@@ -28,6 +28,24 @@
       packages = forAllSystems (pkgs: rec {
         gotg-importer = pkgs.callPackage ./importer { };
         default = gotg-importer;
+
+        # Image for the in-cluster CronJob. The archive tools (unrar, zip, rhash)
+        # arrive through the wrapper's closure, so no extra PATH wiring is needed.
+        #
+        #   nix build .#importer-image
+        #   skopeo copy docker-archive:result docker://localhost:30500/gotg-importer:0.1.0
+        importer-image = pkgs.dockerTools.buildLayeredImage {
+          name = "gotg-importer";
+          tag = gotg-importer.version;
+          contents = [
+            gotg-importer
+            pkgs.cacert
+          ];
+          config = {
+            Entrypoint = [ (pkgs.lib.getExe gotg-importer) ];
+            Env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" ];
+          };
+        };
       });
 
       devShells = forAllSystems (pkgs: {

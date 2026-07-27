@@ -13,12 +13,12 @@ from pathlib import Path
 
 from . import config as cfgmod
 from . import rules as rulesmod
-from .plan import ACTION_MANUAL, Op
-from .planner import plan_source, summarize
+from .run import QbitError, run_paths, run_queue
 
 log = logging.getLogger("gotg-importer")
 
 EXIT_OK = 0
+EXIT_FAILED = 1
 EXIT_CONFIG = 2
 
 
@@ -53,20 +53,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="path to rules.yaml (defaults to the copy bundled in the image)",
     )
+    parser.add_argument(
+        "--no-checksum",
+        action="store_true",
+        help="skip sha256 sidecars (faster first import, no client-side verification)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     return parser.parse_args(argv)
-
-
-def _print_plan(ops: list[Op]) -> None:
-    """One line per operation: action platform src -> dst id."""
-    for op in ops:
-        dst = op.dst or "-"
-        line = f"{op.action:<9} {op.platform or '-':<9} {op.src} -> {dst}"
-        if op.entry_id:
-            line += f"  [{op.entry_id}]"
-        if op.reason:
-            line += f"  ({op.reason})"
-        print(line)
 
 
 def _bootstrap_paths(raw: list[str]) -> list[Path]:
@@ -96,43 +89,36 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if not args.once and not args.bootstrap:
-        log.error("nothing to do: pass --once (queue) or --bootstrap DIR[,DIR...]")
+        log.error("nothing to do: pass --once (work queue) or --bootstrap DIR [DIR...]")
         return EXIT_CONFIG
 
     try:
         cfg = cfgmod.load(require_qbit=bool(args.once))
         rules = rulesmod.load(args.rules)
+        paths = _bootstrap_paths(args.bootstrap) if args.bootstrap else []
+        for path in paths:
+            if not path.exists():
+                raise cfgmod.ConfigError(f"source does not exist: {path}")
     except (cfgmod.ConfigError, rulesmod.RulesError) as exc:
         log.error("%s", exc)
         return EXIT_CONFIG
 
-    ops: list[Op] = []
-    if args.bootstrap:
-        try:
-            sources = _bootstrap_paths(args.bootstrap)
-        except cfgmod.ConfigError as exc:
-            log.error("%s", exc)
-            return EXIT_CONFIG
-        for path in sources:
-            try:
-                ops.extend(plan_source(path, cfg.games_root, rules))
-            except FileNotFoundError:
-                log.error("source does not exist: %s", path)
-                return EXIT_CONFIG
-    else:
-        log.error("--once needs the qBittorrent work queue, which is not wired up yet")
+    checksum = not args.no_checksum
+    try:
+        if paths:
+            stats = run_paths(paths, cfg, rules, dry_run=args.dry_run, checksum=checksum)
+        else:
+            stats = run_queue(cfg, rules, dry_run=args.dry_run, checksum=checksum)
+    except QbitError as exc:
+        log.error("%s", exc)
         return EXIT_CONFIG
+    except OSError as exc:
+        log.error("%s", exc)
+        return EXIT_FAILED
 
-    if args.dry_run:
-        _print_plan(ops)
-    else:
-        log.error("execution is not wired up yet; re-run with --dry-run")
-        return EXIT_CONFIG
-
-    manual = sum(1 for op in ops if op.action == ACTION_MANUAL)
-    log.info("%s", summarize(ops))
-    if manual:
-        log.info("%d payload(s) need manual review", manual)
+    log.info("%s", stats.summary())
+    # Per-torrent failures are reported and tagged, not fatal: a full run that
+    # imported 200 games and flagged 2 is a success the CronJob should not retry.
     return EXIT_OK
 
 

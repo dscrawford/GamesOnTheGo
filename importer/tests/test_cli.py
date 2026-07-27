@@ -1,6 +1,6 @@
 """CLI argument handling and the §10 exit-code contract."""
 
-import pytest
+import json
 
 from gotg_importer.cli import EXIT_CONFIG, EXIT_OK, _bootstrap_paths, main
 
@@ -64,14 +64,40 @@ def test_dry_run_prints_a_plan_and_exits_zero(monkeypatch, tmp_path, capsys):
     assert not (tmp_path / "Games").exists(), "a dry run must write nothing"
 
 
-@pytest.mark.parametrize("args", [["--once"], ["--bootstrap", "/tmp"]])
-def test_unimplemented_paths_fail_loudly_rather_than_silently(monkeypatch, tmp_path, args):
-    # Execution and queue polling arrive in phase 2; until then they must not
-    # pretend to succeed.
+def test_unreachable_qbittorrent_is_a_hard_failure(monkeypatch, tmp_path):
+    # §10: exit non-zero only on hard failure, and an unreachable queue is one.
     monkeypatch.setenv("GAMES_ROOT", str(tmp_path / "Games"))
     monkeypatch.setenv("SOURCE_ROOT", str(tmp_path / "Torrents"))
     monkeypatch.setenv("STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.setenv("QBIT_URL", "http://qbit:8080")
+    monkeypatch.setenv("QBIT_URL", "http://127.0.0.1:1/")
     monkeypatch.setenv("QBIT_USER", "u")
     monkeypatch.setenv("QBIT_PASS", "p")
-    assert main(args) == EXIT_CONFIG
+    assert main(["--once"]) == EXIT_CONFIG
+
+
+def test_bootstrap_imports_for_real_and_writes_a_manifest(monkeypatch, tmp_path):
+    src = tmp_path / "Torrents"
+    src.mkdir()
+    rom = src / "Legend of Zelda, The - Majora's Mask (USA).z64"
+    rom.write_bytes(b"rom")
+    monkeypatch.setenv("GAMES_ROOT", str(tmp_path / "Games"))
+    monkeypatch.setenv("SOURCE_ROOT", str(src))
+    monkeypatch.setenv("STATE_DIR", str(tmp_path / "state"))
+
+    assert main(["--bootstrap", str(rom)]) == EXIT_OK
+
+    imported = tmp_path / "Games" / "n64" / "usa.legend_of_zelda_majoras_mask.z64"
+    assert imported.stat().st_ino == rom.stat().st_ino
+    manifest = json.loads((tmp_path / "Games" / ".gotg" / "manifest.json").read_text())
+    assert manifest["games"][0]["path"] == "/Games/n64/usa.legend_of_zelda_majoras_mask.z64"
+
+
+def test_a_payload_needing_review_still_exits_zero(monkeypatch, tmp_path):
+    # A run that flagged something is not a failed run; the CronJob must not retry.
+    src = tmp_path / "Torrents"
+    (src / "mystery").mkdir(parents=True)
+    monkeypatch.setenv("GAMES_ROOT", str(tmp_path / "Games"))
+    monkeypatch.setenv("SOURCE_ROOT", str(src))
+    monkeypatch.setenv("STATE_DIR", str(tmp_path / "state"))
+
+    assert main(["--bootstrap", str(src / "mystery")]) == EXIT_OK
