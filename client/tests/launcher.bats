@@ -13,10 +13,11 @@ setup() {
   # A stand-in emulator, so install does not have to build a real one.
   export FAKE_EMU="$TEST_TMP/state/roots/fake"
   mkdir -p "$FAKE_EMU/bin"
-  cat >"$FAKE_EMU/bin/fake-emu" <<'EOF'
-#!/usr/bin/env bash
-echo "launched with: $*"
-EOF
+  # Absolute shebang: /usr/bin/env does not exist inside the nix build sandbox.
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'echo "launched with: $*"\n'
+  } >"$FAKE_EMU/bin/fake-emu"
   chmod +x "$FAKE_EMU/bin/fake-emu"
 
   jq -n '{fake: {attr: "hello", bin: "fake-emu", argsTemplate: ["{target}"]}}' \
