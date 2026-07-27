@@ -163,3 +163,59 @@ def test_1g1r_falls_back_when_no_usa():
 def test_1g1r_returns_none_when_all_nonretail():
     cands = [parse("Thing (USA) (Proto).zip"), parse("Thing (Japan) (Beta).zip")]
     assert select_1g1r(cands) is None
+
+
+# --- Variant tags and numbered statuses --------------------------------------
+# Both of these came out of the real library, where filename order was silently
+# deciding which dump of 135 titles got imported.
+
+
+@pytest.mark.parametrize(
+    "tag",
+    ["(Beta 1)", "(Beta 2)", "(Proto 1)", "(Demo 2)", "(Sample 1)"],
+)
+def test_numbered_status_tags_are_still_non_retail(tag):
+    # An exact-match lookup let every numbered dump through as a retail game.
+    assert parse(f"Some Game (USA) {tag}.zip").is_retail is False
+
+
+@pytest.mark.parametrize(
+    "filename, expected",
+    [
+        ("Game (USA).zip", []),
+        ("Game (USA) (En,Fr,De).zip", []),
+        ("Game (USA) (Rev 1).zip", []),
+        ("Game (USA) (Proto) (2000-01-10).zip", ["Proto"]),
+        ("Game (USA) (LodgeNet).zip", ["LodgeNet"]),
+        ("Game (USA) (En,Fr,Es) (GameCube).zip", ["GameCube"]),
+        ("Game (USA, Europe) (Arcade).zip", ["Arcade"]),
+    ],
+)
+def test_variant_tags_exclude_region_language_revision_and_dates(filename, expected):
+    assert parse(filename).variants == expected
+
+
+def test_1g1r_prefers_the_standard_release_over_a_reissue():
+    # The real case: Majora's Mask has USA cartridge, GameCube bonus-disc and
+    # LodgeNet hotel-rental dumps, all retail and all equally ranked until now.
+    cands = [
+        parse("Legend of Zelda, The - Majora's Mask (USA) (GameCube).zip"),
+        parse("Legend of Zelda, The - Majora's Mask (USA) (LodgeNet).zip"),
+        parse("Legend of Zelda, The - Majora's Mask (USA).zip"),
+    ]
+    winner = select_1g1r(cands)
+    assert winner is not None
+    assert winner.variants == []
+
+
+def test_variant_tie_break_does_not_outrank_region_or_revision():
+    # A plain European dump must not beat a tagged USA one, and a base revision
+    # must not beat a higher one.
+    assert select_1g1r([parse("Game (Europe).zip"), parse("Game (USA) (Arcade).zip")]).region == "usa"
+    assert select_1g1r([parse("Game (USA).zip"), parse("Game (USA) (Rev 1).zip")]).revision == "rev1"
+
+
+def test_a_title_with_only_tagged_dumps_still_imports():
+    winner = select_1g1r([parse("Game (USA) (Arcade).zip")])
+    assert winner is not None
+    assert winner.variants == ["Arcade"]

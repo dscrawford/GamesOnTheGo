@@ -56,6 +56,35 @@ _ARTICLES = {"the", "a", "an"}
 
 _REV_RE = re.compile(r"^(?:rev\s*([0-9a-z.]+)|v\s*([0-9]+(?:\.[0-9]+)*))$", re.I)
 
+_LANG_RE = re.compile(r"^[A-Z][a-z](,[A-Z][a-z])+$")
+_DATE_RE = re.compile(r"^\d{4}(-\d{2}){0,2}$")
+
+
+def _normalize_status(tag: str) -> str:
+    """'Beta 1' -> 'beta'. No-Intro numbers repeated dumps of the same kind, and
+    an exact-match lookup would let every one of those through as retail."""
+    return re.sub(r"\s*\d+$", "", tag.strip().lower())
+
+
+def _variant_tags(tags: list[str]) -> list[str]:
+    """Tags that mark an alternate release rather than describing the dump.
+
+    Region, languages, revision and dates say *which* copy this is; anything left
+    ("LodgeNet", "GameCube", "Arcade", "Virtual Console") says it is a different
+    distribution of the same game.
+    """
+    out = []
+    for tag in tags:
+        low = tag.strip().lower()
+        if low in _REGION_MAP or _LANG_RE.match(tag.strip()) or _DATE_RE.match(tag.strip()):
+            continue
+        if _REV_RE.match(tag.strip()):
+            continue
+        if all(part.strip().lower() in _REGION_MAP for part in tag.split(",")):
+            continue  # multi-region tag, e.g. "USA, Europe"
+        out.append(tag.strip())
+    return out
+
 
 @dataclass
 class ParsedRom:
@@ -65,6 +94,7 @@ class ParsedRom:
     revision: str            # e.g. "rev1", "v1_2", or ""
     languages: list[str] = field(default_factory=list)
     statuses: list[str] = field(default_factory=list)
+    variants: list[str] = field(default_factory=list)  # tags that are not region/language/revision
     ext: str = ""
     is_retail: bool = True
     confident: bool = True    # False -> caller should quarantine for review
@@ -149,7 +179,7 @@ def parse(filename: str) -> ParsedRom:
     revision = _parse_revision(tags)
 
     lower_tags = [t.lower() for t in tags]
-    statuses = [t for t in lower_tags if t in _NON_RETAIL]
+    statuses = [t for t in lower_tags if _normalize_status(t) in _NON_RETAIL]
     languages = next((t for t in tags if re.match(r"^[A-Z][a-z](,[A-Z][a-z])+$", t)), "")
     languages = languages.split(",") if languages else []
 
@@ -163,6 +193,7 @@ def parse(filename: str) -> ParsedRom:
         revision=revision,
         languages=languages,
         statuses=statuses,
+        variants=_variant_tags(tags),
         ext=ext,
         is_retail=is_retail,
         confident=region_ok and bool(slug),
@@ -176,7 +207,15 @@ def select_1g1r(candidates: list[ParsedRom]) -> ParsedRom | None:
     """From all dumps sharing one title, pick the single retail keeper.
 
     Preference: retail only; then region priority (usa>world>eur>jpn); then the
-    highest revision. Returns None if no retail candidate exists.
+    highest revision; then the fewest variant tags. Returns None if no retail
+    candidate exists.
+
+    That last step matters: a title often has several equally-ranked dumps that
+    differ only by distribution — "(USA) (LodgeNet)" is the hotel-rental unit,
+    "(USA) (GameCube)" is ripped from a bonus disc, "(USA) (Arcade)" is the
+    Nintendo Super System board. Without it the winner came down to filename
+    order, which picked a variant over the standard cartridge for 135 titles in
+    this library, including Majora's Mask.
     """
     retail = [c for c in candidates if c.is_retail and c.valid]
     if not retail:
@@ -184,7 +223,7 @@ def select_1g1r(candidates: list[ParsedRom]) -> ParsedRom | None:
 
     def rank(c: ParsedRom):
         region_idx = _REGION_PRIORITY.index(c.region) if c.region in _REGION_PRIORITY else len(_REGION_PRIORITY)
-        return (region_idx, -_rev_sort_key(c.revision))
+        return (region_idx, -_rev_sort_key(c.revision), len(c.variants))
 
     return sorted(retail, key=rank)[0]
 
