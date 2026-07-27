@@ -15,7 +15,7 @@ from pathlib import Path
 from . import manifest as mf
 from . import plan as pl
 from .config import Config
-from .execute import STATUS_ERROR, STATUS_MANUAL, Result, execute
+from .execute import STATUS_ERROR, STATUS_MANUAL, Result, cleanup_staging, execute
 from .planner import plan_source
 from .qbit import TAG_ERROR, TAG_IMPORTED, TAG_MANUAL, QbitError, Queue, Torrent, resolve_payload
 from .rules import Rules
@@ -115,10 +115,14 @@ def run_paths(
         stats.actions.update(op.action for op in ops)
         return stats
 
+    cleanup_staging(cfg.games_root)
     entries = mf.load(cfg.manifest_path)
     for path in paths:
         stats.record(process_source(path, cfg, rules, entries, checksum=checksum))
-    mf.save(cfg.manifest_path, entries)
+        # Publish after every source rather than at the end. A run killed part
+        # way through — an OOM during a large extract, an evicted pod — would
+        # otherwise leave thousands of imported games with no catalog naming them.
+        mf.save(cfg.manifest_path, entries)
     return stats
 
 
@@ -139,14 +143,16 @@ def run_queue(
     if not torrents:
         return stats
 
+    if not dry_run:
+        cleanup_staging(cfg.games_root)
     entries = mf.load(cfg.manifest_path)
     for torrent in torrents:
         results = _process_torrent(torrent, queue, cfg, rules, entries, state, dry_run=dry_run, checksum=checksum)
         stats.record(results)
-
-    if not dry_run:
-        mf.save(cfg.manifest_path, entries)
-        state.save()
+        if not dry_run:
+            # Durable after every torrent, for the same reason as run_paths.
+            mf.save(cfg.manifest_path, entries)
+            state.save()
     return stats
 
 

@@ -45,6 +45,9 @@ STATUS_ERROR = "error"
 # Headroom required beyond the estimated size of a derived file.
 FREE_SPACE_MARGIN = 1.10
 
+# Prefixes of the temporary directories used while building a derived file.
+STAGING_PREFIXES = (".gotg-extract-", ".gotg-zip-")
+
 
 class ExecutionError(Exception):
     """One operation failed. The torrent is tagged gotg-error and the run continues."""
@@ -73,6 +76,27 @@ def _assert_under(path: Path, root: Path) -> Path:
 
 def _dir_size(path: Path) -> int:
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+
+
+def cleanup_staging(games_root: Path) -> int:
+    """Delete staging directories left by a run that was killed mid-extract.
+
+    Python's TemporaryDirectory cleanup does not run when the process is SIGKILLed
+    — an OOM kill or an evicted pod — so without this a failed extract silently
+    strands several gigabytes until someone notices.
+    """
+    removed = 0
+    if not games_root.is_dir():
+        return 0
+    for platform_dir in games_root.iterdir():
+        if not platform_dir.is_dir():
+            continue
+        for child in platform_dir.iterdir():
+            if child.is_dir() and child.name.startswith(STAGING_PREFIXES):
+                log.warning("removing staging directory left by an earlier run: %s", child)
+                shutil.rmtree(child, ignore_errors=True)
+                removed += 1
+    return removed
 
 
 def _require_space(root: Path, needed: int) -> None:

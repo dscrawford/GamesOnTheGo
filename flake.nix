@@ -100,6 +100,7 @@
                 curl
                 python3
                 coreutils
+                zip
                 unzip
                 gnugrep
                 gnused
