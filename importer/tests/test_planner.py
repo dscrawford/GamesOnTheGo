@@ -94,6 +94,42 @@ def test_scene_release_plans_an_extraction(roots):
     assert "region" in op.reason
 
 
+def test_scene_release_without_an_unpacked_rom_reads_the_archive(roots, monkeypatch):
+    # The live library ships only the .rar set, which previously produced a
+    # platform-less op writing to "/Games//world.….r00".
+    import gotg_importer.scan as scanmod
+
+    src, games = roots
+    stem = "v-the_legend_of_zelda_skyward_sword_hd"
+    make_dir(
+        src,
+        "The_Legend_of_Zelda_Skyward_Sword_HD_NSW-VENOM",
+        files=("v-lozsshd.nfo", f"{stem}.rar", f"{stem}.r00", f"{stem}.r01", f"{stem}.sfv"),
+    )
+    monkeypatch.setattr(scanmod, "list_archive", lambda path: (f"{stem}.nsp",))
+
+    ops = plan_source(src / "The_Legend_of_Zelda_Skyward_Sword_HD_NSW-VENOM", games, RULES)
+
+    assert len(ops) == 1
+    op = ops[0]
+    assert op.action == ACTION_EXTRACT
+    assert op.platform == "switch"
+    assert op.dst == f"{games}/switch/world.legend_of_zelda_skyward_sword_hd.nsp"
+
+
+def test_scene_release_of_an_unknown_platform_is_flagged_not_guessed(roots, monkeypatch):
+    import gotg_importer.scan as scanmod
+
+    src, games = roots
+    make_dir(src, "Some_Release-GRP", files=("x.rar", "x.r00", "x.sfv"))
+    monkeypatch.setattr(scanmod, "list_archive", lambda path: ("setup.exe",))
+
+    ops = plan_source(src / "Some_Release-GRP", games, RULES)
+
+    assert [op.action for op in ops] == [ACTION_MANUAL]
+    assert ops[0].dst == "", "a platform-less op must not name a destination"
+
+
 def test_scene_region_override_pins_the_region(roots):
     src, games = roots
     from dataclasses import replace

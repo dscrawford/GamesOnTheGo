@@ -20,13 +20,14 @@ from gotg_importer.scan import Source
 RULES = defaults()
 
 
-def src(name, *, is_dir=True, files=(), dirs=(), code_files=()):
+def src(name, *, is_dir=True, files=(), dirs=(), code_files=(), archive_members=()):
     return Source(
         path=Path("/data/Torrents") / name,
         is_dir=is_dir,
         files=tuple(files),
         dirs=tuple(dirs),
         code_files=tuple(code_files),
+        archive_members=tuple(archive_members),
     )
 
 
@@ -82,10 +83,24 @@ def test_scene_archive_with_extracted_rom():
     assert verdict.platform == "switch"
 
 
-def test_scene_archive_platform_deferred_to_listing():
-    source = src("Some_Release-GRP", files=("x.rar", "x.r00", "x.sfv", "x.nfo"))
+def test_scene_archive_platform_comes_from_the_archive_listing():
+    # The real server copy has no unpacked ROM — only the .rar set — so the
+    # platform has to come from the archive's own header.
+    source = src(
+        "The_Legend_of_Zelda_Skyward_Sword_HD_NSW-VENOM",
+        files=("v-lozsshd.nfo", "v-loz.rar", "v-loz.r00", "v-loz.r01", "v-loz.sfv"),
+        archive_members=("v-the_legend_of_zelda_skyward_sword_hd.nsp",),
+    )
     verdict = classify(source, RULES)
     assert verdict.handler == HANDLER_SCENE_ARCHIVE
+    assert verdict.platform == "switch"
+
+
+def test_rar_volume_parts_are_never_mistaken_for_roms():
+    # .r00 is packaging. Treating it as a ROM produced a bogus ".r00" entry.
+    source = src("Some_Release-GRP", files=("x.rar", "x.r00", "x.r01", "x.sfv", "x.nfo"))
+    verdict = classify(source, RULES)
+    assert verdict.handler == HANDLER_MANUAL
     assert verdict.platform == ""
 
 

@@ -17,25 +17,19 @@ from .scan import Source, scan
 
 def _rom_files(source: Source, rules: Rules) -> list[str]:
     """Payload files that look like ROMs — the input to the No-Intro planner."""
-    names = []
-    for name in source.files:
-        _, dot, ext = name.rpartition(".")
-        ext = ext.lower() if dot else ""
-        if ext and ext not in rules.archive_exts:
-            names.append(name)
-    return names
+    return [name for name in source.files if cl.is_rom_name(name, rules)]
 
 
 def _scene_inner_name(source: Source, rules: Rules) -> str:
     """The ROM inside a scene release.
 
-    If a previous run (or the uploader) already extracted it next to the volumes,
-    use that name; otherwise fall back to the .rar name and let execution correct
-    it from the archive listing.
+    Prefer a copy already unpacked beside the volumes, then the archive's own
+    listing. Both name the real ROM; the .rar name would only give a volume.
     """
-    roms = _rom_files(source, rules)
-    if roms:
-        return max(roms, key=lambda n: len(n))
+    for candidates in (source.files, source.archive_members):
+        roms = [name for name in candidates if cl.is_rom_name(name, rules)]
+        if roms:
+            return max(roms, key=len)
     rars = source.with_ext("rar")
     return rars[0] if rars else source.name
 
@@ -52,6 +46,20 @@ def plan_source(path: Path | str, games_root: Path | str, rules: Rules) -> list[
 
     if verdict.handler == cl.HANDLER_MANUAL:
         return [pl.Op(pl.ACTION_MANUAL, verdict.platform, str(source.path), "", "", reason=verdict.reason)]
+
+    if not verdict.platform:
+        # Without a platform there is no valid destination, and guessing one files
+        # the game where the client would hand it to the wrong emulator.
+        return [
+            pl.Op(
+                pl.ACTION_MANUAL,
+                "",
+                str(source.path),
+                "",
+                "",
+                reason=verdict.reason or f"no platform for handler {verdict.handler!r}",
+            )
+        ]
 
     if verdict.handler == cl.HANDLER_WIIU_DECRYPTED:
         return [pl.plan_wiiu_decrypted(games_root, src_dir, source.name)]

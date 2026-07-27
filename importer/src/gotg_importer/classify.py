@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 
 from .rules import Rules
-from .scan import WIIU_DECRYPTED_DIRS, Source
+from .scan import VOLUME_RE, WIIU_DECRYPTED_DIRS, Source
 
 HANDLER_WIIU_DECRYPTED = "wiiu_decrypted"
 HANDLER_WIIU_NUS = "wiiu_nus"
@@ -58,24 +58,33 @@ def _is_scene_archive(source: Source) -> bool:
     return source.has_ext("rar") and (source.has_ext("r00") or source.has_ext("sfv"))
 
 
-def _platform_from_files(source: Source, rules: Rules) -> tuple[str, int]:
-    """Majority platform across the payload's ROM files, plus how many voted for it.
+def is_rom_name(name: str, rules: Rules) -> bool:
+    """Whether a filename could be a ROM rather than packaging.
 
-    Archive/metadata extensions do not vote — a scene release is .rar/.sfv/.nfo plus
-    one ROM, and only the ROM identifies the platform.
+    Archive metadata and multi-volume parts never count: a scene release is a .rar
+    plus dozens of .r00-style volumes, and only the file inside identifies the game.
     """
+    ext = _ext(name)
+    return bool(ext) and ext not in rules.archive_exts and not VOLUME_RE.match(ext)
+
+
+def _platform_from_names(names: tuple[str, ...], rules: Rules) -> tuple[str, int]:
+    """Majority platform across candidate ROM names, plus how many voted for it."""
     votes: collections.Counter[str] = collections.Counter()
-    for name in source.files:
-        ext = _ext(name)
-        if not ext or ext in rules.archive_exts:
+    for name in names:
+        if not is_rom_name(name, rules):
             continue
-        platform = rules.platform_for_ext(ext)
+        platform = rules.platform_for_ext(_ext(name))
         if platform:
             votes[platform] += 1
     if not votes:
         return "", 0
     platform, count = votes.most_common(1)[0]
     return platform, count
+
+
+def _platform_from_files(source: Source, rules: Rules) -> tuple[str, int]:
+    return _platform_from_names(source.files, rules)
 
 
 def classify(source: Source, rules: Rules) -> Classification:
@@ -102,11 +111,17 @@ def classify(source: Source, rules: Rules) -> Classification:
         return Classification(HANDLER_WIIU_NUS, "wiiu", "raw NUS download; decrypt deferred")
 
     if _is_scene_archive(source):
+        # Prefer a ROM already unpacked beside the volumes; otherwise read the
+        # names out of the archive header.
         platform, _ = _platform_from_files(source, rules)
+        if not platform:
+            platform, _ = _platform_from_names(source.archive_members, rules)
         if platform:
             return Classification(HANDLER_SCENE_ARCHIVE, platform)
-        # No extracted ROM to learn from yet; the archive listing resolves it at execution.
-        return Classification(HANDLER_SCENE_ARCHIVE, "", "platform resolved from archive listing")
+        return Classification(
+            HANDLER_MANUAL,
+            reason="scene archive whose contents name no known platform; add the extension to rules.yaml",
+        )
 
     platform, count = _platform_from_files(source, rules)
     if platform and count >= rules.min_set_files:
