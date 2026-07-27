@@ -86,7 +86,13 @@ manifest_find() {
   count="$(printf '%s' "$matches" | grep -c . || true)"
   case "$count" in
     0) die "no game called '$want' in the catalog. Try: gotg list | grep $id" ;;
-    1) printf '%s' "$matches" ;;
+    1)
+      # Check the record before anything builds a path out of it.
+      validate_id "$(manifest_field "$matches" id)"
+      validate_platform "$(manifest_field "$matches" platform)"
+      validate_remote_path "$(manifest_field "$matches" path)"
+      printf '%s' "$matches"
+      ;;
     *)
       local options
       options="$(printf '%s\n' "$matches" | jq -r '"  gotg <command> \(.platform)/\(.id)"')"
@@ -108,6 +114,7 @@ manifest_field() {
 game_local_path() {
   local game="$1" platform name
   platform="$(manifest_field "$game" platform)"
+  validate_platform "$platform"
   if [[ "$(override_field "$game" unzip)" == "true" ]]; then
     name="$(manifest_field "$game" id)"
   else

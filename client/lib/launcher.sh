@@ -10,6 +10,8 @@ launcher_path() {
   local game="$1" id platform
   id="$(manifest_field "$game" id)"
   platform="$(manifest_field "$game" platform)"
+  validate_id "$id"
+  validate_platform "$platform"
   printf '%s/%s/play-%s.sh' "$GOTG_GAMES_DIR" "$platform" "$id"
 }
 
@@ -34,7 +36,7 @@ launcher_write() {
   [[ -f "$template" ]] || die "missing launcher template at $template"
 
   id="$(manifest_field "$game" id)"
-  title="$(manifest_field "$game" title)"
+  title="$(sanitize_title "$(manifest_field "$game" title)")"
   : "${title:=$id}"
   ref="$(launcher_ref "$game")"
 
@@ -44,12 +46,20 @@ launcher_write() {
     warn "kept your existing script as $(basename "$dest").bak"
   fi
 
+  # Substitute with bash string replacement, not sed. Titles are free-form text
+  # from the catalog: 45 games in this library have "&" in the title, which sed
+  # expands to the matched text, and a title containing the delimiter or a
+  # backslash escape aborts sed outright — after the redirection has already
+  # truncated the destination.
+  local content
+  content="$(cat "$template")"
+  content="${content//@ID@/$(escape_replacement "$id")}"
+  content="${content//@REF@/$(escape_replacement "$ref")}"
+  content="${content//@TITLE@/$(escape_replacement "$title")}"
+  content="${content//@FLAKE@/$(escape_replacement "$(gotg_flake)")}"
+
   mkdir -p "$(dirname "$dest")"
-  sed -e "s|@ID@|$id|g" \
-    -e "s|@REF@|$ref|g" \
-    -e "s|@TITLE@|$title|g" \
-    -e "s|@FLAKE@|$(gotg_flake)|g" \
-    "$template" >"$dest"
+  printf '%s\n' "$content" >"$dest"
   chmod +x "$dest"
   printf '%s' "$dest"
 }

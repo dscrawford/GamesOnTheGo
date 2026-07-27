@@ -125,3 +125,34 @@ teardown() {
   run jq -r '.games[0].path' "$GOTG_CACHE_FILE"
   [[ "$output" == *"& friends"* ]]
 }
+
+@test "a catalog entry cannot escape the games directory via its platform" {
+  # platform is used to build paths that get rm -rf'd and written to, so an
+  # unchecked "../.." would reach outside ~/Games entirely.
+  mkdir -p "$TEST_TMP/VICTIM"
+  echo "precious" > "$TEST_TMP/VICTIM/important.txt"
+  mkdir -p "$SERVER_ROOT/Games/.gotg"
+  # A well-formed entry in every respect except the platform, so it is the
+  # platform check being tested rather than the id check.
+  jq -n '{version:1,games:[{platform:"../VICTIM",path:"/Games/x/usa.evil",
+          type:"dir",size_bytes:1,sha256:null,title:"Evil"}]}' \
+    > "$SERVER_ROOT/Games/.gotg/manifest.json"
+
+  gotg refresh
+  gotg download usa.evil
+
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"invalid platform"* ]]
+  [ -f "$TEST_TMP/VICTIM/important.txt" ]
+}
+
+@test "a platform with a slash or traversal is rejected" {
+  mkdir -p "$SERVER_ROOT/Games/.gotg"
+  jq -n '{version:1,games:[{platform:"n64/../../etc",path:"/Games/x/usa.evil.z64",
+          type:"file",size_bytes:1,sha256:null,title:"Evil"}]}' \
+    > "$SERVER_ROOT/Games/.gotg/manifest.json"
+  gotg refresh
+  gotg info usa.evil
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"invalid platform"* ]]
+}

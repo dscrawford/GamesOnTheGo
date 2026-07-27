@@ -171,8 +171,14 @@ def _find_extracted(src_dir: Path, ext: str) -> Path | None:
 
 def _verify_archive(src_dir: Path) -> None:
     sfvs = sorted(src_dir.glob("*.sfv"))
-    if sfvs and shutil.which("rhash"):
-        _run(["rhash", "-c", sfvs[0].name], cwd=src_dir)
+    if not sfvs:
+        return
+    if not shutil.which("rhash"):
+        # Say so rather than silently trusting the archive: a bad image build
+        # would otherwise import unverified extracts with no trace in the log.
+        log.warning("rhash is not installed; skipping the checksum in %s", sfvs[0].name)
+        return
+    _run(["rhash", "-c", sfvs[0].name], cwd=src_dir)
 
 
 def _extract(op: Op, cfg: Config) -> tuple[str, Path]:

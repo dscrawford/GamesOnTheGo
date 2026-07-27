@@ -131,3 +131,46 @@ teardown() {
   [ -f "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
   [[ "$output" == *"launched with:"* ]]
 }
+
+@test "titles with shell and sed metacharacters produce a sound launcher" {
+  # 45 games in the real library have "&" in the title, which sed expands to the
+  # matched text; "|" is the delimiter and would abort generation outright.
+  mkdir -p "$SERVER_ROOT/Games/n64"
+  printf 'rom' > "$SERVER_ROOT/Games/n64/usa.cnc.z64"
+  local sha size
+  sha="$(sha256sum "$SERVER_ROOT/Games/n64/usa.cnc.z64" | cut -d' ' -f1)"
+  size="$(stat -c '%s' "$SERVER_ROOT/Games/n64/usa.cnc.z64")"
+  add_manifest_entry n64 "/Games/n64/usa.cnc.z64" file "$size" "$sha" \
+    'Command & Conquer | $(touch /tmp/pwned) `id` \1'
+
+  gotg refresh
+  gotg install usa.cnc
+  [ "$status" -eq 0 ]
+
+  local launcher="$GOTG_GAMES_DIR/n64/play-usa.cnc.sh"
+  # The title survives verbatim rather than being mangled into "@TITLE@".
+  grep -q 'Command & Conquer' "$launcher"
+  ! grep -q '@TITLE@' "$launcher"
+  # And the launcher is still valid, single-purpose bash.
+  bash -n "$launcher"
+  [ ! -e /tmp/pwned ]
+  run bash "$launcher"
+  [ ! -e /tmp/pwned ]
+}
+
+@test "a title containing a newline cannot break out of its comment line" {
+  mkdir -p "$SERVER_ROOT/Games/n64"
+  printf 'rom' > "$SERVER_ROOT/Games/n64/usa.nl.z64"
+  local sha size
+  sha="$(sha256sum "$SERVER_ROOT/Games/n64/usa.nl.z64" | cut -d' ' -f1)"
+  size="$(stat -c '%s' "$SERVER_ROOT/Games/n64/usa.nl.z64")"
+  add_manifest_entry n64 "/Games/n64/usa.nl.z64" file "$size" "$sha" \
+    "$(printf 'Game\ntouch /tmp/pwned-nl')"
+
+  gotg refresh
+  gotg install usa.nl
+  [ "$status" -eq 0 ]
+  bash -n "$GOTG_GAMES_DIR/n64/play-usa.nl.sh"
+  run bash "$GOTG_GAMES_DIR/n64/play-usa.nl.sh"
+  [ ! -e /tmp/pwned-nl ]
+}

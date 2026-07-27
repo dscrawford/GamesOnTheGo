@@ -20,6 +20,8 @@ GOTG_PARTIAL_DIR="$GOTG_GAMES_DIR/.gotg-partial"
 
 # The entry-id contract, shared with the importer.
 GOTG_ID_RE='^[a-z]{3,5}\.[a-z0-9][a-z0-9_]*$'
+# Platform slugs name a directory under ~/Games, so they are checked too.
+GOTG_PLATFORM_RE='^[a-z0-9][a-z0-9_-]*$'
 
 log() { printf '%s\n' "$*" >&2; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -47,11 +49,36 @@ validate_id() {
   [[ "$id" =~ $GOTG_ID_RE ]] || die "invalid game id: $id"
 }
 
+# The platform becomes a directory name under ~/Games, and the paths built from
+# it are passed to `rm -rf` and used as redirection targets. An unchecked value
+# like "../.." would put those outside the games directory entirely.
+validate_platform() {
+  local platform="$1"
+  [[ -n "$platform" ]] || die "catalog entry has no platform"
+  [[ "$platform" =~ $GOTG_PLATFORM_RE ]] || die "invalid platform in catalog: $platform"
+}
+
 # Reject anything that could climb out of the games directory.
 validate_remote_path() {
   local path="$1"
   [[ "$path" == /* ]] || die "remote path must be absolute: $path"
   [[ "$path" != *..* ]] || die "remote path may not contain '..': $path"
+}
+
+# Titles are free-form text from the catalog and end up inside a generated
+# script. Collapse them to one printable line so a newline cannot break out of
+# the comment it sits in and become a command.
+sanitize_title() {
+  printf '%s' "$1" | tr -d '\000-\037\177' | cut -c1-120
+}
+
+# Make a string safe to use as the replacement in ${var//pattern/replacement}.
+# Since bash 5.2 an unescaped '&' there means "the text that matched", exactly
+# as in sed — so "Command & Conquer" would substitute the placeholder back into
+# itself. Backslash escapes those, so it has to be escaped first.
+escape_replacement() {
+  local s="${1//\\/\\\\}"
+  printf '%s' "${s//&/\\&}"
 }
 
 # Percent-encode each path segment but keep the separators. Game filenames are

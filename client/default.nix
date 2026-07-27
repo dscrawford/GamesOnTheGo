@@ -12,6 +12,7 @@
   gnugrep,
   gnused,
   gawk,
+  util-linux,
   nix,
 }:
 
@@ -44,6 +45,7 @@ stdenvNoCC.mkDerivation {
           gnugrep
           gnused
           gawk
+          util-linux # flock, for the per-game download lock
           # `gotg install` builds emulators; launching never evaluates nix.
           nix
         ]

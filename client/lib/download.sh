@@ -46,8 +46,11 @@ _download_quiet() {
 _download_zenity() {
   local url="$1" out="$2" type="$3" title="$4" expected="${5:-0}"
 
-  local pipe curl_pid zen_pid status=0
-  pipe="$(mktemp -u)"
+  # A private directory for the fifo: mktemp -u then mkfifo races with anything
+  # else that could claim the name in between.
+  local pipedir pipe curl_pid zen_pid status=0
+  pipedir="$(mktemp -d)"
+  pipe="$pipedir/progress"
   mkfifo "$pipe"
 
   # Without a known total there is no percentage to show, which is the normal
@@ -73,8 +76,10 @@ _download_zenity() {
       kill "$curl_pid" 2>/dev/null || true
       wait "$curl_pid" 2>/dev/null || true
       exec 9>&-
-      rm -f "$pipe"
-      die "download cancelled"
+      rm -rf "$pipedir"
+      # Could be the user cancelling, or zenity failing to start at all; say so
+      # rather than asserting an intent we cannot observe.
+      die "download stopped: the progress dialog closed (cancelled, or zenity could not run)"
     fi
     if [[ "$expected" -gt 0 ]]; then
       size="$(stat -c '%s' "$out" 2>/dev/null || echo 0)"
@@ -89,9 +94,15 @@ _download_zenity() {
   done
 
   wait "$curl_pid" || status=$?
-  printf '100\n' >&9 || true
+  # Only claim completion if it actually completed; jumping the bar to 100% on a
+  # failed transfer tells the user the opposite of what happened.
+  if [[ "$status" -eq 0 ]]; then
+    printf '100\n' >&9 || true
+  else
+    printf '# download failed\n' >&9 || true
+  fi
   exec 9>&-
-  rm -f "$pipe"
+  rm -rf "$pipedir"
   wait "$zen_pid" 2>/dev/null || true
   return "$status"
 }
@@ -198,6 +209,21 @@ download_game() {
   mkdir -p "$GOTG_PARTIAL_DIR"
   staged="$(download_partial_path "$id" "$type")"
 
+  # Two fetches of one game share a staging file, so a terminal `gotg install`
+  # racing a Steam launch of the same title would interleave two curls into it.
+  # The lock makes the second wait and then see the finished install. It lives in
+  # the state directory, not next to the downloads, so it is not mistaken for a
+  # leftover partial file.
+  mkdir -p "$GOTG_STATE_DIR/locks"
+  exec 8>"$GOTG_STATE_DIR/locks/$id.lock"
+  if ! flock -w 3600 8; then
+    die "timed out waiting for another gotg process to finish downloading $id"
+  fi
+  if [[ -e "$dest" ]]; then
+    exec 8>&-
+    return 0
+  fi
+
   config_load
   local token url
   token="$(api_login)"
@@ -220,6 +246,7 @@ download_game() {
     fi
   fi
 
+  exec 8>&-
   log "installed $dest"
 }
 
