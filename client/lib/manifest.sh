@@ -101,10 +101,18 @@ manifest_field() {
 }
 
 # Local install path for a game: ~/Games/<platform>/<entry name>.
+#
+# A game marked `unzip` lands as a directory named after its id instead: the
+# No-Intro sets ship zipped ROMs, which most emulators read directly, but native
+# ports want the bare ROM file.
 game_local_path() {
   local game="$1" platform name
   platform="$(manifest_field "$game" platform)"
-  name="$(basename "$(manifest_field "$game" path)")"
+  if [[ "$(override_field "$game" unzip)" == "true" ]]; then
+    name="$(manifest_field "$game" id)"
+  else
+    name="$(basename "$(manifest_field "$game" path)")"
+  fi
   printf '%s/%s/%s' "$GOTG_GAMES_DIR" "$platform" "$name"
 }
 

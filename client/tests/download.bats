@@ -123,3 +123,28 @@ teardown() {
   # ever visible where a launcher would look for it.
   [ ! -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
 }
+
+@test "a zipped rom can be unpacked for emulators that need a bare file" {
+  # The No-Intro sets ship zipped ROMs; the 2s2h port wants the .z64 itself.
+  mkdir -p "$TEST_TMP/mkzip" "$SERVER_ROOT/Games/n64"
+  printf 'rom bytes' > "$TEST_TMP/mkzip/Zelda (USA).z64"
+  (cd "$TEST_TMP/mkzip" && zip -q "$SERVER_ROOT/Games/n64/usa.zelda.zip" "Zelda (USA).z64")
+  local sha size
+  sha="$(sha256sum "$SERVER_ROOT/Games/n64/usa.zelda.zip" | cut -d' ' -f1)"
+  size="$(stat -c '%s' "$SERVER_ROOT/Games/n64/usa.zelda.zip")"
+  add_manifest_entry n64 "/Games/n64/usa.zelda.zip" file "$size" "$sha" "Zelda"
+
+  # A per-machine override in the config directory, which is how someone would
+  # really do this without rebuilding the flake.
+  jq -n '{"n64/usa.zelda": {unzip: true, target: "*.z64"}}' \
+    > "$GOTG_CONFIG_DIR/overrides.json"
+
+  gotg refresh
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+
+  # Installed as a directory holding the real ROM, not the archive.
+  [ -d "$GOTG_GAMES_DIR/n64/usa.zelda" ]
+  [ -f "$GOTG_GAMES_DIR/n64/usa.zelda/Zelda (USA).z64" ]
+  [ ! -e "$GOTG_GAMES_DIR/n64/usa.zelda.zip" ]
+}

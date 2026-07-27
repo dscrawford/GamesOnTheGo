@@ -8,8 +8,8 @@ set -euo pipefail
 # and from the nix store.
 GOTG_ROOT="${GOTG_ROOT:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)}"
 GOTG_LIB="$GOTG_ROOT/lib"
-GOTG_DATA="$GOTG_ROOT/data"
-GOTG_TEMPLATES="$GOTG_ROOT/templates"
+GOTG_DATA="${GOTG_DATA:-$GOTG_ROOT/data}"
+GOTG_TEMPLATES="${GOTG_TEMPLATES:-$GOTG_ROOT/templates}"
 export GOTG_ROOT GOTG_LIB GOTG_DATA GOTG_TEMPLATES
 
 # shellcheck source=lib/common.sh

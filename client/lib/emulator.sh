@@ -17,7 +17,16 @@ gotg_flake() {
 
 emulators_json() { printf '%s/emulators.json' "$GOTG_DATA"; }
 platforms_json() { printf '%s/platforms.json' "$GOTG_DATA"; }
-overrides_json() { printf '%s/overrides.json' "$GOTG_DATA"; }
+
+# Per-game overrides are the one thing a person tweaks per machine, so a copy in
+# the config directory wins over the one shipped in the store.
+overrides_json() {
+  if [[ -f "$GOTG_CONFIG_DIR/overrides.json" ]]; then
+    printf '%s/overrides.json' "$GOTG_CONFIG_DIR"
+  else
+    printf '%s/overrides.json' "$GOTG_DATA"
+  fi
+}
 
 # Per-game overrides, looked up by "platform/id" first then bare id.
 override_field() {

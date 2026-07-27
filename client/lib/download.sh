@@ -132,6 +132,25 @@ _install_file() {
   mv -f "$staged" "$dest"
 }
 
+# A zipped ROM unpacked into its own directory, for emulators that cannot read
+# an archive (the 2s2h port extracts assets from a bare .z64, for instance).
+_install_zipped_rom() {
+  local staged_zip="$1" dest="$2"
+  local stage="$GOTG_PARTIAL_DIR/unzip-$$"
+  rm -rf "$stage"
+  mkdir -p "$stage"
+
+  unzip -q "$staged_zip" -d "$stage" || {
+    rm -rf "$stage"
+    die "could not unzip $(basename "$staged_zip")"
+  }
+
+  mkdir -p "$(dirname "$dest")"
+  rm -rf "$dest"
+  mv "$stage" "$dest"
+  rm -f "$staged_zip"
+}
+
 _install_dir_zip() {
   local staged_zip="$1" dest="$2"
   local stage="$GOTG_PARTIAL_DIR/stage-$$"
@@ -192,7 +211,13 @@ download_game() {
     _install_dir_zip "$staged" "$dest"
   else
     _verify_checksum "$staged" "$sha"
-    _install_file "$staged" "$dest"
+    if [[ "$(override_field "$game" unzip)" == "true" ]]; then
+      # Verified as downloaded, then unpacked: the checksum still covers what
+      # came off the server.
+      _install_zipped_rom "$staged" "$dest"
+    else
+      _install_file "$staged" "$dest"
+    fi
   fi
 
   log "installed $dest"
