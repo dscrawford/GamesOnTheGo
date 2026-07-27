@@ -48,6 +48,6 @@ than failing in a way Steam renders as the game closing instantly.
 nix flake check     # or: GOTG_BIN=$(which gotg) bats client/tests/
 ```
 
-27 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
+31 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
 of the real API — including `Range` requests — that resume is exercised against a
 genuinely truncated transfer rather than a simulated one.

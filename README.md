@@ -84,5 +84,5 @@ nix develop        # python, pytest, ruff, shellcheck, bats
 nix flake check    # every test suite and linter
 ```
 
-`nix flake check` runs 100 importer tests (pytest), 19 client tests (bats,
+`nix flake check` runs 119 importer tests (pytest), 31 client tests (bats,
 against a stand-in File Browser over real HTTP), ruff and shellcheck.
