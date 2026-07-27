@@ -1,0 +1,17 @@
+{
+  "_comment": [
+    "Per-game local tweaks, merged over the platform defaults.",
+    "Key by id, or by platform/id when the same id exists on several platforms.",
+    "  emulator: name from emulators.json",
+    "  target:   glob for the file to launch, relative to the installed game",
+    "  args:     replaces the emulator's argsTemplate entirely"
+  ],
+
+  "n64/usa.legend_of_zelda_majoras_mask": {
+    "emulator": "2s2h",
+    "comment": "Native PC port rather than emulation; it extracts assets from the ROM on first run"
+  },
+
+  "wiiu/usa.legend_of_zelda_twilight_princess_hd": { "target": "code/*.rpx" },
+  "wiiu/usa.legend_of_zelda_the_wind_waker_hd": { "target": "code/*.rpx" }
+}

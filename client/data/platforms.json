@@ -1,0 +1,12 @@
+{
+  "n64": { "emulator": "ares" },
+  "snes": { "emulator": "ares" },
+  "nes": { "emulator": "ares" },
+  "gb": { "emulator": "ares" },
+  "gbc": { "emulator": "ares" },
+  "gba": { "emulator": "ares" },
+  "gamecube": { "emulator": "dolphin" },
+  "wii": { "emulator": "dolphin" },
+  "wiiu": { "emulator": "cemu" },
+  "switch": { "emulator": "ryujinx" }
+}

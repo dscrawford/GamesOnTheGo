@@ -1,0 +1,32 @@
+{
+  "ares": {
+    "attr": "ares",
+    "bin": "ares",
+    "argsTemplate": ["{target}"],
+    "description": "Multi-system emulator; detects the console from the ROM"
+  },
+  "cemu": {
+    "attr": "cemu",
+    "bin": "cemu",
+    "argsTemplate": ["-g", "{target}"],
+    "description": "Wii U; wants the .rpx inside a decrypted title"
+  },
+  "dolphin": {
+    "attr": "dolphin-emu",
+    "bin": "dolphin-emu",
+    "argsTemplate": ["-e", "{target}"],
+    "description": "GameCube and Wii"
+  },
+  "ryujinx": {
+    "attr": "ryubing",
+    "bin": "Ryujinx",
+    "argsTemplate": ["{target}"],
+    "description": "Switch; the maintained Ryujinx fork, as nixpkgs dropped the original"
+  },
+  "2s2h": {
+    "attr": "_2ship2harkinian",
+    "bin": "2s2h",
+    "argsTemplate": [],
+    "description": "Majora's Mask native port; extracts its own assets from the ROM once"
+  }
+}

@@ -25,9 +25,19 @@
         );
     in
     {
-      packages = forAllSystems (pkgs: rec {
-        gotg-importer = pkgs.callPackage ./importer { };
-        default = gotg-importer;
+      packages = forAllSystems (
+        pkgs:
+        let
+          # One registry of emulators, shared by the CLI and these outputs, so a
+          # new emulator is a single JSON edit.
+          emulators = builtins.fromJSON (builtins.readFile ./client/data/emulators.json);
+          emulatorPackages = builtins.mapAttrs (_: spec: pkgs.${spec.attr}) emulators;
+        in
+        emulatorPackages
+        // rec {
+          gotg = pkgs.callPackage ./client { };
+          gotg-importer = pkgs.callPackage ./importer { };
+          default = gotg;
 
         # Image for the in-cluster CronJob. The archive tools (unrar, zip, rhash)
         # arrive through the wrapper's closure, so no extra PATH wiring is needed.
@@ -46,7 +56,8 @@
             Env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" ];
           };
         };
-      });
+        }
+      );
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
@@ -65,6 +76,45 @@
 
       checks = forAllSystems (pkgs: {
         importer = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-importer;
+        client = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg;
+
+        shellcheck =
+          pkgs.runCommand "check-shellcheck"
+            {
+              nativeBuildInputs = [ pkgs.shellcheck ];
+            }
+            ''
+              cd ${./.}
+              shellcheck --external-sources --source-path=client client/bin/gotg client/lib/*.sh
+              touch $out
+            '';
+
+        # End-to-end against a stand-in File Browser: real HTTP, real resume,
+        # real checksums, no network.
+        client-tests =
+          pkgs.runCommand "check-client-tests"
+            {
+              nativeBuildInputs = with pkgs; [
+                bats
+                jq
+                curl
+                python3
+                coreutils
+                unzip
+                gnugrep
+                gnused
+                gawk
+                diffutils
+              ];
+              GOTG_BIN = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.gotg;
+            }
+            ''
+              cp -r ${./client/tests} tests
+              chmod -R u+w tests
+              export HOME=$TMPDIR
+              bats tests/
+              touch $out
+            '';
 
         ruff =
           pkgs.runCommand "check-ruff"

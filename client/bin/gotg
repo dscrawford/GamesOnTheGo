@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# GamesOnTheGo — download a game from the server on demand and launch it.
+#
+# Dispatch only; each command lives in its own lib/cmd-*.sh.
+set -euo pipefail
+
+# Resolve the library next to this script so the CLI works both from a checkout
+# and from the nix store.
+GOTG_ROOT="${GOTG_ROOT:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)}"
+GOTG_LIB="$GOTG_ROOT/lib"
+GOTG_DATA="$GOTG_ROOT/data"
+GOTG_TEMPLATES="$GOTG_ROOT/templates"
+export GOTG_ROOT GOTG_LIB GOTG_DATA GOTG_TEMPLATES
+
+# shellcheck source=lib/common.sh
+source "$GOTG_LIB/common.sh"
+# shellcheck source=lib/config.sh
+source "$GOTG_LIB/config.sh"
+# shellcheck source=lib/api.sh
+source "$GOTG_LIB/api.sh"
+# shellcheck source=lib/manifest.sh
+source "$GOTG_LIB/manifest.sh"
+# shellcheck source=lib/download.sh
+source "$GOTG_LIB/download.sh"
+# shellcheck source=lib/emulator.sh
+source "$GOTG_LIB/emulator.sh"
+# shellcheck source=lib/launcher.sh
+source "$GOTG_LIB/launcher.sh"
+# shellcheck source=lib/cmd-play.sh
+source "$GOTG_LIB/cmd-play.sh"
+
+usage() {
+  cat <<'EOF'
+usage: gotg <command> [args]
+
+  login              save the server URL and credentials (mode 600)
+  refresh            re-fetch the game catalog from the server
+  list               list every game, marking the ones installed here
+  info <id>          show one game's details
+  download <id>      fetch a game without setting up a launcher
+  install <id>       fetch it, build its emulator, write a Steam launcher
+  play <id>          fetch if needed, then launch (what the launchers call)
+  sync               rebuild gotg and the emulator GC roots after a git pull
+
+Ids look like usa.legend_of_zelda_majoras_mask. When the same id exists on more
+than one platform, qualify it: n64/usa.bugs_life
+
+`install` and `sync` build things with nix, so run them from a terminal. Steam's
+launch environment cannot evaluate nix; `play` only ever runs prebuilt binaries.
+EOF
+}
+
+main() {
+  local cmd="${1:-}"
+  [[ $# -gt 0 ]] && shift || true
+
+  case "$cmd" in
+    login) cmd_login "$@" ;;
+    refresh) cmd_refresh "$@" ;;
+    list | ls) cmd_list "$@" ;;
+    info | show) cmd_info "$@" ;;
+    download | get) cmd_download "$@" ;;
+    install) cmd_install "$@" ;;
+    play | launch) cmd_play "$@" ;;
+    sync) cmd_sync "$@" ;;
+    help | --help | -h | "") usage ;;
+    *)
+      printf 'error: unknown command: %s\n\n' "$cmd" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
