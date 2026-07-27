@@ -87,7 +87,7 @@ emulator_build() {
   nix build "$ref" -o "$root" ||
     die "could not build $name. Run this from a terminal (not through Steam)."
   emulator_is_built "$name" ||
-    die "built $name but $(emulator_bin "$name") is missing — check 'bin' in $(emulator_json)"
+    die "built $name but $(emulator_bin "$name") is missing — check 'bin' in $(emulators_json)"
 }
 
 # The file handed to the emulator. Directory games need a glob (Wii U wants the
