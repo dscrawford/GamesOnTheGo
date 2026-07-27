@@ -59,6 +59,23 @@ under an id the client then hands to the wrong emulator.
 `rules.yaml` (a ConfigMap in-cluster) carries the DAT-directory and extension maps,
 so adding a platform is a config edit rather than a release.
 
+## Operational notes
+
+Learned from the first real bootstrap over the live library:
+
+- **Memory.** `unrar` allocates the archive's whole RAR5 dictionary, which is
+  hundreds of megabytes on a large scene release. 512Mi is not enough; the
+  CronJob asks for 2Gi.
+- **Source and destination must share a filesystem.** Imports are hardlinks, so
+  `GAMES_ROOT` and `SOURCE_ROOT` have to be two paths on one mount — which is why
+  the CronJob mounts `jellyfin-data` once at `/data` rather than binding each
+  subdirectory separately. Getting this wrong fails loudly with EXDEV.
+- **Interrupted runs are safe.** The catalog is published after each source and
+  staging directories are swept at the start of the next run, so an OOM kill or
+  an evicted pod costs only the work in flight.
+- **Checksumming dominates the runtime.** Hashing is what makes a first import
+  take minutes; `--no-checksum` skips it at the cost of client-side verification.
+
 ## Development
 
 ```bash
