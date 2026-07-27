@@ -1,0 +1,135 @@
+"""Classification ladder, exercised against the real payload shapes in the library."""
+
+from pathlib import Path
+
+import pytest
+
+from gotg_importer.classify import (
+    HANDLER_EXCLUDED,
+    HANDLER_MANUAL,
+    HANDLER_NO_INTRO_SET,
+    HANDLER_SCENE_ARCHIVE,
+    HANDLER_SINGLE_FILE,
+    HANDLER_WIIU_DECRYPTED,
+    HANDLER_WIIU_NUS,
+    classify,
+)
+from gotg_importer.rules import defaults
+from gotg_importer.scan import Source
+
+RULES = defaults()
+
+
+def src(name, *, is_dir=True, files=(), dirs=(), code_files=()):
+    return Source(
+        path=Path("/data/Torrents") / name,
+        is_dir=is_dir,
+        files=tuple(files),
+        dirs=tuple(dirs),
+        code_files=tuple(code_files),
+    )
+
+
+# --- WiiU: decrypted output present vs raw NUS download ----------------------
+# Both shapes carry .app/.h3/title.tmd; only the decrypted one also has code/*.rpx.
+
+WIIU_NUS_FILES = ("00000002.app", "00000004.app", "00000004.h3", "title.tik", "title.tmd", "tmd.64")
+
+
+def test_wiiu_decrypted_wins_over_nus():
+    source = src(
+        "Legend of Zelda, The - Twilight Princess HD (USA) (En,Fr,Es)",
+        files=WIIU_NUS_FILES,
+        dirs=("code", "content", "meta"),
+        code_files=("app.xml", "cos.xml", "Zelda.rpx"),
+    )
+    verdict = classify(source, RULES)
+    assert verdict.handler == HANDLER_WIIU_DECRYPTED
+    assert verdict.platform == "wiiu"
+
+
+def test_wiiu_nus_without_decrypted_output():
+    source = src("Some WiiU Title (USA)", files=WIIU_NUS_FILES)
+    verdict = classify(source, RULES)
+    assert verdict.handler == HANDLER_WIIU_NUS
+    assert verdict.platform == "wiiu"
+
+
+def test_wiiu_marker_dirs_without_executable_are_not_decrypted():
+    # code/ exists but holds no .rpx -> not importable as decrypted.
+    source = src(
+        "Half Extracted Title (USA)", files=WIIU_NUS_FILES, dirs=("code", "content", "meta"), code_files=("app.xml",)
+    )
+    assert classify(source, RULES).handler == HANDLER_WIIU_NUS
+
+
+# --- Scene archive -----------------------------------------------------------
+
+
+def test_scene_archive_with_extracted_rom():
+    source = src(
+        "The_Legend_of_Zelda_Skyward_Sword_HD_NSW-VENOM",
+        files=(
+            "v-lozsshd.nfo",
+            "v-the_legend_of_zelda_skyward_sword_hd.nsp",
+            "v-the_legend_of_zelda_skyward_sword_hd.r00",
+            "v-the_legend_of_zelda_skyward_sword_hd.rar",
+            "v-the_legend_of_zelda_skyward_sword_hd.sfv",
+        ),
+    )
+    verdict = classify(source, RULES)
+    assert verdict.handler == HANDLER_SCENE_ARCHIVE
+    assert verdict.platform == "switch"
+
+
+def test_scene_archive_platform_deferred_to_listing():
+    source = src("Some_Release-GRP", files=("x.rar", "x.r00", "x.sfv", "x.nfo"))
+    verdict = classify(source, RULES)
+    assert verdict.handler == HANDLER_SCENE_ARCHIVE
+    assert verdict.platform == ""
+
+
+# --- No-Intro sets and single files ------------------------------------------
+
+
+def test_dat_dir_name_maps_to_platform():
+    verdict = classify(src("Nintendo - Nintendo 64 (BigEndian)", files=("a.zip", "b.zip")), RULES)
+    assert (verdict.handler, verdict.platform) == (HANDLER_NO_INTRO_SET, "n64")
+
+
+def test_excluded_set_is_honored():
+    name = "Nintendo - Nintendo Entertainment System (Headered) (Aftermarket)"
+    assert classify(src(name, files=("a.zip",)), RULES).handler == HANDLER_EXCLUDED
+
+
+def test_loose_rom_directory_is_a_set():
+    files = tuple(f"Game {i} (USA).z64" for i in range(8))
+    verdict = classify(src("random n64 dump", files=files), RULES)
+    assert (verdict.handler, verdict.platform) == (HANDLER_NO_INTRO_SET, "n64")
+
+
+def test_bare_file_is_single_file():
+    verdict = classify(src("Legend of Zelda, The - Majora's Mask (USA).z64", is_dir=False), RULES)
+    assert (verdict.handler, verdict.platform) == (HANDLER_SINGLE_FILE, "n64")
+
+
+def test_directory_with_one_rom_is_single_file():
+    verdict = classify(src("Majora torrent", files=("Majora's Mask (USA).z64", "readme.txt")), RULES)
+    assert (verdict.handler, verdict.platform) == (HANDLER_SINGLE_FILE, "n64")
+
+
+# --- Never guess -------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        src("mystery.bin", is_dir=False),
+        src("empty dir"),
+        src("unmapped set", files=tuple(f"g{i}.zip" for i in range(20))),
+    ],
+)
+def test_unidentifiable_payloads_go_to_manual(source):
+    verdict = classify(source, RULES)
+    assert verdict.handler == HANDLER_MANUAL
+    assert verdict.reason, "manual verdicts must explain themselves"

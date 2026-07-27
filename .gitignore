@@ -1,0 +1,14 @@
+# Nix build outputs / GC roots
+result
+result-*
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+
+# Local runtime state (never committed)
+/state/

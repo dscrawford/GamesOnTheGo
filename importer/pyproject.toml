@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gotg-importer"
+version = "0.1.0"
+description = "Organizes completed game torrents into the GOTG /Games tree"
+requires-python = ">=3.11"
+dependencies = [
+    "qbittorrent-api>=2024.1.58",
+    "PyYAML>=6.0",
+]
+
+[project.scripts]
+gotg-importer = "gotg_importer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+gotg_importer = ["rules.yaml"]
+
+[tool.ruff]
+# 120 keeps the ported reference implementation (slugify.py, plan.py) verbatim.
+line-length = 120
+
+[tool.ruff.format]
+# slugify.py and plan.py are ported verbatim from Kubernetes/games/ so the two
+# copies stay diffable; reformatting them would break that.
+exclude = ["src/gotg_importer/slugify.py", "src/gotg_importer/plan.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/gotg_importer/plan.py" = ["B007"]  # ported verbatim; loop var kept for clarity
+
+[tool.ruff.lint.isort]
+known-first-party = ["gotg_importer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

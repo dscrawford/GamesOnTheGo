@@ -1,0 +1,49 @@
+# Classification rules for the GOTG importer (mounted as a ConfigMap in-cluster).
+# These entries extend/override the built-in defaults in plan.py — adding a
+# platform here needs no code change or new image.
+version: 1
+
+# How many mapped ROM files make a directory a "set" rather than a loose game.
+min_set_files: 5
+
+# Scene releases carry no region tag in the filename, so they default to `world`
+# and are flagged for confirmation. Pin a region for a known release with a
+# substring match:
+scene_default_region: world
+scene_overrides: []
+#   - match: "NSW-VENOM"
+#     region: usa
+
+# No-Intro / Redump DAT directory name -> platform + handler.
+# handler: no_intro_set | single_file | excluded
+dat_dirs:
+  "Nintendo - Nintendo 64 (BigEndian)":
+    platform: n64
+    handler: no_intro_set
+  "Nintendo - Super Nintendo Entertainment System":
+    platform: snes
+    handler: no_intro_set
+  # Homebrew/aftermarket set — deliberately not imported (decision 2026-07-26).
+  "Nintendo - Nintendo Entertainment System (Headered) (Aftermarket)":
+    platform: nes
+    handler: excluded
+
+# Single-file extension -> platform, for loose ROM torrents.
+extensions:
+  z64: n64
+  n64: n64
+  v64: n64
+  sfc: snes
+  smc: snes
+  nes: nes
+  nsp: switch
+  xci: switch
+  rvz: gamecube
+  gcm: gamecube
+  iso: gamecube
+  wbfs: wii
+  wua: wiiu
+  wux: wiiu
+  gba: gba
+  gbc: gbc
+  gb: gb
