@@ -3,6 +3,11 @@
 # reach the real server or touch the real ~/Games.
 
 setup_env() {
+  # Neither a terminal nor a display, which is how gotg runs under Steam and the
+  # only way these can be deterministic: with a display inherited from whoever
+  # ran bats, a download or a build waits on a zenity dialog nobody is watching.
+  unset DISPLAY WAYLAND_DISPLAY
+
   export TEST_TMP="$BATS_TEST_TMPDIR"
   export SERVER_ROOT="$TEST_TMP/server"
   export GOTG_CONFIG_DIR="$TEST_TMP/config"
@@ -83,4 +88,59 @@ add_manifest_entry() {
 
 gotg() {
   run --separate-stderr "$GOTG_BIN" "$@"
+}
+
+# A stand-in for a built environment: the GC root that `gotg play` execs, with no
+# nix involved. Absolute shebang, because /usr/bin/env does not exist inside the
+# nix build sandbox these run in.
+fake_env() {
+  local attr="$1"
+  # A second word in the same `local` would expand $attr before it is assigned.
+  local dir="$GOTG_ROOTS_DIR/$attr"
+  mkdir -p "$dir/bin"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'echo "%s launched with: $*"\n' "$attr"
+  } >"$dir/bin/gotg-play"
+  chmod +x "$dir/bin/gotg-play"
+}
+
+# A stand-in `nix`, so that building an environment can be tested where there is
+# no nix to run. It records what it was asked to build and then produces the GC
+# root, or — with "fail" — records it and gives up, as a build of a broken
+# environment would.
+stub_nix() {
+  local mode="${1:-ok}"
+  export NIX_LOG="$TEST_TMP/nix.log"
+  export GOTG_FLAKE="$TEST_TMP/flake"
+  export GOTG_NIX="$TEST_TMP/bin/nix"
+  export SHIM_BASH
+  SHIM_BASH="$(command -v bash)"
+  mkdir -p "$GOTG_FLAKE" "$TEST_TMP/bin"
+  : >"$GOTG_FLAKE/flake.nix"
+
+  {
+    printf '#!%s\n' "$SHIM_BASH"
+    cat <<'SHIM'
+printf '%s\n' "$*" >>"$NIX_LOG"
+SHIM
+    if [[ "$mode" == "fail" ]]; then printf 'exit 1\n'; fi
+    cat <<'SHIM'
+out=""
+prev=""
+for arg in "$@"; do
+  if [[ "$prev" == "-o" ]]; then out="$arg"; fi
+  prev="$arg"
+done
+[[ -n "$out" ]] || exit 1
+mkdir -p "$out/bin"
+{
+  printf '#!%s\n' "$SHIM_BASH"
+  printf 'echo "built launched with: $*"\n'
+} >"$out/bin/gotg-play"
+chmod +x "$out/bin/gotg-play"
+exit 0
+SHIM
+  } >"$GOTG_NIX"
+  chmod +x "$GOTG_NIX"
 }

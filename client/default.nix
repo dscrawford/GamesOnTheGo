@@ -28,7 +28,9 @@ stdenvNoCC.mkDerivation {
     runHook preInstall
 
     mkdir -p $out/share/gotg
-    cp -r lib data templates $out/share/gotg/
+    # env/ is shipped for its file names, not to be evaluated from here: the CLI
+    # reads them to work out which flake attribute a game wants, without nix.
+    cp -r lib data templates env $out/share/gotg/
     install -Dm755 bin/gotg $out/share/gotg/bin/gotg
 
     makeWrapper $out/share/gotg/bin/gotg $out/bin/gotg \

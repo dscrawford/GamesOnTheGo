@@ -28,40 +28,45 @@
       packages = forAllSystems (
         pkgs:
         let
-          # One registry of emulators, shared by the CLI and these outputs, so a
-          # new emulator is a single JSON edit.
-          emulators = builtins.fromJSON (builtins.readFile ./client/data/emulators.json);
-          emulatorPackages = builtins.mapAttrs (_: spec: pkgs.${spec.attr}) emulators;
+          # One launchable environment per platform, plus one per game that needs
+          # its own settings — see client/env. `gotg play` builds these by name.
+          envs = import ./client/env { inherit pkgs; };
         in
-        emulatorPackages
+        envs
         // rec {
           gotg = pkgs.callPackage ./client { };
           gotg-importer = pkgs.callPackage ./importer { };
           default = gotg;
 
-        # Image for the in-cluster CronJob. The archive tools (unrar, zip, rhash)
-        # arrive through the wrapper's closure, so no extra PATH wiring is needed.
-        #
-        #   nix build .#importer-image
-        #   skopeo copy docker-archive:result docker://localhost:30500/gotg-importer:0.1.0
-        importer-image = pkgs.dockerTools.buildLayeredImage {
-          name = "gotg-importer";
-          tag = gotg-importer.version;
-          contents = [
-            gotg-importer
-            pkgs.cacert
-          ];
-          config = {
-            Entrypoint = [ (pkgs.lib.getExe gotg-importer) ];
-            Env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" ];
+          # Image for the in-cluster CronJob. The archive tools (unrar, zip, rhash)
+          # arrive through the wrapper's closure, so no extra PATH wiring is needed.
+          #
+          #   nix build .#importer-image
+          #   skopeo copy docker-archive:result docker://localhost:30500/gotg-importer:0.1.0
+          importer-image = pkgs.dockerTools.buildLayeredImage {
+            name = "gotg-importer";
+            tag = gotg-importer.version;
+            contents = [
+              gotg-importer
+              pkgs.cacert
+            ];
+            config = {
+              Entrypoint = [ (pkgs.lib.getExe gotg-importer) ];
+              Env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" ];
+            };
           };
-        };
         }
       );
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
-          packages = with pkgs; [
+          packages = [
+            # The wrapped CLI, so `gotg` is on PATH in the shell. It runs the
+            # built copy under /nix/store, so rerun `nix develop` (or let direnv
+            # reload) after editing client/.
+            self.packages.${pkgs.stdenv.hostPlatform.system}.gotg
+          ]
+          ++ (with pkgs; [
             (python3.withPackages (ps: [
               ps.qbittorrent-api
               ps.pyyaml
@@ -70,7 +75,7 @@
             ruff
             shellcheck
             bats
-          ];
+          ]);
         };
       });
 

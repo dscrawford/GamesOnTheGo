@@ -9,8 +9,8 @@ gotg refresh                re-fetch the catalog
 gotg list                   every game, marking what is installed here
 gotg info <id>              one game's details
 gotg download <id>          fetch a game, nothing else
-gotg install <id>           fetch + build its emulator + write a Steam launcher
-gotg play <id>              fetch if needed, then launch
+gotg install <id>           fetch + build its environment + write a Steam launcher
+gotg play <id>              fetch and build what is missing, then launch
 gotg sync                   rebuild the GC roots after a git pull
 ```
 
@@ -24,9 +24,16 @@ gotg sync                   rebuild the GC roots after a git pull
 | `lib/api.sh` | File Browser login and raw-download URLs |
 | `lib/manifest.sh` | the catalog, id resolution, `list` and `info` |
 | `lib/download.sh` | staging, resume, checksums, unzip, progress UI |
-| `lib/emulator.sh` | which emulator, GC roots, launch arguments |
+| `lib/env.sh` | which environment, GC roots, building one |
 | `lib/launcher.sh` | rendering the Steam launcher |
 | `lib/cmd-play.sh` | `install`, `play`, `sync` |
+| `env/<platform>.nix` | the emulator, arguments and settings for a platform |
+| `env/games/<platform>/<id>.nix` | what one game changes about that |
+
+`env/` is nix, built by the flake, but it is also shipped in the package: the CLI
+reads the *names* of those files to work out which flake attribute a game wants,
+which is how `list`, `info` and any launch of something already built stay clear
+of nix entirely.
 
 ## Things worth knowing
 
@@ -38,9 +45,12 @@ a stale token only shows up at launch time.
 complete and verified. A half-downloaded file can never look like an installed
 game to a launcher.
 
-**`play` never builds anything.** Steam's launch environment cannot evaluate nix,
-so if an emulator is missing it says to run `gotg install` from a terminal rather
-than failing in a way Steam renders as the game closing instantly.
+**`play` builds an environment only when one is missing**, and before it starts
+downloading, so the failure most likely to need a person happens first rather
+than at the end of a ten-gigabyte transfer. A launch that finds its GC root — the
+usual one — never runs nix. When it does have to build, Steam gives it no
+terminal, so it pulses a zenity dialog and writes the real error to the launch
+log; `gotg install <id>` from a terminal is still the smoother first run.
 
 ## Tests
 
@@ -48,6 +58,6 @@ than failing in a way Steam renders as the game closing instantly.
 nix flake check     # or: GOTG_BIN=$(which gotg) bats client/tests/
 ```
 
-31 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
+35 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
 of the real API — including `Range` requests — that resume is exercised against a
 genuinely truncated transfer rather than a simulated one.

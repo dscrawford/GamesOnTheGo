@@ -10,7 +10,10 @@ GOTG_ROOT="${GOTG_ROOT:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/..
 GOTG_LIB="$GOTG_ROOT/lib"
 GOTG_DATA="${GOTG_DATA:-$GOTG_ROOT/data}"
 GOTG_TEMPLATES="${GOTG_TEMPLATES:-$GOTG_ROOT/templates}"
-export GOTG_ROOT GOTG_LIB GOTG_DATA GOTG_TEMPLATES
+# The emulator environments. Only their file names are read here — building one
+# is the flake's job — so this copy is enough to know what a game will run in.
+GOTG_ENV_DIR="${GOTG_ENV_DIR:-$GOTG_ROOT/env}"
+export GOTG_ROOT GOTG_LIB GOTG_DATA GOTG_TEMPLATES GOTG_ENV_DIR
 
 # shellcheck source=lib/common.sh
 source "$GOTG_LIB/common.sh"
@@ -22,8 +25,8 @@ source "$GOTG_LIB/api.sh"
 source "$GOTG_LIB/manifest.sh"
 # shellcheck source=lib/download.sh
 source "$GOTG_LIB/download.sh"
-# shellcheck source=lib/emulator.sh
-source "$GOTG_LIB/emulator.sh"
+# shellcheck source=lib/env.sh
+source "$GOTG_LIB/env.sh"
 # shellcheck source=lib/launcher.sh
 source "$GOTG_LIB/launcher.sh"
 # shellcheck source=lib/cmd-play.sh
@@ -38,15 +41,18 @@ usage: gotg <command> [args]
   list               list every game, marking the ones installed here
   info <id>          show one game's details
   download <id>      fetch a game without setting up a launcher
-  install <id>       fetch it, build its emulator, write a Steam launcher
-  play <id>          fetch if needed, then launch (what the launchers call)
-  sync               rebuild gotg and the emulator GC roots after a git pull
+  install <id>       fetch it, build its environment, write a Steam launcher
+  play <id>          fetch and build whatever is missing, then launch
+  sync               rebuild gotg and the environment GC roots after a git pull
 
 Ids look like usa.legend_of_zelda_majoras_mask. When the same id exists on more
 than one platform, qualify it: n64/usa.bugs_life
 
-`install` and `sync` build things with nix, so run them from a terminal. Steam's
-launch environment cannot evaluate nix; `play` only ever runs prebuilt binaries.
+A game runs in an environment built from the flake: client/env/<platform>.nix,
+or client/env/games/<platform>/<id>.nix where one game wants its own settings.
+`play` builds a missing environment on the spot, which compiles an emulator the
+first time and is far happier in a terminal than under Steam — so running
+`install` once, from a terminal, is still the smoother way in.
 EOF
 }
 

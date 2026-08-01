@@ -1,19 +1,18 @@
 {
   "_comment": [
-    "Per-game local tweaks, merged over the platform defaults.",
+    "Per-game local tweaks the CLI has to know before anything is built: where a",
+    "game lands on disk, and which file inside it to launch. How a game runs —",
+    "emulator, arguments, settings — lives in client/env instead.",
     "Key by id, or by platform/id when the same id exists on several platforms.",
-    "  emulator: name from emulators.json",
     "  target:   glob for the file to launch, relative to the installed game",
-    "  args:     replaces the emulator's argsTemplate entirely",
     "  unzip:    unpack a zipped ROM into a directory after download, for",
     "            emulators that cannot read an archive"
   ],
 
   "n64/usa.legend_of_zelda_majoras_mask": {
-    "emulator": "2s2h",
     "unzip": true,
     "target": "*.z64",
-    "comment": "Native PC port, not emulation. It extracts its assets from a bare .z64 on first run, so the No-Intro zip has to be unpacked."
+    "comment": "Runs on the 2s2h native port (client/env/games/n64), which extracts its assets from a bare .z64 on first run, so the No-Intro zip has to be unpacked."
   },
 
   "wiiu/usa.legend_of_zelda_twilight_princess_hd": { "target": "code/*.rpx" },

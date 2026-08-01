@@ -10,23 +10,16 @@ setup() {
   setup_env
   start_server
   write_config
-  # A stand-in emulator, so install does not have to build a real one.
-  export FAKE_EMU="$TEST_TMP/state/roots/fake"
-  mkdir -p "$FAKE_EMU/bin"
-  # Absolute shebang: /usr/bin/env does not exist inside the nix build sandbox.
-  {
-    printf '#!%s\n' "$(command -v bash)"
-    printf 'echo "launched with: $*"\n'
-  } >"$FAKE_EMU/bin/fake-emu"
-  chmod +x "$FAKE_EMU/bin/fake-emu"
 
-  jq -n '{fake: {attr: "hello", bin: "fake-emu", argsTemplate: ["{target}"]}}' \
-    >"$TEST_TMP/emulators.json"
-  jq -n '{n64: {emulator: "fake"}}' >"$TEST_TMP/platforms.json"
-  cp -r "$(dirname "$GOTG_BIN")/../share/gotg/data" "$TEST_TMP/data"
-  chmod -R u+w "$TEST_TMP/data"
-  cp "$TEST_TMP/emulators.json" "$TEST_TMP/data/emulators.json"
-  cp "$TEST_TMP/platforms.json" "$TEST_TMP/data/platforms.json"
+  # A stand-in for client/env. Only the file names decide which environment a
+  # game wants, so this is all the CLI reads; the built root is faked alongside
+  # it, which keeps every test here clear of nix.
+  export GOTG_ENV_DIR="$TEST_TMP/env"
+  mkdir -p "$GOTG_ENV_DIR"
+  : >"$GOTG_ENV_DIR/n64.nix"
+  fake_env env-n64
+
+  mkdir -p "$TEST_TMP/data"
   echo '{}' >"$TEST_TMP/data/overrides.json"
   export GOTG_DATA="$TEST_TMP/data"
 }
@@ -99,26 +92,76 @@ teardown() {
   [ ! -e "$GOTG_GAMES_DIR/n64/play-usa.zelda.sh.bak" ]
 }
 
-@test "play launches the emulator with the game as its argument" {
+@test "play launches the platform environment with the game as its argument" {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
   gotg download usa.zelda
   gotg play usa.zelda
   [ "$status" -eq 0 ]
-  [[ "$output" == *"launched with: $GOTG_GAMES_DIR/n64/usa.zelda.z64"* ]]
+  [[ "$output" == *"env-n64 launched with: $GOTG_GAMES_DIR/n64/usa.zelda.z64"* ]]
 }
 
-@test "play refuses to build an emulator, and says where to do it" {
+@test "a game with its own environment file gets that one, not the platform's" {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
   gotg download usa.zelda
-  rm -rf "$FAKE_EMU"
+  mkdir -p "$GOTG_ENV_DIR/games/n64"
+  : >"$GOTG_ENV_DIR/games/n64/usa.zelda.nix"
+  # The dot in an id is an attribute path separator in a flake reference.
+  fake_env env-n64-usa_zelda
+
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"env-n64-usa_zelda launched with:"* ]]
+}
+
+@test "play builds a missing environment from the flake" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  gotg download usa.zelda
+  rm -rf "$GOTG_ROOTS_DIR/env-n64"
+  stub_nix
+
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  grep -q "build $GOTG_FLAKE#env-n64 -o $GOTG_ROOTS_DIR/env-n64" "$NIX_LOG"
+  [[ "$output" == *"launched with: $GOTG_GAMES_DIR/n64/usa.zelda.z64"* ]]
+}
+
+@test "the environment is built before the download, not after it" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  rm -rf "$GOTG_ROOTS_DIR/env-n64"
+  stub_nix fail
 
   gotg play usa.zelda
   [ "$status" -ne 0 ]
-  # Steam cannot evaluate nix, so this has to be an instruction, not an attempt.
+  # Nothing was fetched: a missing emulator is worth failing on before a transfer
+  # that can run to tens of gigabytes.
+  [ ! -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
+}
+
+@test "a failed build says how to run it somewhere it can be read" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  rm -rf "$GOTG_ROOTS_DIR/env-n64"
+  stub_nix fail
+
+  gotg play usa.zelda
+  [ "$status" -ne 0 ]
   [[ "$stderr" == *"terminal"* ]]
-  [[ "$stderr" == *"gotg install usa.zelda"* ]]
+  [[ "$stderr" == *"nix build $GOTG_FLAKE#env-n64"* ]]
+  # Under Steam the only trace of a launch is the log the shortcut redirects to.
+  [[ "$stderr" == *"$GOTG_LOG_DIR"* ]]
+}
+
+@test "a platform with no environment says where to add one" {
+  add_game snes "usa.mario.sfc" "rom"
+  gotg refresh
+
+  gotg play usa.mario
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"client/env/snes.nix"* ]]
 }
 
 @test "play downloads a game that is missing before launching it" {

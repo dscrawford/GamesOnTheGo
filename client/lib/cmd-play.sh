@@ -6,16 +6,16 @@ cmd_install() {
   [[ -n "$want" ]] || die "usage: gotg install <id>"
   manifest_ensure
 
-  local game emulator launcher
+  local game attr launcher
   game="$(manifest_find "$want")"
-  emulator="$(emulator_for_game "$game")"
+  attr="$(env_attr "$game")"
 
   download_game "$game"
 
-  if emulator_is_built "$emulator"; then
-    log "emulator $emulator already built"
+  if env_is_built "$attr"; then
+    log "environment $attr already built"
   else
-    emulator_build "$emulator"
+    env_build "$attr"
   fi
 
   launcher="$(launcher_write "$game")"
@@ -34,24 +34,27 @@ cmd_play() {
   # Prefer the cached catalog: a game already installed here must still launch
   # when the server is unreachable.
   manifest_cached || manifest_ensure
-  local game emulator bin
+  local game attr
   game="$(manifest_find "$want")"
+  attr="$(env_attr "$game")"
+
+  # Before the download, not after. A missing emulator is the failure most likely
+  # to need a person, and finding that out at the end of a 10 GB transfer helps
+  # nobody. Once built it is a symlink test, so the usual launch pays nothing.
+  env_ensure "$attr"
 
   download_game "$game"
 
-  emulator="$(emulator_for_game "$game")"
-  bin="$(emulator_bin "$emulator")"
-  if [[ ! -x "$bin" ]]; then
-    die "emulator '$emulator' is not built yet.
-     Steam's environment cannot evaluate nix, so this has to happen in a terminal:
-       gotg install $want"
-  fi
+  local target install
+  target="$(resolve_target "$game")"
+  install="$(game_local_path "$game")"
 
-  local args=()
-  mapfile -t args < <(emulator_args "$game" "$emulator")
+  # The environment decides the emulator, its arguments and its settings; all it
+  # is told is which file to run and where that came from.
+  export GOTG_TARGET="$target" GOTG_INSTALL="$install"
 
-  log "launching $(manifest_field "$game" title) with $emulator"
-  exec "$bin" "${args[@]}" "$@"
+  log "launching $(manifest_field "$game" title) with $attr"
+  exec "$(env_bin "$attr")" "$target" "$@"
 }
 
 # Rebuild the GC roots after pulling a new version of the flake.
@@ -62,16 +65,22 @@ cmd_sync() {
 
   mkdir -p "$GOTG_STATE_DIR"
   log "building gotg -> $GOTG_APP_ROOT"
-  nix build "$flake#gotg" -o "$GOTG_APP_ROOT" || die "could not build gotg from $flake"
+  "$(nix_bin)" build "$flake#gotg" -o "$GOTG_APP_ROOT" || die "could not build gotg from $flake"
 
-  # Only rebuild emulators that are already in use here.
-  local name
+  # Only rebuild the environments that are already in use here.
+  local root name
   if [[ -d "$GOTG_ROOTS_DIR" ]]; then
-    for name in "$GOTG_ROOTS_DIR"/*; do
-      [[ -e "$name" ]] || continue
-      name="$(basename "$name")"
+    for root in "$GOTG_ROOTS_DIR"/*; do
+      [[ -e "$root" ]] || continue
+      name="$(basename "$root")"
+      # Roots from before environments existed were named after the emulator, and
+      # the flake has no such attribute any more.
+      if [[ "$name" != env-* ]]; then
+        warn "skipping $name: not an environment. Remove it with: rm $root"
+        continue
+      fi
       log "rebuilding $name"
-      emulator_build "$name"
+      env_build "$name"
     done
   fi
   log "done"

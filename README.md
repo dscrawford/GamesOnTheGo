@@ -8,7 +8,7 @@ Two components share one contract:
 | Component | What it does | Where it runs |
 |---|---|---|
 | **[importer](importer/)** | Organizes completed game torrents into a canonical `/Games` tree with hardlinks, and publishes the catalog | In-cluster CronJob |
-| **[client](client/)** | `gotg` — fetches a game on demand, builds its emulator, generates a Steam launcher | Desktop, Steam Deck |
+| **[client](client/)** | `gotg` — fetches a game on demand, builds the environment it runs in, generates a Steam launcher | Desktop, Steam Deck |
 
 ## The entry-id contract
 
@@ -46,20 +46,64 @@ gotg install usa.legend_of_zelda_majoras_mask    # download + build emulator + w
 **Games → Add a Non-Steam Game → Browse**. Launching it downloads the game if it
 is missing (with a progress dialog) and then starts the emulator.
 
-`gotg install` and `gotg sync` build things with nix, so run them from a terminal.
-Steam's launch environment cannot evaluate nix — `gotg play` only ever execs
-binaries that were built ahead of time.
+### Emulator environments
+
+A game does not run "in an emulator" so much as in an **environment** built from
+this flake: one derivation holding the emulator, the arguments it wants and any
+settings, exposing a single `bin/gotg-play`. One file per platform, plus one per
+game that needs something of its own:
+
+```
+client/env/snes.nix                            the base for every SNES game
+client/env/games/snes/world.super_metroid.nix  what Super Metroid changes about it
+```
+
+```nix
+# client/env/snes.nix
+{ pkgs, ... }:
+{
+  emulator = pkgs.ares;
+  bin = "ares";
+  args = [ "{target}" ];
+}
+```
+
+A per-game file states only its differences, and takes the platform's `base` if
+it wants to add to a setting rather than replace it:
+
+```nix
+# client/env/games/snes/world.super_metroid.nix
+{ base, ... }:
+{
+  isolate = true;                       # its own config and saves, under ~/.local/state/gotg/env
+  args = base.args ++ [ "--fullscreen" ];
+  env = { SDL_VIDEODRIVER = "wayland"; };
+  configFiles = { "ares/settings.bml" = ./settings.bml; };   # seeded on first run
+}
+```
+
+`gotg play world.super_metroid` looks at the catalog for the platform, picks
+`env-snes-world_super_metroid` if that file exists and `env-snes` otherwise,
+builds it from the flake if it is not here yet, and execs it. Adding a platform
+is one file; a new emulator is a one-line change to the file that wants it.
+
+The build is the one part of a launch that evaluates nix, and Steam is a poor
+place for it — the first launch of a platform compiles an emulator, behind a
+progress dialog with no terminal to show errors in. Running `gotg install <id>`
+once from a terminal keeps it out of the way; after that, launching is a symlink
+test and costs nothing.
 
 ### Per-game tweaks
 
-Copy `client/data/overrides.json` to `~/.config/gotg/overrides.json` and edit it;
-the local copy wins. Keys are `id` or `platform/id`:
+*How* a game runs lives in `client/env` above. What is left in
+`client/data/overrides.json` is what the CLI has to know before anything is
+built, so that `gotg list` still works offline. Copy it to
+`~/.config/gotg/overrides.json` to change it per machine; the local copy wins.
+Keys are `id` or `platform/id`:
 
 | Field | Meaning |
 |---|---|
-| `emulator` | name from `client/data/emulators.json` |
 | `target` | glob for the file to launch, relative to the installed game |
-| `args` | replaces the emulator's argument template entirely |
 | `unzip` | unpack a zipped ROM after download, for emulators that cannot read archives |
 
 ## Why launching is the way it is
@@ -74,15 +118,18 @@ Steam is a hostile launch environment, and each of these was learned the hard wa
   scripts — they die at startup with "cannot open shared object file".
 - It swallows stdout and stderr, so every launch logs to
   `~/.local/state/gotg/logs/<id>.log`.
-- It cannot evaluate nix, so emulators are pre-built into GC roots and the
-  launcher only execs an existing store path.
+- It is a hostile place to evaluate nix, so environments are built into GC roots
+  and a launch that finds one there never runs nix at all.
 
 ## Development
 
 ```bash
-nix develop        # python, pytest, ruff, shellcheck, bats
+nix develop        # gotg on PATH, plus python, pytest, ruff, shellcheck, bats
 nix flake check    # every test suite and linter
 ```
 
-`nix flake check` runs 119 importer tests (pytest), 31 client tests (bats,
+The `gotg` on PATH in the dev shell is the wrapped build, not `client/bin/gotg`
+directly, so re-enter the shell (direnv reloads on its own) to pick up edits.
+
+`nix flake check` runs 119 importer tests (pytest), 35 client tests (bats,
 against a stand-in File Browser over real HTTP), ruff and shellcheck.
