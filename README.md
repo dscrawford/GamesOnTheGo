@@ -39,7 +39,7 @@ nix build ~/Documents/GOTG#gotg -o ~/.local/state/gotg/app
 ~/.local/state/gotg/app/bin/gotg login          # server URL + credentials, saved 0600
 
 gotg list                                        # what is on the server, and what is here
-gotg install usa.legend_of_zelda_majoras_mask    # download + build emulator + write launcher
+gotg install usa.legend_of_zelda_majoras_mask    # download + build its environment + write launcher
 ```
 
 `install` prints the path of a `play-<id>.sh` script. Add that to Steam with
@@ -87,6 +87,29 @@ it wants to add to a setting rather than replace it:
 builds it from the flake if it is not here yet, and execs it. Adding a platform
 is one file; a new emulator is a one-line change to the file that wants it.
 
+### Games that are not emulated
+
+Three games run on native ports built from their decompilations rather than in
+an emulator, which is nothing more than a per-game environment naming a
+different package:
+
+| Game | Port | nixpkgs |
+|---|---|---|
+| Ocarina of Time | Ship of Harkinian | `shipwright` |
+| Ocarina of Time: Master Quest | Ship of Harkinian | `shipwright` |
+| Majora's Mask | 2 Ship 2 Harkinian | `_2ship2harkinian` |
+
+These take the ROM once rather than on every launch: the first run extracts it
+into an `.o2r` archive kept with the game's saves, and afterwards the port
+starts with no ROM at all. `client/env/helpers.nix` holds that handshake, since
+all three share it — the guard matters, because handing these ports a ROM they
+have already extracted stops the launch on a confirmation dialog.
+
+They read a bare `.z64`, so the entries are also marked `unzip` below. Only the
+dumps the ports support will extract; SoH's list is `docs/supportedHashes.json`
+in the [Shipwright](https://github.com/HarbourMasters/Shipwright) repo, and both
+catalogued US dumps (NTSC 1.2 and NTSC MQ) are on it.
+
 The build is the one part of a launch that evaluates nix, and Steam is a poor
 place for it — the first launch of a platform compiles an emulator, behind a
 progress dialog with no terminal to show errors in. Running `gotg install <id>`
@@ -131,5 +154,5 @@ nix flake check    # every test suite and linter
 The `gotg` on PATH in the dev shell is the wrapped build, not `client/bin/gotg`
 directly, so re-enter the shell (direnv reloads on its own) to pick up edits.
 
-`nix flake check` runs 119 importer tests (pytest), 35 client tests (bats,
+`nix flake check` runs 119 importer tests (pytest), 37 client tests (bats,
 against a stand-in File Browser over real HTTP), ruff and shellcheck.

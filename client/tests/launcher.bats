@@ -115,6 +115,50 @@ teardown() {
   [[ "$output" == *"env-n64-usa_zelda launched with:"* ]]
 }
 
+@test "a decomp game launches its own port with the unzipped rom" {
+  # The shape the Zelda ports need: a No-Intro zip unpacked to a bare .z64, a
+  # glob to pick that file out of the directory it became, and an environment
+  # belonging to the game rather than the platform.
+  mkdir -p "$TEST_TMP/mkzip" "$SERVER_ROOT/Games/n64"
+  printf 'rom bytes' >"$TEST_TMP/mkzip/Zelda (USA).z64"
+  (cd "$TEST_TMP/mkzip" && zip -q "$SERVER_ROOT/Games/n64/usa.zelda.zip" "Zelda (USA).z64")
+  local sha size
+  sha="$(sha256sum "$SERVER_ROOT/Games/n64/usa.zelda.zip" | cut -d' ' -f1)"
+  size="$(stat -c '%s' "$SERVER_ROOT/Games/n64/usa.zelda.zip")"
+  add_manifest_entry n64 "/Games/n64/usa.zelda.zip" file "$size" "$sha" "Zelda"
+  jq -n '{"n64/usa.zelda": {unzip: true, target: "*.z64"}}' >"$TEST_TMP/data/overrides.json"
+
+  mkdir -p "$GOTG_ENV_DIR/games/n64"
+  : >"$GOTG_ENV_DIR/games/n64/usa.zelda.nix"
+  fake_env env-n64-usa_zelda
+
+  gotg refresh
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  # The bare ROM inside the unpacked directory, not the directory or the zip.
+  [[ "$output" == *"env-n64-usa_zelda launched with: $GOTG_GAMES_DIR/n64/usa.zelda/Zelda (USA).z64"* ]]
+}
+
+@test "every override in the shipped data is keyed by a well-formed id" {
+  local shipped
+  shipped="$(dirname "$GOTG_BIN")/../share/gotg/data/overrides.json"
+  [ -f "$shipped" ]
+
+  # A typo in one of these keys fails silently — the override simply never
+  # matches the game it was written for, and the game launches wrong.
+  run jq -r 'keys[] | select(startswith("_") | not)' "$shipped"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+
+  local key
+  while read -r key; do
+    [[ "$key" =~ ^([a-z0-9][a-z0-9_-]*/)?[a-z]{3,5}\.[a-z0-9][a-z0-9_]*$ ]] || {
+      echo "malformed override key: $key" >&2
+      return 1
+    }
+  done <<<"$output"
+}
+
 @test "play builds a missing environment from the flake" {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh

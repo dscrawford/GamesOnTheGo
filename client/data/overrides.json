@@ -9,11 +9,15 @@
     "            emulators that cannot read an archive"
   ],
 
-  "n64/usa.legend_of_zelda_majoras_mask": {
-    "unzip": true,
-    "target": "*.z64",
-    "comment": "Runs on the 2s2h native port (client/env/games/n64), which extracts its assets from a bare .z64 on first run, so the No-Intro zip has to be unpacked."
-  },
+  "_comment_decomp": [
+    "The three entries below run on native ports built from the decompilations",
+    "rather than in an emulator — see client/env/games/n64. Each reads a bare",
+    ".z64 once to extract its assets, so the No-Intro zip has to be unpacked."
+  ],
+
+  "n64/usa.legend_of_zelda_majoras_mask": { "unzip": true, "target": "*.z64" },
+  "n64/usa.legend_of_zelda_ocarina_of_time_rev2": { "unzip": true, "target": "*.z64" },
+  "n64/usa.legend_of_zelda_ocarina_of_time_master_quest": { "unzip": true, "target": "*.z64" },
 
   "wiiu/usa.legend_of_zelda_twilight_princess_hd": { "target": "code/*.rpx" },
   "wiiu/usa.legend_of_zelda_the_wind_waker_hd": { "target": "code/*.rpx" }

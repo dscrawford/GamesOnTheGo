@@ -14,6 +14,7 @@
 
 let
   mkEnv = import ./lib.nix { inherit pkgs lib; };
+  helpers = import ./helpers.nix { inherit pkgs lib; };
 
   nixNames =
     dir:
@@ -21,9 +22,13 @@ let
       lib.filterAttrs (n: t: t == "regular" && lib.hasSuffix ".nix" n) (builtins.readDir dir)
     );
 
-  platforms = lib.subtractLists [ "default" "lib" ] (nixNames ./.);
+  platforms = lib.subtractLists [
+    "default"
+    "lib"
+    "helpers"
+  ] (nixNames ./.);
 
-  baseFor = platform: import (./. + "/${platform}.nix") { inherit pkgs lib; };
+  baseFor = platform: import (./. + "/${platform}.nix") { inherit pkgs lib helpers; };
 
   gamesFor =
     platform:
@@ -56,7 +61,7 @@ let
     platform: id:
     let
       base = baseFor platform;
-      patch = import (./games + "/${platform}/${id}.nix") { inherit pkgs lib base; };
+      patch = import (./games + "/${platform}/${id}.nix") { inherit pkgs lib base helpers; };
     in
     mkEnv (merge base patch // { name = attrFor platform id; });
 in
