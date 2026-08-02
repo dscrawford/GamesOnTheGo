@@ -197,6 +197,12 @@ clocks drift, and an mtime rule silently picks the wrong side.
 Bundles are **not encrypted**: anyone who can read `/Games/.gotg/saves` can read
 your saves.
 
+**Saves only.** A pull restores what you played, not what you installed. Cemu's
+`mlc01/usr/title` — installed updates and DLC — is deliberately excluded: it is
+not a save, it can run to gigabytes, and it is not reconstructible from the ROM,
+so a machine that has only ever pulled will have your progress and still need
+those installed by hand.
+
 ### Per-game tweaks
 
 *How* a game runs lives in `client/env` above. What is left in

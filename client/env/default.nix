@@ -57,13 +57,33 @@ let
       configFiles = (base.configFiles or { }) // (patch.configFiles or { });
     };
 
+  # A platform's legacy locations are written for the whole platform — ares kept
+  # every SNES save in ~/Games/snes, so the glob is "*.ram". Inherited unchanged
+  # by a game with an environment of its own, that would have
+  # env-snes-world_super_metroid adopt every SNES save on the machine and then
+  # push them all as its own. Narrow the filename to the game, which is what the
+  # save is named after; entries that are whole directories rather than globs —
+  # the Harkinian ports' — have nothing to narrow and are left alone.
+  scopeLegacyToGame =
+    id: paths:
+    map (
+      entry: entry // { from = lib.replaceStrings [ "/*." ] [ "/${id}." ] entry.from; }
+    ) paths;
+
   gameEnv =
     platform: id:
     let
       base = baseFor platform;
       patch = import (./games + "/${platform}/${id}.nix") { inherit pkgs lib base helpers; };
+      merged = merge base patch;
     in
-    mkEnv (merge base patch // { name = attrFor platform id; });
+    mkEnv (
+      merged
+      // {
+        name = attrFor platform id;
+        legacyPaths = scopeLegacyToGame id (merged.legacyPaths or [ ]);
+      }
+    );
 in
 lib.listToAttrs (
   map (
