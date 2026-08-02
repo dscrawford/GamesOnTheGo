@@ -193,11 +193,45 @@ pads_ares_bindings() {
   printf '%s' "$bindings"
 }
 
-# The controllers that can be bound, in the order they will be seated. SDL's
-# enumeration order is what decides it, because that is what the emulators
-# themselves go by — so this and `gotg controllers order` cannot disagree.
+# Where a chosen order is remembered.
+#
+# Its own file rather than a key in config.json: that one holds the server
+# password and is kept 0600, and which pad is player 1 is neither a secret nor
+# worth rewriting a credentials file over.
+pads_order_file() { printf '%s/controllers.json' "$GOTG_CONFIG_DIR"; }
+
+# The pinned order, as identity/slot keys. Absent, unreadable and malformed all
+# mean the same thing — no preference — because a config file that cannot be
+# parsed is a reason to fall back to SDL's order, not to refuse to launch.
+pads_order_read() {
+  local file
+  file="$(pads_order_file)"
+  [[ -f "$file" ]] || {
+    printf '[]'
+    return 0
+  }
+  jq -c '.order // []' "$file" 2>/dev/null || printf '[]'
+}
+
+# The controllers that can be bound, in the order they will be seated.
+#
+# SDL's enumeration order decides it unless something has been pinned, and
+# every caller comes through here — both emulators and `gotg controllers order`
+# — so what is displayed and what is written cannot disagree.
+#
+# A pinned controller that is not attached simply is not there to seat, and the
+# ones behind it move up. Anything unpinned follows in SDL's order.
 pads_seating() {
-  jq -c '[.[] | select(.gamepad and .map != null)]' <<<"$1"
+  local order
+  order="$(pads_order_read)"
+  jq -c --argjson order "$order" '
+    [ .[] | select(.gamepad and .map != null) ]
+    | map(. + { _key: "\(.identity)/\(.slot)" })
+    | map(. + { _rank: (._key as $k | $order | index($k)) })
+    | ( [ .[] | select(._rank != null) ] | sort_by(._rank) )
+      + [ .[] | select(._rank == null) ]
+    | map(del(._key) | del(._rank))
+  ' <<<"$1"
 }
 
 # Bind each attached controller, whichever emulator this environment runs.

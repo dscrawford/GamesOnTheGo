@@ -16,7 +16,13 @@ usage: gotg controllers <command> [args]
 
   list                    the controllers SDL can see, as the emulators see them
   order                   who is player 1, player 2, and so on
+  order --set <pad>...    choose that order; anything unnamed follows behind
+  order --clear           go back to the order SDL enumerates them
+  order --json            the same answer, for a UI rather than a person
   apply [<id>|--all]      write emulator bindings now, without launching
+
+A controller can be named by any part of its name or by the identity/slot the
+bindings are keyed on. Naming one is enough to make it player 1.
 
 Bindings are also written on every `gotg play`, so this is for checking a change
 or fixing a controller up without starting a game.
@@ -74,6 +80,23 @@ controllers_list() {
 # a command of its own because the answer is invisible otherwise until someone
 # presses start on the wrong pad.
 controllers_order() {
+  case "${1:-}" in
+    --set)
+      shift
+      controllers_order_set "$@"
+      return
+      ;;
+    --clear)
+      controllers_order_clear
+      return
+      ;;
+    --json)
+      controllers_order_json
+      return
+      ;;
+    -*) die "unknown option for controllers order: $1" ;;
+  esac
+
   local pads seating count
   pads="$("$(pads_bin)" 2>/dev/null)" || die "could not run $(pads_bin)"
   seating="$(pads_seating "$pads")"
@@ -96,8 +119,114 @@ controllers_order() {
     end' <<<"$seating" >&2
 
   log ""
-  log "Order follows the order SDL enumerates them, which is what the emulators"
-  log "go by too. Unplug and replug a controller to move it down the list."
+  if [[ "$(jq 'length' <<<"$(pads_order_read)")" == "0" ]]; then
+    log "Order follows the order SDL enumerates them, which is what the emulators"
+    log "go by too. To choose instead:"
+    log ""
+    log "  gotg controllers order --set xbox      # that pad first, rest behind it"
+  else
+    log "This order is pinned, in $(pads_order_file)."
+    log "Anything not named there follows in SDL's order."
+    log ""
+    log "  gotg controllers order --clear         # back to SDL's order"
+  fi
+  log ""
+  log "Bindings are rewritten on the next launch, or now with:"
+  log "  gotg controllers apply --all"
+}
+
+# One controller, named either exactly as the bindings key it or by any part of
+# its name. A UI would pass the key; a person types "xbox".
+#
+# Prints the key, or fails. `die` inside a command substitution exits only that
+# subshell, so every caller checks the status rather than trusting the trap.
+controllers_resolve() {
+  local seating="$1" want="$2" matches count
+  matches="$(jq -c --arg w "$want" '
+    [ .[] | select(
+        "\(.identity)/\(.slot)" == $w
+        or ((.name | ascii_downcase) | contains($w | ascii_downcase))
+      ) ]' <<<"$seating")"
+  count="$(jq 'length' <<<"$matches")"
+
+  case "$count" in
+    0) die "no controller here matches \"$want\" — run: gotg controllers order" ;;
+    1) jq -r '.[0] | "\(.identity)/\(.slot)"' <<<"$matches" ;;
+    *)
+      warn "\"$want\" matches $count controllers:"
+      jq -r '.[] | "  \(.name)  \(.identity)/\(.slot)"' <<<"$matches" >&2
+      die "name one of them exactly, or use its identity/slot"
+      ;;
+  esac
+}
+
+# Pin an order. Naming some of the controllers is enough — the rest keep SDL's
+# order behind the ones named, which is what makes "put the Xbox pad first" a
+# one-word command rather than a full list.
+controllers_order_set() {
+  [[ $# -gt 0 ]] ||
+    die "usage: gotg controllers order --set <controller> [<controller>...]"
+
+  local pads seating
+  pads="$("$(pads_bin)" 2>/dev/null)" || die "could not run $(pads_bin)"
+  seating="$(pads_seating "$pads")"
+  [[ "$(jq 'length' <<<"$seating")" != "0" ]] ||
+    die "no controllers to order — run: gotg controllers list"
+
+  local keys='[]' want key
+  for want in "$@"; do
+    key="$(controllers_resolve "$seating" "$want")" || exit 1
+    # Naming one twice would have it take two seats and push a real pad out.
+    jq -e --arg k "$key" 'index($k) == null' >/dev/null <<<"$keys" ||
+      die "\"$want\" is already in the order"
+    keys="$(jq -c --arg k "$key" '. + [$k]' <<<"$keys")"
+  done
+
+  local file
+  file="$(pads_order_file)"
+  mkdir -p "$GOTG_CONFIG_DIR"
+  if ! jq -n --argjson order "$keys" '{order: $order}' >"$file.tmp"; then
+    rm -f "$file.tmp"
+    die "could not write $file"
+  fi
+  mv "$file.tmp" "$file" || die "could not write $file"
+
+  controllers_order
+}
+
+controllers_order_clear() {
+  local file
+  file="$(pads_order_file)"
+  if [[ ! -f "$file" ]]; then
+    log "nothing was pinned — SDL's order already stands"
+    return 0
+  fi
+  rm -f "$file"
+  log "cleared: back to the order SDL enumerates them"
+  log ""
+  log "Bindings are rewritten on the next launch, or now with:"
+  log "  gotg controllers apply --all"
+}
+
+# The same answer, for something other than a person to read. Everything else
+# here logs to stderr, so this has stdout to itself.
+controllers_order_json() {
+  local pads seating order
+  pads="$("$(pads_bin)" 2>/dev/null)" || die "could not run $(pads_bin)"
+  seating="$(pads_seating "$pads")"
+  order="$(pads_order_read)"
+
+  jq --argjson order "$order" --argjson max "$GOTG_MAX_PLAYERS" '
+    { pinned: ($order | length) > 0,
+      ports: $max,
+      players: [ to_entries[] | {
+        player: (.key + 1),
+        seated: (.key < $max),
+        name: .value.name,
+        key: "\(.value.identity)/\(.value.slot)",
+        pinned: ("\(.value.identity)/\(.value.slot)" as $k
+                 | ($order | index($k)) != null)
+      } ] }' <<<"$seating"
 }
 
 controllers_apply() {

@@ -71,9 +71,28 @@ has no evdev node — needs the steam-devices udev rules, which
 elsewhere. `list` says so when it can see nothing.
 
 Each attached controller is seated in the console port of its own number, up to
-the four every ares console has. The order is SDL's enumeration order, which is
-what the emulators go by too — so `order` and the bindings cannot disagree —
-and unplugging and replugging a controller moves it down the list.
+the four every ares console has. The order is SDL's enumeration order by
+default, which is what the emulators go by too — so `order` and the bindings
+cannot disagree.
+
+To choose instead:
+
+```bash
+gotg controllers order --set xbox     # that pad is player 1, the rest follow
+gotg controllers order --clear        # back to SDL's order
+gotg controllers order --json         # the same answer, for a UI
+```
+
+Naming one controller is enough: anything unnamed keeps SDL's order behind the
+ones named. A pad can be named by any part of its name or by the `identity/slot`
+the bindings are keyed on — a name matching two pads is refused rather than
+guessed at. The choice lives in `~/.config/gotg/controllers.json`, deliberately
+apart from `config.json`, which holds the server password and is kept 0600.
+
+A pinned controller that is not attached leaves no gap; the ones behind it move
+up. An order naming a pad you have put away is therefore harmless, which is
+what makes it safe to keep one order across machines that do not have the same
+controllers.
 
 **The stick and the D-pad are interchangeable.** On the consoles that never had
 a stick — SNES, NES, the Game Boys — both are bound to the same input, so

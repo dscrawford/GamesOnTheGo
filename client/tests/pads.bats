@@ -178,6 +178,58 @@ BML
   [ "$output" = "2" ]
 }
 
+seating_fixture() {
+  cat <<'JSON'
+[{"name":"Steam Controller","identity":"AAA","slot":0,"gamepad":true,"map":{"a":{"type":"button","index":0}}},
+ {"name":"Xbox 360 Controller","identity":"BBB","slot":0,"gamepad":true,"map":{"a":{"type":"button","index":0}}},
+ {"name":"Keyboard","identity":"CCC","slot":0,"gamepad":false,"map":null}]
+JSON
+}
+
+pin_order() {
+  mkdir -p "$GOTG_CONFIG_DIR"
+  jq -n --argjson o "$1" '{order: $o}' >"$GOTG_CONFIG_DIR/controllers.json"
+}
+
+@test "with nothing pinned, seating follows SDL and drops what cannot be bound" {
+  run pads_seating "$(seating_fixture)"
+  [ "$(jq -r 'length' <<<"$output")" = "2" ]
+  [ "$(jq -r '.[0].identity' <<<"$output")" = "AAA" ]
+  [ "$(jq -r '.[1].identity' <<<"$output")" = "BBB" ]
+}
+
+@test "naming one controller is enough — it leads and the rest follow behind" {
+  pin_order '["BBB/0"]'
+  run pads_seating "$(seating_fixture)"
+  [ "$(jq -r '.[0].identity' <<<"$output")" = "BBB" ]
+  [ "$(jq -r '.[1].identity' <<<"$output")" = "AAA" ]
+  # Still whole records, not just the keys they were matched on.
+  [ "$(jq -r '.[0].name' <<<"$output")" = "Xbox 360 Controller" ]
+}
+
+@test "a pinned order is followed exactly" {
+  pin_order '["BBB/0","AAA/0"]'
+  run pads_seating "$(seating_fixture)"
+  [ "$(jq -r '[.[].identity] | join(",")' <<<"$output")" = "BBB,AAA" ]
+}
+
+@test "a pinned controller that is not attached leaves no gap" {
+  # Pinning something that has since been unplugged must not seat a hole where
+  # it was — the controllers behind it move up.
+  pin_order '["GONE/0","BBB/0"]'
+  run pads_seating "$(seating_fixture)"
+  [ "$(jq -r 'length' <<<"$output")" = "2" ]
+  [ "$(jq -r '.[0].identity' <<<"$output")" = "BBB" ]
+}
+
+@test "an unparseable order file falls back to SDL rather than refusing to launch" {
+  mkdir -p "$GOTG_CONFIG_DIR"
+  printf 'this is not json' >"$GOTG_CONFIG_DIR/controllers.json"
+  run pads_seating "$(seating_fixture)"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].identity' <<<"$output")" = "AAA" ]
+}
+
 @test "a handheld's pad has no port number" {
   cat >"$TEST_TMP/settings.bml" <<'BML'
 GameBoy
