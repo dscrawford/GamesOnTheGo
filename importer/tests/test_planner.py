@@ -278,9 +278,7 @@ def test_a_lone_archive_is_planned_end_to_end(tmp_path, monkeypatch):
 
     src = tmp_path / "Super Mario Sunshine (USA).7z"
     src.write_bytes(b"archive")
-    monkeypatch.setattr(
-        sc, "list_archive_file", lambda p: ("Super Mario Sunshine (USA).nkit.iso",)
-    )
+    monkeypatch.setattr(sc, "list_archive_file", lambda p: ("Super Mario Sunshine (USA).nkit.iso",))
 
     ops = plan_source(src, "/Games", load_rules())
 

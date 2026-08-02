@@ -43,6 +43,10 @@
           # to guess which physical controller is which.
           gotg-pads = pkgs.callPackage ./client/gotg-pads { };
 
+          # Not in nixpkgs, though its sibling wiimms-iso-tools is. Needed to
+          # open and rebuild the Yaz0 archives GameCube games keep their data in.
+          wiimms-szs-tools = pkgs.callPackage ./pkgs/wiimms-szs-tools { };
+
           # Image for the in-cluster CronJob. The archive tools (unrar, zip, rhash)
           # arrive through the wrapper's closure, so no extra PATH wiring is needed.
           #
