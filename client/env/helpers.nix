@@ -39,6 +39,29 @@
       # everything it made. Saves live here too.
       isolate = true;
       args = [ ];
+
+      # These ports were already writing under {state}, so naming their saves
+      # moves nothing — it only says what is worth carrying to another machine.
+      # Matched against a live 2ship directory: the saves themselves, and the
+      # settings file beside them, which is small and worth keeping in step.
+      saves = [
+        "data/${appName}/saves/**"
+        "data/${appName}/${appName}*.json"
+      ];
+      # The .o2r is tens of megabytes and is rebuilt from the ROM by the first
+      # run on any machine, so uploading it would be paying to move something
+      # the other end can make for itself. The rest is noise.
+      saveExcludes = [
+        "data/${appName}/*.o2r"
+        "data/${appName}/logs/**"
+        "data/${appName}/mods/**"
+        "data/${appName}/imgui.ini"
+      ];
+      # Where a hand-installed copy of the same port keeps its saves. `adopt`
+      # copies from here once, so switching to gotg does not look like losing
+      # every file.
+      legacyPaths = [ "$XDG_DATA/${appName}" ];
+
       preLaunch = ''
         harkinian_data="''${XDG_DATA_HOME:-$HOME/.local/share}/${appName}"
         if ${lib.concatMapStringsSep " && " (a: ''[ ! -e "$harkinian_data/${a}" ]'') archives}; then

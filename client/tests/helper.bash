@@ -17,6 +17,8 @@ setup_env() {
   export GOTG_CACHE_FILE="$GOTG_STATE_DIR/manifest.json"
   export GOTG_PARTIAL_DIR="$GOTG_GAMES_DIR/.gotg-partial"
   export GOTG_ROOTS_DIR="$GOTG_STATE_DIR/roots"
+  export GOTG_ENV_STATE_DIR="$GOTG_STATE_DIR/env"
+  export GOTG_SAVES_DIR="$GOTG_STATE_DIR/saves"
   export GOTG_APP_ROOT="$GOTG_STATE_DIR/app"
   export GOTG_LOG_DIR="$GOTG_STATE_DIR/logs"
   mkdir -p "$SERVER_ROOT/Games/.gotg" "$GOTG_GAMES_DIR"
@@ -123,12 +125,20 @@ fake_env() {
   local attr="$1"
   # A second word in the same `local` would expand $attr before it is assigned.
   local dir="$GOTG_ROOTS_DIR/$attr"
-  mkdir -p "$dir/bin"
+  local saves="${2:-[]}" excludes="${3:-[]}"
+  mkdir -p "$dir/bin" "$dir/share/gotg"
   {
     printf '#!%s\n' "$(command -v bash)"
     printf 'echo "%s launched with: $*"\n' "$attr"
   } >"$dir/bin/gotg-play"
   chmod +x "$dir/bin/gotg-play"
+
+  # The real derivation emits this beside the runnable; the saves commands read
+  # it from the GC root rather than evaluating nix.
+  jq -n --arg name "$attr" --argjson saves "$saves" --argjson excludes "$excludes" \
+    '{version: 1, name: $name, saves: $saves, excludes: $excludes,
+      legacy: [], saveStates: false}' \
+    >"$dir/share/gotg/saves.json"
 }
 
 # A stand-in `nix`, so that building an environment can be tested where there is

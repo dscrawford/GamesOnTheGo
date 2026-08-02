@@ -29,6 +29,22 @@
   configFiles ? { },
   # Point XDG at {state}, so this environment's settings are its own.
   isolate ? false,
+  # What is worth carrying between machines: globs under {state}, and what to
+  # leave out of them. These live here rather than in data/overrides.json
+  # because the glob and the emulator flag that *creates* the path it matches
+  # are one decision — split them across two files and they drift silently, so
+  # that changing where saves are written leaves a backup quietly holding
+  # nothing. overrides.json is also keyed by game, which is the wrong shape for
+  # an env-snes shared by every SNES title.
+  saves ? [ ],
+  saveExcludes ? [ ],
+  # Where this emulator kept its saves before it was told to write them under
+  # {state}. Read by `gotg saves adopt`, which copies them forward.
+  legacyPaths ? [ ],
+  # Save states are excluded by default: they run to tens of megabytes and are
+  # not portable across emulator versions, so a state pulled from another
+  # machine may simply refuse to load.
+  saveStates ? false,
 }:
 
 let
@@ -56,10 +72,23 @@ let
       fi
     '') configFiles
   );
-in
-pkgs.writeShellApplication {
-  name = "gotg-play";
-  runtimeInputs = [ pkgs.coreutils ] ++ path;
+  # Read by the CLI from the built GC root: a file read, never a nix evaluation,
+  # the same rule env_attr already obeys so that nothing on the launch or the
+  # sync path needs nix to be usable.
+  manifest = {
+    version = 1;
+    inherit
+      name
+      saves
+      saveStates
+      ;
+    excludes = saveExcludes;
+    legacy = legacyPaths;
+  };
+
+  app = pkgs.writeShellApplication {
+    name = "gotg-play";
+    runtimeInputs = [ pkgs.coreutils ] ++ path;
   text = ''
     # usage: gotg-play [rom] [extra emulator arguments]
     #
@@ -89,4 +118,18 @@ pkgs.writeShellApplication {
     ${preLaunch}
     exec ${exe} ${lib.concatMapStringsSep " " render args} "$@"
   '';
-}
+  };
+in
+# writeShellApplication has no postInstall to hang the manifest off, and
+# overrideAttrs cannot reach inside it, so the runnable is wrapped rather than
+# modified. env_is_built tests [[ -x ]], which follows the symlink, so nothing
+# downstream can tell the difference.
+pkgs.runCommand "gotg-env-${name}"
+  {
+    meta.mainProgram = "gotg-play";
+  }
+  ''
+    mkdir -p $out/bin $out/share/gotg
+    ln -s ${app}/bin/gotg-play $out/bin/gotg-play
+    cp ${pkgs.writeText "saves.json" (builtins.toJSON manifest)} $out/share/gotg/saves.json
+  ''

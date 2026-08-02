@@ -68,6 +68,21 @@ env_root() { printf '%s/%s' "$GOTG_ROOTS_DIR" "$1"; }
 env_bin() { printf '%s/bin/gotg-play' "$(env_root "$1")"; }
 env_is_built() { [[ -x "$(env_bin "$1")" ]]; }
 
+# The writable directory an environment keeps its settings and saves in. The
+# generated wrapper computes the same path and prefers GOTG_ENV_STATE, which
+# cmd_play exports from here, so the two cannot drift apart.
+env_state_dir() {
+  validate_attr "$1"
+  printf '%s/%s' "${GOTG_ENV_STATE_DIR:-$GOTG_STATE_DIR/env}" "$1"
+}
+
+# What an environment says is worth backing up, emitted by its derivation and
+# read straight from the GC root — a file read, not a nix evaluation.
+env_saves_manifest() {
+  validate_attr "$1"
+  printf '%s/share/gotg/saves.json' "$(env_root "$1")"
+}
+
 # nix can take a long time the first time a platform is used. Under Steam there
 # is no terminal for it to say so in, and a game that shows no window for twenty
 # minutes reads as a crash, so pulse a dialog for as long as the build runs.

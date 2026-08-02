@@ -45,13 +45,16 @@ cmd_play() {
 
   download_game "$game"
 
-  local target install
+  local target install env_state
   target="$(resolve_target "$game")"
   install="$(game_local_path "$game")"
+  env_state="$(env_state_dir "$attr")"
 
   # The environment decides the emulator, its arguments and its settings; all it
-  # is told is which file to run and where that came from.
-  export GOTG_TARGET="$target" GOTG_INSTALL="$install"
+  # is told is which file to run, where that came from, and where to keep what
+  # it writes — that last one from env_state_dir, so the CLI and the wrapper
+  # agree on it rather than each computing their own.
+  export GOTG_TARGET="$target" GOTG_INSTALL="$install" GOTG_ENV_STATE="$env_state"
 
   log "launching $(manifest_field "$game" title) with $attr"
   exec "$(env_bin "$attr")" "$target" "$@"
