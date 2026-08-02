@@ -87,10 +87,13 @@ cmd_sync() {
     for root in "$GOTG_ROOTS_DIR"/*; do
       [[ -e "$root" ]] || continue
       name="$(basename "$root")"
-      # Roots from before environments existed were named after the emulator, and
-      # the flake has no such attribute any more.
-      if [[ "$name" != env-* ]]; then
-        warn "skipping $name: not an environment. Remove it with: rm $root"
+      # Anything that is not a well-formed environment name: a root from before
+      # environments existed, named after the emulator, or one left by a
+      # mistyped `nix build -o`. Checked against the same pattern env_attr
+      # produces, and skipped rather than fatal — one stray symlink in here
+      # should not stop every other environment from being rebuilt.
+      if ! [[ "$name" =~ $GOTG_ATTR_RE ]]; then
+        warn "skipping $name: not an environment name. Remove it with: rm $root"
         continue
       fi
       before="$(readlink -f "$root" 2>/dev/null || true)"
