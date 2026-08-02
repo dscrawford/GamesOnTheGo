@@ -98,22 +98,36 @@ client/env/games/snes/world.super_metroid.nix  what Super Metroid changes about 
 
 Where several platforms share an emulator and the awkward parts of driving it,
 that shape moves into `client/env/helpers.nix` and the platform file names
-itself — `snes.nix` is one line calling `helpers.aresPlatform { platform =
-"snes"; }`. A platform that needs to differ stops calling the helper.
+itself and whatever differs:
 
-A per-game file states only its differences, and takes the platform's `base` if
-it wants to add to a setting rather than replace it:
+```nix
+# client/env/snes.nix
+{ helpers, ... }:
+helpers.aresPlatform {
+  platform = "snes";
+  system = "Super Famicom";      # the directory ares files its saves under
+  console = "SuperFamicom";      # the settings.bml section its bindings go in
+}
+```
+
+Both of those are read off a real `settings.bml` rather than derived from the
+platform slug, and a platform without them stays dormant for that feature rather
+than guessing. A platform that needs to differ more stops calling the helper.
+
+A per-game file states only its differences:
 
 ```nix
 # client/env/games/snes/world.super_metroid.nix
-{ base, ... }:
+{ ... }:
 {
-  isolate = true;                       # its own config and saves, under ~/.local/state/gotg/env
-  args = base.args ++ [ "--fullscreen" ];
-  env = { SDL_VIDEODRIVER = "wayland"; };
-  configFiles = { "ares/settings.bml" = ./settings.bml; };   # seeded on first run
+  isolate = true;   # its own config and saves, under ~/.local/state/gotg/env
 }
 ```
+
+It can also set `args`, `env`, `configFiles` (seeded on first run), `preLaunch`,
+or a different `emulator` outright, and it receives the platform's attributes as
+`base` — so `args = base.args ++ [ … ]` adds to the command line rather than
+replacing it.
 
 `gotg play world.super_metroid` looks at the catalog for the platform, picks
 `env-snes-world_super_metroid` if that file exists and `env-snes` otherwise,
@@ -237,5 +251,5 @@ tree, with the packaged wrapper's own dependency list on PATH. Edits apply on
 save — there is nothing to rebuild and no shell to re-enter. `nix run .#gotg`
 gives you the packaged article when that is what you want to test.
 
-`nix flake check` runs 119 importer tests (pytest), 74 client tests (bats,
+`nix flake check` runs 119 importer tests (pytest), 79 client tests (bats,
 against a stand-in File Browser over real HTTP), ruff and shellcheck.
