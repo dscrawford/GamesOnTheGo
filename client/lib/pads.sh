@@ -114,13 +114,35 @@ pads_ares_rewrite() {
   rm -f "$file.gotg-map"
 }
 
-# Bind player one of an environment to the first gamepad SDL reports.
+# Every ares console tops out at four controller ports.
+GOTG_MAX_PLAYERS=4
+
+# One controller's worth of bindings, as ares button -> assignment.
+pads_ares_bindings() {
+  local console="$1" identity="$2" slot="$3" map="$4"
+  local bindings='{}' button element assignment
+  while IFS=$'\t' read -r button element; do
+    [[ -n "$button" ]] || continue
+    assignment="$(pads_ares_assignment "$identity" "$slot" "$map" "$element")" || continue
+    bindings="$(jq -c --arg k "$button" --arg v "$assignment" '. + {($k): $v}' <<<"$bindings")"
+  done < <(jq -r --arg c "$console" '.[$c] | to_entries[] | "\(.key)\t\(.value)"' "$(ares_pads_table)")
+  printf '%s' "$bindings"
+}
+
+# The controllers that can be bound, in the order they will be seated. SDL's
+# enumeration order is what decides it, because that is what the emulators
+# themselves go by — so this and `gotg controllers order` cannot disagree.
+pads_seating() {
+  jq -c '[.[] | select(.gamepad and .map != null)]' <<<"$1"
+}
+
+# Bind each attached controller to the console port of the same number.
 #
 # Never fatal. A launch with no controller attached, or with one SDL does not
 # recognise, is a launch on the keyboard — which is worse than a bound pad and
 # very much better than not starting.
 pads_configure() {
-  local attr="$1" manifest console file pads first identity slot map table
+  local attr="$1" manifest console file pads identity slot map table
 
   manifest="$(env_pads_manifest "$attr")"
   [[ -f "$manifest" ]] || return 0
@@ -146,26 +168,30 @@ pads_configure() {
   }
 
   pads="$("$(pads_bin)" 2>/dev/null)" || return 0
-  first="$(jq -c '[.[] | select(.gamepad and .map != null)][0] // empty' <<<"$pads")"
-  [[ -n "$first" ]] || return 0
 
-  identity="$(jq -r '.identity' <<<"$first")"
-  slot="$(jq -r '.slot' <<<"$first")"
-  map="$(jq -c '.map' <<<"$first")"
+  local seating count
+  seating="$(pads_seating "$pads")"
+  count="$(jq 'length' <<<"$seating")"
+  ((count > 0)) || return 0
+  ((count <= GOTG_MAX_PLAYERS)) || count=$GOTG_MAX_PLAYERS
 
-  local bindings='{}' button element assignment bound=0
-  while IFS=$'\t' read -r button element; do
-    [[ -n "$button" ]] || continue
-    assignment="$(pads_ares_assignment "$identity" "$slot" "$map" "$element")" || continue
-    bindings="$(jq -c --arg k "$button" --arg v "$assignment" '. + {($k): $v}' <<<"$bindings")"
-    bound=$((bound + 1))
-  done < <(jq -r --arg c "$console" '.[$c] | to_entries[] | "\(.key)\t\(.value)"' "$table")
+  local player port bindings name
+  for ((player = 0; player < count; player++)); do
+    port=$((player + 1))
+    identity="$(jq -r ".[$player].identity" <<<"$seating")"
+    slot="$(jq -r ".[$player].slot" <<<"$seating")"
+    map="$(jq -c ".[$player].map" <<<"$seating")"
+    name="$(jq -r ".[$player].name" <<<"$seating")"
 
-  ((bound > 0)) || return 0
+    bindings="$(pads_ares_bindings "$console" "$identity" "$slot" "$map")"
+    [[ "$(jq 'length' <<<"$bindings")" != "0" ]] || continue
 
-  if pads_ares_rewrite "$file" "$console" 1 "$bindings"; then
-    log "bound $bound $console input(s) to $(jq -r '.name' <<<"$first")"
-  else
-    warn "could not write controller bindings for $attr"
-  fi
+    # A console with fewer ports than there are controllers simply has no
+    # section for the later ones, and the rewrite finds nothing to change.
+    if pads_ares_rewrite "$file" "$console" "$port" "$bindings"; then
+      log "player $port: $name -> $console port $port ($(jq 'length' <<<"$bindings") inputs)"
+    else
+      warn "could not write player $port's bindings for $attr"
+    fi
+  done
 }

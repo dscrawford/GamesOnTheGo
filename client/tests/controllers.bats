@@ -110,3 +110,66 @@ BML
   [ "$status" -eq 0 ]
   [[ "$stderr" == *"has not run SuperFamicom yet"* ]]
 }
+
+# Two controllers, in the order SDL reports them.
+two_controllers() {
+  jq -n '[{instance: 1, name: "Steam Controller", guid: "0300", identity: "0300",
+           slot: 0, vid: "28de", pid: "1304", gamepad: true,
+           path: "/dev/hidraw1", evdev: null, steamSlot: null,
+           map: {a: {type: "button", index: 0}}},
+          {instance: 2, name: "Xbox Wireless Controller", guid: "0500",
+           identity: "0500", slot: 0, vid: "045e", pid: "0b13", gamepad: true,
+           path: "/dev/input/event24", evdev: "/dev/input/event24",
+           steamSlot: null, map: {a: {type: "button", index: 3}}}]' \
+    >"$GOTG_PADS_FIXTURE"
+}
+
+@test "order numbers the controllers as the emulators will seat them" {
+  two_controllers
+  gotg controllers order
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"Player 1   Steam Controller"* ]]
+  [[ "$stderr" == *"Player 2   Xbox Wireless Controller"* ]]
+  # The identity is shown because that is what a binding is keyed on.
+  [[ "$stderr" == *"0300/0"* ]]
+}
+
+@test "order says nothing is seated rather than nothing is attached" {
+  jq -n '[{instance: 1, name: "Unknown Pad", guid: "ffff", identity: "ffff",
+           slot: 0, vid: "0000", pid: "0000", gamepad: false, path: null,
+           evdev: null, steamSlot: null, map: null}]' >"$GOTG_PADS_FIXTURE"
+  gotg controllers order
+  [ "$status" -eq 0 ]
+  # A pad SDL cannot map is attached but unusable, and saying "no controllers"
+  # would send someone looking at the wrong layer.
+  [[ "$stderr" == *"no controllers to seat"* ]]
+  [[ "$stderr" == *"controllers list"* ]]
+}
+
+@test "each controller binds to the console port of its own number" {
+  two_controllers
+  fake_env env-snes
+  mkdir -p "$GOTG_ROOTS_DIR/env-snes/share/gotg"
+  jq -n '{console: "SuperFamicom"}' >"$GOTG_ROOTS_DIR/env-snes/share/gotg/pads.json"
+
+  local state="$GOTG_ENV_STATE_DIR/env-snes/data/ares"
+  mkdir -p "$state"
+  cat >"$state/settings.bml" <<'BML'
+SuperFamicom
+  Input
+    Controller.Port.1
+      Gamepad
+        B: ;;
+    Controller.Port.2
+      Gamepad
+        B: ;;
+BML
+
+  gotg controllers apply --all
+  [ "$status" -eq 0 ]
+  # Player one's pad to port one, player two's to port two — and the button
+  # index differs between them, so a mix-up would be visible here.
+  run awk '/Controller\.Port\.1/{p=1} /Controller\.Port\.2/{p=2} /B:/{print p, $2}' "$state/settings.bml"
+  [ "${lines[0]}" = "1 0300/0/3/0;;" ]
+  [ "${lines[1]}" = "2 0500/0/3/3;;" ]
+}

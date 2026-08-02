@@ -15,6 +15,7 @@ controllers_usage() {
 usage: gotg controllers <command> [args]
 
   list                    the controllers SDL can see, as the emulators see them
+  order                   who is player 1, player 2, and so on
   apply [<id>|--all]      write emulator bindings now, without launching
 
 Bindings are also written on every `gotg play`, so this is for checking a change
@@ -31,6 +32,7 @@ cmd_controllers() {
   [[ $# -gt 0 ]] && shift || true
   case "$verb" in
     list) controllers_list "$@" ;;
+    order) controllers_order "$@" ;;
     apply) controllers_apply "$@" ;;
     help | --help | -h | "") controllers_usage ;;
     *)
@@ -63,6 +65,39 @@ controllers_list() {
     "  reached by \(if .evdev then .evdev else (.path // "?") + " (raw HID, no evdev node)" end)\n" +
     "  mapping    \(if .map == null then "none — SDL does not recognise this pad, so nothing can be generated for it" else "\(.map | length) elements" end)"
   ' <<<"$pads" >&2
+}
+
+# Who gets which console port.
+#
+# Decided by SDL's enumeration order, which is also what the bindings are
+# written from, so this and what the emulator does cannot disagree. It is worth
+# a command of its own because the answer is invisible otherwise until someone
+# presses start on the wrong pad.
+controllers_order() {
+  local pads seating count
+  pads="$("$(pads_bin)" 2>/dev/null)" || die "could not run $(pads_bin)"
+  seating="$(pads_seating "$pads")"
+  count="$(jq 'length' <<<"$seating")"
+
+  if [[ "$count" == "0" ]]; then
+    log "no controllers to seat."
+    log ""
+    log "A pad SDL does not recognise cannot be bound and so is not seated."
+    log "Run: gotg controllers list"
+    return 0
+  fi
+
+  jq -r --argjson max "$GOTG_MAX_PLAYERS" '
+    to_entries[] |
+    if .key < $max then
+      "  Player \(.key + 1)   \(.value.name)\n             \(.value.identity)/\(.value.slot)"
+    else
+      "  (unseated) \(.value.name) — consoles here have only \($max) ports"
+    end' <<<"$seating" >&2
+
+  log ""
+  log "Order follows the order SDL enumerates them, which is what the emulators"
+  log "go by too. Unplug and replug a controller to move it down the list."
 }
 
 controllers_apply() {

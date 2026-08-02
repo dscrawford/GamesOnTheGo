@@ -54,6 +54,7 @@ per-game environment needs no visit to a settings screen.
 
 ```bash
 gotg controllers list          # what SDL sees, as the emulators see it
+gotg controllers order         # who is player 1, player 2, and so on
 gotg controllers apply --all   # write bindings now, without launching
 ```
 
@@ -69,10 +70,15 @@ has no evdev node — needs the steam-devices udev rules, which
 `programs.steam.enable` already installs, as does the `steam-devices` package
 elsewhere. `list` says so when it can see nothing.
 
-Two present limits: bindings are written for **player one**, and only for
-consoles listed in `client/data/ares-pads.json`. An emulator creates a console's
-section the first time that console runs, so the first launch of a platform has
-nothing to write into and the one after it does.
+Each attached controller is seated in the console port of its own number, up to
+the four every ares console has. The order is SDL's enumeration order, which is
+what the emulators go by too — so `order` and the bindings cannot disagree —
+and unplugging and replugging a controller moves it down the list.
+
+Two present limits: bindings are written only for consoles listed in
+`client/data/ares-pads.json`, and an emulator creates a console's section the
+first time that console runs, so the first launch of a platform has nothing to
+write into and the one after it does.
 
 ### Emulator environments
 
@@ -251,5 +257,5 @@ tree, with the packaged wrapper's own dependency list on PATH. Edits apply on
 save — there is nothing to rebuild and no shell to re-enter. `nix run .#gotg`
 gives you the packaged article when that is what you want to test.
 
-`nix flake check` runs 119 importer tests (pytest), 79 client tests (bats,
+`nix flake check` runs 119 importer tests (pytest), 82 client tests (bats,
 against a stand-in File Browser over real HTTP), ruff and shellcheck.
