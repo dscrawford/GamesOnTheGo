@@ -135,6 +135,37 @@ or a different `emulator` outright, and it receives the platform's attributes as
 `base` — so `args = base.args ++ [ … ]` adds to the command line rather than
 replacing it.
 
+### Variants
+
+A game can have more than one environment, named by a third component on the
+file: `usa.super_mario_sunshine.bse.nix` is reached as `gotg play
+usa.super_mario_sunshine bse`. Without a variant you get the plain game.
+
+```bash
+gotg play usa.super_mario_sunshine        # the game as it shipped
+gotg play usa.super_mario_sunshine bse    # + BetterSunshineEngine
+gotg play usa.super_mario_sunshine bsmso  # + Better Super Mario Sunshine Online
+```
+
+The two Sunshine variants install Kuribo mods, which are changes to the game's
+own files rather than settings: the first launch opens the disc image, writes
+the mod in, rebuilds the image and keeps it beside that variant's saves. It
+takes a few minutes and happens once. The download in `~/Games` is never
+touched, and each variant is its own environment — so the plain game, `bse` and
+`bsmso` coexist, and removing a mod is deleting one directory.
+
+BSE is a framework rather than a mod with a front end, so a correct install
+looks exactly like Super Mario Sunshine at the title screen. What tells a
+working install from a failed one is Kuribo's own log: boot with `OSREPORT`
+logging on and it names each module as it loads it.
+
+**BSMSO's online play does not work here.** The multiplayer is not in the disc
+modules — a Windows launcher drives it by reading and writing the memory of the
+running Dolphin process, no Linux build is published, and Wine cannot reach a
+native `dolphin-emu` from inside its prefix. What the variant gives you is the
+disc: the engine, the Better Sunshine Moveset and the BSMSO module. Hosting and
+joining are not available.
+
 `gotg play world.super_metroid` looks at the catalog for the platform, picks
 `env-snes-world_super_metroid` if that file exists and `env-snes` otherwise,
 builds it from the flake if it is not here yet, and execs it. Adding a platform
