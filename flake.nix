@@ -63,13 +63,38 @@
         }
       );
 
-      devShells = forAllSystems (pkgs: {
+      devShells = forAllSystems (
+        pkgs:
+        let
+          gotgPkg = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg;
+
+          # `gotg` in the dev shell runs the working tree, not the store.
+          #
+          # The packaged wrapper sets GOTG_ROOT to its own copy under /nix/store,
+          # so editing client/ did nothing until the shell was re-entered — and
+          # a flake only sees git-tracked files, so a brand-new lib/*.sh did
+          # nothing even then, until it was added. Both are a poor way to find
+          # out you have been testing yesterday's code.
+          #
+          # This takes its PATH from the package's own runtimeInputs, so the two
+          # cannot disagree about what gotg needs, and execs the checkout. Edits
+          # apply on save, with nothing to rebuild. `nix run .#gotg` is still
+          # there when what you want is the packaged article.
+          gotg-dev = pkgs.writeShellScriptBin "gotg" ''
+            root="''${GOTG_DEV_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+            if [ ! -x "$root/client/bin/gotg" ]; then
+              echo "gotg: no client/bin/gotg under $root" >&2
+              echo "      set GOTG_DEV_ROOT to your checkout, or use: nix run .#gotg" >&2
+              exit 1
+            fi
+            export PATH="${pkgs.lib.makeBinPath gotgPkg.runtimeInputs}:$PATH"
+            exec "$root/client/bin/gotg" "$@"
+          '';
+        in
+        {
         default = pkgs.mkShell {
           packages = [
-            # The wrapped CLI, so `gotg` is on PATH in the shell. It runs the
-            # built copy under /nix/store, so rerun `nix develop` (or let direnv
-            # reload) after editing client/.
-            self.packages.${pkgs.stdenv.hostPlatform.system}.gotg
+            gotg-dev
           ]
           ++ (with pkgs; [
             (python3.withPackages (ps: [
@@ -80,9 +105,17 @@
             ruff
             shellcheck
             bats
+            git
           ]);
+
+          # Pin the checkout at shell entry, so `gotg` keeps meaning this tree
+          # even from a subdirectory.
+          shellHook = ''
+            export GOTG_DEV_ROOT="$PWD"
+          '';
         };
-      });
+        }
+      );
 
       checks = forAllSystems (pkgs: {
         importer = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-importer;

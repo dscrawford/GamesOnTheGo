@@ -232,8 +232,10 @@ nix develop        # gotg on PATH, plus python, pytest, ruff, shellcheck, bats
 nix flake check    # every test suite and linter
 ```
 
-The `gotg` on PATH in the dev shell is the wrapped build, not `client/bin/gotg`
-directly, so re-enter the shell (direnv reloads on its own) to pick up edits.
+The `gotg` on PATH in the dev shell runs `client/bin/gotg` from the working
+tree, with the packaged wrapper's own dependency list on PATH. Edits apply on
+save — there is nothing to rebuild and no shell to re-enter. `nix run .#gotg`
+gives you the packaged article when that is what you want to test.
 
 `nix flake check` runs 119 importer tests (pytest), 74 client tests (bats,
 against a stand-in File Browser over real HTTP), ruff and shellcheck.
