@@ -60,6 +60,70 @@ static void ares_identity(SDL_JoystickID id, char *out, size_t n) {
     SDL_snprintf(out, n, "VID:%u|PID:%u", (unsigned)vid, (unsigned)pid);
 }
 
+// Which raw joystick element drives each standard gamepad element.
+//
+// This is the piece that makes generated bindings possible at all. An emulator
+// binds raw indices — "button 6" — while a person thinks in "Start", and the
+// two only line up per controller model. SDL already knows the correspondence
+// for anything in its mapping database, so ask it rather than asking the user
+// to press every button in an emulator's settings screen.
+static void print_gamepad_map(SDL_JoystickID id) {
+    SDL_Gamepad *pad = SDL_OpenGamepad(id);
+    if (!pad) {
+        fputs("null", stdout);
+        return;
+    }
+
+    int n = 0;
+    SDL_GamepadBinding **binds = SDL_GetGamepadBindings(pad, &n);
+    if (!binds) {
+        fputs("null", stdout);
+        SDL_CloseGamepad(pad);
+        return;
+    }
+
+    fputs("{", stdout);
+    int written = 0;
+    for (int i = 0; i < n; i++) {
+        const SDL_GamepadBinding *b = binds[i];
+
+        // Only the standard elements a person names. An unmapped output is of
+        // no use to a generator.
+        const char *out = NULL;
+        if (b->output_type == SDL_GAMEPAD_BINDTYPE_BUTTON)
+            out = SDL_GetGamepadStringForButton(b->output.button);
+        else if (b->output_type == SDL_GAMEPAD_BINDTYPE_AXIS)
+            out = SDL_GetGamepadStringForAxis(b->output.axis.axis);
+        if (!out) continue;
+
+        printf("%s\n    ", written++ ? "," : "");
+        print_json_string(out);
+        fputs(": ", stdout);
+
+        switch (b->input_type) {
+        case SDL_GAMEPAD_BINDTYPE_BUTTON:
+            printf("{\"type\": \"button\", \"index\": %d}", b->input.button);
+            break;
+        case SDL_GAMEPAD_BINDTYPE_AXIS:
+            // min/max carry the direction: a trigger runs one way, a stick both.
+            printf("{\"type\": \"axis\", \"index\": %d, \"min\": %d, \"max\": %d}",
+                   b->input.axis.axis, b->input.axis.axis_min, b->input.axis.axis_max);
+            break;
+        case SDL_GAMEPAD_BINDTYPE_HAT:
+            printf("{\"type\": \"hat\", \"index\": %d, \"mask\": %d}",
+                   b->input.hat.hat, b->input.hat.hat_mask);
+            break;
+        default:
+            fputs("null", stdout);
+            break;
+        }
+    }
+    fputs(written ? "\n  }" : "}", stdout);
+
+    SDL_free(binds);
+    SDL_CloseGamepad(pad);
+}
+
 int main(void) {
     // See what the emulators see. The current Steam Controller is a hidapi
     // device whose SDL3 driver falls back to SDL_HINT_JOYSTICK_HIDAPI, so
@@ -145,6 +209,10 @@ int main(void) {
 
         if (steam_slot >= 0) printf(", \"steamSlot\": %d", steam_slot);
         else fputs(", \"steamSlot\": null", stdout);
+
+        fputs(", \"map\": ", stdout);
+        if (SDL_IsGamepad(id)) print_gamepad_map(id);
+        else fputs("null", stdout);
 
         fputs("}", stdout);
     }
