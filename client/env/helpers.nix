@@ -19,7 +19,21 @@
   # The platforms share this because what they share is the part that has to be
   # right. A platform that needs to differ stops calling this and says so.
   aresPlatform =
-    { platform }:
+    {
+      platform,
+      # What ares calls this console. It does not write the save directly under
+      # Paths/Saves — it makes a directory of this name there and puts it
+      # inside. Confirmed by launching: a SNES save landed in
+      # "{state}/saves/Super Famicom/", and ares keeps a matching
+      # "Super Famicom.sys" beside its settings.
+      #
+      # So this is what an older save has to be adopted *into*. Get it wrong and
+      # the copy lands somewhere ares never looks, which from the sofa is
+      # indistinguishable from having lost the save — so a platform whose name
+      # has not been confirmed by launching adopts nothing at all rather than
+      # guessing at it.
+      system ? null,
+    }:
     {
       emulator = pkgs.ares;
       bin = "ares";
@@ -34,21 +48,24 @@
       # another machine may simply refuse to load. Memory saves always travel.
       saveExcludes = [ "saves/*.bs[0-9]" ];
       # Where ares put them before it was told otherwise: beside the ROM, named
-      # for it. `gotg saves adopt` copies these forward.
-      legacyPaths = map
-        (ext: {
-          from = "$GAMES/${platform}/*.${ext}";
-          into = "saves";
-        })
-        [
-          "ram"
-          "eeprom"
-          "flash"
-          "rtc"
-          "iram"
-          "bsx"
-          "dram"
-        ];
+      # for it. `gotg saves adopt` copies these forward, into the directory ares
+      # will actually read them from.
+      legacyPaths = lib.optionals (system != null) (
+        map
+          (ext: {
+            from = "$GAMES/${platform}/*.${ext}";
+            into = "saves/${system}";
+          })
+          [
+            "ram"
+            "eeprom"
+            "flash"
+            "rtc"
+            "iram"
+            "bsx"
+            "dram"
+          ]
+      );
     };
 
   # The HarbourMasters ports — Ship of Harkinian, 2 Ship 2 Harkinian — are native

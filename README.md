@@ -201,5 +201,5 @@ nix flake check    # every test suite and linter
 The `gotg` on PATH in the dev shell is the wrapped build, not `client/bin/gotg`
 directly, so re-enter the shell (direnv reloads on its own) to pick up edits.
 
-`nix flake check` runs 119 importer tests (pytest), 66 client tests (bats,
+`nix flake check` runs 119 importer tests (pytest), 67 client tests (bats,
 against a stand-in File Browser over real HTTP), ruff and shellcheck.

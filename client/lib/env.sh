@@ -158,6 +158,15 @@ env_ensure() {
   env_is_built "$attr" || env_build "$attr"
 }
 
+# Rebuild something that is already here, tolerating failure. Used where the
+# point is to pick up a definition that has moved: if the flake cannot be
+# reached, what is already built still runs, and refusing to continue would be
+# worse than being one version behind. The subshell is what makes env_build's
+# die local — it ends the attempt rather than the command.
+env_refresh() {
+  (env_build "$1")
+}
+
 # The file handed to the emulator. Directory games need a glob (Wii U wants the
 # .rpx inside code/), single-file games are just themselves.
 resolve_target() {

@@ -12,8 +12,13 @@ cmd_install() {
 
   download_game "$game"
 
+  # Refresh rather than skip when a root is already there. This runs from a
+  # terminal where nix is cheap and a cached build is quick, and the alternative
+  # is what bit twice already: an environment whose definition has moved keeps
+  # running the old one, silently, until somebody thinks to run sync.
   if env_is_built "$attr"; then
-    log "environment $attr already built"
+    env_refresh "$attr" ||
+      warn "could not rebuild $attr — carrying on with the one already built here"
   else
     env_build "$attr"
   fi
@@ -77,7 +82,7 @@ cmd_sync() {
   "$(nix_bin)" build "$flake#gotg" -o "$GOTG_APP_ROOT" || die "could not build gotg from $flake"
 
   # Only rebuild the environments that are already in use here.
-  local root name
+  local root name before after changed=0
   if [[ -d "$GOTG_ROOTS_DIR" ]]; then
     for root in "$GOTG_ROOTS_DIR"/*; do
       [[ -e "$root" ]] || continue
@@ -88,9 +93,24 @@ cmd_sync() {
         warn "skipping $name: not an environment. Remove it with: rm $root"
         continue
       fi
+      before="$(readlink -f "$root" 2>/dev/null || true)"
       log "rebuilding $name"
       env_build "$name"
+      after="$(readlink -f "$root" 2>/dev/null || true)"
+      # Say which ones actually moved. A rebuild that changes nothing looks
+      # identical to one that changes how a game runs, and the difference is
+      # worth a line — a stale root is used silently for as long as it lasts.
+      if [[ "$before" != "$after" ]]; then
+        log "  $name changed"
+        changed=$((changed + 1))
+      fi
     done
+  fi
+
+  if ((changed > 0)); then
+    log ""
+    log "$changed environment(s) changed. Anything already open keeps the old one"
+    log "until it is closed and launched again."
   fi
   log "done"
 }

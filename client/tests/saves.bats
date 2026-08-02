@@ -37,11 +37,14 @@ teardown() {
   stop_server
 }
 
-# An environment that also knows where its emulator used to keep saves.
+# An environment that also knows where its emulator used to keep saves, and
+# files them the way ares really does: under a directory named for the console,
+# which has a space in it on every platform ares supports.
 fake_env_legacy() {
   local dir="$GOTG_ROOTS_DIR/env-n64/share/gotg"
   jq -n '{version: 1, name: "env-n64", saves: ["saves/**"], excludes: [],
-          legacy: [{from: "$GAMES/n64/*.ram", into: "saves"}], saveStates: false}' \
+          legacy: [{from: "$GAMES/n64/*.ram", into: "saves/Nintendo 64"}],
+          saveStates: false}' \
     >"$dir/saves.json"
 }
 
@@ -109,6 +112,20 @@ first_device() {
   gotg saves pull --all
   [ "$status" -eq 0 ]
   [ "$(cat "$STATE/saves/zelda.ram")" = "save-data-one" ]
+}
+
+@test "a save filed under a console name with a space in it survives the trip" {
+  # Not a corner case: ares files every save under a directory named for the
+  # console, so "saves/Super Famicom/x.ram" is the ordinary shape.
+  mkdir -p "$STATE/saves/Super Famicom"
+  printf 'nested-save' >"$STATE/saves/Super Famicom/usa.super_mario_world.ram"
+  gotg saves push --all
+  [ "$status" -eq 0 ]
+
+  second_device
+  gotg saves pull --all
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STATE/saves/Super Famicom/usa.super_mario_world.ram")" = "nested-save" ]
 }
 
 @test "an unchanged save set uploads nothing the second time" {
@@ -322,7 +339,7 @@ first_device() {
   [[ "$stderr" == *"would copy"* ]]
   [[ "$stderr" == *"usa.zelda.ram"* ]]
   [[ "$stderr" == *"Nothing has been changed"* ]]
-  [ ! -e "$STATE/saves/usa.zelda.ram" ]
+  [ ! -e "$STATE/saves/Nintendo 64/usa.zelda.ram" ]
 }
 
 @test "adopt copies, and leaves the originals where they were" {
@@ -332,7 +349,7 @@ first_device() {
 
   gotg saves adopt --all --yes
   [ "$status" -eq 0 ]
-  [ "$(cat "$STATE/saves/usa.zelda.ram")" = "old-save" ]
+  [ "$(cat "$STATE/saves/Nintendo 64/usa.zelda.ram")" = "old-save" ]
   # If the mapping is wrong, the cost is disk rather than a save.
   [ "$(cat "$GOTG_GAMES_DIR/n64/usa.zelda.ram")" = "old-save" ]
 }
@@ -341,12 +358,13 @@ first_device() {
   fake_env_legacy
   mkdir -p "$GOTG_GAMES_DIR/n64"
   printf 'old-save' >"$GOTG_GAMES_DIR/n64/usa.zelda.ram"
-  write_save "usa.zelda.ram" "newer-work"
+  mkdir -p "$STATE/saves/Nintendo 64"
+  printf 'newer-work' >"$STATE/saves/Nintendo 64/usa.zelda.ram"
 
   gotg saves adopt --all --yes
   [ "$status" -eq 0 ]
   # Anything already here came from a pull or from playing, and is the authority.
-  [ "$(cat "$STATE/saves/usa.zelda.ram")" = "newer-work" ]
+  [ "$(cat "$STATE/saves/Nintendo 64/usa.zelda.ram")" = "newer-work" ]
 }
 
 @test "the first launch adopts once, and only once" {
@@ -358,13 +376,13 @@ first_device() {
 
   gotg play usa.zelda
   [ "$status" -eq 0 ]
-  [ "$(cat "$STATE/saves/usa.zelda.ram")" = "old-save" ]
+  [ "$(cat "$STATE/saves/Nintendo 64/usa.zelda.ram")" = "old-save" ]
 
   # Play on, then launch again: the older file must not come back over the top.
-  write_save "usa.zelda.ram" "played-since"
+  printf 'played-since' >"$STATE/saves/Nintendo 64/usa.zelda.ram"
   gotg play usa.zelda
   [ "$status" -eq 0 ]
-  [ "$(cat "$STATE/saves/usa.zelda.ram")" = "played-since" ]
+  [ "$(cat "$STATE/saves/Nintendo 64/usa.zelda.ram")" = "played-since" ]
 }
 
 @test "a game id names the environment its saves actually belong to" {

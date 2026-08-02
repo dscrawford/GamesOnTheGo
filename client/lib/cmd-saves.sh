@@ -300,9 +300,16 @@ saves_cmd_adopt() {
   mapfile -t attrs < <(saves_resolve "$want")
   [[ ${#attrs[@]} -gt 0 ]] || die "nothing to adopt into — no environment is built here"
 
-  local attr total=0 found
+  local attr total=0 found declared
   for attr in "${attrs[@]}"; do
     log "$attr"
+    declared="$(jq -r '.legacy | length' <<<"$(saves_manifest "$attr")")"
+    if [[ "$declared" == "0" ]]; then
+      # Distinct from "nothing to copy": this environment has not been told
+      # where its emulator used to write, so it is not looking.
+      log "  no older location declared for this environment — nothing to look at"
+      continue
+    fi
     found="$(saves_adopt "$attr" "$apply")"
     [[ "$found" == "0" ]] && log "  nothing left behind to copy"
     total=$((total + found))
