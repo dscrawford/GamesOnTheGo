@@ -48,37 +48,31 @@ is missing (with a progress dialog) and then starts the emulator.
 
 ### Controllers
 
-Most controllers need nothing. An Xbox pad works the moment it is plugged in,
-because systemd already grants access to joystick devices.
-
-The exception is anything that talks raw HID rather than evdev — the current
-Steam Controller does, and has no evdev node at all. Reading `/dev/hidraw*`
-needs one udev rule, and that rule is the whole privileged surface of this.
-
-On NixOS, use the module:
-
-```nix
-imports = [ inputs.gotg.nixosModules.controllers ];
-programs.gotg.controllers.enable = true;
-```
-
-Anywhere else:
+Bindings are written for you. `gotg play` points the emulator at whatever
+controller is attached, every launch — so a new pad, a new console or a new
+per-game environment needs no visit to a settings screen.
 
 ```bash
-gotg controllers install-rules            # prints what it would run
-gotg controllers install-rules --apply    # runs it, then replug the controller
+gotg controllers list          # what SDL sees, as the emulators see it
+gotg controllers apply --all   # write bindings now, without launching
 ```
 
-It refuses on NixOS rather than doing it, because a hand-made symlink in
-`/etc/udev/rules.d` is replaced on the next rebuild — which fails later and
-looks like something else.
+It works by asking SDL which raw input drives each standard button on *that*
+model, so one table covers every controller rather than needing a column each.
+The identity string it binds by is built the same way the emulator builds it,
+and compared as a string — which is why `list` prints it: that is what tells you
+whether a controller is the same one a binding was written for.
 
-The module has two options that are off unless asked for: `xboxDongle` for the
-Xbox Wireless dongle, which is off by default because the `xone` driver
-blacklists `xpad` and changes how *wired* pads enumerate; and
-`gcAdapterOverclock` for 1 ms polling on the Wii U GameCube adapter. Enabling
-this alongside `programs.steam.enable` is a no-op — both go through
-`services.udev.packages` with the same store path.
+**Making a device readable is the host's job, not this project's.** An ordinary
+pad needs nothing at all. One that talks raw HID — the current Steam Controller
+has no evdev node — needs the steam-devices udev rules, which
+`programs.steam.enable` already installs, as does the `steam-devices` package
+elsewhere. `list` says so when it can see nothing.
+
+Two present limits: bindings are written for **player one**, and only for
+consoles listed in `client/data/ares-pads.json`. An emulator creates a console's
+section the first time that console runs, so the first launch of a platform has
+nothing to write into and the one after it does.
 
 ### Emulator environments
 

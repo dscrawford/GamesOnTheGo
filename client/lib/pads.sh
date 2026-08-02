@@ -137,6 +137,14 @@ pads_configure() {
   file="$(env_state_dir "$attr")/data/ares/settings.bml"
   [[ -f "$file" ]] || return 0
 
+  # ares writes a console's section the first time that console runs, so the
+  # very first launch of a platform has nothing to bind into. Say so, rather
+  # than looking like it worked — the next launch will take.
+  grep -qx "$console" "$file" || {
+    log "ares has not run $console yet — its bindings go in on the next launch"
+    return 0
+  }
+
   pads="$("$(pads_bin)" 2>/dev/null)" || return 0
   first="$(jq -c '[.[] | select(.gamepad and .map != null)][0] // empty' <<<"$pads")"
   [[ -n "$first" ]] || return 0

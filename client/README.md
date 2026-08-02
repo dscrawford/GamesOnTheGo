@@ -12,7 +12,7 @@ gotg download <id>          fetch a game, nothing else
 gotg install <id>           fetch + build its environment + write a Steam launcher
 gotg play <id>              fetch and build what is missing, then launch
 gotg saves <command>        setup / status / push / pull, between machines
-gotg controllers <command>  install-rules, for pads that talk raw HID
+gotg controllers <command>  list what SDL sees; apply bindings
 gotg sync                   rebuild the GC roots after a git pull
 ```
 
@@ -33,7 +33,8 @@ gotg sync                   rebuild the GC roots after a git pull
 | `lib/remote-filebrowser.sh` | those five against File Browser |
 | `lib/saves.sh` | bundling, generations, and verifying what arrives |
 | `lib/cmd-saves.sh` | `saves setup`, `status`, `push`, `pull` |
-| `lib/cmd-controllers.sh` | `controllers install-rules` |
+| `lib/pads.sh` | generating emulator bindings from what SDL reports |
+| `lib/cmd-controllers.sh` | `controllers list`, `controllers apply` |
 | `env/<platform>.nix` | the emulator, arguments and settings for a platform |
 | `env/games/<platform>/<id>.nix` | what one game changes about that |
 

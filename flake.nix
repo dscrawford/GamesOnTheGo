@@ -38,16 +38,6 @@
           gotg-importer = pkgs.callPackage ./importer { };
           default = gotg;
 
-          # The whole privileged surface of controller support: one store path
-          # holding Valve's udev rules. Everything else a controller needs is
-          # unprivileged, so this is the only thing that has to touch the host —
-          # either through nixosModules.controllers, or symlinked into
-          # /etc/udev/rules.d by `gotg controllers install-rules`.
-          #
-          # Open question: whether to ship a GOTG-specific subset (28de:*,
-          # 057e:0337, uinput) instead of the whole Valve file. Smaller thing to
-          # audit, one more thing to keep current; the full package for now.
-          controller-udev-rules = pkgs.steam-devices-udev-rules;
 
           # Asks the same library the emulators ask, so nothing downstream has
           # to guess which physical controller is which.
@@ -72,50 +62,6 @@
           };
         }
       );
-
-      # The NixOS way in, for hosts that have one. Everything here is host
-      # configuration that a package cannot do for itself: udev rules, a kernel
-      # module, an out-of-tree driver.
-      nixosModules.controllers =
-        {
-          config,
-          lib,
-          pkgs,
-          ...
-        }:
-        let
-          cfg = config.programs.gotg.controllers;
-        in
-        {
-          options.programs.gotg.controllers = {
-            enable = lib.mkEnableOption "controller support for GOTG";
-
-            xboxDongle = lib.mkEnableOption ''
-              the xone driver, for the Xbox Wireless USB dongle.
-
-              Off by default on purpose: xone blacklists xpad and mt76x2u, which
-              changes how *wired* Xbox pads enumerate. Turn it on only if you
-              actually have the dongle
-            '';
-
-            gcAdapterOverclock = lib.mkEnableOption ''
-              1 ms polling for the Wii U GameCube adapter, instead of the
-              stock 8 ms
-            '';
-          };
-
-          config = lib.mkIf cfg.enable {
-            # The same mechanism programs.steam.enable uses, so enabling both is
-            # a no-op rather than a conflict.
-            services.udev.packages = [ pkgs.steam-devices-udev-rules ];
-            boot.kernelModules = [ "uinput" ];
-
-            hardware.xone.enable = lib.mkIf cfg.xboxDongle true;
-            boot.extraModulePackages = lib.mkIf cfg.gcAdapterOverclock [
-              config.boot.kernelPackages.gcadapter-oc-kmod
-            ];
-          };
-        };
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {

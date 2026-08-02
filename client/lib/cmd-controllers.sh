@@ -1,34 +1,28 @@
 # shellcheck shell=bash
-# `gotg controllers` — the one step controllers need that a package cannot do
-# for itself.
+# `gotg controllers` — where the inputs land.
 #
-# Almost all of controller support is unprivileged: an Xbox pad works out of the
-# box because systemd already grants access to joystick devices. The exception is
-# anything that talks over raw HID rather than evdev — the current Steam
-# Controller is one — where reading /dev/hidraw* needs a udev rule. That rule is
-# the entire privileged surface, and it is one store path.
+# Deliberately *not* about making a controller work at the system level. Whether
+# this machine can read a given device is the host's business: an evdev pad
+# needs nothing, and one that talks raw HID needs a udev rule that arrives with
+# programs.steam.enable or the steam-devices package. Shipping our own copy of
+# that was duplicating the distribution's job.
 #
-# On NixOS this is the wrong tool entirely; see below.
-
-# Only the input rules. The package also carries VR rules, which are nothing to
-# do with playing a Mega Drive game.
-GOTG_CONTROLLER_RULES=(60-steam-input.rules)
-
-# Seams, so this is testable without being root or being on the host it targets.
-udev_rules_dir() { printf '%s' "${GOTG_UDEV_RULES_DIR:-/etc/udev/rules.d}"; }
-nixos_marker() { printf '%s' "${GOTG_NIXOS_MARKER:-/etc/NIXOS}"; }
+# What is ours is the half above it: which controller SDL is looking at, and
+# which emulator input each of its buttons ends up driving.
 
 controllers_usage() {
   cat <<'EOF'
 usage: gotg controllers <command> [args]
 
-  install-rules [--apply]   let this machine read controllers that talk raw HID
+  list                    the controllers SDL can see, as the emulators see them
+  apply [<id>|--all]      write emulator bindings now, without launching
 
-Without --apply it prints the commands and changes nothing. Xbox pads need none
-of this. On NixOS, use the module instead:
+Bindings are also written on every `gotg play`, so this is for checking a change
+or fixing a controller up without starting a game.
 
-  imports = [ gotg.nixosModules.controllers ];
-  programs.gotg.controllers.enable = true;
+Making a device readable in the first place is the host's job. An ordinary pad
+needs nothing; one that talks raw HID (the Steam Controller) needs the
+steam-devices udev rules, which programs.steam.enable already installs.
 EOF
 }
 
@@ -36,7 +30,8 @@ cmd_controllers() {
   local verb="${1:-}"
   [[ $# -gt 0 ]] && shift || true
   case "$verb" in
-    install-rules) controllers_install_rules "$@" ;;
+    list) controllers_list "$@" ;;
+    apply) controllers_apply "$@" ;;
     help | --help | -h | "") controllers_usage ;;
     *)
       printf 'error: unknown controllers command: %s\n\n' "$verb" >&2
@@ -46,91 +41,56 @@ cmd_controllers() {
   esac
 }
 
-# The store path holding the rules, built from the flake through the same seam
-# env.sh builds environments with.
-controllers_rules_path() {
-  local flake ref out
-  flake="$(gotg_flake)"
-  [[ -f "$flake/flake.nix" ]] ||
-    die "no flake at $flake, so there is nothing to take the rules from.
-     Point at your checkout with GOTG_FLAKE, or the 'flake' key in $GOTG_CONFIG_FILE."
+# What SDL reports, in the terms the bindings are written in. `identity/slot` is
+# the string an emulator stores, so seeing it here is how you tell whether a
+# controller is the same one a binding was written for.
+controllers_list() {
+  local pads
+  pads="$("$(pads_bin)" 2>/dev/null)" || die "could not run $(pads_bin)"
 
-  ref="$flake#controller-udev-rules"
-  out="$("$(nix_bin)" build "$ref" --no-link --print-out-paths)" ||
-    die "could not build $ref"
-  [[ -n "$out" ]] || die "building $ref produced no path"
-  printf '%s' "$out"
+  if [[ "$(jq 'length' <<<"$pads")" == "0" ]]; then
+    log "no controllers visible to SDL."
+    log ""
+    log "An ordinary pad needs no setup. A Steam Controller talks raw HID and"
+    log "needs the steam-devices udev rules — programs.steam.enable installs"
+    log "them, as does the steam-devices package on other distributions."
+    return 0
+  fi
+
+  jq -r '.[] |
+    "\(.name)\n" +
+    "  binds as   \(.identity)/\(.slot)\n" +
+    "  reached by \(if .evdev then .evdev else (.path // "?") + " (raw HID, no evdev node)" end)\n" +
+    "  mapping    \(if .map == null then "none — SDL does not recognise this pad, so nothing can be generated for it" else "\(.map | length) elements" end)"
+  ' <<<"$pads" >&2
 }
 
-controllers_install_rules() {
-  local apply="no" arg
-  for arg in "$@"; do
-    case "$arg" in
-      --apply) apply="yes" ;;
-      *) die "unknown option: $arg (only --apply)" ;;
-    esac
-  done
+controllers_apply() {
+  local want="${1:-}"
+  local attrs=()
 
-  # Symlinking into /etc/udev/rules.d on NixOS is not merely unnecessary, it is
-  # actively wrong: the next rebuild replaces that directory and the rule
-  # silently goes away, which is a worse failure than never having worked.
-  if [[ -e "$(nixos_marker)" ]]; then
-    die "this is NixOS, where a hand-made symlink in $(udev_rules_dir) is replaced
-     on the next rebuild. Use the module instead:
-
-       inputs.gotg.url = \"path:$(gotg_flake)\";
-       imports = [ inputs.gotg.nixosModules.controllers ];
-       programs.gotg.controllers.enable = true;"
-  fi
-
-  local store dir rule src dest
-  store="$(controllers_rules_path)"
-  dir="$(udev_rules_dir)"
-
-  local todo=()
-  for rule in "${GOTG_CONTROLLER_RULES[@]}"; do
-    src="$store/lib/udev/rules.d/$rule"
-    dest="$dir/$rule"
-    [[ -f "$src" ]] || die "$rule is not in $store — the rules package has changed shape"
-
-    if [[ "$(readlink -f "$dest" 2>/dev/null)" == "$src" ]]; then
-      log "$dest already points at the current rules"
-      continue
-    fi
-    todo+=("$rule")
-  done
-
-  if [[ ${#todo[@]} -eq 0 ]]; then
-    log "nothing to do — this machine is already set up."
-    return 0
-  fi
-
-  # The commands go to stdout so they can be read, copied, or piped; everything
-  # explaining them goes to stderr, so a pipe gets only the commands.
-  if [[ "$apply" != "yes" ]]; then
-    log "These need root. Run them yourself, or re-run with --apply:"
-    log ""
-    for rule in "${todo[@]}"; do
-      printf 'sudo ln -sfn %s %s\n' "$store/lib/udev/rules.d/$rule" "$dir/$rule"
+  if [[ -z "$want" || "$want" == "--all" ]]; then
+    local root name
+    [[ -d "$GOTG_ROOTS_DIR" ]] || die "nothing is built here yet"
+    for root in "$GOTG_ROOTS_DIR"/*; do
+      [[ -e "$root" ]] || continue
+      name="$(basename "$root")"
+      [[ "$name" =~ $GOTG_ATTR_RE ]] || continue
+      [[ -f "$(env_pads_manifest "$name")" ]] || continue
+      attrs+=("$name")
     done
-    printf 'sudo udevadm control --reload && sudo udevadm trigger\n'
-    log ""
-    log "Then replug the controller."
-    return 0
+  else
+    manifest_cached || manifest_ensure
+    local game
+    game="$(manifest_find "$want")"
+    attrs+=("$(env_attr "$game")")
   fi
 
-  need_cmd sudo
-  for rule in "${todo[@]}"; do
-    log "linking $rule into $dir"
-    sudo ln -sfn "$store/lib/udev/rules.d/$rule" "$dir/$rule" ||
-      die "could not link $rule into $dir"
+  [[ ${#attrs[@]} -gt 0 ]] ||
+    die "no environment here generates bindings — see client/data/ares-pads.json"
+
+  local attr
+  for attr in "${attrs[@]}"; do
+    pads_configure "$attr" || warn "could not write bindings for $attr"
   done
-
-  log "reloading udev"
-  sudo udevadm control --reload || die "could not reload udev"
-  sudo udevadm trigger || die "could not trigger udev"
-
-  log ""
-  log "Done. Replug the controller — a rule only applies to devices that arrive"
-  log "after it does."
 }
