@@ -47,11 +47,27 @@ override_field() {
 # flake reference and an id always holds one, so it becomes an underscore — the
 # same rule client/env/default.nix names the attributes by.
 env_attr() {
-  local game="$1" id platform
+  local game="$1" variant="${2:-}" id platform
   id="$(manifest_field "$game" id)"
   platform="$(manifest_field "$game" platform)"
   validate_id "$id"
   validate_platform "$platform"
+
+  # A named variant of one game: a different engine, a mod, a second way to run
+  # it. The file is "<id>.<variant>.nix", which cannot be confused with a plain
+  # game file because an id holds exactly one dot.
+  if [[ -n "$variant" ]]; then
+    [[ "$variant" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || die "invalid variant name: $variant"
+    if [[ -f "$GOTG_ENV_DIR/games/$platform/$id.$variant.nix" ]]; then
+      printf 'env-%s-%s-%s' "$platform" "${id/./_}" "$variant"
+      return 0
+    fi
+    local available
+    available="$(env_variants "$platform" "$id")"
+    die "no '$variant' variant of $id.
+     ${available:-There are no variants of this game.}
+     A variant is client/env/games/$platform/$id.<name>.nix — then: gotg sync"
+  fi
 
   if [[ -f "$GOTG_ENV_DIR/games/$platform/$id.nix" ]]; then
     printf 'env-%s-%s' "$platform" "${id/./_}"
@@ -62,6 +78,18 @@ env_attr() {
      Add one at client/env/$platform.nix — the existing ones are three lines
      each — then run: gotg sync"
   fi
+}
+
+# The variants a game has, for an error message worth reading.
+env_variants() {
+  local platform="$1" id="$2" file names=()
+  for file in "$GOTG_ENV_DIR/games/$platform/$id".*.nix; do
+    [[ -e "$file" ]] || continue
+    file="$(basename "$file" .nix)"
+    names+=("${file#"$id".}")
+  done
+  [[ ${#names[@]} -gt 0 ]] || return 0
+  printf 'Available: %s' "${names[*]}"
 }
 
 env_root() { printf '%s/%s' "$GOTG_ROOTS_DIR" "$1"; }

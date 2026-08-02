@@ -257,5 +257,5 @@ tree, with the packaged wrapper's own dependency list on PATH. Edits apply on
 save — there is nothing to rebuild and no shell to re-enter. `nix run .#gotg`
 gives you the packaged article when that is what you want to test.
 
-`nix flake check` runs 119 importer tests (pytest), 82 client tests (bats,
+`nix flake check` runs 119 importer tests (pytest), 85 client tests (bats,
 against a stand-in File Browser over real HTTP), ruff and shellcheck.

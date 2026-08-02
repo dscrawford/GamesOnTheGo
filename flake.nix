@@ -47,6 +47,10 @@
           # open and rebuild the Yaz0 archives GameCube games keep their data in.
           wiimms-szs-tools = pkgs.callPackage ./pkgs/wiimms-szs-tools { };
 
+          # Extracts and rebuilds GameCube discs. wiimms-iso-tools can do the
+          # first but rebuilds as a Wii disc, which boots into nothing.
+          pyisotools = pkgs.callPackage ./pkgs/pyisotools { };
+
           # Image for the in-cluster CronJob. The archive tools (unrar, zip, rhash)
           # arrive through the wrapper's closure, so no extra PATH wiring is needed.
           #

@@ -261,3 +261,42 @@ teardown() {
   run bash "$GOTG_GAMES_DIR/n64/play-usa.nl.sh"
   [ ! -e /tmp/pwned-nl ]
 }
+
+@test "a named variant selects an environment of its own" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  gotg download usa.zelda
+  mkdir -p "$GOTG_ENV_DIR/games/n64"
+  : >"$GOTG_ENV_DIR/games/n64/usa.zelda.hd.nix"
+  fake_env env-n64-usa_zelda-hd
+
+  gotg play usa.zelda hd
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"env-n64-usa_zelda-hd launched with:"* ]]
+}
+
+@test "an unknown variant fails and says which exist" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  mkdir -p "$GOTG_ENV_DIR/games/n64"
+  : >"$GOTG_ENV_DIR/games/n64/usa.zelda.hd.nix"
+
+  gotg play usa.zelda randomtypo
+  [ "$status" -ne 0 ]
+  # A typo must not be passed to the emulator, where it would look like the
+  # variant silently not working.
+  [[ "$stderr" == *"no 'randomtypo' variant"* ]]
+  [[ "$stderr" == *"Available: hd"* ]]
+}
+
+@test "an emulator argument is not mistaken for a variant" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  gotg download usa.zelda
+
+  gotg play usa.zelda --fullscreen
+  [ "$status" -eq 0 ]
+  # Straight through to the platform environment, with the flag passed on.
+  [[ "$output" == *"env-n64 launched with:"* ]]
+  [[ "$output" == *"--fullscreen"* ]]
+}

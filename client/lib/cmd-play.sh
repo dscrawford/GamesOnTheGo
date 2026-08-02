@@ -33,15 +33,26 @@ cmd_install() {
 
 cmd_play() {
   local want="${1:-}"
-  [[ -n "$want" ]] || die "usage: gotg play <id>"
+  [[ -n "$want" ]] || die "usage: gotg play <id> [variant] [emulator args...]"
   shift || true
+
+  # An optional second word names a variant — a mod or a different engine for
+  # this one game. Anything starting with a dash is an emulator argument, so the
+  # two cannot be confused; anything else is taken as a variant and must exist,
+  # rather than being passed silently to the emulator where a typo would look
+  # like the mod simply not working.
+  local variant=""
+  if [[ $# -gt 0 && "$1" != -* ]]; then
+    variant="$1"
+    shift
+  fi
 
   # Prefer the cached catalog: a game already installed here must still launch
   # when the server is unreachable.
   manifest_cached || manifest_ensure
   local game attr
   game="$(manifest_find "$want")"
-  attr="$(env_attr "$game")"
+  attr="$(env_attr "$game" "$variant")"
 
   # Before the download, not after. A missing emulator is the failure most likely
   # to need a person, and finding that out at the end of a 10 GB transfer helps

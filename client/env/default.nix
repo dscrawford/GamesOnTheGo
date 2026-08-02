@@ -16,6 +16,14 @@ let
   mkEnv = import ./lib.nix { inherit pkgs lib; };
   helpers = import ./helpers.nix { inherit pkgs lib; };
 
+  # Tools this project packages itself, for environments that need something
+  # nixpkgs does not carry. Passed alongside pkgs so an env file never has to
+  # reach back up the tree with a relative path.
+  gotgPkgs = {
+    pyisotools = pkgs.callPackage ../../pkgs/pyisotools { };
+    wiimms-szs-tools = pkgs.callPackage ../../pkgs/wiimms-szs-tools { };
+  };
+
   nixNames =
     dir:
     lib.mapAttrsToList (n: _: lib.removeSuffix ".nix" n) (
@@ -28,7 +36,7 @@ let
     "helpers"
   ] (nixNames ./.);
 
-  baseFor = platform: import (./. + "/${platform}.nix") { inherit pkgs lib helpers; };
+  baseFor = platform: import (./. + "/${platform}.nix") { inherit pkgs lib helpers gotgPkgs; };
 
   gamesFor =
     platform:
@@ -40,7 +48,25 @@ let
   # An id holds exactly one dot, which would be read as an attribute path
   # separator in a flake reference, so it becomes an underscore. Since the dot is
   # always in the region prefix, no two ids can collapse onto the same name.
-  attrFor = platform: id: "env-${platform}-${lib.replaceStrings [ "." ] [ "_" ] id}";
+  #
+  # That same rule makes variants unambiguous: a filename with a *second* dot is
+  # "<id>.<variant>", because an id can never contain one. So
+  # usa.super_mario_sunshine.bse.nix is the bse variant of that game, reachable
+  # as `gotg play usa.super_mario_sunshine bse`.
+  splitGame =
+    name:
+    let
+      parts = lib.splitString "." name;
+    in
+    {
+      id = lib.concatStringsSep "." (lib.take 2 parts);
+      variant = if lib.length parts > 2 then lib.elemAt parts 2 else null;
+    };
+
+  attrFor =
+    platform: id: variant:
+    "env-${platform}-${lib.replaceStrings [ "." ] [ "_" ] id}"
+    + lib.optionalString (variant != null) "-${variant}";
 
   # A game states only what it changes. Shallow, because `emulator` is a
   # derivation and a recursive merge would splice two of them together; the two
@@ -71,16 +97,28 @@ let
     ) paths;
 
   gameEnv =
-    platform: id:
+    platform: fileName:
     let
-      base = baseFor platform;
-      patch = import (./games + "/${platform}/${id}.nix") { inherit pkgs lib base helpers; };
+      inherit (splitGame fileName) id variant;
+
+      # A variant builds on the game's own environment when it has one, and on
+      # the platform otherwise — so a mod inherits whatever the plain game
+      # already established rather than restating it.
+      plainFile = ./games + "/${platform}/${id}.nix";
+      platformBase = baseFor platform;
+      base =
+        if variant != null && builtins.pathExists plainFile then
+          merge platformBase (import plainFile { inherit pkgs lib helpers gotgPkgs; base = platformBase; })
+        else
+          platformBase;
+
+      patch = import (./games + "/${platform}/${fileName}.nix") { inherit pkgs lib base helpers gotgPkgs; };
       merged = merge base patch;
     in
     mkEnv (
       merged
       // {
-        name = attrFor platform id;
+        name = attrFor platform id variant;
         legacyPaths = scopeLegacyToGame id (merged.legacyPaths or [ ]);
       }
     );
@@ -92,6 +130,12 @@ lib.listToAttrs (
   ) platforms
   ++ lib.concatMap (
     platform:
-    map (id: lib.nameValuePair (attrFor platform id) (gameEnv platform id)) (gamesFor platform)
+    map (
+      fileName:
+      let
+        inherit (splitGame fileName) id variant;
+      in
+      lib.nameValuePair (attrFor platform id variant) (gameEnv platform fileName)
+    ) (gamesFor platform)
   ) platforms
 )

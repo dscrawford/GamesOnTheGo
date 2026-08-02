@@ -54,7 +54,7 @@ usage: gotg <command> [args]
   info <id>          show one game's details
   download <id>      fetch a game without setting up a launcher
   install <id>       fetch it, build its environment, write a Steam launcher
-  play <id>          fetch and build whatever is missing, then launch
+  play <id> [variant] fetch and build whatever is missing, then launch
   saves <command>    move saves between machines (saves help for the rest)
   controllers <cmd>  what SDL sees, and where its inputs land
   sync               rebuild gotg and the environment GC roots after a git pull
