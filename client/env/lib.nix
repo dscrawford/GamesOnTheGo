@@ -50,6 +50,10 @@
   # ares creates a section the first time that console is run, so the name is
   # not derivable from the platform slug and is only set where it is confirmed.
   padConsole ? null,
+  # Whose bindings can be written for this environment. ares needs a console
+  # name as well, since its one settings file keeps a section per console;
+  # dolphin keeps a file per pad and needs nothing beyond knowing it is dolphin.
+  padEmulator ? (if padConsole != null then "ares" else null),
 }:
 
 let
@@ -154,9 +158,14 @@ pkgs.runCommand "gotg-env-${name}"
     mkdir -p $out/bin $out/share/gotg
     ln -s ${app}/bin/gotg-play $out/bin/gotg-play
     cp ${pkgs.writeText "saves.json" (builtins.toJSON manifest)} $out/share/gotg/saves.json
-    ${lib.optionalString (padConsole != null) ''
+    ${lib.optionalString (padEmulator != null) ''
       cp ${
-        pkgs.writeText "pads.json" (builtins.toJSON { console = padConsole; })
+        pkgs.writeText "pads.json" (
+          builtins.toJSON (
+            { emulator = padEmulator; }
+            // lib.optionalAttrs (padConsole != null) { console = padConsole; }
+          )
+        )
       } $out/share/gotg/pads.json
     ''}
   ''

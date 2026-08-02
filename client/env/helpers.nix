@@ -95,6 +95,36 @@
     {
       emulator = pkgs.dolphin-emu;
       bin = "dolphin-emu";
+
+      # Isolated because both of the input fixes below need this environment to
+      # own its Dolphin configuration — bindings written into the player's own
+      # install would be ours to get wrong on their behalf.
+      isolate = true;
+
+      # Which follows from isolating: Dolphin's data directory moves under
+      # {state}, so a memory card written before this would otherwise be in a
+      # directory nothing reads any more, which from the sofa is exactly what
+      # losing it looks like. `gotg saves adopt` copies them forward.
+      saves = [
+        "data/dolphin-emu/GC/**"
+        "data/dolphin-emu/Wii/**"
+      ];
+      legacyPaths = [
+        {
+          from = "$XDG_DATA/dolphin-emu/GC";
+          into = "data/dolphin-emu";
+        }
+        {
+          from = "$XDG_DATA/dolphin-emu/Wii";
+          into = "data/dolphin-emu";
+        }
+      ];
+
+      # GameCube pads only. A Wii game played with a GameCube controller is
+      # covered; Wii remotes live in a different file with a different shape,
+      # and nothing here pretends to write them.
+      padEmulator = "dolphin";
+
       args = [
         "-b"
         "-e"

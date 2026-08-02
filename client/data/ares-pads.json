@@ -1,44 +1,140 @@
 {
   "_comment": [
-    "Which standard gamepad element drives each ares button, per console.",
+    "Which standard gamepad element drives each ares input, per console.",
     "",
-    "The left side is ares' own button name inside",
-    "<Console>/Input/Controller.Port.N/Gamepad; the right side is SDL's name for",
-    "a standard element, which SDL maps to whatever raw index a given controller",
-    "actually uses. That indirection is the point: the same table works for a",
-    "pad whose A is button 0 and one whose A is button 1.",
+    "The left side is ares' own input name inside the block named by `layout`;",
+    "the right side is SDL's name for a standard element, which SDL maps to",
+    "whatever raw index a given controller actually uses. That indirection is",
+    "the point: the same table works for a pad whose A is button 0 and one whose",
+    "A is button 1.",
     "",
-    "Only consoles confirmed against a real settings.bml are listed. An ares",
-    "console section is created the first time that console is run, so the name",
-    "cannot be guessed from the platform slug — add one by playing the console",
-    "once and reading the section heading."
+    "A value may be a list. ares holds three bindings per input — an unbound one",
+    "reads `;;`, which is two separators around three empty slots — and any of",
+    "them drives it. That is how the analog stick doubles as the D-pad on the",
+    "consoles that never had one: both are bound, and either works.",
+    "",
+    "An element ending in - or + is one direction of an analog axis: - is the",
+    "low side (up, or left), + the high side. Elements without a sign are",
+    "buttons, hats or triggers, whose direction is not in question.",
+    "",
+    "A name containing / is an input nested one level deeper, which is how ares",
+    "spells a true analog axis: `X-Axis/Lo` is the Lo line inside the X-Axis",
+    "block. Binding those is what makes a stick analog rather than four",
+    "switches.",
+    "",
+    "`layout` is where the block lives. Consoles with controller ports nest",
+    "under Controller.Port.<n>; the handhelds have one built-in pad and nest",
+    "under their own name with no port number. Every name here — console,",
+    "container and pad alike — is read off a real settings.bml. ares writes a",
+    "console's section the first time that console runs, so none of them can be",
+    "guessed from the platform slug, and a wrong one would write bindings that",
+    "nothing ever reads."
   ],
 
   "SuperFamicom": {
-    "Up": "dpup",
-    "Down": "dpdown",
-    "Left": "dpleft",
-    "Right": "dpright",
-    "B": "a",
-    "A": "b",
-    "Y": "x",
-    "X": "y",
-    "L": "leftshoulder",
-    "R": "rightshoulder",
-    "Select": "back",
-    "Start": "start"
+    "layout": { "container": "Controller.Port", "pad": "Gamepad", "players": 4 },
+    "buttons": {
+      "Up": ["dpup", "lefty-"],
+      "Down": ["dpdown", "lefty+"],
+      "Left": ["dpleft", "leftx-"],
+      "Right": ["dpright", "leftx+"],
+      "B": "a",
+      "A": "b",
+      "Y": "x",
+      "X": "y",
+      "L": "leftshoulder",
+      "R": "rightshoulder",
+      "Select": "back",
+      "Start": "start"
+    }
+  },
+
+  "Famicom": {
+    "layout": { "container": "Controller.Port", "pad": "Gamepad", "players": 4 },
+    "buttons": {
+      "Up": ["dpup", "lefty-"],
+      "Down": ["dpdown", "lefty+"],
+      "Left": ["dpleft", "leftx-"],
+      "Right": ["dpright", "leftx+"],
+      "B": "a",
+      "A": "b",
+      "Select": "back",
+      "Start": "start"
+    }
   },
 
   "Nintendo64": {
-    "Up": "dpup",
-    "Down": "dpdown",
-    "Left": "dpleft",
-    "Right": "dpright",
-    "B": "x",
-    "A": "a",
-    "L": "leftshoulder",
-    "R": "rightshoulder",
-    "Z": "lefttrigger",
-    "Start": "start"
+    "layout": { "container": "Controller.Port", "pad": "Gamepad", "players": 4 },
+    "buttons": {
+      "Up": "dpup",
+      "Down": "dpdown",
+      "Left": "dpleft",
+      "Right": "dpright",
+
+      "X-Axis/Lo": "leftx-",
+      "X-Axis/Hi": "leftx+",
+      "Y-Axis/Lo": "lefty-",
+      "Y-Axis/Hi": "lefty+",
+
+      "L-Up": "dpup",
+      "L-Down": "dpdown",
+      "L-Left": "dpleft",
+      "L-Right": "dpright",
+
+      "A": "a",
+      "B": "x",
+      "C-Up": "righty-",
+      "C-Down": "righty+",
+      "C-Left": "rightx-",
+      "C-Right": "rightx+",
+      "L": "leftshoulder",
+      "R": "rightshoulder",
+      "Z": "lefttrigger",
+      "Start": "start"
+    }
+  },
+
+  "GameBoy": {
+    "layout": { "container": "Game.Boy", "pad": "Controls", "players": 1 },
+    "buttons": {
+      "Up": ["dpup", "lefty-"],
+      "Down": ["dpdown", "lefty+"],
+      "Left": ["dpleft", "leftx-"],
+      "Right": ["dpright", "leftx+"],
+      "B": "a",
+      "A": "b",
+      "Select": "back",
+      "Start": "start"
+    }
+  },
+
+  "GameBoyColor": {
+    "layout": { "container": "Game.Boy.Color", "pad": "Controls", "players": 1 },
+    "buttons": {
+      "Up": ["dpup", "lefty-"],
+      "Down": ["dpdown", "lefty+"],
+      "Left": ["dpleft", "leftx-"],
+      "Right": ["dpright", "leftx+"],
+      "B": "a",
+      "A": "b",
+      "Select": "back",
+      "Start": "start"
+    }
+  },
+
+  "GameBoyAdvance": {
+    "layout": { "container": "Game.Boy.Advance", "pad": "Controls", "players": 1 },
+    "buttons": {
+      "Up": ["dpup", "lefty-"],
+      "Down": ["dpdown", "lefty+"],
+      "Left": ["dpleft", "leftx-"],
+      "Right": ["dpright", "leftx+"],
+      "B": "a",
+      "A": "b",
+      "L": "leftshoulder",
+      "R": "rightshoulder",
+      "Select": "back",
+      "Start": "start"
+    }
   }
 }

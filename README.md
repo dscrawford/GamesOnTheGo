@@ -75,10 +75,29 @@ the four every ares console has. The order is SDL's enumeration order, which is
 what the emulators go by too — so `order` and the bindings cannot disagree —
 and unplugging and replugging a controller moves it down the list.
 
-Two present limits: bindings are written only for consoles listed in
-`client/data/ares-pads.json`, and an emulator creates a console's section the
-first time that console runs, so the first launch of a platform has nothing to
-write into and the one after it does.
+**The stick and the D-pad are interchangeable.** On the consoles that never had
+a stick — SNES, NES, the Game Boys — both are bound to the same input, so
+either moves you; ares keeps three bindings per input and any of them drives
+it. Where the console does have a stick, N64 and GameCube, the stick is the
+stick and the D-pad drives it too, so a game that only ever reads the stick
+still answers to the D-pad. A game reading both then gets both, which is the
+price of that.
+
+| Emulator | Consoles | Written into |
+|---|---|---|
+| ares | SNES, NES, N64, Game Boy, Game Boy Color, Game Boy Advance | `settings.bml` |
+| Dolphin | GameCube, and a Wii game played with a GameCube controller | `GCPadNew.ini` |
+
+The two halves work differently, because the emulators do. ares binds a raw
+input index, so `client/data/ares-pads.json` maps each console input to a
+standard gamepad element and SDL is asked what that element is on *this* pad.
+Dolphin names standard elements itself, so there is no table — only the device
+line, which is inert if it names a device Dolphin cannot see.
+
+Three present limits: a console needs an entry in `ares-pads.json`; an emulator
+creates a console's section the first time that console runs, so the first
+launch of a platform has nothing to write into and the one after it does; and
+Wii remotes are not generated, only GameCube pads.
 
 ### Emulator environments
 

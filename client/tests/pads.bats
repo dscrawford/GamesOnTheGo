@@ -22,7 +22,9 @@ setup() {
         "dpdown":{"type":"hat","index":0,"mask":4},
         "dpleft":{"type":"hat","index":0,"mask":8},
         "dpright":{"type":"hat","index":0,"mask":2},
-        "lefttrigger":{"type":"axis","index":2,"min":-32768,"max":32767}}'
+        "lefttrigger":{"type":"axis","index":2,"min":-32768,"max":32767},
+        "leftx":{"type":"axis","index":0,"min":-32768,"max":32767},
+        "lefty":{"type":"axis","index":1,"min":-32768,"max":32767}}'
 }
 
 @test "a button becomes group 3 and its raw index" {
@@ -83,8 +85,8 @@ Nintendo64
         B: ;;
 BML
 
-  pads_ares_rewrite "$TEST_TMP/settings.bml" SuperFamicom 1 \
-    "$(jq -nc '{Up: "GUID/0/1/1/Lo", B: "GUID/0/3/0"}')"
+  pads_ares_rewrite "$TEST_TMP/settings.bml" SuperFamicom Controller.Port.1 Gamepad \
+    "$(jq -nc '{Up: "GUID/0/1/1/Lo;;", B: "GUID/0/3/0;;"}')"
 
   run cat "$TEST_TMP/settings.bml"
   [ "$status" -eq 0 ]
@@ -108,7 +110,86 @@ MegaDrive
       Gamepad
         Up: ;;
 BML
-  pads_ares_rewrite "$TEST_TMP/settings.bml" SuperFamicom 1 "$(jq -nc '{Up: "GUID/0/1/1/Lo"}')"
+  pads_ares_rewrite "$TEST_TMP/settings.bml" SuperFamicom Controller.Port.1 Gamepad \
+    "$(jq -nc '{Up: "GUID/0/1/1/Lo;;"}')"
   run grep -c "GUID" "$TEST_TMP/settings.bml"
   [ "$output" = "0" ]
+}
+
+@test "an axis binds one direction at a time, and the sign says which" {
+  # "lefty" is a whole stick; only "lefty-" is up. Without the sign there is
+  # nothing in the name to decide it.
+  run pads_ares_assignment "$ID" 0 "$MAP" lefty-
+  [ "$output" = "$ID/0/0/1/Lo" ]
+  run pads_ares_assignment "$ID" 0 "$MAP" lefty+
+  [ "$output" = "$ID/0/0/1/Hi" ]
+  run pads_ares_assignment "$ID" 0 "$MAP" leftx-
+  [ "$output" = "$ID/0/0/0/Lo" ]
+}
+
+@test "a trigger needs no sign — it rests at one end and travels one way" {
+  run pads_ares_assignment "$ID" 0 "$MAP" lefttrigger
+  [ "$output" = "$ID/0/0/2/Hi" ]
+}
+
+@test "the stick doubles as the D-pad on a console that never had one" {
+  # Both are bound to the same input, in two of ares' three slots, so either
+  # drives it. This reads the shipped table rather than a fixture: the point is
+  # that SNES really is set up this way.
+  run pads_ares_bindings SuperFamicom "$ID" 0 "$MAP"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.Up' <<<"$output")" = "$ID/0/1/1/Lo;$ID/0/0/1/Lo;" ]
+  [ "$(jq -r '.Left' <<<"$output")" = "$ID/0/1/0/Lo;$ID/0/0/0/Lo;" ]
+  # A plain button still fills one slot and leaves the other two empty.
+  [ "$(jq -r '.B' <<<"$output")" = "$ID/0/3/0;;" ]
+}
+
+@test "an input whose elements this pad all lack is left as ares had it" {
+  run pads_ares_bindings SuperFamicom "$ID" 0 "$MAP"
+  # This pad has no right shoulder, so R is absent rather than empty.
+  [ "$(jq 'has("R")' <<<"$output")" = "false" ]
+}
+
+@test "a true analog axis is reached one level deeper" {
+  cat >"$TEST_TMP/settings.bml" <<'BML'
+Nintendo64
+  Input
+    Controller.Port.1
+      Gamepad
+        Up: ;;
+        X-Axis
+          Lo: ;;
+          Hi: ;;
+        Y-Axis
+          Lo: ;;
+          Hi: ;;
+BML
+
+  pads_ares_rewrite "$TEST_TMP/settings.bml" Nintendo64 Controller.Port.1 Gamepad \
+    "$(jq -nc '{"X-Axis/Lo": "GUID/0/0/0/Lo;;", "Y-Axis/Hi": "GUID/0/0/1/Hi;;"}')"
+
+  run cat "$TEST_TMP/settings.bml"
+  # The nested lines keep their own indentation and their short names.
+  [[ "$output" == *"          Lo: GUID/0/0/0/Lo;;"* ]]
+  [[ "$output" == *"          Hi: GUID/0/0/1/Hi;;"* ]]
+  # X-Axis/Hi and Y-Axis/Lo were not asked for, so they are still empty: the
+  # two blocks are told apart rather than treated as one.
+  run grep -c "GUID" "$TEST_TMP/settings.bml"
+  [ "$output" = "2" ]
+}
+
+@test "a handheld's pad has no port number" {
+  cat >"$TEST_TMP/settings.bml" <<'BML'
+GameBoy
+  Input
+    Game.Boy
+      Controls
+        Up: ;;
+        A: ;;
+BML
+
+  pads_ares_rewrite "$TEST_TMP/settings.bml" GameBoy Game.Boy Controls \
+    "$(jq -nc '{Up: "GUID/0/1/1/Lo;;"}')"
+  run grep -c "GUID" "$TEST_TMP/settings.bml"
+  [ "$output" = "1" ]
 }

@@ -27,6 +27,21 @@ ares_pads_table() { printf '%s/ares-pads.json' "$GOTG_DATA"; }
 #   $1 identity  $2 slot  $3 the device's map, as JSON  $4 SDL element name
 pads_ares_assignment() {
   local identity="$1" slot="$2" map="$3" element="$4"
+
+  # An axis element carries its direction as a trailing sign, because the name
+  # alone does not have one: "lefty" is a whole stick, and only "lefty-" is up.
+  local sign=""
+  case "$element" in
+    *-)
+      sign=Lo
+      element="${element%-}"
+      ;;
+    *+)
+      sign=Hi
+      element="${element%+}"
+      ;;
+  esac
+
   local entry
   entry="$(jq -c --arg e "$element" '.[$e] // empty' <<<"$map")"
   [[ -n "$entry" ]] || return 1
@@ -54,33 +69,35 @@ pads_ares_assignment() {
       printf '%s/%s/1/%s/%s' "$identity" "$slot" "$axis" "$qualifier"
       ;;
     axis)
-      # A trigger rests at one end and travels one way; a stick axis is bound
-      # per direction by the element that names it.
-      local qualifier=Hi
-      case "$element" in
-        *up | *left) qualifier=Lo ;;
-      esac
+      # A trigger rests at one end and travels one way, so it needs no sign; a
+      # stick axis is bound one direction at a time and the sign says which.
+      local qualifier="${sign:-Hi}"
       printf '%s/%s/0/%s/%s' "$identity" "$slot" "$index" "$qualifier"
       ;;
     *) return 1 ;;
   esac
 }
 
-# Rewrite the Gamepad block of one console's port, leaving every other line of
-# the file exactly as it was.
+# Rewrite one pad block, leaving every other line of the file exactly as it was.
 #
 # settings.bml is ares' whole configuration and it rewrites the file on exit, so
 # this touches only the lines it is replacing. The block is found by walking the
-# indentation — Console / Input / Controller.Port.N / Gamepad — because sibling
-# blocks (Rumble.Gamepad, Mouse) carry the same button names and must not be
-# caught.
+# indentation — Console / Input / <container> / <pad> — because sibling blocks
+# (Rumble.Gamepad, Mouse, Justifier) carry the same input names and must not be
+# caught. The container is "Controller.Port.1" on a console with ports and
+# "Game.Boy" on a handheld, which is the whole of the difference between them.
+#
+# Inputs one level deeper are addressed as "<block>/<name>": ares spells a true
+# analog axis as an X-Axis block containing Lo and Hi, and those lines are worth
+# reaching, since binding them is what makes a stick analog rather than four
+# switches.
 pads_ares_rewrite() {
-  local file="$1" console="$2" port="$3" bindings="$4"
+  local file="$1" console="$2" block="$3" pad="$4" bindings="$5"
 
   local tmp="$file.gotg-tmp"
   jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<<"$bindings" >"$file.gotg-map"
 
-  awk -v console="$console" -v port="$port" -v mapfile="$file.gotg-map" '
+  awk -v console="$console" -v block="$block" -v pad="$pad" -v mapfile="$file.gotg-map" '
     BEGIN {
       while ((getline line < mapfile) > 0) {
         split(line, f, "\t")
@@ -90,17 +107,34 @@ pads_ares_rewrite() {
     # Depth of a line, in ares two-space levels.
     { indent = match($0, /[^ ]/) - 1 }
 
-    indent == 0 { inConsole = ($0 == console); inInput = 0; inPort = 0; inPad = 0 }
-    inConsole && indent == 2 { inInput = ($0 ~ /^  Input$/); inPort = 0; inPad = 0 }
-    inInput && indent == 4 { inPort = ($0 ~ "^    Controller\\.Port\\." port "$"); inPad = 0 }
-    inPort && indent == 6 { inPad = ($0 ~ /^      Gamepad$/) }
+    indent == 0 { inConsole = ($0 == console); inInput = 0; inBlock = 0; inPad = 0; axis = "" }
+    inConsole && indent == 2 { inInput = ($0 ~ /^  Input$/); inBlock = 0; inPad = 0; axis = "" }
+    inInput && indent == 4 { inBlock = ($0 == "    " block); inPad = 0; axis = "" }
+    inBlock && indent == 6 { inPad = ($0 == "      " pad); axis = "" }
 
     inPad && indent == 8 {
       key = $0
       sub(/^ +/, "", key)
+      if (key ~ /:/) {
+        # An ordinary input. It also ends whatever nested block preceded it.
+        axis = ""
+        sub(/:.*$/, "", key)
+        if (key in want) {
+          printf "        %s: %s\n", key, want[key]
+          next
+        }
+      } else {
+        # A block rather than an input: X-Axis, Y-Axis.
+        axis = key
+      }
+    }
+
+    inPad && indent == 10 && axis != "" {
+      key = $0
+      sub(/^ +/, "", key)
       sub(/:.*$/, "", key)
-      if (key in want) {
-        printf "        %s: %s;;\n", key, want[key]
+      if ((axis "/" key) in want) {
+        printf "          %s: %s\n", key, want[axis "/" key]
         next
       }
     }
@@ -117,15 +151,45 @@ pads_ares_rewrite() {
 # Every ares console tops out at four controller ports.
 GOTG_MAX_PLAYERS=4
 
-# One controller's worth of bindings, as ares button -> assignment.
+# How many bindings ares keeps per input. They are joined by ";", which is why
+# an unbound input reads ";;" — three slots, all of them empty.
+GOTG_ARES_BINDINGS=3
+
+# One controller's worth of bindings, as ares input -> the value to write.
+#
+# The value is the whole field, separators and all, because how many of the
+# three slots are filled is decided here: an input can be driven by the D-pad
+# and the stick at once.
 pads_ares_bindings() {
   local console="$1" identity="$2" slot="$3" map="$4"
-  local bindings='{}' button element assignment
-  while IFS=$'\t' read -r button element; do
-    [[ -n "$button" ]] || continue
-    assignment="$(pads_ares_assignment "$identity" "$slot" "$map" "$element")" || continue
-    bindings="$(jq -c --arg k "$button" --arg v "$assignment" '. + {($k): $v}' <<<"$bindings")"
-  done < <(jq -r --arg c "$console" '.[$c] | to_entries[] | "\(.key)\t\(.value)"' "$(ares_pads_table)")
+  local bindings='{}' input elements
+  while IFS=$'\t' read -r input elements; do
+    [[ -n "$input" ]] || continue
+
+    local value="" filled=0 element assignment
+    # Word splitting is what is wanted: the elements arrive space-separated.
+    # shellcheck disable=SC2086
+    for element in $elements; do
+      ((filled < GOTG_ARES_BINDINGS)) || break
+      assignment="$(pads_ares_assignment "$identity" "$slot" "$map" "$element")" || continue
+      value+="${value:+;}$assignment"
+      ((filled++))
+    done
+    # An element this controller lacks binds nothing rather than guessing, and
+    # an input whose every element is missing is left as ares had it.
+    ((filled > 0)) || continue
+    while ((filled < GOTG_ARES_BINDINGS)); do
+      value+=";"
+      ((filled++))
+    done
+
+    bindings="$(jq -c --arg k "$input" --arg v "$value" '. + {($k): $v}' <<<"$bindings")"
+  done < <(
+    jq -r --arg c "$console" '
+      .[$c].buttons | to_entries[]
+      | "\(.key)\t\(if (.value | type) == "array" then (.value | join(" ")) else .value end)"
+    ' "$(ares_pads_table)"
+  )
   printf '%s' "$bindings"
 }
 
@@ -136,12 +200,30 @@ pads_seating() {
   jq -c '[.[] | select(.gamepad and .map != null)]' <<<"$1"
 }
 
-# Bind each attached controller to the console port of the same number.
+# Bind each attached controller, whichever emulator this environment runs.
+#
+# The environment says which, in the pads.json its derivation carries; an
+# environment that says nothing is one whose bindings are left alone.
+pads_configure() {
+  local attr="$1" manifest emulator
+
+  manifest="$(env_pads_manifest "$attr")"
+  [[ -f "$manifest" ]] || return 0
+  emulator="$(jq -r '.emulator // "ares"' "$manifest")"
+
+  case "$emulator" in
+    ares) pads_ares_configure "$attr" ;;
+    dolphin) pads_dolphin_configure "$attr" ;;
+    *) return 0 ;;
+  esac
+}
+
+# Bind each attached controller to the ares console port of the same number.
 #
 # Never fatal. A launch with no controller attached, or with one SDL does not
 # recognise, is a launch on the keyboard — which is worse than a bound pad and
 # very much better than not starting.
-pads_configure() {
+pads_ares_configure() {
   local attr="$1" manifest console file pads identity slot map table
 
   manifest="$(env_pads_manifest "$attr")"
@@ -169,13 +251,22 @@ pads_configure() {
 
   pads="$("$(pads_bin)" 2>/dev/null)" || return 0
 
+  # Where this console keeps its pads. A handheld has one built in and no port
+  # number; everything else numbers them from 1.
+  local container padBlock players
+  container="$(jq -r --arg c "$console" '.[$c].layout.container' "$table")"
+  padBlock="$(jq -r --arg c "$console" '.[$c].layout.pad' "$table")"
+  players="$(jq -r --arg c "$console" '.[$c].layout.players // 1' "$table")"
+
   local seating count
   seating="$(pads_seating "$pads")"
   count="$(jq 'length' <<<"$seating")"
   ((count > 0)) || return 0
   ((count <= GOTG_MAX_PLAYERS)) || count=$GOTG_MAX_PLAYERS
+  # A second controller on a Game Boy has nowhere to sit.
+  ((count <= players)) || count=$players
 
-  local player port bindings name
+  local player port bindings name block where
   for ((player = 0; player < count; player++)); do
     port=$((player + 1))
     identity="$(jq -r ".[$player].identity" <<<"$seating")"
@@ -183,13 +274,21 @@ pads_configure() {
     map="$(jq -c ".[$player].map" <<<"$seating")"
     name="$(jq -r ".[$player].name" <<<"$seating")"
 
+    if ((players > 1)); then
+      block="$container.$port"
+      where="$console port $port"
+    else
+      block="$container"
+      where="$console"
+    fi
+
     bindings="$(pads_ares_bindings "$console" "$identity" "$slot" "$map")"
     [[ "$(jq 'length' <<<"$bindings")" != "0" ]] || continue
 
     # A console with fewer ports than there are controllers simply has no
     # section for the later ones, and the rewrite finds nothing to change.
-    if pads_ares_rewrite "$file" "$console" "$port" "$bindings"; then
-      log "player $port: $name -> $console port $port ($(jq 'length' <<<"$bindings") inputs)"
+    if pads_ares_rewrite "$file" "$console" "$block" "$padBlock" "$bindings"; then
+      log "player $port: $name -> $where ($(jq 'length' <<<"$bindings") inputs)"
     else
       warn "could not write player $port's bindings for $attr"
     fi
