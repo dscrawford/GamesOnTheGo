@@ -35,6 +35,10 @@ source "$GOTG_LIB/env.sh"
 source "$GOTG_LIB/launcher.sh"
 # shellcheck source=lib/cmd-play.sh
 source "$GOTG_LIB/cmd-play.sh"
+# shellcheck source=lib/saves.sh
+source "$GOTG_LIB/saves.sh"
+# shellcheck source=lib/cmd-saves.sh
+source "$GOTG_LIB/cmd-saves.sh"
 
 usage() {
   cat <<'EOF'
@@ -47,6 +51,7 @@ usage: gotg <command> [args]
   download <id>      fetch a game without setting up a launcher
   install <id>       fetch it, build its environment, write a Steam launcher
   play <id>          fetch and build whatever is missing, then launch
+  saves <command>    move saves between machines (saves help for the rest)
   sync               rebuild gotg and the environment GC roots after a git pull
 
 Ids look like usa.legend_of_zelda_majoras_mask. When the same id exists on more
@@ -72,6 +77,7 @@ main() {
     download | get) cmd_download "$@" ;;
     install) cmd_install "$@" ;;
     play | launch) cmd_play "$@" ;;
+    saves) cmd_saves "$@" ;;
     sync) cmd_sync "$@" ;;
     help | --help | -h | "") usage ;;
     *)

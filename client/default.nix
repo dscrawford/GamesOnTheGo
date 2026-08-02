@@ -6,6 +6,8 @@
   curl,
   jq,
   unzip,
+  gnutar,
+  zstd,
   zenity,
   coreutils,
   findutils,
@@ -47,6 +49,8 @@ stdenvNoCC.mkDerivation {
           gnugrep
           gnused
           gawk
+          gnutar # save bundles
+          zstd
           util-linux # flock, for the per-game download lock
           # `gotg install` builds emulators; launching never evaluates nix.
           nix

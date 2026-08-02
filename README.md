@@ -116,6 +116,39 @@ progress dialog with no terminal to show errors in. Running `gotg install <id>`
 once from a terminal keeps it out of the way; after that, launching is a symlink
 test and costs nothing.
 
+### Saves
+
+Saves can be carried between machines through the same File Browser that serves
+the library — no new infrastructure, the same account, under the hidden `.gotg`
+directory the catalog already uses.
+
+```bash
+gotg saves setup                  # choose a backend, and prove it works
+gotg saves status --all           # what each side has; writes nothing
+gotg saves push usa.zelda         # send this machine's saves
+gotg saves pull --all             # take the remote's
+```
+
+**The unit is the environment, not the game.** `env-snes` is shared by every
+SNES title and holds all their saves at once, so an id is resolved the way
+`play` resolves it and then the command says which environment it is really
+working on.
+
+A save set travels as one deterministic `tar.zst`, so an unchanged one hashes
+identically and a push from a machine that has changed nothing uploads nothing.
+Each push is a numbered generation kept alongside the last, and one `latest.json`
+says which is current.
+
+**Nothing here ever deletes a save.** A push that would overwrite work done
+elsewhere stops and prints both sides with the three commands that resolve it; a
+`--force` keeps the generation it overtook; a pull archives what was here first,
+under `~/.local/state/gotg/saves/local/`. Times and device ids are printed for
+you to read and are never used to decide anything — Decks suspend and their
+clocks drift, and an mtime rule silently picks the wrong side.
+
+Bundles are **not encrypted**: anyone who can read `/Games/.gotg/saves` can read
+your saves.
+
 ### Per-game tweaks
 
 *How* a game runs lives in `client/env` above. What is left in
@@ -154,5 +187,5 @@ nix flake check    # every test suite and linter
 The `gotg` on PATH in the dev shell is the wrapped build, not `client/bin/gotg`
 directly, so re-enter the shell (direnv reloads on its own) to pick up edits.
 
-`nix flake check` runs 119 importer tests (pytest), 37 client tests (bats,
+`nix flake check` runs 119 importer tests (pytest), 62 client tests (bats,
 against a stand-in File Browser over real HTTP), ruff and shellcheck.

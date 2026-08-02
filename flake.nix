@@ -107,6 +107,8 @@
                 coreutils
                 zip
                 unzip
+                gnutar
+                zstd
                 gnugrep
                 gnused
                 gawk
