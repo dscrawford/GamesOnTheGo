@@ -74,6 +74,64 @@
       );
     };
 
+  # dolphin, for the two disc platforms that share it.
+  #
+  # Two things here are about input rather than emulation, and both were learned
+  # from a pad that worked in Dolphin's own configuration screen and did nothing
+  # in the game:
+  #
+  # `-b` (batch) starts the game with no library window. Without it Dolphin opens
+  # two windows, and only the render one reads a controller — so whichever window
+  # the desktop happened to focus decided whether the pad did anything. The
+  # configuration screen reads input regardless, which is what makes this look
+  # like a binding fault when it is a focus fault.
+  #
+  # BackgroundInput is the setting that stops focus mattering at all. It is the
+  # ini key; "Background Input" is only its label in the interface. Dolphin
+  # writes this file itself, so it is edited in place on each launch rather than
+  # seeded through configFiles, which only ever fills in a file that is absent.
+  dolphinPlatform =
+    { }:
+    {
+      emulator = pkgs.dolphin-emu;
+      bin = "dolphin-emu";
+      args = [
+        "-b"
+        "-e"
+        "{target}"
+      ];
+      preLaunch = ''
+        # Only where this environment owns its Dolphin configuration. Otherwise
+        # this would be reaching into the settings of the player's own Dolphin
+        # install, which is not ours to change. Tested at runtime rather than
+        # against `isolate` here, so that a game file turning isolation on gets
+        # this too.
+        if [ "''${XDG_CONFIG_HOME:-}" = "$state/config" ]; then
+          dolphin_ini="$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini"
+          mkdir -p "$(dirname "$dolphin_ini")"
+          touch "$dolphin_ini"
+          ${pkgs.gawk}/bin/awk '
+            # Leaving the section without having written it: write it now, ahead
+            # of the header that ends the section.
+            /^\[/ {
+              if (in_input && !written) { print "BackgroundInput = True"; written = 1 }
+              in_input = ($0 == "[Input]")
+            }
+            in_input && /^[ \t]*BackgroundInput[ \t]*=/ {
+              print "BackgroundInput = True"; written = 1; next
+            }
+            { print }
+            END {
+              if (!written) {
+                if (!in_input) print "[Input]"
+                print "BackgroundInput = True"
+              }
+            }
+          ' "$dolphin_ini" > "$dolphin_ini.gotg" && mv "$dolphin_ini.gotg" "$dolphin_ini"
+        fi
+      '';
+    };
+
   # The HarbourMasters ports — Ship of Harkinian, 2 Ship 2 Harkinian — are native
   # ports rather than emulators, and take the ROM differently from anything else
   # here. They read it once, extract it into an .o2r archive kept beside their

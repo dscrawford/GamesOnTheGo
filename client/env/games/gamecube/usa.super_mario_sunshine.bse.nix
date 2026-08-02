@@ -30,7 +30,9 @@ base
     gotgPkgs.pyisotools # extracts and rebuilds the disc itself
   ];
 
-  preLaunch = ''
+  # Added to the platform's rather than replacing it: the base sets up Dolphin's
+  # input configuration, which this game needs exactly as much as any other.
+  preLaunch = base.preLaunch + ''
     bse="$state/bse"
     patched="$bse/super_mario_sunshine.rvz"
 
