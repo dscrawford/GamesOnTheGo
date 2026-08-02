@@ -50,6 +50,12 @@ cmd_play() {
   install="$(game_local_path "$game")"
   env_state="$(env_state_dir "$attr")"
 
+  # Carry forward saves written before this environment was told where to keep
+  # them. Once only, and never at the cost of the launch: the game running
+  # matters more than the copy, and a Steam launch is where most of these will
+  # be started from, so it goes to the log and play continues either way.
+  saves_adopt_once "$attr" || warn "could not adopt older saves for $attr"
+
   # The environment decides the emulator, its arguments and its settings; all it
   # is told is which file to run, where that came from, and where to keep what
   # it writes — that last one from env_state_dir, so the CLI and the wrapper

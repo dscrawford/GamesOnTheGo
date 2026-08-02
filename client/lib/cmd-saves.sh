@@ -13,6 +13,8 @@ usage: gotg saves <command> [args]
   status [<id>|--all]    compare this machine with the remote; writes nothing
   push   [<id>|--all]    send this machine's saves        [--force]
   pull   [<id>|--all]    take the remote's saves          [--force]
+  adopt  [<id>|--all]    copy in saves from before the emulators were
+                         told where to put them          [--yes]
 
 An id is resolved the same way `play` resolves it, but saves belong to the
 *environment*, which several games can share — env-snes holds every SNES memory
@@ -34,6 +36,7 @@ cmd_saves() {
     status) saves_cmd_status "$@" ;;
     push) saves_cmd_push "$@" ;;
     pull) saves_cmd_pull "$@" ;;
+    adopt) saves_cmd_adopt "$@" ;;
     help | --help | -h | "") saves_usage ;;
     *)
       printf 'error: unknown saves command: %s\n\n' "$verb" >&2
@@ -282,6 +285,37 @@ saves_divergence() {
      Take the remote (what is here is archived first):  gotg saves pull <id>
      Take yours (the remote generation is kept):        gotg saves push --force <id>
      Look before choosing:                              gotg saves status <id>"
+}
+
+saves_cmd_adopt() {
+  local want="" apply="no" arg
+  for arg in "$@"; do
+    case "$arg" in
+      --yes | -y) apply="yes" ;;
+      *) want="$arg" ;;
+    esac
+  done
+
+  local attrs=()
+  mapfile -t attrs < <(saves_resolve "$want")
+  [[ ${#attrs[@]} -gt 0 ]] || die "nothing to adopt into — no environment is built here"
+
+  local attr total=0 found
+  for attr in "${attrs[@]}"; do
+    log "$attr"
+    found="$(saves_adopt "$attr" "$apply")"
+    [[ "$found" == "0" ]] && log "  nothing left behind to copy"
+    total=$((total + found))
+  done
+
+  log ""
+  if [[ "$apply" == "yes" ]]; then
+    log "copied $total file(s). The originals are untouched — delete them yourself once"
+    log "you have started each game and seen its save."
+  else
+    log "$total file(s) would be copied. Nothing has been changed."
+    log "Run it again with --yes to do it."
+  fi
 }
 
 saves_cmd_pull() {

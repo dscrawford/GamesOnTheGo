@@ -1,9 +1,5 @@
-# Nintendo 64 — ares, which works out the console from the ROM header. Every
-# cartridge platform gets its own file rather than sharing one, so that changing
-# how Nintendo 64 runs cannot quietly change the rest of them.
-{ pkgs, ... }:
-{
-  emulator = pkgs.ares;
-  bin = "ares";
-  args = [ "{target}" ];
-}
+# Nintendo 64 — ares, which works out the console from the ROM header, with its saves
+# redirected into this environment's own directory. See helpers.nix for why that
+# redirect is needed and what the trailing slash is doing.
+{ helpers, ... }:
+helpers.aresPlatform { platform = "n64"; }

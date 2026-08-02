@@ -59,14 +59,19 @@ client/env/games/snes/world.super_metroid.nix  what Super Metroid changes about 
 ```
 
 ```nix
-# client/env/snes.nix
+# client/env/wiiu.nix
 { pkgs, ... }:
 {
-  emulator = pkgs.ares;
-  bin = "ares";
-  args = [ "{target}" ];
+  emulator = pkgs.cemu;
+  bin = "cemu";
+  args = [ "-g" "{target}" ];
 }
 ```
+
+Where several platforms share an emulator and the awkward parts of driving it,
+that shape moves into `client/env/helpers.nix` and the platform file names
+itself — `snes.nix` is one line calling `helpers.aresPlatform { platform =
+"snes"; }`. A platform that needs to differ stops calling the helper.
 
 A per-game file states only its differences, and takes the platform's `base` if
 it wants to add to a setting rather than replace it:
@@ -134,6 +139,15 @@ SNES title and holds all their saves at once, so an id is resolved the way
 `play` resolves it and then the command says which environment it is really
 working on.
 
+**Emulators are told where to put their saves**, or there would be nothing
+predictable to sync. ares in particular ignores XDG and writes beside the ROM,
+so `env-snes` and `env-snes-world_super_metroid` would otherwise fight over the
+same `.ram` file in `~/Games`. Saves written before that redirect are copied
+forward by `gotg saves adopt` — dry-run by default, `--yes` to act, and it
+copies rather than moves, so a wrong guess costs disk and not a save. The first
+launch after upgrading does it once by itself, because a Steam shortcut is the
+only place many of these games are ever started from.
+
 A save set travels as one deterministic `tar.zst`, so an unchanged one hashes
 identically and a push from a machine that has changed nothing uploads nothing.
 Each push is a numbered generation kept alongside the last, and one `latest.json`
@@ -187,5 +201,5 @@ nix flake check    # every test suite and linter
 The `gotg` on PATH in the dev shell is the wrapped build, not `client/bin/gotg`
 directly, so re-enter the shell (direnv reloads on its own) to pick up edits.
 
-`nix flake check` runs 119 importer tests (pytest), 62 client tests (bats,
+`nix flake check` runs 119 importer tests (pytest), 66 client tests (bats,
 against a stand-in File Browser over real HTTP), ruff and shellcheck.

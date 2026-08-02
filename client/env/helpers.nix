@@ -4,6 +4,53 @@
 { pkgs, lib }:
 
 {
+  # ares, for the cartridge platforms that share it.
+  #
+  # It does not consult XDG for saves. Emulator::locate reads settings.paths.saves,
+  # which is empty by default, and falls back to the ROM's own path with the
+  # extension swapped — so a memory save lands in ~/Games next to the ROM, where
+  # env-snes and env-snes-world_super_metroid would also be writing over each
+  # other. Paths/Saves is that setting, and **the trailing slash is load-bearing**:
+  # ares concatenates it with the filename without inserting a separator.
+  #
+  # ares restores command-line overrides before it saves settings, so passing
+  # this never rewrites the user's own settings.bml.
+  #
+  # The platforms share this because what they share is the part that has to be
+  # right. A platform that needs to differ stops calling this and says so.
+  aresPlatform =
+    { platform }:
+    {
+      emulator = pkgs.ares;
+      bin = "ares";
+      isolate = true;
+      args = [
+        "--setting"
+        "Paths/Saves={state}/saves/"
+        "{target}"
+      ];
+      saves = [ "saves/**" ];
+      # Save states are tied to the ares that wrote them, so one carried from
+      # another machine may simply refuse to load. Memory saves always travel.
+      saveExcludes = [ "saves/*.bs[0-9]" ];
+      # Where ares put them before it was told otherwise: beside the ROM, named
+      # for it. `gotg saves adopt` copies these forward.
+      legacyPaths = map
+        (ext: {
+          from = "$GAMES/${platform}/*.${ext}";
+          into = "saves";
+        })
+        [
+          "ram"
+          "eeprom"
+          "flash"
+          "rtc"
+          "iram"
+          "bsx"
+          "dram"
+        ];
+    };
+
   # The HarbourMasters ports — Ship of Harkinian, 2 Ship 2 Harkinian — are native
   # ports rather than emulators, and take the ROM differently from anything else
   # here. They read it once, extract it into an .o2r archive kept beside their
@@ -59,8 +106,14 @@
       ];
       # Where a hand-installed copy of the same port keeps its saves. `adopt`
       # copies from here once, so switching to gotg does not look like losing
-      # every file.
-      legacyPaths = [ "$XDG_DATA/${appName}" ];
+      # every file. `isolate` points XDG_DATA_HOME at {state}/data, which is why
+      # that is where it goes.
+      legacyPaths = [
+        {
+          from = "$XDG_DATA/${appName}";
+          into = "data";
+        }
+      ];
 
       preLaunch = ''
         harkinian_data="''${XDG_DATA_HOME:-$HOME/.local/share}/${appName}"

@@ -287,6 +287,81 @@ saves_extract() {
   rm -rf "$staging"
 }
 
+# -------------------------------------------------------------------- adopting
+
+# Copy saves forward from wherever the emulator used to keep them.
+#
+# Telling an emulator to write somewhere new makes every save it already wrote
+# invisible in one step, and the way you find out is that a game starts from the
+# title screen. So the redirect and this arrive together.
+#
+# Copies, never moves: if the mapping is wrong the cost is disk, not a save. And
+# nothing already in place is overwritten, so running it twice is harmless and
+# it can never undo a sync.
+saves_adopt() {
+  local attr="$1" apply="${2:-no}" manifest state
+  manifest="$(saves_manifest "$attr")"
+  state="$(env_state_dir "$attr")"
+
+  local found=0 from into match dest base
+  while IFS=$'\t' read -r from into; do
+    [[ -n "$from" ]] || continue
+    from="${from//\$GAMES/$GOTG_GAMES_DIR}"
+    from="${from//\$XDG_DATA/${XDG_DATA_HOME:-$HOME/.local/share}}"
+
+    # shellcheck disable=SC2086 # the manifest entry is a glob on purpose
+    for match in $from; do
+      [[ -e "$match" ]] || continue
+      base="$(basename "$match")"
+      dest="$state/$into/$base"
+      # Whatever is here now came from a pull or from play, and is newer than
+      # anything being adopted.
+      [[ -e "$dest" ]] && continue
+
+      found=$((found + 1))
+      if [[ "$apply" == "yes" ]]; then
+        mkdir -p "$state/$into"
+        cp -a "$match" "$dest"
+        log "  copied $match"
+      else
+        log "  would copy $match -> $dest"
+      fi
+    done
+  done < <(jq -r '.legacy[]? | "\(.from)\t\(.into)"' <<<"$manifest")
+
+  printf '%s' "$found"
+}
+
+# The same thing, once, unattended, on the first launch after the redirect
+# lands. A Steam-launched game is the only place many of these will ever be
+# started from, so leaving adoption to a command nobody runs would mean finding
+# out about it the hard way. It writes to the launch log and never interferes
+# with the launch itself.
+saves_adopt_once() {
+  local attr="$1"
+  [[ -f "$(env_saves_manifest "$attr")" ]] || return 0
+  [[ "$(saves_journal_get "$attr" adopted)" == "true" ]] && return 0
+
+  # Only into an environment that has nothing yet: once a save exists here, this
+  # machine is the authority and older files must not be laid on top of it.
+  local manifest state globs=()
+  manifest="$(saves_manifest "$attr")"
+  state="$(env_state_dir "$attr")"
+  mapfile -t globs < <(jq -r '.saves[]?' <<<"$manifest")
+  [[ ${#globs[@]} -gt 0 ]] || return 0
+  [[ -z "$(saves_member_list "$state" "${globs[@]}")" ]] || {
+    saves_journal_set "$attr" '{"adopted": true}'
+    return 0
+  }
+
+  local found
+  found="$(saves_adopt "$attr" yes)"
+  if [[ "$found" != "0" ]]; then
+    log "adopted $found save file(s) from where $attr used to keep them"
+  fi
+  saves_journal_set "$attr" '{"adopted": true}'
+}
+
 # Archive whatever is here before overwriting it. A pull is the one operation
 # that can destroy local work, so it never happens without this first.
 saves_snapshot() {

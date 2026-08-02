@@ -37,6 +37,14 @@ teardown() {
   stop_server
 }
 
+# An environment that also knows where its emulator used to keep saves.
+fake_env_legacy() {
+  local dir="$GOTG_ROOTS_DIR/env-n64/share/gotg"
+  jq -n '{version: 1, name: "env-n64", saves: ["saves/**"], excludes: [],
+          legacy: [{from: "$GAMES/n64/*.ram", into: "saves"}], saveStates: false}' \
+    >"$dir/saves.json"
+}
+
 # Put a save in place, as an emulator would.
 write_save() {
   mkdir -p "$STATE/saves"
@@ -302,6 +310,61 @@ first_device() {
   gotg saves status --all
   [ "$status" -eq 0 ]
   [[ "$output$stderr" == *"unreachable"* ]]
+}
+
+@test "adopt says what it would do and changes nothing" {
+  fake_env_legacy
+  mkdir -p "$GOTG_GAMES_DIR/n64"
+  printf 'old-save' >"$GOTG_GAMES_DIR/n64/usa.zelda.ram"
+
+  gotg saves adopt --all
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"would copy"* ]]
+  [[ "$stderr" == *"usa.zelda.ram"* ]]
+  [[ "$stderr" == *"Nothing has been changed"* ]]
+  [ ! -e "$STATE/saves/usa.zelda.ram" ]
+}
+
+@test "adopt copies, and leaves the originals where they were" {
+  fake_env_legacy
+  mkdir -p "$GOTG_GAMES_DIR/n64"
+  printf 'old-save' >"$GOTG_GAMES_DIR/n64/usa.zelda.ram"
+
+  gotg saves adopt --all --yes
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STATE/saves/usa.zelda.ram")" = "old-save" ]
+  # If the mapping is wrong, the cost is disk rather than a save.
+  [ "$(cat "$GOTG_GAMES_DIR/n64/usa.zelda.ram")" = "old-save" ]
+}
+
+@test "adopt never writes over a save that is already here" {
+  fake_env_legacy
+  mkdir -p "$GOTG_GAMES_DIR/n64"
+  printf 'old-save' >"$GOTG_GAMES_DIR/n64/usa.zelda.ram"
+  write_save "usa.zelda.ram" "newer-work"
+
+  gotg saves adopt --all --yes
+  [ "$status" -eq 0 ]
+  # Anything already here came from a pull or from playing, and is the authority.
+  [ "$(cat "$STATE/saves/usa.zelda.ram")" = "newer-work" ]
+}
+
+@test "the first launch adopts once, and only once" {
+  fake_env_legacy
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  mkdir -p "$GOTG_GAMES_DIR/n64"
+  printf 'old-save' >"$GOTG_GAMES_DIR/n64/usa.zelda.ram"
+
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STATE/saves/usa.zelda.ram")" = "old-save" ]
+
+  # Play on, then launch again: the older file must not come back over the top.
+  write_save "usa.zelda.ram" "played-since"
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STATE/saves/usa.zelda.ram")" = "played-since" ]
 }
 
 @test "a game id names the environment its saves actually belong to" {

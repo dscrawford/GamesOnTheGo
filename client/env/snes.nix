@@ -1,9 +1,5 @@
-# SNES — ares, which works out the console from the ROM header. Every
-# cartridge platform gets its own file rather than sharing one, so that changing
-# how SNES runs cannot quietly change the rest of them.
-{ pkgs, ... }:
-{
-  emulator = pkgs.ares;
-  bin = "ares";
-  args = [ "{target}" ];
-}
+# SNES — ares, which works out the console from the ROM header, with its saves
+# redirected into this environment's own directory. See helpers.nix for why that
+# redirect is needed and what the trailing slash is doing.
+{ helpers, ... }:
+helpers.aresPlatform { platform = "snes"; }
