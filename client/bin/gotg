@@ -21,6 +21,10 @@ source "$GOTG_LIB/common.sh"
 source "$GOTG_LIB/config.sh"
 # shellcheck source=lib/api.sh
 source "$GOTG_LIB/api.sh"
+# shellcheck source=lib/remote.sh
+source "$GOTG_LIB/remote.sh"
+# shellcheck source=lib/remote-filebrowser.sh
+source "$GOTG_LIB/remote-filebrowser.sh"
 # shellcheck source=lib/manifest.sh
 source "$GOTG_LIB/manifest.sh"
 # shellcheck source=lib/download.sh

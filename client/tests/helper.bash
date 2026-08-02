@@ -90,6 +90,32 @@ gotg() {
   run --separate-stderr "$GOTG_BIN" "$@"
 }
 
+# Source the client's own libraries into the test shell.
+#
+# The blob layer has no command of its own, and reaching it through `gotg saves`
+# would confound a backend fault with a conflict-model one — so these are called
+# directly. Set up exactly as bin/gotg sets them up, from the installed package
+# rather than the checkout, so what is tested is what is shipped.
+load_client_libs() {
+  local root
+  root="$(cd "$(dirname "$GOTG_BIN")/../share/gotg" && pwd)"
+  export GOTG_ROOT="$root"
+  export GOTG_LIB="$root/lib"
+  export GOTG_DATA="${GOTG_DATA:-$root/data}"
+  export GOTG_TEMPLATES="$root/templates"
+  export GOTG_ENV_DIR="${GOTG_ENV_DIR:-$root/env}"
+
+  # shellcheck source=/dev/null
+  local lib
+  for lib in common config api remote remote-filebrowser manifest download env launcher; do
+    source "$GOTG_LIB/$lib.sh"
+  done
+  GOTG_SERVER="$GOTG_SERVER_URL"
+  GOTG_USER="tester"
+  GOTG_PASS="hunter2"
+  GOTG_REMOTE_ROOT="/Games"
+}
+
 # A stand-in for a built environment: the GC root that `gotg play` execs, with no
 # nix involved. Absolute shebang, because /usr/bin/env does not exist inside the
 # nix build sandbox these run in.

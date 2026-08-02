@@ -85,6 +85,13 @@ validate_blob_key() {
 # deterministic for the tests costs nothing.
 iso_now() { printf '%s' "${GOTG_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"; }
 
+# The hard ceiling on a save bundle, enforced in both directions. This is the
+# guard that catches a save glob which has quietly matched something enormous —
+# a Harkinian .o2r is tens of megabytes, is rebuilt from the ROM, and must never
+# be uploaded — and it is worth more than an exclude list, because it does not
+# have to be complete to work.
+saves_max_bytes() { printf '%s' "${GOTG_SAVES_MAX_BYTES:-67108864}"; }
+
 # Reject anything that could climb out of the games directory.
 validate_remote_path() {
   local path="$1"
