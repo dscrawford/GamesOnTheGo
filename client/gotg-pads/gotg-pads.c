@@ -36,6 +36,30 @@ static void print_json_string_or_null(const char *s) {
     else fputs("null", stdout);
 }
 
+// The string ares identifies a controller by, built exactly as
+// ruby/input/joypad/sdl.cpp does — the SDL GUID, or a VID/PID pair when the
+// GUID comes back all zeros. It matters that this matches character for
+// character: ares looks a binding up by comparing this against the identifier
+// stored in settings.bml, so a difference of any kind is a controller that
+// silently has no buttons.
+static void ares_identity(SDL_JoystickID id, char *out, size_t n) {
+    char guid[33] = {0};
+    SDL_GUIDToString(SDL_GetJoystickGUIDForID(id), guid, sizeof(guid));
+
+    if (*guid && strcmp(guid, "00000000000000000000000000000000") != 0) {
+        SDL_strlcpy(out, guid, n);
+        return;
+    }
+
+    // ares substitutes its generic ids for a missing vendor or product, and
+    // formats both in decimal.
+    Uint16 vid = SDL_GetJoystickVendorForID(id);
+    Uint16 pid = SDL_GetJoystickProductForID(id);
+    if (vid == 0) vid = 0x0000;  // HID::Joypad::GenericVendorID
+    if (pid == 0) pid = 0x0003;  // HID::Joypad::GenericProductID
+    SDL_snprintf(out, n, "VID:%u|PID:%u", (unsigned)vid, (unsigned)pid);
+}
+
 int main(void) {
     // See what the emulators see. The current Steam Controller is a hidapi
     // device whose SDL3 driver falls back to SDL_HINT_JOYSTICK_HIDAPI, so
@@ -71,15 +95,19 @@ int main(void) {
         char guid[33] = {0};
         SDL_GUIDToString(SDL_GetJoystickGUIDForID(id), guid, sizeof(guid));
 
-        // ares' slot: how many devices with this same GUID came before this one
-        // in SDL's enumeration order. Two identical pads are told apart by
-        // nothing else, so this has to match ruby/input/joypad/sdl.cpp exactly —
-        // getting it wrong silently swaps player one and player two.
+        char identity[64] = {0};
+        ares_identity(id, identity, sizeof(identity));
+
+        // ares' slot: how many devices with this same *identity* came before
+        // this one in SDL's enumeration order. Two identical pads are told
+        // apart by nothing else, so this has to match
+        // ruby/input/joypad/sdl.cpp exactly — getting it wrong silently swaps
+        // player one and player two.
         int slot = 0;
         for (int j = 0; j < i; j++) {
-            char other[33] = {0};
-            SDL_GUIDToString(SDL_GetJoystickGUIDForID(ids[j]), other, sizeof(other));
-            if (strcmp(other, guid) == 0) slot++;
+            char other[64] = {0};
+            ares_identity(ids[j], other, sizeof(other));
+            if (strcmp(other, identity) == 0) slot++;
         }
 
         Uint16 vid = SDL_GetJoystickVendorForID(id);
@@ -97,7 +125,12 @@ int main(void) {
         printf("\"instance\": %u, ", (unsigned)id);
         fputs("\"name\": ", stdout);
         print_json_string_or_null(SDL_GetJoystickNameForID(id));
-        printf(", \"guid\": \"%s\", \"slot\": %d", guid, slot);
+        printf(", \"guid\": \"%s\"", guid);
+        // identity + slot is what an ares binding is keyed on, so it is emitted
+        // ready to use rather than left to be reassembled downstream.
+        fputs(", \"identity\": ", stdout);
+        print_json_string(identity);
+        printf(", \"slot\": %d", slot);
         printf(", \"vid\": \"%04x\", \"pid\": \"%04x\"", vid, pid);
         printf(", \"gamepad\": %s", SDL_IsGamepad(id) ? "true" : "false");
 
