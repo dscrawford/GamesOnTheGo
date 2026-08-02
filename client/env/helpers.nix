@@ -21,6 +21,11 @@
   aresPlatform =
     {
       platform,
+      # The ares console section this platform's games appear under. Only set
+      # where it has been read off a real settings.bml — ares creates the
+      # section on first run, so it cannot be derived from the platform slug,
+      # and a wrong name would write bindings nothing ever reads.
+      console ? null,
       # What ares calls this console. It does not write the save directly under
       # Paths/Saves — it makes a directory of this name there and puts it
       # inside. Confirmed by launching: a SNES save landed in
@@ -38,6 +43,7 @@
       emulator = pkgs.ares;
       bin = "ares";
       isolate = true;
+      padConsole = console;
       args = [
         "--setting"
         "Paths/Saves={state}/saves/"

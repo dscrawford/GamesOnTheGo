@@ -109,7 +109,7 @@ load_client_libs() {
 
   # shellcheck source=/dev/null
   local lib
-  for lib in common config api remote remote-filebrowser manifest download env launcher; do
+  for lib in common config api remote remote-filebrowser manifest download env launcher pads saves; do
     source "$GOTG_LIB/$lib.sh"
   done
   GOTG_SERVER="$GOTG_SERVER_URL"

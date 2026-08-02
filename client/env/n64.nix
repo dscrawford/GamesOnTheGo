@@ -8,4 +8,7 @@
 # a guess would copy old saves somewhere ares never reads, which looks exactly
 # like losing them.
 { helpers, ... }:
-helpers.aresPlatform { platform = "n64"; }
+helpers.aresPlatform {
+  platform = "n64";
+  console = "Nintendo64";
+}

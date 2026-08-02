@@ -1,0 +1,44 @@
+{
+  "_comment": [
+    "Which standard gamepad element drives each ares button, per console.",
+    "",
+    "The left side is ares' own button name inside",
+    "<Console>/Input/Controller.Port.N/Gamepad; the right side is SDL's name for",
+    "a standard element, which SDL maps to whatever raw index a given controller",
+    "actually uses. That indirection is the point: the same table works for a",
+    "pad whose A is button 0 and one whose A is button 1.",
+    "",
+    "Only consoles confirmed against a real settings.bml are listed. An ares",
+    "console section is created the first time that console is run, so the name",
+    "cannot be guessed from the platform slug — add one by playing the console",
+    "once and reading the section heading."
+  ],
+
+  "SuperFamicom": {
+    "Up": "dpup",
+    "Down": "dpdown",
+    "Left": "dpleft",
+    "Right": "dpright",
+    "B": "a",
+    "A": "b",
+    "Y": "x",
+    "X": "y",
+    "L": "leftshoulder",
+    "R": "rightshoulder",
+    "Select": "back",
+    "Start": "start"
+  },
+
+  "Nintendo64": {
+    "Up": "dpup",
+    "Down": "dpdown",
+    "Left": "dpleft",
+    "Right": "dpright",
+    "B": "x",
+    "A": "a",
+    "L": "leftshoulder",
+    "R": "rightshoulder",
+    "Z": "lefttrigger",
+    "Start": "start"
+  }
+}

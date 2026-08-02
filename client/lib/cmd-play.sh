@@ -61,6 +61,12 @@ cmd_play() {
   # be started from, so it goes to the log and play continues either way.
   saves_adopt_once "$attr" || warn "could not adopt older saves for $attr"
 
+  # Point the emulator at whatever controller is actually plugged in, every
+  # launch, so a new pad needs no visit to a settings screen. Never fatal: a
+  # launch with no controller is a launch on the keyboard, which beats not
+  # starting.
+  pads_configure "$attr" || warn "could not set controller bindings for $attr"
+
   # The environment decides the emulator, its arguments and its settings; all it
   # is told is which file to run, where that came from, and where to keep what
   # it writes — that last one from env_state_dir, so the CLI and the wrapper

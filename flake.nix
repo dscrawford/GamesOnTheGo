@@ -34,7 +34,7 @@
         in
         envs
         // rec {
-          gotg = pkgs.callPackage ./client { };
+          gotg = pkgs.callPackage ./client { inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg-pads; };
           gotg-importer = pkgs.callPackage ./importer { };
           default = gotg;
 

@@ -83,6 +83,13 @@ env_saves_manifest() {
   printf '%s/share/gotg/saves.json' "$(env_root "$1")"
 }
 
+# Which ares console this environment's bindings belong to, if any. Absent for
+# an environment whose bindings are not generated.
+env_pads_manifest() {
+  validate_attr "$1"
+  printf '%s/share/gotg/pads.json' "$(env_root "$1")"
+}
+
 # nix can take a long time the first time a platform is used. Under Steam there
 # is no terminal for it to say so in, and a game that shows no window for twenty
 # minutes reads as a crash, so pulse a dialog for as long as the build runs.

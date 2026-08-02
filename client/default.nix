@@ -6,6 +6,7 @@
   curl,
   jq,
   unzip,
+  gotg-pads,
   gnutar,
   zstd,
   zenity,
@@ -49,6 +50,7 @@ stdenvNoCC.mkDerivation {
           gnugrep
           gnused
           gawk
+          gotg-pads # reports what SDL sees, for generated bindings
           gnutar # save bundles
           zstd
           util-linux # flock, for the per-game download lock

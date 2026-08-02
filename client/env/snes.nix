@@ -8,4 +8,5 @@
 helpers.aresPlatform {
   platform = "snes";
   system = "Super Famicom";
+  console = "SuperFamicom";
 }

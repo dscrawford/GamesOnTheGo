@@ -45,6 +45,11 @@
   # not portable across emulator versions, so a state pulled from another
   # machine may simply refuse to load.
   saveStates ? false,
+  # The ares console section whose controller bindings can be generated —
+  # "SuperFamicom", "Nintendo64". Null leaves an environment's bindings alone.
+  # ares creates a section the first time that console is run, so the name is
+  # not derivable from the platform slug and is only set where it is confirmed.
+  padConsole ? null,
 }:
 
 let
@@ -149,4 +154,9 @@ pkgs.runCommand "gotg-env-${name}"
     mkdir -p $out/bin $out/share/gotg
     ln -s ${app}/bin/gotg-play $out/bin/gotg-play
     cp ${pkgs.writeText "saves.json" (builtins.toJSON manifest)} $out/share/gotg/saves.json
+    ${lib.optionalString (padConsole != null) ''
+      cp ${
+        pkgs.writeText "pads.json" (builtins.toJSON { console = padConsole; })
+      } $out/share/gotg/pads.json
+    ''}
   ''
