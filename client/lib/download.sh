@@ -8,6 +8,11 @@
 # Poll interval for the graphical progress dialog.
 PROGRESS_TICK="${GOTG_PROGRESS_TICK:-0.5}"
 
+# The token for the transfer in progress, set by download_game. A plain shell
+# variable and never exported: it reaches curl on stdin, so it appears neither
+# in the URL, nor in any argv, nor in a child process's environment.
+GOTG_DOWNLOAD_TOKEN=""
+
 download_partial_path() {
   local id="$1" type="$2"
   if [[ "$type" == "dir" ]]; then
@@ -24,7 +29,8 @@ _curl_download() {
   shift 3
   local resume=(-C -)
   [[ "$type" == "dir" ]] && resume=()
-  curl -fL --retry 3 --retry-connrefused --retry-delay 2 \
+  api_auth_config "$GOTG_DOWNLOAD_TOKEN" | curl --config - \
+    -fL --retry 3 --retry-connrefused --retry-delay 2 \
     --connect-timeout 15 \
     "${resume[@]}" "$@" -o "$out" "$url"
 }
@@ -225,9 +231,9 @@ download_game() {
   fi
 
   config_load
-  local token url
-  token="$(api_login)"
-  url="$(api_raw_url "$remote" "$token" "$type")"
+  local url
+  GOTG_DOWNLOAD_TOKEN="$(api_login)"
+  url="$(api_raw_url "$remote" "$type")"
 
   log "fetching $title ($(human_size "$size"))"
   _download_with_progress "$url" "$staged" "$type" "$title" "${size:-0}" ||

@@ -13,6 +13,7 @@ GOTG_CACHE_FILE="$GOTG_STATE_DIR/manifest.json"
 GOTG_ROOTS_DIR="$GOTG_STATE_DIR/roots"
 GOTG_LOG_DIR="$GOTG_STATE_DIR/logs"
 GOTG_APP_ROOT="$GOTG_STATE_DIR/app"
+GOTG_SAVES_DIR="$GOTG_STATE_DIR/saves"
 
 # Where games land. One directory per platform, mirroring the server layout.
 GOTG_GAMES_DIR="${GOTG_GAMES_DIR:-$HOME/Games}"
@@ -22,6 +23,13 @@ GOTG_PARTIAL_DIR="$GOTG_GAMES_DIR/.gotg-partial"
 GOTG_ID_RE='^[a-z]{3,5}\.[a-z0-9][a-z0-9_]*$'
 # Platform slugs name a directory under ~/Games, so they are checked too.
 GOTG_PLATFORM_RE='^[a-z0-9][a-z0-9_-]*$'
+# Environment attributes are flake attributes, GC root names, local state
+# directories and remote directories all at once, so they are checked wherever
+# one arrives from somewhere other than env_attr.
+GOTG_ATTR_RE='^env-[a-z0-9][a-z0-9_-]*$'
+# The only two shapes of remote key that exist. Everything a backend is asked
+# for goes through this before it becomes a URL or an argv entry.
+GOTG_BLOB_KEY_RE='^env-[a-z0-9][a-z0-9_-]*/(gen/[0-9]{6}-[0-9a-f]{12}\.tar\.zst|latest\.json)$'
 
 log() { printf '%s\n' "$*" >&2; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -57,6 +65,25 @@ validate_platform() {
   [[ -n "$platform" ]] || die "catalog entry has no platform"
   [[ "$platform" =~ $GOTG_PLATFORM_RE ]] || die "invalid platform in catalog: $platform"
 }
+
+# An attribute arriving from a GC root directory listing or the remote, on its
+# way to becoming a path or a flake reference.
+validate_attr() {
+  local attr="$1"
+  [[ -n "$attr" ]] || die "empty environment name"
+  [[ "$attr" =~ $GOTG_ATTR_RE ]] || die "invalid environment name: $attr"
+}
+
+# Remote keys are built here but read back from listings the server controls.
+validate_blob_key() {
+  local key="$1"
+  [[ "$key" =~ $GOTG_BLOB_KEY_RE ]] || die "invalid remote key: $key"
+}
+
+# UTC stamp for the metadata a person reads when choosing between two saves.
+# Deliberately never an input to any decision — see docs/saves.md — so making it
+# deterministic for the tests costs nothing.
+iso_now() { printf '%s' "${GOTG_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"; }
 
 # Reject anything that could climb out of the games directory.
 validate_remote_path() {

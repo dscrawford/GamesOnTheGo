@@ -5,10 +5,14 @@ Implements the three behaviours the client depends on: a JSON login that returns
 a bare token, /api/raw for a file (with Range support, so resume is really
 tested), and /api/raw for a directory served as a zip.
 
-Usage: mock_filebrowser.py <root-dir> <port> [--fail-after N]
+Usage: mock_filebrowser.py <root-dir> <port> [--fail-after N] [--legacy-auth]
 
 --fail-after drops the connection after N bytes, which is how the resume test
 produces a genuinely truncated download rather than a simulated one.
+
+--legacy-auth also accepts the token as an ?auth= query parameter. File Browser
+removed that in 2.45.0, so the default is header-only: a test that turns this on
+is testing an old server on purpose.
 """
 
 from __future__ import annotations
@@ -29,9 +33,15 @@ PASSWORD = "hunter2"
 class Handler(BaseHTTPRequestHandler):
     root = "."
     fail_after = 0
+    legacy_auth = False
 
     def log_message(self, *args):  # keep the test output readable
         pass
+
+    def _authorized(self, query) -> bool:
+        if self.headers.get("X-Auth") == TOKEN:
+            return True
+        return bool(self.legacy_auth and query.get("auth", [""])[0] == TOKEN)
 
     def _send(self, code, body=b"", ctype="application/octet-stream", extra=None):
         self.send_response(code)
@@ -60,7 +70,7 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         if not parsed.path.startswith("/api/raw"):
             return self._send(404, b"not found")
-        if query.get("auth", [""])[0] != TOKEN:
+        if not self._authorized(query):
             return self._send(401, b"unauthorized")
 
         rel = unquote(parsed.path[len("/api/raw") :]).lstrip("/")
@@ -120,6 +130,7 @@ def main():
     port = int(args[1])
     if "--fail-after" in sys.argv:
         Handler.fail_after = int(sys.argv[sys.argv.index("--fail-after") + 1])
+    Handler.legacy_auth = "--legacy-auth" in sys.argv
 
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     server.serve_forever()

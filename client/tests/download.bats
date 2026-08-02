@@ -15,6 +15,21 @@ teardown() {
   stop_server
 }
 
+@test "the token travels in a header, not a query parameter" {
+  # File Browser dropped ?auth= in 2.45.0; this server is older, but the client
+  # moved to X-Auth ahead of it. The mock is header-only unless asked otherwise,
+  # so a regression to the query form fails here rather than on upgrade day —
+  # and the token stays out of argv, access logs and any proxy in between.
+  add_game n64 "usa.zelda.z64" "rom-content"
+  local url="$GOTG_SERVER_URL/api/raw/Games/n64/usa.zelda.z64"
+
+  run curl -s -o /dev/null -w '%{http_code}' "$url?auth=test-token-12345"
+  [ "$output" = "401" ]
+
+  run curl -s -o /dev/null -w '%{http_code}' -H 'X-Auth: test-token-12345' "$url"
+  [ "$output" = "200" ]
+}
+
 @test "list marks which games are already installed" {
   add_game n64 "usa.zelda.z64" "rom-content" "Zelda"
   gotg refresh

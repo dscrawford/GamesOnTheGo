@@ -9,12 +9,14 @@
 
 config_exists() { [[ -f "$GOTG_CONFIG_FILE" ]]; }
 
-# Refuse to read a config anyone else can read.
+# Refuse to read a secret anyone else can read. Takes a path because the config
+# is no longer the only such file — an rclone.conf holds OAuth refresh tokens,
+# which are worth rather more than one library password.
 config_check_perms() {
-  local mode
-  mode="$(stat -c '%a' "$GOTG_CONFIG_FILE")"
+  local file="${1:-$GOTG_CONFIG_FILE}" mode
+  mode="$(stat -c '%a' "$file")"
   if [[ "${mode: -2}" != "00" ]]; then
-    die "$GOTG_CONFIG_FILE is mode $mode; it holds a password. Fix with: chmod 600 $GOTG_CONFIG_FILE"
+    die "$file is mode $mode; it holds a secret. Fix with: chmod 600 $file"
   fi
 }
 
@@ -34,23 +36,45 @@ config_load() {
   [[ -n "$GOTG_SERVER" ]] || die "no server in $GOTG_CONFIG_FILE — run: gotg login"
 }
 
-config_write() {
-  local server="$1" username="$2" password="$3" remote_root="$4"
+# Merge keys into the config, keeping everything already there.
+#
+# This used to rebuild the whole object from its four arguments, which meant a
+# second `gotg login` silently dropped every other key — running it after
+# `gotg saves setup` would have unconfigured the save backend without saying so.
+config_patch() {
+  local patch="$1" existing='{}'
   mkdir -p "$GOTG_CONFIG_DIR"
   chmod 700 "$GOTG_CONFIG_DIR"
+
+  if [[ -f "$GOTG_CONFIG_FILE" ]]; then
+    config_check_perms "$GOTG_CONFIG_FILE"
+    existing="$(cat "$GOTG_CONFIG_FILE")"
+    jq -e 'type == "object"' >/dev/null 2>&1 <<<"$existing" ||
+      die "$GOTG_CONFIG_FILE is not a JSON object — move it aside and run: gotg login"
+  fi
+
   local tmp="$GOTG_CONFIG_FILE.tmp"
   # Create with the right mode before writing, so the password is never briefly
   # world-readable.
   : >"$tmp"
   chmod 600 "$tmp"
-  jq -n \
+  jq -n --argjson existing "$existing" --argjson patch "$patch" '$existing + $patch' >"$tmp"
+  mv "$tmp" "$GOTG_CONFIG_FILE"
+}
+
+# One key, for the commands that configure a single thing.
+config_set() {
+  config_patch "$(jq -nc --arg k "$1" --arg v "$2" '{($k): $v}')"
+}
+
+config_write() {
+  local server="$1" username="$2" password="$3" remote_root="$4"
+  config_patch "$(jq -nc \
     --arg server "$server" \
     --arg username "$username" \
     --arg password "$password" \
     --arg remote_root "$remote_root" \
-    '{server: $server, username: $username, password: $password, remote_root: $remote_root}' \
-    >"$tmp"
-  mv "$tmp" "$GOTG_CONFIG_FILE"
+    '{server: $server, username: $username, password: $password, remote_root: $remote_root}')"
 }
 
 prompt_secret() {
