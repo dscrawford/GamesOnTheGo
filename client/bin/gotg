@@ -39,6 +39,8 @@ source "$GOTG_LIB/cmd-play.sh"
 source "$GOTG_LIB/saves.sh"
 # shellcheck source=lib/cmd-saves.sh
 source "$GOTG_LIB/cmd-saves.sh"
+# shellcheck source=lib/cmd-controllers.sh
+source "$GOTG_LIB/cmd-controllers.sh"
 
 usage() {
   cat <<'EOF'
@@ -52,6 +54,7 @@ usage: gotg <command> [args]
   install <id>       fetch it, build its environment, write a Steam launcher
   play <id>          fetch and build whatever is missing, then launch
   saves <command>    move saves between machines (saves help for the rest)
+  controllers <cmd>  the one privileged step some controllers need
   sync               rebuild gotg and the environment GC roots after a git pull
 
 Ids look like usa.legend_of_zelda_majoras_mask. When the same id exists on more
@@ -78,6 +81,7 @@ main() {
     install) cmd_install "$@" ;;
     play | launch) cmd_play "$@" ;;
     saves) cmd_saves "$@" ;;
+    controllers) cmd_controllers "$@" ;;
     sync) cmd_sync "$@" ;;
     help | --help | -h | "") usage ;;
     *)

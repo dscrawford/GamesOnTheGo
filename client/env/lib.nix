@@ -60,7 +60,24 @@ let
       [ "'\"$target\"'" "'\"$install\"'" "'\"$state\"'" ]
       (lib.escapeShellArg s);
 
-  exports = lib.concatLines (lib.mapAttrsToList (k: v: "export ${k}=${render (toString v)}") env);
+  # Hints every emulator here needs, merged *under* an environment's own env so
+  # that a platform can still override one.
+  baseEnv = {
+    # The current Steam Controller has no evdev node at all — it is a hidapi
+    # device, driven by SDL3's triton driver. That driver's IsEnabled() falls
+    # back to SDL_HINT_JOYSTICK_HIDAPI when no Steam-specific hint is set, and
+    # the Steam launcher template deliberately sets that to 0, so the puck would
+    # stay a keyboard and mouse inside exactly the launcher people use.
+    #
+    # An explicit hint beats the fallback, which is why this is set here rather
+    # than by deleting the launcher's line: that line is what makes Steam Input
+    # work for whoever is playing today, and it is not ours to regress.
+    SDL_JOYSTICK_HIDAPI_STEAM = "1";
+  };
+
+  exports = lib.concatLines (
+    lib.mapAttrsToList (k: v: "export ${k}=${render (toString v)}") (baseEnv // env)
+  );
 
   sourceOf = v: if lib.isDerivation v || lib.isPath v then v else pkgs.writeText "gotg-config" v;
 

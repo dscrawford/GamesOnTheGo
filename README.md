@@ -46,6 +46,40 @@ gotg install usa.legend_of_zelda_majoras_mask    # download + build its environm
 **Games → Add a Non-Steam Game → Browse**. Launching it downloads the game if it
 is missing (with a progress dialog) and then starts the emulator.
 
+### Controllers
+
+Most controllers need nothing. An Xbox pad works the moment it is plugged in,
+because systemd already grants access to joystick devices.
+
+The exception is anything that talks raw HID rather than evdev — the current
+Steam Controller does, and has no evdev node at all. Reading `/dev/hidraw*`
+needs one udev rule, and that rule is the whole privileged surface of this.
+
+On NixOS, use the module:
+
+```nix
+imports = [ inputs.gotg.nixosModules.controllers ];
+programs.gotg.controllers.enable = true;
+```
+
+Anywhere else:
+
+```bash
+gotg controllers install-rules            # prints what it would run
+gotg controllers install-rules --apply    # runs it, then replug the controller
+```
+
+It refuses on NixOS rather than doing it, because a hand-made symlink in
+`/etc/udev/rules.d` is replaced on the next rebuild — which fails later and
+looks like something else.
+
+The module has two options that are off unless asked for: `xboxDongle` for the
+Xbox Wireless dongle, which is off by default because the `xone` driver
+blacklists `xpad` and changes how *wired* pads enumerate; and
+`gcAdapterOverclock` for 1 ms polling on the Wii U GameCube adapter. Enabling
+this alongside `programs.steam.enable` is a no-op — both go through
+`services.udev.packages` with the same store path.
+
 ### Emulator environments
 
 A game does not run "in an emulator" so much as in an **environment** built from
@@ -201,5 +235,5 @@ nix flake check    # every test suite and linter
 The `gotg` on PATH in the dev shell is the wrapped build, not `client/bin/gotg`
 directly, so re-enter the shell (direnv reloads on its own) to pick up edits.
 
-`nix flake check` runs 119 importer tests (pytest), 67 client tests (bats,
+`nix flake check` runs 119 importer tests (pytest), 74 client tests (bats,
 against a stand-in File Browser over real HTTP), ruff and shellcheck.

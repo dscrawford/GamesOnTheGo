@@ -12,6 +12,7 @@ gotg download <id>          fetch a game, nothing else
 gotg install <id>           fetch + build its environment + write a Steam launcher
 gotg play <id>              fetch and build what is missing, then launch
 gotg saves <command>        setup / status / push / pull, between machines
+gotg controllers <command>  install-rules, for pads that talk raw HID
 gotg sync                   rebuild the GC roots after a git pull
 ```
 
@@ -32,6 +33,7 @@ gotg sync                   rebuild the GC roots after a git pull
 | `lib/remote-filebrowser.sh` | those five against File Browser |
 | `lib/saves.sh` | bundling, generations, and verifying what arrives |
 | `lib/cmd-saves.sh` | `saves setup`, `status`, `push`, `pull` |
+| `lib/cmd-controllers.sh` | `controllers install-rules` |
 | `env/<platform>.nix` | the emulator, arguments and settings for a platform |
 | `env/games/<platform>/<id>.nix` | what one game changes about that |
 
@@ -63,6 +65,6 @@ log; `gotg install <id>` from a terminal is still the smoother first run.
 nix flake check     # or: GOTG_BIN=$(which gotg) bats client/tests/
 ```
 
-67 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
+74 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
 of the real API — including `Range` requests — that resume is exercised against a
 genuinely truncated transfer rather than a simulated one.
