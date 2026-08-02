@@ -49,6 +49,10 @@
           # audit, one more thing to keep current; the full package for now.
           controller-udev-rules = pkgs.steam-devices-udev-rules;
 
+          # Asks the same library the emulators ask, so nothing downstream has
+          # to guess which physical controller is which.
+          gotg-pads = pkgs.callPackage ./client/gotg-pads { };
+
           # Image for the in-cluster CronJob. The archive tools (unrar, zip, rhash)
           # arrive through the wrapper's closure, so no extra PATH wiring is needed.
           #
