@@ -25,9 +25,23 @@ class RulesError(Exception):
 
 
 @dataclass(frozen=True)
+class Target:
+    """The format a platform's emulator wants, per IMPORTER_SPEC.md §5a.
+
+    An empty ``ext`` means the source is already usable and should be hardlinked,
+    which is every platform imported so far — so adding this changes nothing for
+    them.
+    """
+
+    ext: str = ""
+    tool: str = ""
+
+
+@dataclass
 class Rules:
     dat_dirs: dict[str, tuple[str, str]] = field(default_factory=dict)
     extensions: dict[str, str] = field(default_factory=dict)
+    targets: dict[str, Target] = field(default_factory=dict)
     archive_exts: frozenset[str] = ARCHIVE_EXTS
     # How many mapped ROM files make a directory a "set" rather than a loose game.
     min_set_files: int = 5
@@ -38,6 +52,10 @@ class Rules:
 
     def platform_for_ext(self, ext: str) -> str:
         return self.extensions.get(ext.lower().lstrip("."), "")
+
+    def target_for(self, platform: str) -> Target:
+        """What this platform's games must end up as. Default: whatever they are."""
+        return self.targets.get(platform, Target())
 
     def region_for_release(self, release_name: str) -> str:
         """Region for a scene release, whose filename carries no region tag."""
@@ -76,6 +94,18 @@ def load(path: Path | str | None = None) -> Rules:
     for ext, platform in (raw.get("extensions") or {}).items():
         extensions[str(ext).lower().lstrip(".")] = str(platform)
 
+    targets = dict(base.targets)
+    for platform, spec in (raw.get("targets") or {}).items():
+        if not isinstance(spec, dict):
+            raise RulesError(f"{path}: targets[{platform!r}] must be a mapping")
+        ext = str(spec.get("ext") or "").lower().lstrip(".")
+        tool = str(spec.get("tool") or "")
+        # A target that names a format but no way to reach it would silently
+        # import the source unchanged, which is the failure this exists to avoid.
+        if ext and not tool:
+            raise RulesError(f"{path}: targets[{platform!r}] sets 'ext' but no 'tool'")
+        targets[str(platform)] = Target(ext=ext, tool=tool)
+
     overrides: list[tuple[str, str]] = []
     for entry in raw.get("scene_overrides") or []:
         if not isinstance(entry, dict) or "match" not in entry or "region" not in entry:
@@ -85,6 +115,7 @@ def load(path: Path | str | None = None) -> Rules:
     return Rules(
         dat_dirs=dat_dirs,
         extensions=extensions,
+        targets=targets,
         archive_exts=frozenset(raw.get("archive_exts") or base.archive_exts),
         min_set_files=int(raw.get("min_set_files", base.min_set_files)),
         scene_default_region=str(raw.get("scene_default_region", base.scene_default_region)),

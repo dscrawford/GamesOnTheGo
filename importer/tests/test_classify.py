@@ -9,12 +9,13 @@ from gotg_importer.classify import (
     HANDLER_MANUAL,
     HANDLER_NO_INTRO_SET,
     HANDLER_SCENE_ARCHIVE,
+    HANDLER_SINGLE_ARCHIVE,
     HANDLER_SINGLE_FILE,
     HANDLER_WIIU_DECRYPTED,
     HANDLER_WIIU_NUS,
     classify,
 )
-from gotg_importer.rules import defaults
+from gotg_importer.rules import defaults, load
 from gotg_importer.scan import Source
 
 RULES = defaults()
@@ -148,3 +149,37 @@ def test_unidentifiable_payloads_go_to_manual(source):
     verdict = classify(source, RULES)
     assert verdict.handler == HANDLER_MANUAL
     assert verdict.reason, "manual verdicts must explain themselves"
+
+
+def test_lone_archive_is_judged_by_what_is_inside():
+    # load(), not defaults(): `.iso` is mapped in rules.yaml on purpose.
+    rules = load()
+    """A .7z says nothing about a platform; the image inside says everything."""
+    source = Source(
+        path=Path("/t/Super Mario Sunshine (USA).7z"),
+        is_dir=False,
+        archive_members=("Super Mario Sunshine (USA).nkit.iso",),
+    )
+    verdict = classify(source, rules)
+    assert verdict.handler == HANDLER_SINGLE_ARCHIVE
+    assert verdict.platform == "gamecube"
+
+
+def test_lone_archive_of_nothing_recognisable_is_flagged_not_guessed():
+    rules = defaults()
+    source = Source(
+        path=Path("/t/Some Release.7z"),
+        is_dir=False,
+        archive_members=("readme.txt", "cover.jpg"),
+    )
+    verdict = classify(source, rules)
+    assert verdict.handler == HANDLER_MANUAL
+    assert "no known platform" in verdict.reason
+
+
+def test_an_archive_that_could_not_be_listed_is_not_a_game():
+    rules = defaults()
+    """No members means 7z was unavailable or the file is broken — say so
+    rather than inventing a platform from the wrapper's extension."""
+    source = Source(path=Path("/t/Thing.7z"), is_dir=False)
+    assert classify(source, rules).handler == HANDLER_MANUAL

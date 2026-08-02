@@ -4,6 +4,7 @@
   makeWrapper,
   unrar,
   p7zip,
+  dolphin-emu,
   zip,
   rhash,
   coreutils,
@@ -34,6 +35,10 @@ python3Packages.buildPythonApplication {
         lib.makeBinPath [
           unrar
           p7zip
+          # dolphin-tool: reads every disc format Dolphin plays and writes RVZ,
+          # which is how a GameCube image is normalized on import (spec §5a).
+          # A large closure for one binary, and the reason the image grew.
+          dolphin-emu
           zip
           rhash
           coreutils

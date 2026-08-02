@@ -12,3 +12,6 @@ __pycache__/
 
 # Local runtime state (never committed)
 /state/
+
+# direnv caches: symlinks into the store, never part of the source
+.direnv/

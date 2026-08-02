@@ -119,3 +119,28 @@ def test_cleanup_runs_before_importing(cfg):
 
 def test_cleanup_on_a_missing_games_root_is_harmless(tmp_path):
     assert cleanup_staging(tmp_path / "nope") == 0
+
+
+def test_scan_finds_games_and_walks_past_everything_else(tmp_path):
+    """The source tree is shared with film and television: a TV episode is not a
+    low-confidence game, it is not a game, and must not become a manual item."""
+    from gotg_importer.rules import load as load_rules
+    from gotg_importer.run import discover
+
+    root = tmp_path / "Torrents"
+    root.mkdir()
+    (root / "Some.Show.S01E01.1080p.WEB-DL.x264-GROUP.mkv").write_bytes(b"x")
+    (root / "Some.Film.2024.2160p.BluRay.REMUX.HEVC.mkv").write_bytes(b"x")
+    (root / "usa.zelda.z64").write_bytes(b"rom")
+    dat = root / "Nintendo - Nintendo 64 (BigEndian)"
+    dat.mkdir()
+    for n in range(6):
+        (dat / f"Game {n} (USA).z64").write_bytes(b"rom")
+
+    found, ignored = discover(root, load_rules())
+
+    names = {p.name for p in found}
+    assert "usa.zelda.z64" in names
+    assert "Nintendo - Nintendo 64 (BigEndian)" in names
+    assert ignored == 2
+    assert not any(n.endswith(".mkv") for n in names)

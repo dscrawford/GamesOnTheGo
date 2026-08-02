@@ -12,8 +12,10 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import classify as cl
 from . import manifest as mf
 from . import plan as pl
+from . import scan as sc
 from .config import Config
 from .execute import STATUS_ERROR, STATUS_MANUAL, Result, cleanup_staging, execute
 from .planner import plan_source
@@ -95,6 +97,46 @@ def _tag_for(results: list[Result]) -> str:
     if any(r.status == STATUS_MANUAL for r in results):
         return TAG_MANUAL
     return TAG_IMPORTED
+
+
+def discover(root: Path, rules: Rules) -> tuple[list[Path], int]:
+    """Game payloads directly under ``root``, and how many entries were ignored.
+
+    The source tree is shared with film and television, so anything that names no
+    known game format is passed over silently. That is the whole difference from
+    --bootstrap: an unrecognised entry there is a low-confidence game worth a
+    person's attention, whereas here it is almost certainly a TV episode, and
+    quarantining thousands of those would bury the few that matter.
+    """
+    found: list[Path] = []
+    ignored = 0
+    for child in sorted(root.iterdir()):
+        try:
+            source = sc.scan(child)
+        except OSError as exc:
+            log.debug("skipping %s: %s", child.name, exc)
+            ignored += 1
+            continue
+        verdict = cl.classify(source, rules)
+        if verdict.handler == cl.HANDLER_MANUAL and not verdict.platform:
+            ignored += 1
+            continue
+        found.append(child)
+    return found, ignored
+
+
+def run_scan(
+    root: Path,
+    cfg: Config,
+    rules: Rules,
+    *,
+    dry_run: bool,
+    checksum: bool = True,
+) -> RunStats:
+    """Import every game under one directory (--scan)."""
+    paths, ignored = discover(root, rules)
+    log.info("scanned %s: %d game source(s), %d entry(s) ignored", root, len(paths), ignored)
+    return run_paths(paths, cfg, rules, dry_run=dry_run, checksum=checksum)
 
 
 def run_paths(

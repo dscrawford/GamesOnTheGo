@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import config as cfgmod
 from . import rules as rulesmod
-from .run import QbitError, run_paths, run_queue
+from .run import QbitError, run_paths, run_queue, run_scan
 
 log = logging.getLogger("gotg-importer")
 
@@ -44,6 +44,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "process these source directories by path instead of polling qBittorrent; "
             "accepts several paths, or one comma-separated list"
+        ),
+    )
+    parser.add_argument(
+        "--scan",
+        metavar="DIR",
+        type=Path,
+        default=None,
+        help=(
+            "walk one directory, import everything that classifies as a game, and ignore the rest; needs no qBittorrent"
         ),
     )
     parser.add_argument(
@@ -88,24 +97,29 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(message)s",
     )
 
-    if not args.once and not args.bootstrap:
-        log.error("nothing to do: pass --once (work queue) or --bootstrap DIR [DIR...]")
+    if not args.once and not args.bootstrap and not args.scan:
+        log.error("nothing to do: pass --once (work queue), --scan DIR, or --bootstrap DIR [DIR...]")
         return EXIT_CONFIG
 
     try:
+        # Only the polling path talks to qBittorrent.
         cfg = cfgmod.load(require_qbit=bool(args.once))
         rules = rulesmod.load(args.rules)
         paths = _bootstrap_paths(args.bootstrap) if args.bootstrap else []
         for path in paths:
             if not path.exists():
                 raise cfgmod.ConfigError(f"source does not exist: {path}")
+        if args.scan and not args.scan.is_dir():
+            raise cfgmod.ConfigError(f"not a directory: {args.scan}")
     except (cfgmod.ConfigError, rulesmod.RulesError) as exc:
         log.error("%s", exc)
         return EXIT_CONFIG
 
     checksum = not args.no_checksum
     try:
-        if paths:
+        if args.scan:
+            stats = run_scan(args.scan, cfg, rules, dry_run=args.dry_run, checksum=checksum)
+        elif paths:
             stats = run_paths(paths, cfg, rules, dry_run=args.dry_run, checksum=checksum)
         else:
             stats = run_queue(cfg, rules, dry_run=args.dry_run, checksum=checksum)

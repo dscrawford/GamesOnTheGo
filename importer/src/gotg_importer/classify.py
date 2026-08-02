@@ -20,6 +20,7 @@ HANDLER_WIIU_NUS = "wiiu_nus"
 HANDLER_SCENE_ARCHIVE = "scene_archive"
 HANDLER_NO_INTRO_SET = "no_intro_set"
 HANDLER_SINGLE_FILE = "single_file"
+HANDLER_SINGLE_ARCHIVE = "single_archive"
 HANDLER_EXCLUDED = "excluded"
 HANDLER_MANUAL = "manual"
 
@@ -93,6 +94,17 @@ def classify(source: Source, rules: Rules) -> Classification:
         platform = rules.platform_for_ext(_ext(source.name))
         if platform:
             return Classification(HANDLER_SINGLE_FILE, platform)
+
+        # A lone archive: the wrapper says nothing, so judge it by what is inside.
+        if source.archive_members:
+            platform, _ = _platform_from_names(source.archive_members, rules)
+            if platform:
+                return Classification(HANDLER_SINGLE_ARCHIVE, platform)
+            return Classification(
+                HANDLER_MANUAL,
+                reason="archive whose contents name no known platform; add the extension to rules.yaml",
+            )
+
         return Classification(
             HANDLER_MANUAL,
             reason=f"unmapped extension {_ext(source.name) or '(none)'}; add it to rules.yaml",

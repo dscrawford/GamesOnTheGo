@@ -8,10 +8,12 @@ import pytest
 
 from gotg_importer.plan import (
     ACTION_ARCHIVE,
+    ACTION_CONVERT,
     ACTION_EXTRACT,
     ACTION_HARDLINK,
     ACTION_MANUAL,
     ACTION_SKIP,
+    plan_single_archive,
 )
 from gotg_importer.planner import plan_source, summarize
 from gotg_importer.rules import defaults
@@ -212,3 +214,52 @@ def test_summary_line_format(roots):
     make_dir(src, "Nintendo - Nintendo 64 (BigEndian)", files=("Body Harvest (USA).zip",))
     ops = plan_source(src / "Nintendo - Nintendo 64 (BigEndian)", games, RULES)
     assert summarize(ops) == "hardlink=1 extract=0 archive=0 manual=0 skip=0"
+
+
+def test_lone_archive_converts_to_the_format_the_emulator_wants():
+    """Sunshine's real shape: a 7z holding an NKit image Dolphin can read but
+    which is not the format the library stores."""
+    op = plan_single_archive(
+        "gamecube",
+        "/Games",
+        "/T/Super Mario Sunshine (USA).7z",
+        "Super Mario Sunshine (USA).nkit.iso",
+        target_ext="rvz",
+    )
+    assert op.action == ACTION_CONVERT
+    assert op.entry_id == "usa.super_mario_sunshine"
+    assert op.dst == "/Games/gamecube/usa.super_mario_sunshine.rvz"
+
+
+def test_an_archive_already_in_the_target_format_is_only_unpacked():
+    op = plan_single_archive(
+        "gamecube",
+        "/Games",
+        "/T/Some Game (USA).7z",
+        "Some Game (USA).rvz",
+        target_ext="rvz",
+    )
+    assert op.action == ACTION_EXTRACT
+
+
+def test_a_platform_with_no_target_keeps_whatever_it_holds():
+    """Every platform imported so far: the ROM inside is already what ares wants."""
+    op = plan_single_archive(
+        "n64",
+        "/Games",
+        "/T/Some Game (USA).7z",
+        "Some Game (USA).z64",
+    )
+    assert op.action == ACTION_EXTRACT
+    assert op.dst == "/Games/n64/usa.some_game.z64"
+
+
+def test_an_archive_whose_name_yields_no_id_is_flagged():
+    op = plan_single_archive(
+        "gamecube",
+        "/Games",
+        "/T/!!!.7z",
+        "x.iso",
+        target_ext="rvz",
+    )
+    assert op.action == ACTION_MANUAL

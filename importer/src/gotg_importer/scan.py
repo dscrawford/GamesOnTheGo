@@ -24,6 +24,12 @@ VOLUME_RE = re.compile(r"^(r\d{2,3}|\d{3}|part\d+)$", re.I)
 
 ARCHIVE_LIST_TIMEOUT = 60
 
+# Archives that are packaging around a game rather than a container an emulator
+# reads. `.zip` is deliberately absent: the library treats a zipped ROM as a
+# first-class entry — ares opens one directly, and hardlinking it costs nothing —
+# so unpacking one would trade zero space for a full copy and gain nothing.
+SINGLE_ARCHIVE_EXTS = ("7z", "rar")
+
 
 @dataclass(frozen=True)
 class Source:
@@ -76,6 +82,35 @@ def list_archive(path: Path) -> tuple[str, ...]:
     return tuple(line.strip() for line in proc.stdout.splitlines() if line.strip())
 
 
+def list_archive_file(path: Path) -> tuple[str, ...]:
+    """Names inside a single archive, read from its header without unpacking.
+
+    The archive's own extension says nothing about the platform — a .7z holds
+    whatever someone put in it — so the only evidence is what is inside.
+    """
+    seven = shutil.which("7z") or shutil.which("7za")
+    if not seven:
+        return ()
+    try:
+        proc = subprocess.run(
+            [seven, "l", "-ba", "-slt", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=ARCHIVE_LIST_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.debug("could not list %s: %s", path, exc)
+        return ()
+    if proc.returncode != 0:
+        return ()
+    return tuple(line.partition("=")[2].strip() for line in proc.stdout.splitlines() if line.startswith("Path ="))
+
+
+def _ext(name: str) -> str:
+    _, dot, ext = name.rpartition(".")
+    return ext.lower() if dot else ""
+
+
 def scan(path: Path, *, probe_archives: bool = True) -> Source:
     """Probe one payload path. Raises FileNotFoundError if it does not exist."""
     path = Path(path)
@@ -83,7 +118,10 @@ def scan(path: Path, *, probe_archives: bool = True) -> Source:
         raise FileNotFoundError(path)
 
     if not path.is_dir():
-        return Source(path=path, is_dir=False)
+        members: tuple[str, ...] = ()
+        if probe_archives and _ext(path.name) in SINGLE_ARCHIVE_EXTS:
+            members = list_archive_file(path)
+        return Source(path=path, is_dir=False, archive_members=members)
 
     files: list[str] = []
     dirs: list[str] = []

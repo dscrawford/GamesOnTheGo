@@ -36,6 +36,7 @@ EXT_PLATFORM = {
 ACTION_HARDLINK = "hardlink"      # renamed hardlink, zero space, seeding-safe
 ACTION_EXTRACT = "extract"        # derived copy (scene archive -> rom)
 ACTION_ARCHIVE = "archive"        # derived copy (decrypted dir -> single .zip)
+ACTION_CONVERT = "convert"        # derived conversion (source -> the format the emulator wants)
 ACTION_DECRYPT = "decrypt"        # WiiU NUS -> code/content/meta (deferred)
 ACTION_SKIP = "skip"              # excluded / non-retail / duplicate
 ACTION_MANUAL = "manual"          # low-confidence -> quarantine for human review
@@ -90,6 +91,40 @@ def plan_no_intro_set(platform: str, games_root: str, src_dir: str,
             ops.append(Op(ACTION_HARDLINK, platform, f"{src_dir}/{fn}", dst,
                           p.entry_id, title=_display_title(p), type="file"))
     return ops
+
+
+def plan_single_archive(platform: str, games_root: str, src_file: str,
+                        inner_name: str, target_ext: str = "") -> Op:
+    """Plan a lone archive: unpack the game inside, in the format the emulator wants.
+
+    The archive's own name carries the title and region — it is an ordinary
+    release name — so the id comes from that rather than from the member, whose
+    name may be anything the packer chose.
+    """
+    stem = src_file.rsplit("/", 1)[-1]
+    stem = _re.sub(r"\.[A-Za-z0-9]{1,4}$", "", stem)
+    parsed = parse(f"{stem}.{_ext_of(inner_name)}")
+
+    if not parsed.valid:
+        return Op(ACTION_MANUAL, platform, src_file, "", parsed.entry_id,
+                  reason="archive name does not yield a valid id")
+
+    inner_ext = _ext_of(inner_name)
+    # Convert only when the emulator wants something else; an archive that
+    # already holds the target format just needs unpacking.
+    if target_ext and inner_ext != target_ext:
+        action, ext = ACTION_CONVERT, target_ext
+    else:
+        action, ext = ACTION_EXTRACT, inner_ext
+
+    dst = f"{games_root}/{platform}/{parsed.entry_id}.{ext}"
+    return Op(action, platform, src_file, dst, parsed.entry_id,
+              title=_display_title(parsed), type="file")
+
+
+def _ext_of(name: str) -> str:
+    _, dot, ext = name.rpartition(".")
+    return ext.lower() if dot else ""
 
 
 def _clean_scene_name(name: str) -> str:

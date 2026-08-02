@@ -26,6 +26,7 @@ from .config import Config
 from .manifest import Entry
 from .plan import (
     ACTION_ARCHIVE,
+    ACTION_CONVERT,
     ACTION_EXTRACT,
     ACTION_HARDLINK,
     ACTION_MANUAL,
@@ -212,6 +213,69 @@ def _extract(op: Op, cfg: Config) -> tuple[str, Path]:
     return STATUS_DONE, dst
 
 
+def _convert(op: Op, cfg: Config) -> tuple[str, Path]:
+    """Unpack a lone archive and normalize the image to the emulator's format.
+
+    Two derived steps rather than one: the archive is extracted to staging, then
+    converted out of staging into place. The intermediate is never left under a
+    name the client could serve, and the original archive is untouched so it
+    keeps seeding.
+    """
+    src = Path(op.src)
+    dst = _assert_under(Path(op.dst), cfg.games_root)
+    target_ext = dst.suffix.lstrip(".")
+
+    if dst.exists():
+        return STATUS_NOOP, dst
+
+    if not src.is_file():
+        raise ExecutionError(f"not an archive: {src}")
+
+    # Staging holds the uncompressed image, which for a disc is far larger than
+    # the archive; check against that rather than the archive's own size.
+    _require_space(cfg.games_root, src.stat().st_size * 3)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(dir=dst.parent, prefix=".gotg-extract-") as tmp:
+        _run(["7z", "x", "-y", f"-o{tmp}", str(src)])
+        images = [p for p in Path(tmp).rglob("*") if p.is_file()]
+        if not images:
+            raise ExecutionError(f"{src.name} produced no files")
+        image = max(images, key=lambda p: p.stat().st_size)
+
+        if image.suffix.lstrip(".").lower() == target_ext:
+            os.replace(image, dst)
+            return STATUS_DONE, dst
+
+        staged = Path(tmp) / dst.name
+        # Dolphin's own converter: it reads every format it can play, including
+        # NKit, and RVZ is both smaller and what the library stores. Note it
+        # repackages rather than restoring NKit's stripped data — see
+        # IMPORTER_SPEC.md §5a; these are normalized images, not pristine dumps.
+        _run(
+            [
+                "dolphin-tool",
+                "convert",
+                "-f",
+                target_ext,
+                "-b",
+                "131072",
+                "-c",
+                "zstd",
+                "-l",
+                "5",
+                "-i",
+                str(image),
+                "-o",
+                str(staged),
+            ]
+        )
+        if not staged.is_file():
+            raise ExecutionError(f"converting {image.name} produced no {target_ext}")
+        os.replace(staged, dst)
+    return STATUS_DONE, dst
+
+
 def _archive(op: Op, cfg: Config) -> tuple[str, Path]:
     """Pack a decrypted WiiU title's code/content/meta into one zip."""
     src_dir = Path(op.src)
@@ -260,6 +324,8 @@ def execute(op: Op, cfg: Config, *, checksum: bool = True) -> Result:
             status = _link(Path(op.src), dst)
         elif op.action == ACTION_EXTRACT:
             status, dst = _extract(op, cfg)
+        elif op.action == ACTION_CONVERT:
+            status, dst = _convert(op, cfg)
         elif op.action == ACTION_ARCHIVE:
             status, dst = _archive(op, cfg)
         else:

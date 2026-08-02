@@ -1,6 +1,7 @@
 """Execution: the half that writes. Invariants matter more than happy paths here."""
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -260,3 +261,40 @@ def test_source_tree_is_never_modified(cfg):
     after = {p: (p.stat().st_mtime, p.stat().st_size) for p in cfg.source_root.rglob("*")}
     assert before == after
     assert os.listdir(cfg.source_root) == ["Zelda (USA).z64"]
+
+
+def test_convert_normalizes_an_archived_image_and_leaves_the_source_alone(cfg, monkeypatch):
+    """The Sunshine shape: a lone archive holding an image in the wrong format.
+
+    dolphin-tool is stubbed — the conversion itself was verified against the real
+    file (IMPORTER_SPEC.md §5a); what matters here is the staging discipline.
+    """
+    from gotg_importer import execute as ex
+
+    games = cfg.games_root
+    src = cfg.source_root / "Some Game (USA).7z"
+    src.write_bytes(b"pretend archive")
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, cwd=None):
+        calls.append(cmd)
+        if cmd[0] == "7z":
+            out = Path(cmd[3][2:])
+            (out / "Some Game (USA).nkit.iso").write_bytes(b"image")
+        else:  # dolphin-tool convert -o <staged>
+            Path(cmd[cmd.index("-o") + 1]).write_bytes(b"converted")
+
+    monkeypatch.setattr(ex, "_run", fake_run)
+    monkeypatch.setattr(ex, "_require_space", lambda *a: None)
+
+    op = Op(ex.ACTION_CONVERT, "gamecube", str(src), str(games / "gamecube" / "usa.some_game.rvz"), "usa.some_game")
+    result = ex.execute(op, cfg, checksum=False)
+
+    assert result.status == ex.STATUS_DONE
+    assert (games / "gamecube" / "usa.some_game.rvz").read_bytes() == b"converted"
+    # The archive keeps seeding, untouched.
+    assert src.read_bytes() == b"pretend archive"
+    # And no staging directory survives the run.
+    assert not list((games / "gamecube").glob(".gotg-extract-*"))
+    assert calls[0][0] == "7z" and calls[1][0] == "dolphin-tool"

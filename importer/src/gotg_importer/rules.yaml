@@ -30,6 +30,12 @@ dat_dirs:
 
 # Single-file extension -> platform, for loose ROM torrents.
 extensions:
+  # `.iso` is genuinely ambiguous — GameCube, Wii, PS2 and PSP all use it — so it
+  # is mapped here rather than in the code defaults, where the assumption would
+  # be invisible. This library holds no Wii or PS2 titles; when one arrives this
+  # mapping must go and the platform be decided from the disc header instead
+  # (dolphin-tool reports the Game ID, which distinguishes them).
+  iso: gamecube
   z64: n64
   n64: n64
   v64: n64
@@ -47,3 +53,13 @@ extensions:
   gba: gba
   gbc: gbc
   gb: gb
+
+# The format each platform's emulator wants (IMPORTER_SPEC.md §5a). A platform
+# absent here is imported as it arrives, which is every platform so far.
+targets:
+  # Dolphin reads NKit images directly and rewraps them as RVZ, which is both
+  # smaller and already mapped to gamecube in the extension table. Note the
+  # conversion repackages without restoring NKit's stripped data: the result
+  # plays correctly but is not a pristine dump.
+  gamecube: { ext: rvz, tool: dolphin-tool }
+  wii: { ext: rvz, tool: dolphin-tool }
