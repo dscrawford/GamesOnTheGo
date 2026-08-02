@@ -263,3 +263,27 @@ def test_an_archive_whose_name_yields_no_id_is_flagged():
         target_ext="rvz",
     )
     assert op.action == ACTION_MANUAL
+
+
+def test_a_lone_archive_is_planned_end_to_end(tmp_path, monkeypatch):
+    """plan_source must reach the single_archive planner.
+
+    The unit test above covers the planner itself; this covers the dispatch that
+    finds it — which is exactly the seam a real dry run caught as
+    "unknown handler 'single_archive'".
+    """
+    from gotg_importer import scan as sc
+    from gotg_importer.planner import plan_source
+    from gotg_importer.rules import load as load_rules
+
+    src = tmp_path / "Super Mario Sunshine (USA).7z"
+    src.write_bytes(b"archive")
+    monkeypatch.setattr(
+        sc, "list_archive_file", lambda p: ("Super Mario Sunshine (USA).nkit.iso",)
+    )
+
+    ops = plan_source(src, "/Games", load_rules())
+
+    assert len(ops) == 1
+    assert ops[0].action == ACTION_CONVERT
+    assert ops[0].dst == "/Games/gamecube/usa.super_mario_sunshine.rvz"

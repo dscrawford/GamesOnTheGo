@@ -75,6 +75,24 @@ def plan_source(path: Path | str, games_root: Path | str, rules: Rules) -> list[
             )
         ]
 
+    if verdict.handler == cl.HANDLER_SINGLE_ARCHIVE:
+        # The game inside is what matters; the archive is only how it travelled.
+        # The target format comes from the rules, so a platform whose emulator
+        # wants something else gets a conversion rather than a bare unpack.
+        inner = next(
+            (m for m in source.archive_members if cl.is_rom_name(m, rules)),
+            "",
+        )
+        return [
+            pl.plan_single_archive(
+                verdict.platform,
+                games_root,
+                str(source.path),
+                inner,
+                target_ext=rules.target_for(verdict.platform).ext,
+            )
+        ]
+
     if verdict.handler == cl.HANDLER_NO_INTRO_SET:
         return pl.plan_no_intro_set(
             verdict.platform, games_root, str(source.path), _rom_files(source, rules), one_g_one_r=True
