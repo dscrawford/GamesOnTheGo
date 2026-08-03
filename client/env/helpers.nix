@@ -131,33 +131,84 @@
         "{target}"
       ];
       preLaunch = ''
+        # Dolphin writes these files itself and records only what differs from a
+        # default, so there is usually no line to replace and often no section
+        # either — which is why this sets a key rather than substituting one.
+        gotg_ini_set() {
+          gotg_ini_file="$1"
+          gotg_ini_section="[$2]"
+          gotg_ini_key="$3"
+          gotg_ini_value="$4"
+
+          mkdir -p "$(dirname "$gotg_ini_file")"
+          touch "$gotg_ini_file"
+          ${pkgs.gawk}/bin/awk \
+            -v section="$gotg_ini_section" \
+            -v key="$gotg_ini_key" \
+            -v value="$gotg_ini_value" '
+            BEGIN { line = key " = " value }
+            # Leaving the section without having written the key: write it now,
+            # ahead of the header that ends the section.
+            /^\[/ {
+              if (inSection && !written) { print line; written = 1 }
+              inSection = ($0 == section)
+            }
+            inSection && index($0, key " ") == 1 { print line; written = 1; next }
+            { print }
+            END {
+              if (!written) {
+                if (!inSection) print section
+                print line
+              }
+            }
+          ' "$gotg_ini_file" > "$gotg_ini_file.gotg" &&
+            mv "$gotg_ini_file.gotg" "$gotg_ini_file"
+        }
+
         # Only where this environment owns its Dolphin configuration. Otherwise
         # this would be reaching into the settings of the player's own Dolphin
         # install, which is not ours to change. Tested at runtime rather than
         # against `isolate` here, so that a game file turning isolation on gets
         # this too.
         if [ "''${XDG_CONFIG_HOME:-}" = "$state/config" ]; then
-          dolphin_ini="$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini"
-          mkdir -p "$(dirname "$dolphin_ini")"
-          touch "$dolphin_ini"
-          ${pkgs.gawk}/bin/awk '
-            # Leaving the section without having written it: write it now, ahead
-            # of the header that ends the section.
-            /^\[/ {
-              if (in_input && !written) { print "BackgroundInput = True"; written = 1 }
-              in_input = ($0 == "[Input]")
-            }
-            in_input && /^[ \t]*BackgroundInput[ \t]*=/ {
-              print "BackgroundInput = True"; written = 1; next
-            }
-            { print }
-            END {
-              if (!written) {
-                if (!in_input) print "[Input]"
-                print "BackgroundInput = True"
-              }
-            }
-          ' "$dolphin_ini" > "$dolphin_ini.gotg" && mv "$dolphin_ini.gotg" "$dolphin_ini"
+          gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini" \
+            Input BackgroundInput True
+
+          # Internal resolution, from the player's own preference rather than
+          # this flake: what looks right depends on the screen in front of you,
+          # which is not something a derivation can know.
+          #
+          # Dolphin scales by whole multiples of the GameCube's 640x528, and
+          # labels them by the width that lands on: 640*N wide, so 3x is 1080p
+          # and 4K is 6x. Read off Dolphin's own label format, not guessed.
+          gotg_res=default
+          if [ -f "$GOTG_USER_CONFIG/video.json" ]; then
+            gotg_res="$(${pkgs.jq}/bin/jq -r '.resolution // "default"' \
+              "$GOTG_USER_CONFIG/video.json" 2>/dev/null || echo default)"
+          fi
+
+          gotg_scale=""
+          case "$gotg_res" in
+            default | native) gotg_scale="" ;;
+            720p) gotg_scale=2 ;;
+            1080p) gotg_scale=3 ;;
+            1440p) gotg_scale=4 ;;
+            4k | 4K) gotg_scale=6 ;;
+            5k | 5K) gotg_scale=8 ;;
+            [1-8]x) gotg_scale="''${gotg_res%x}" ;;
+            *)
+              echo "gotg: unknown resolution '$gotg_res' in $GOTG_USER_CONFIG/video.json" >&2
+              echo "gotg: expected default, 720p, 1080p, 1440p, 4k, 5k, or 1x-8x" >&2
+              ;;
+          esac
+
+          # "default" writes nothing at all, deliberately. It means this is not
+          # ours to manage, so whatever Dolphin or the player set in its own
+          # settings screen survives — rather than being reset on every launch.
+          if [ -n "$gotg_scale" ]; then
+            gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/GFX.ini" \
+              Settings InternalResolution "$gotg_scale"
+          fi
         fi
       '';
     };

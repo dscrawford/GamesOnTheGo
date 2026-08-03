@@ -134,6 +134,12 @@ let
 
     state="''${GOTG_ENV_STATE:-''${XDG_STATE_HOME:-$HOME/.local/state}/gotg/env/${name}}"
     mkdir -p "$state"
+
+    # The player's own configuration directory, captured *before* isolation
+    # moves XDG_CONFIG_HOME under {state}. Preferences that belong to the person
+    # rather than to the environment are read from here, so one setting can
+    # apply across every environment without being baked into any of them.
+    export GOTG_USER_CONFIG="''${GOTG_USER_CONFIG:-''${XDG_CONFIG_HOME:-$HOME/.config}/gotg}"
     ${lib.optionalString isolate ''
       export XDG_CONFIG_HOME="$state/config"
       export XDG_DATA_HOME="$state/data"

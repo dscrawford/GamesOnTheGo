@@ -118,6 +118,30 @@ creates a console's section the first time that console runs, so the first
 launch of a platform has nothing to write into and the one after it does; and
 Wii remotes are not generated, only GameCube pads.
 
+### Video
+
+What resolution looks right depends on the screen in front of you, which is not
+something a derivation can know — so it is a preference of yours rather than a
+property of the environment. Put it in `~/.config/gotg/video.json`:
+
+```json
+{ "resolution": "4k" }
+```
+
+`default`, `720p`, `1080p`, `1440p`, `4k`, `5k`, or `1x`–`8x` for the multiplier
+itself. It applies to every Dolphin environment at once — GameCube, Wii, and the
+per-game variants — and takes effect on the next launch with nothing to rebuild.
+
+Dolphin renders at whole multiples of the GameCube's 640×528 and names them by
+the width that lands on, so `1080p` is 3× and `4k` is 6×. Those are read off
+Dolphin's own label format rather than guessed.
+
+**`default` writes nothing at all**, deliberately: it means this is not ours to
+manage, so whatever you set in Dolphin's own settings screen survives instead of
+being reset on every launch. An unrecognised value is reported and then also
+left alone, on the same principle — a typo should not silently change how your
+games look.
+
 ### Emulator environments
 
 A game does not run "in an emulator" so much as in an **environment** built from
