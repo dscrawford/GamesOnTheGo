@@ -47,6 +47,8 @@ source "$GOTG_LIB/saves.sh"
 source "$GOTG_LIB/cmd-saves.sh"
 # shellcheck source=lib/cmd-controllers.sh
 source "$GOTG_LIB/cmd-controllers.sh"
+# shellcheck source=lib/cmd-configure.sh
+source "$GOTG_LIB/cmd-configure.sh"
 
 usage() {
   cat <<'EOF'
@@ -61,6 +63,8 @@ usage: gotg <command> [args]
   play <id> [variant] fetch and build whatever is missing, then launch
   saves <command>    move saves between machines (saves help for the rest)
   controllers <cmd>  what SDL sees, and where its inputs land
+  configure <id> [variant]
+                     open that environment's own emulator settings
   sync               rebuild gotg and the environment GC roots after a git pull
 
 Ids look like usa.legend_of_zelda_majoras_mask. When the same id exists on more
@@ -88,6 +92,7 @@ main() {
     play | launch) cmd_play "$@" ;;
     saves) cmd_saves "$@" ;;
     controllers) cmd_controllers "$@" ;;
+    configure) cmd_configure "$@" ;;
     sync) cmd_sync "$@" ;;
     help | --help | -h | "") usage ;;
     *)

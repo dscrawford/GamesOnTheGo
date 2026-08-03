@@ -322,6 +322,10 @@
     {
       emulator = port;
       inherit bin;
+      # These have no launcher to open: their settings are inside the game, and
+      # starting them with no arguments starts the game — which `gotg play`
+      # already does.
+      configurable = false;
       # The archive is derived from the ROM and worth keeping with the game
       # rather than in a shared ~/.local/share, so that removing a game removes
       # everything it made. Saves live here too.

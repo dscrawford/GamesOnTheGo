@@ -54,6 +54,14 @@
   # name as well, since its one settings file keeps a section per console;
   # dolphin keeps a file per pad and needs nothing beyond knowing it is dolphin.
   padEmulator ? (if padConsole != null then "ares" else null),
+  # Whether `gotg configure` can open this emulator's own settings screen.
+  #
+  # Defaults to whether the environment isolates, because without isolation
+  # there is no separate configuration to open — it would be the player's own
+  # install, which is the one thing every other part of this avoids touching.
+  # A port whose settings are in-game rather than in a launcher sets this false:
+  # opening it would just start the game, which `gotg play` already does.
+  configurable ? isolate,
 }:
 
 let
@@ -164,6 +172,11 @@ pkgs.runCommand "gotg-env-${name}"
     mkdir -p $out/bin $out/share/gotg
     ln -s ${app}/bin/gotg-play $out/bin/gotg-play
     cp ${pkgs.writeText "saves.json" (builtins.toJSON manifest)} $out/share/gotg/saves.json
+    ${lib.optionalString configurable ''
+      cp ${
+        pkgs.writeText "configure.json" (builtins.toJSON { exec = exe; })
+      } $out/share/gotg/configure.json
+    ''}
     ${lib.optionalString (padEmulator != null) ''
       cp ${
         pkgs.writeText "pads.json" (

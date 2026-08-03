@@ -142,6 +142,24 @@ being reset on every launch. An unrecognised value is reported and then also
 left alone, on the same principle — a typo should not silently change how your
 games look.
 
+Everything else — aspect ratio, backend, anything the emulator itself offers —
+is set in the emulator's own settings screen:
+
+```bash
+gotg configure usa.super_mario_sunshine bse
+```
+
+A launch cannot double as this. `gotg play` starts Dolphin in batch mode so the
+game comes up with no library window and the pad works, and every environment
+points the emulator at its own config directory — so running `dolphin-emu` from
+a terminal edits your personal install and changes nothing about the game you
+are trying to fix. `configure` runs that environment's own emulator, against
+that environment's own settings, with no game and no batch flag.
+
+Settings belong to one environment, so `bse` and `bsmso` are configured
+separately. An emulator whose settings live in-game rather than in a launcher —
+the Harkinian ports — says so rather than opening.
+
 ### Emulator environments
 
 A game does not run "in an emulator" so much as in an **environment** built from
@@ -350,5 +368,5 @@ tree, with the packaged wrapper's own dependency list on PATH. Edits apply on
 save — there is nothing to rebuild and no shell to re-enter. `nix run .#gotg`
 gives you the packaged article when that is what you want to test.
 
-`nix flake check` runs 119 importer tests (pytest), 112 client tests (bats,
+`nix flake check` runs 119 importer tests (pytest), 119 client tests (bats,
 against a stand-in File Browser over real HTTP), ruff and shellcheck.
