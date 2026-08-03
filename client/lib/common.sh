@@ -31,11 +31,15 @@ GOTG_ATTR_RE='^env-[a-z0-9][a-z0-9_-]*$'
 # for goes through this before it becomes a URL or an argv entry.
 GOTG_BLOB_KEY_RE='^env-[a-z0-9][a-z0-9_-]*/(gen/[0-9]{6}-[0-9a-f]{12}\.tar\.zst|latest\.json)$'
 
+# Plain by default: colour marks the exceptions, and everything being an
+# exception is the same as nothing being one. The label is coloured rather than
+# the message, so the text stays readable when it is quoted or grepped.
 log() { printf '%s\n' "$*" >&2; }
-warn() { printf 'warning: %s\n' "$*" >&2; }
+warn() { printf '%swarning:%s %s\n' "$C_WARN" "$C_RESET" "$*" >&2; }
+success() { printf '%s%s%s\n' "$C_OK" "$*" "$C_RESET" >&2; }
 
 die() {
-  printf 'error: %s\n' "$*" >&2
+  printf '%serror:%s %s\n' "$C_ERROR" "$C_RESET" "$*" >&2
   exit 1
 }
 

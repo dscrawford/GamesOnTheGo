@@ -65,11 +65,13 @@ controllers_list() {
     return 0
   fi
 
-  jq -r '.[] |
-    "\(.name)\n" +
-    "  binds as   \(.identity)/\(.slot)\n" +
-    "  reached by \(if .evdev then .evdev else (.path // "?") + " (raw HID, no evdev node)" end)\n" +
-    "  mapping    \(if .map == null then "none — SDL does not recognise this pad, so nothing can be generated for it" else "\(.map | length) elements" end)"
+  # A pad SDL cannot map is the one thing here worth interrupting for, so it is
+  # the only line that takes a colour of its own.
+  jq -r --arg h "$C_HEAD" --arg m "$C_MUTED" --arg r "$C_RESET" --arg w "$C_WARN" '.[] |
+    "\($h)\(.name)\($r)\n" +
+    "  \($m)binds as  \($r) \(.identity)/\(.slot)\n" +
+    "  \($m)reached by\($r) \(if .evdev then .evdev else (.path // "?") + " (raw HID, no evdev node)" end)\n" +
+    "  \($m)mapping   \($r) \(if .map == null then "\($w)none — SDL does not recognise this pad, so nothing can be generated for it\($r)" else "\(.map | length) elements" end)"
   ' <<<"$pads" >&2
 }
 
@@ -110,12 +112,13 @@ controllers_order() {
     return 0
   fi
 
-  jq -r --argjson max "$GOTG_MAX_PLAYERS" '
+  jq -r --argjson max "$GOTG_MAX_PLAYERS" \
+    --arg h "$C_HEAD" --arg m "$C_MUTED" --arg r "$C_RESET" --arg w "$C_WARN" '
     to_entries[] |
     if .key < $max then
-      "  Player \(.key + 1)   \(.value.name)\n             \(.value.identity)/\(.value.slot)"
+      "  \($h)Player \(.key + 1)\($r)   \(.value.name)\n             \($m)\(.value.identity)/\(.value.slot)\($r)"
     else
-      "  (unseated) \(.value.name) — consoles here have only \($max) ports"
+      "  \($w)(unseated)\($r) \(.value.name) — consoles here have only \($max) ports"
     end' <<<"$seating" >&2
 
   log ""

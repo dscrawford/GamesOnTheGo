@@ -143,15 +143,28 @@ cmd_list() {
     return 0
   }
 
-  local platform id size name title status
-  printf '%-3s %-9s %-46s %10s  %s\n' "" "PLATFORM" "ID" "SIZE" "TITLE"
+  # The colour goes in its own argument so the width applies to the value and
+  # not to the escape bytes, which would silently break every column.
+  local platform id size name title status c_status
+  printf '%s%-3s %-9s %-46s %10s  %s%s\n' \
+    "$C_HEAD" "" "PLATFORM" "ID" "SIZE" "TITLE" "$C_RESET"
   while IFS=$'\t' read -r platform id size name title; do
-    if [[ -e "$GOTG_GAMES_DIR/$platform/$name" ]]; then status="[*]"; else status="[ ]"; fi
-    printf '%-3s %-9s %-46s %10s  %s\n' \
-      "$status" "$platform" "$id" "$(human_size "$size")" "$title"
+    if [[ -e "$GOTG_GAMES_DIR/$platform/$name" ]]; then
+      status="[*]"
+      c_status="$C_OK"
+    else
+      status="[ ]"
+      c_status="$C_MUTED"
+    fi
+    printf '%s%-3s%s %s%-9s%s %s%-46s%s %10s  %s\n' \
+      "$c_status" "$status" "$C_RESET" \
+      "$C_MUTED" "$platform" "$C_RESET" \
+      "$C_ID" "$id" "$C_RESET" \
+      "$(human_size "$size")" "$title"
   done <<<"$rows"
   log ""
-  log "[*] installed locally"
+  # Braced: "$C_OK[*]" reads as an array subscript.
+  log "${C_OK}[*]${C_RESET} installed locally"
 }
 
 cmd_info() {
@@ -164,15 +177,19 @@ cmd_info() {
   local installed="no"
   game_is_installed "$game" && installed="yes"
 
-  jq -r --arg local "$(game_local_path "$game")" --arg installed "$installed" '
-    "id:        \(.id)",
-    "title:     \(.title)",
-    "platform:  \(.platform)",
-    "type:      \(.type)",
-    "size:      \(.size_bytes) bytes",
-    "sha256:    \(.sha256 // "-")",
-    "remote:    \(.path)",
-    "local:     \($local)",
-    "installed: \($installed)"
+  # Labels muted so the values are what the eye lands on; the two fields worth
+  # answering at a glance — what it is, and whether it is here — get colour.
+  jq -r --arg local "$(game_local_path "$game")" --arg installed "$installed" \
+    --arg m "$C_MUTED" --arg r "$C_RESET" --arg id "$C_ID" \
+    --arg ok "$C_OK" --arg no "$C_MUTED" '
+    "\($m)id:       \($r) \($id)\(.id)\($r)",
+    "\($m)title:    \($r) \(.title)",
+    "\($m)platform: \($r) \(.platform)",
+    "\($m)type:     \($r) \(.type)",
+    "\($m)size:     \($r) \(.size_bytes) bytes",
+    "\($m)sha256:   \($r) \(.sha256 // "-")",
+    "\($m)remote:   \($r) \(.path)",
+    "\($m)local:    \($r) \($local)",
+    "\($m)installed:\($r) \(if $installed == "yes" then $ok else $no end)\($installed)\($r)"
   ' <<<"$game"
 }

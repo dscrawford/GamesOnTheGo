@@ -21,6 +21,7 @@ gotg sync                   rebuild the GC roots after a git pull
 | File | Responsibility |
 |---|---|
 | `bin/gotg` | argument dispatch only |
+| `lib/color.sh` | the palette, and the rules for when there is none |
 | `lib/common.sh` | paths, logging, id and path validation |
 | `lib/config.sh` | credentials in a 0600 file, `gotg login` |
 | `lib/api.sh` | File Browser login and raw-download URLs |
@@ -34,6 +35,7 @@ gotg sync                   rebuild the GC roots after a git pull
 | `lib/saves.sh` | bundling, generations, and verifying what arrives |
 | `lib/cmd-saves.sh` | `saves setup`, `status`, `push`, `pull` |
 | `lib/pads.sh` | generating emulator bindings from what SDL reports |
+| `lib/pads-dolphin.sh` | the same for Dolphin, which needs no table |
 | `lib/cmd-controllers.sh` | `controllers list`, `controllers apply` |
 | `env/<platform>.nix` | the emulator, arguments and settings for a platform |
 | `env/games/<platform>/<id>.nix` | what one game changes about that |
@@ -48,6 +50,16 @@ of nix entirely.
 **Tokens are never cached.** File Browser's JWTs expire in hours, so every
 command logs in again — one cheap request that removes a class of failures where
 a stale token only shows up at launch time.
+
+**Colour marks the exceptions.** Ordinary output is plain, because if
+everything is highlighted then nothing is: what takes a colour is a warning, an
+error, a game that is installed, saves that have changed since the last sync.
+`NO_COLOR` turns it off, `FORCE_COLOR` turns it on without a terminal, and
+`TERM=dumb` is believed; otherwise colour appears only when both streams are a
+terminal. That last rule is why nothing here has to know about Steam — a launch
+has both streams redirected to a log file, so it is uncoloured by the same rule
+that uncolours a pipe. Errors and warnings still say "error" and "warning", so
+the colour is never the only thing carrying the meaning.
 
 **Downloads stage outside the platform directory** and are moved in only once
 complete and verified. A half-downloaded file can never look like an installed
@@ -66,6 +78,6 @@ log; `gotg install <id>` from a terminal is still the smoother first run.
 nix flake check     # or: GOTG_BIN=$(which gotg) bats client/tests/
 ```
 
-85 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
+112 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
 of the real API — including `Range` requests — that resume is exercised against a
 genuinely truncated transfer rather than a simulated one.

@@ -147,13 +147,20 @@ saves_status_one() {
   pushed="$(saves_journal_get "$attr" pushed_hash)"
   : "${base_gen:=0}"
 
-  printf '%s\n' "$attr"
+  printf '%s%s%s\n' "$C_HEAD" "$attr" "$C_RESET"
   if [[ -z "$hash" ]]; then
-    printf '  local   no saves here yet\n'
+    printf '  %slocal  %s no saves here yet\n' "$C_MUTED" "$C_RESET"
   else
-    printf '  local   %s file(s), %s, generation %s%s\n' \
+    # Unpushed work is the one thing on this line that might need acting on,
+    # so it is the one thing that is not the default colour.
+    local changed=""
+    if [[ "$hash" != "$pushed" && "$hash" != "$base_hash" ]]; then
+      changed="$C_WARN, changed since the last sync$C_RESET"
+    fi
+    printf '  %slocal  %s %s file(s), %s, generation %s%s\n' \
+      "$C_MUTED" "$C_RESET" \
       "$files" "$(human_size "$(stat -c '%s' "$tmp/status.tar.zst")")" "$base_gen" \
-      "$(if [[ "$hash" != "$pushed" && "$hash" != "$base_hash" ]]; then printf ', changed since the last sync'; fi)"
+      "$changed"
   fi
 
   # A die inside the substitution ends only the subshell, which is what keeps
@@ -161,7 +168,8 @@ saves_status_one() {
   local latest
   latest="$(saves_latest "$attr" 2>/dev/null)" || latest=""
   if [[ -z "$latest" ]]; then
-    printf '  remote  nothing pushed yet, or the server is unreachable\n'
+    printf '  %sremote %s nothing pushed yet, or the server is unreachable\n' \
+      "$C_MUTED" "$C_RESET"
     return 0
   fi
 
@@ -170,8 +178,8 @@ saves_status_one() {
   rdev="$(jq -r '.device // "?"' <<<"$latest")"
   rat="$(jq -r '.written_at // "?"' <<<"$latest")"
   rsize="$(jq -r '.size // 0' <<<"$latest")"
-  printf '  remote  generation %s from device %s, %s, %s\n' \
-    "$rgen" "$rdev" "$(human_size "$rsize")" "$rat"
+  printf '  %sremote %s generation %s from device %s, %s, %s\n' \
+    "$C_MUTED" "$C_RESET" "$rgen" "$rdev" "$(human_size "$rsize")" "$rat"
 
   if [[ -n "$hash" && "$hash" == "$(jq -r '.hash' <<<"$latest")" ]]; then
     printf '  in step\n'
