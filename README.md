@@ -146,6 +146,31 @@ creates a console's section the first time that console runs, so the first
 launch of a platform has nothing to write into and the one after it does; and
 Wii remotes are not generated, only GameCube pads.
 
+### Console keys
+
+A Switch game will not decrypt without console keys, and they are not something
+this project can ship: they belong to a console, they are not redistributable,
+and they track firmware rather than any game. They live beside the games on the
+server, placed by hand:
+
+```
+/Games/switch/prod.keys      required
+/Games/switch/title.keys     optional — some dumps need it, most do not
+```
+
+The first launch of a Switch game fetches them into that environment's own key
+directory at mode 0600, and never again. They are **excluded from save
+bundles** — re-fetchable from the server, and the one thing here worth not
+copying between machines by accident.
+
+A missing key is a warning rather than a refusal: the emulator's own complaint
+about a specific game says more than the client can. They are invisible to
+`gotg list` by construction, since the catalog is built from what the importer
+imported and these are placed by hand — which matters, because `prod.keys`
+would otherwise satisfy the entry-id contract and show up as a game.
+
+`IMPORTER_SPEC.md` §7a is the contract.
+
 ### Video
 
 What resolution looks right depends on the screen in front of you, which is not
@@ -396,5 +421,5 @@ tree, with the packaged wrapper's own dependency list on PATH. Edits apply on
 save — there is nothing to rebuild and no shell to re-enter. `nix run .#gotg`
 gives you the packaged article when that is what you want to test.
 
-`nix flake check` runs 119 importer tests (pytest), 140 client tests (bats,
+`nix flake check` runs 119 importer tests (pytest), 147 client tests (bats,
 against a stand-in File Browser over real HTTP), ruff and shellcheck.

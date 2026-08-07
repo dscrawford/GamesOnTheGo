@@ -62,6 +62,16 @@
   # A port whose settings are in-game rather than in a launcher sets this false:
   # opening it would just start the game, which `gotg play` already does.
   configurable ? isolate,
+  # Files the emulator needs that are not the game and are not ours to ship:
+  # console keys, a BIOS. They live in the platform's own directory on the
+  # server, and the client fetches them into {state}/<into> on demand.
+  #
+  #   { into = "config/Ryujinx/system"; files = [ "prod.keys" ]; }
+  #
+  # Not baked into the derivation on purpose. They are neither redistributable
+  # nor stable — keys track console firmware — so a store path holding them
+  # would be both wrong and stale.
+  keys ? null,
 }:
 
 let
@@ -172,6 +182,11 @@ pkgs.runCommand "gotg-env-${name}"
     mkdir -p $out/bin $out/share/gotg
     ln -s ${app}/bin/gotg-play $out/bin/gotg-play
     cp ${pkgs.writeText "saves.json" (builtins.toJSON manifest)} $out/share/gotg/saves.json
+    ${lib.optionalString (keys != null) ''
+      cp ${
+        pkgs.writeText "keys.json" (builtins.toJSON keys)
+      } $out/share/gotg/keys.json
+    ''}
     ${lib.optionalString configurable ''
       cp ${
         pkgs.writeText "configure.json" (builtins.toJSON { exec = exe; })

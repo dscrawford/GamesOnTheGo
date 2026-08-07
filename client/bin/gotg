@@ -41,6 +41,8 @@ source "$GOTG_LIB/cmd-play.sh"
 source "$GOTG_LIB/pads.sh"
 # shellcheck source=lib/pads-dolphin.sh
 source "$GOTG_LIB/pads-dolphin.sh"
+# shellcheck source=lib/keys.sh
+source "$GOTG_LIB/keys.sh"
 # shellcheck source=lib/saves.sh
 source "$GOTG_LIB/saves.sh"
 # shellcheck source=lib/cmd-saves.sh

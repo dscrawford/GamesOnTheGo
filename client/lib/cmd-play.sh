@@ -78,6 +78,13 @@ cmd_play() {
   # starting.
   pads_configure "$attr" || warn "could not set controller bindings for $attr"
 
+  # Console keys, for the platforms that cannot decrypt a game without them.
+  # Fetched once and kept with the environment; a launch without them still
+  # starts, because the emulator's own complaint about a specific game is more
+  # use than ours about a file.
+  keys_ensure "$attr" "$(manifest_field "$game" platform)" ||
+    warn "could not fetch console keys for $attr"
+
   # The environment decides the emulator, its arguments and its settings; all it
   # is told is which file to run, where that came from, and where to keep what
   # it writes — that last one from env_state_dir, so the CLI and the wrapper
