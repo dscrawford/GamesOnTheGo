@@ -292,6 +292,94 @@
       '';
     };
 
+  # Luigi's Mansion 2 HD's frame-rate patch, shared by the variants that differ
+  # only in the emulated refresh rate they pair it with.
+  #
+  # Pinned to a commit rather than a branch on purpose: it is two lines of
+  # machine code written against one build of one game, so a silent change
+  # upstream would be a silent change to the game's timing.
+  #
+  # It writes `mov r1, #1` over the swap interval — present one frame per
+  # vblank. The sibling "FPS Unlocked" patch writes #0 instead, removing the cap
+  # entirely, which is how people overshoot into the stairs bug; it is not used.
+  luigisMansion2FpsPatch = pkgs.fetchurl {
+    url =
+      "https://raw.githubusercontent.com/StevensND/switch-port-mods/"
+      + "774e7f7c85561ddd865c1cab555f2a335054d522/"
+      + "Luigi%27s%20Mansion%202%20HD/%5B010048701995E000%5D/60FPS/1.0.0.pchtxt";
+    hash = "sha256-CFxkNqG9m+FvzMK0/ECw6qK4HC8hzuJu+Qee3OwIMLg=";
+  };
+
+  # A Ryujinx mod, together with the VSync mode it wants.
+  #
+  # Ryujinx reads mods from mods/contents/<title id>/<name>/exefs — those three
+  # names read off its own HLE assembly, not guessed — and a pchtxt is named for
+  # the game version it patches, so a 1.0.0 patch simply does nothing to a later
+  # revision rather than breaking it.
+  #
+  # VSync travels with the mod because the two decide the frame rate *together*.
+  # A swap-interval patch says "present one frame per vblank", so whatever the
+  # emulated refresh rate is set to becomes the frame rate. Separating them
+  # would leave either half looking broken on its own.
+  #
+  # Pinned on every launch rather than seeded once: F1 changes the mode at
+  # runtime, and without this a stray press would persist into the next session.
+  #
+  # vsyncMode is 0 Switch (60Hz), 1 Unbounded, 2 Custom — measured by starting
+  # Ryujinx against each value and reading back what it logged.
+  ryujinxMod =
+    {
+      titleId,
+      name,
+      patch,
+      # Needed only to generate a config on a first run — see below.
+      exe,
+      gameVersion ? "1.0.0",
+      vsyncMode,
+      customInterval ? null,
+    }:
+    let
+      custom = customInterval != null;
+      edits = [
+        ".vsync_mode = ${toString vsyncMode}"
+        ".enable_custom_vsync_interval = ${if custom then "true" else "false"}"
+      ] ++ lib.optional custom ".custom_vsync_interval = ${toString customInterval}";
+    in
+    {
+      preLaunch = ''
+        mods="$XDG_CONFIG_HOME/Ryujinx/mods/contents/${titleId}/${name}/exefs"
+        if [ ! -f "$mods/${gameVersion}.pchtxt" ]; then
+          mkdir -p "$mods"
+          cp --no-preserve=mode ${patch} "$mods/${gameVersion}.pchtxt"
+          echo "installed the ${name} patch" >&2
+        fi
+
+        config="$XDG_CONFIG_HOME/Ryujinx/Config.json"
+
+        # On a first run there is no config to edit yet — Ryujinx writes one
+        # when it exits — so the setting below would not take until the *second*
+        # launch, and the first would quietly run at the wrong rate. Starting it
+        # with --help writes the full default config and returns immediately.
+        #
+        # Seeding a handful of keys ourselves was the alternative and is worse:
+        # a config missing its version is rejected outright ("Failed to load
+        # config! Loading the default config instead"), and one carrying a
+        # version but few keys leaves the rest at whatever the deserialiser
+        # picks rather than at Ryujinx's own defaults. This way the defaults are
+        # its own.
+        if [ ! -f "$config" ]; then
+          ${exe} --help >/dev/null 2>&1 || true
+        fi
+
+        if [ -f "$config" ]; then
+          ${pkgs.jq}/bin/jq '${lib.concatStringsSep " | " edits}' \
+            "$config" >"$config.gotg" && mv "$config.gotg" "$config"
+        else
+          echo "gotg: no Ryujinx config yet; the frame rate applies next launch" >&2
+        fi
+      '';
+    };
+
   # The HarbourMasters ports — Ship of Harkinian, 2 Ship 2 Harkinian — are native
   # ports rather than emulators, and take the ROM differently from anything else
   # here. They read it once, extract it into an .o2r archive kept beside their
