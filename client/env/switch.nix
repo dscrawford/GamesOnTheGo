@@ -28,6 +28,12 @@
     # Preloading works because both carry the same SONAME: by the time .NET
     # dlopens the bundled path, the loader already has that name resolved and
     # hands back what is loaded. Nothing is patched or replaced on disk.
+    #
+    # This is necessary and not sufficient. A Steam Controller also needs Steam
+    # itself to be running: without it the puck stays in lizard mode, emulating
+    # a keyboard and mouse, and *no* SDL sees a gamepad — measured with Steam
+    # stopped, where even SDL3 reports only the other pad. Both conditions
+    # together, or no controller.
     LD_PRELOAD = "${pkgs.SDL2}/lib/libSDL2-2.0.so.0";
   };
 

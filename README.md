@@ -98,6 +98,11 @@ has no evdev node — needs the steam-devices udev rules, which
 `programs.steam.enable` already installs, as does the `steam-devices` package
 elsewhere. `list` says so when it can see nothing.
 
+**A Steam Controller also needs Steam itself running.** Without it the pad stays
+in lizard mode, emulating a keyboard and mouse, and no SDL version sees a
+gamepad — measured with Steam stopped, where even SDL3 reports only the other
+pad attached. The udev rules are necessary and not sufficient.
+
 Each attached controller is seated in the console port of its own number, up to
 the four every ares console has. The order is SDL's enumeration order by
 default, which is what the emulators go by too — so `order` and the bindings

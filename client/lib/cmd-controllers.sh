@@ -62,6 +62,10 @@ controllers_list() {
     log "An ordinary pad needs no setup. A Steam Controller talks raw HID and"
     log "needs the steam-devices udev rules — programs.steam.enable installs"
     log "them, as does the steam-devices package on other distributions."
+    log ""
+    log "A Steam Controller also needs Steam itself to be running. Without it the"
+    log "pad stays in lizard mode, acting as a keyboard and mouse, and nothing"
+    log "here can see it as a controller however the rules are set."
     return 0
   fi
 
