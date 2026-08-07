@@ -120,6 +120,12 @@
           # even from a subdirectory.
           shellHook = ''
             export GOTG_DEV_ROOT="$PWD"
+            # The completion out of the checkout, so a change to it applies on
+            # save like everything else here. Guarded because the builtins it
+            # uses exist only where bash was built with programmable completion.
+            if [ -n "''${BASH_VERSION:-}" ] && type -t complete >/dev/null 2>&1; then
+              . "$PWD/client/completions/gotg.bash"
+            fi
           '';
         };
         }

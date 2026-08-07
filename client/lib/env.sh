@@ -81,13 +81,21 @@ env_attr() {
 }
 
 # The variants a game has, for an error message worth reading.
-env_variants() {
-  local platform="$1" id="$2" file names=()
+# One variant name per line, and nothing at all when a game has none. Separate
+# from the sentence below it because completion wants the names and a person
+# wants the sentence.
+env_variant_names() {
+  local platform="$1" id="$2" file
   for file in "$GOTG_ENV_DIR/games/$platform/$id".*.nix; do
     [[ -e "$file" ]] || continue
     file="$(basename "$file" .nix)"
-    names+=("${file#"$id".}")
+    printf '%s\n' "${file#"$id".}"
   done
+}
+
+env_variants() {
+  local names=()
+  mapfile -t names < <(env_variant_names "$1" "$2")
   [[ ${#names[@]} -gt 0 ]] || return 0
   printf 'Available: %s' "${names[*]}"
 }

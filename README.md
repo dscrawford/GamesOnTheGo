@@ -56,6 +56,20 @@ gotg list snes --all        # a whole platform, uncut
 `--limit N` for some other number. A truncated list always says so — a silent
 one reads as "that is everything", which is the one thing it must not.
 
+**Tab completion** covers commands, game ids and a game's variants:
+
+```
+gotg play world.legend_of_zelda<TAB>   → world.legend_of_zelda_skyward_sword_hd
+gotg play usa.super_mario_sunshine <TAB>  → bse  bsmso
+```
+
+It reads the cached catalog and **never fetches** — a tab that blocks on the
+network is worse than no completion, so a missing catalog completes nothing
+rather than going to the server. The package installs it to
+`share/bash-completion/completions/gotg`, which NixOS picks up with
+`programs.bash.completion.enable`; `nix develop` sources the one in the checkout
+instead, so edits to it apply on save.
+
 `install` prints the path of a `play-<id>.sh` script. Add that to Steam with
 **Games → Add a Non-Steam Game → Browse**. Launching it downloads the game if it
 is missing (with a progress dialog) and then starts the emulator.
@@ -382,5 +396,5 @@ tree, with the packaged wrapper's own dependency list on PATH. Edits apply on
 save — there is nothing to rebuild and no shell to re-enter. `nix run .#gotg`
 gives you the packaged article when that is what you want to test.
 
-`nix flake check` runs 119 importer tests (pytest), 131 client tests (bats,
+`nix flake check` runs 119 importer tests (pytest), 140 client tests (bats,
 against a stand-in File Browser over real HTTP), ruff and shellcheck.

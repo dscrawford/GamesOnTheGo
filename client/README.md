@@ -32,6 +32,8 @@ gotg sync                   rebuild the GC roots after a git pull
 | `lib/launcher.sh` | rendering the Steam launcher |
 | `lib/cmd-play.sh` | `install`, `play`, `sync` |
 | `lib/cmd-configure.sh` | `configure` — the emulator's own settings screen |
+| `lib/cmd-complete.sh` | the lists shell completion asks for |
+| `completions/gotg.bash` | bash completion, installed where bash looks |
 | `lib/remote.sh` | the five blob operations, and which backend serves them |
 | `lib/remote-filebrowser.sh` | those five against File Browser |
 | `lib/saves.sh` | bundling, generations, and verifying what arrives |
@@ -80,6 +82,6 @@ log; `gotg install <id>` from a terminal is still the smoother first run.
 nix flake check     # or: GOTG_BIN=$(which gotg) bats client/tests/
 ```
 
-131 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
+140 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
 of the real API — including `Range` requests — that resume is exercised against a
 genuinely truncated transfer rather than a simulated one.

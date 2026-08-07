@@ -49,6 +49,8 @@ source "$GOTG_LIB/cmd-saves.sh"
 source "$GOTG_LIB/cmd-controllers.sh"
 # shellcheck source=lib/cmd-configure.sh
 source "$GOTG_LIB/cmd-configure.sh"
+# shellcheck source=lib/cmd-complete.sh
+source "$GOTG_LIB/cmd-complete.sh"
 
 usage() {
   cat <<'EOF'
@@ -94,6 +96,8 @@ main() {
     saves) cmd_saves "$@" ;;
     controllers) cmd_controllers "$@" ;;
     configure) cmd_configure "$@" ;;
+    # Not in the usage: this is what shell completion calls.
+    complete) cmd_complete "$@" ;;
     sync) cmd_sync "$@" ;;
     help | --help | -h | "") usage ;;
     *)
