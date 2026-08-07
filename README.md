@@ -283,7 +283,16 @@ usa.super_mario_sunshine bse`. Without a variant you get the plain game.
 gotg play usa.super_mario_sunshine        # the game as it shipped
 gotg play usa.super_mario_sunshine bse    # + BetterSunshineEngine
 gotg play usa.super_mario_sunshine bsmso  # + Better Super Mario Sunshine Online
+gotg play world.banra 60fps               # Luigi's Mansion 2 HD, unlocked to 60
 ```
+
+Not every variant rebuilds a disc. The Switch one installs a `.pchtxt` into the
+emulator's mod directory and pins VSync to the Switch's own 60Hz — because the
+other way to raise the frame rate, Ryujinx's VSync toggle, changes the *emulated
+refresh rate*, and Ryujinx warns that "in some titles, this may speed up or slow
+down the rate of gameplay logic". In Luigi's Mansion 2 that is the bug where
+Luigi crawls up stairs. The patch changes the cap in the executable and leaves
+the logic alone.
 
 The two Sunshine variants install Kuribo mods, which are changes to the game's
 own files rather than settings: the first launch opens the disc image, writes
