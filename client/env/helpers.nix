@@ -356,19 +356,25 @@
 
         config="$XDG_CONFIG_HOME/Ryujinx/Config.json"
 
-        # On a first run there is no config to edit yet — Ryujinx writes one
-        # when it exits — so the setting below would not take until the *second*
+        # On a first run there is no config to edit yet — Ryujinx writes one on
+        # startup — so the setting below would not take until the *second*
         # launch, and the first would quietly run at the wrong rate. Starting it
-        # with --help writes the full default config and returns immediately.
+        # once writes the full 94-key default, which is then edited below.
         #
-        # Seeding a handful of keys ourselves was the alternative and is worse:
-        # a config missing its version is rejected outright ("Failed to load
-        # config! Loading the default config instead"), and one carrying a
-        # version but few keys leaves the rest at whatever the deserialiser
-        # picks rather than at Ryujinx's own defaults. This way the defaults are
-        # its own.
+        # With the display hidden, so it cannot put a window on screen: Ryujinx
+        # takes no flag that means "just write the config and stop" — it treats
+        # an unknown argument as a file to load, which is how the first attempt
+        # at this opened a second window reporting it "couldn't find any
+        # application in '--help'". Blinded it writes the config and exits on
+        # its own, seen and discarded here.
+        #
+        # Seeding a few keys ourselves was the alternative and is worse: a
+        # config with no version is rejected outright ("Failed to load config!
+        # Loading the default config instead"), and one with a version but few
+        # keys leaves the rest at whatever the deserialiser picks rather than at
+        # Ryujinx's own defaults.
         if [ ! -f "$config" ]; then
-          ${exe} --help >/dev/null 2>&1 || true
+          env -u DISPLAY -u WAYLAND_DISPLAY ${exe} >/dev/null 2>&1 || true
         fi
 
         if [ -f "$config" ]; then
