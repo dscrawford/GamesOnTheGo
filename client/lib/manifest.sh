@@ -131,17 +131,71 @@ game_is_installed() {
 
 cmd_refresh() { manifest_refresh; }
 
+# How many games a bare `gotg list` prints. A full library runs to hundreds,
+# and a screenful you can read beats a scrollback you have to hunt through.
+GOTG_LIST_LIMIT=50
+
 cmd_list() {
+  local pattern="" limit="$GOTG_LIST_LIMIT"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --all)
+        limit=0
+        shift
+        ;;
+      --limit)
+        limit="${2:-}"
+        shift 2 || die "--limit needs a number"
+        ;;
+      --limit=*)
+        limit="${1#--limit=}"
+        shift
+        ;;
+      -*) die "unknown option for list: $1" ;;
+      *)
+        [[ -z "$pattern" ]] || die "usage: gotg list [pattern] [--all|--limit N]"
+        pattern="$1"
+        shift
+        ;;
+    esac
+  done
+  [[ "$limit" =~ ^[0-9]+$ ]] || die "--limit takes a number, not: $limit"
+
   manifest_ensure
   local rows
   # The entry name comes along so the installed check is an exact path test
   # rather than a guess at what the file is called.
-  rows="$(manifest_games |
-    jq -r '[.platform, .id, .size_bytes, (.path | split("/") | last), .title] | @tsv')"
-  [[ -n "$rows" ]] || {
+  #
+  # The pattern is a regex, matched without case against the id, the title and
+  # the platform — the three things anyone would type. `any` rather than three
+  # `or`s, because a bare `(.id, .title)` emits one result per field and would
+  # print a matching game once per field it matched in.
+  if ! rows="$(manifest_games |
+    jq -r --arg p "$pattern" '
+      select($p == "" or ([.id, .title, .platform] | any(test($p; "i"))))
+      | [.platform, .id, .size_bytes, (.path | split("/") | last), .title] | @tsv
+    ' 2>&1)"; then
+    die "not a valid pattern: $pattern
+     It is a regex, so a bare . matches any character and ( must be closed."
+  fi
+
+  if [[ -z "$rows" ]]; then
+    if [[ -n "$pattern" ]]; then
+      log "nothing matches $pattern"
+      return 0
+    fi
     log "the catalog is empty"
     return 0
-  }
+  fi
+
+  local total shown
+  total="$(wc -l <<<"$rows")"
+  shown="$total"
+  if ((limit > 0 && total > limit)); then
+    rows="$(head -n "$limit" <<<"$rows")"
+    shown="$limit"
+  fi
 
   # The colour goes in its own argument so the width applies to the value and
   # not to the escape bytes, which would silently break every column.
@@ -165,6 +219,15 @@ cmd_list() {
   log ""
   # Braced: "$C_OK[*]" reads as an array subscript.
   log "${C_OK}[*]${C_RESET} installed locally"
+
+  # Say what was left out, and how to see it. A silent truncation reads as
+  # "that is everything", which is the one thing it must not read as.
+  if ((shown < total)); then
+    log ""
+    log "${C_WARN}showing $shown of $total.${C_RESET} Narrow it with a pattern:"
+    log "  gotg list zelda          # id, title or platform, as a regex"
+    log "  gotg list --all          # every one of them"
+  fi
 }
 
 cmd_info() {
