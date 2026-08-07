@@ -189,7 +189,17 @@ pkgs.runCommand "gotg-env-${name}"
     ''}
     ${lib.optionalString configurable ''
       cp ${
-        pkgs.writeText "configure.json" (builtins.toJSON { exec = exe; })
+        pkgs.writeText "configure.json" (
+          builtins.toJSON {
+            exec = exe;
+            # The same environment a launch runs under. Without it a settings
+            # screen sees a different machine than the game does — the SDL hints
+            # in particular decide whether a controller exists at all, so
+            # binding a pad in a configure that lacked them would be binding a
+            # pad the game will not have.
+            env = baseEnv // env;
+          }
+        )
       } $out/share/gotg/configure.json
     ''}
     ${lib.optionalString (padEmulator != null) ''

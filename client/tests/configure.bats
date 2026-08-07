@@ -25,10 +25,11 @@ fake_configurable_root() {
   mkdir -p "$GOTG_ROOTS_DIR/$attr/share/gotg" "$GOTG_ROOTS_DIR/$attr/bin"
   if [[ -z "$exe" ]]; then
     exe="$GOTG_ROOTS_DIR/$attr/bin/emulator"
-    printf '#!/bin/sh\necho "emulator opened"\necho "config=$XDG_CONFIG_HOME"\n' >"$exe"
+    printf '#!/bin/sh\necho "emulator opened"\necho "config=$XDG_CONFIG_HOME"\necho "hint=${SDL_JOYSTICK_HIDAPI_STEAM:-unset}"\n' >"$exe"
     chmod +x "$exe"
   fi
-  jq -n --arg e "$exe" '{exec: $e}' >"$GOTG_ROOTS_DIR/$attr/share/gotg/configure.json"
+  jq -n --arg e "$exe" '{exec: $e, env: {SDL_JOYSTICK_HIDAPI_STEAM: "1"}}' \
+    >"$GOTG_ROOTS_DIR/$attr/share/gotg/configure.json"
 }
 
 @test "it opens the environment's own emulator, pointed at its own settings" {
@@ -86,4 +87,27 @@ fake_configurable_root() {
   gotg configure world.super_metroid nosuchvariant
   [ "$status" -ne 0 ]
   [[ "$output" != *"emulator opened"* ]]
+}
+
+@test "it runs under the same environment a launch would" {
+  # The SDL hints decide whether a controller exists at all — Ryujinx's SDL2
+  # sees no Steam Controller without this one. A settings screen that lacked
+  # them would be binding a pad the game will not have.
+  fake_configurable_root env-snes-world_super_metroid
+  gotg configure world.super_metroid
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"hint=1"* ]]
+}
+
+@test "an environment that sets no variables still opens" {
+  mkdir -p "$GOTG_ROOTS_DIR/env-snes-world_super_metroid/share/gotg" \
+    "$GOTG_ROOTS_DIR/env-snes-world_super_metroid/bin"
+  local exe="$GOTG_ROOTS_DIR/env-snes-world_super_metroid/bin/emulator"
+  printf '#!/bin/sh\necho "emulator opened"\n' >"$exe"
+  chmod +x "$exe"
+  jq -n --arg e "$exe" '{exec: $e}' \
+    >"$GOTG_ROOTS_DIR/env-snes-world_super_metroid/share/gotg/configure.json"
+  gotg configure world.super_metroid
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"emulator opened"* ]]
 }

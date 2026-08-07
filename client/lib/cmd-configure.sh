@@ -49,11 +49,24 @@ cmd_configure() {
 
   log "$attr: opening $(basename "$emulator")"
   log ""
-  log "This is that environment's own settings, not your Dolphin install's, and"
+  log "This is that environment's own settings, not your emulator install's, and"
   log "not any other environment's. Changes apply on its next launch."
   log ""
 
+  # The same environment a launch runs under, not just the same directories.
+  # The SDL hints in particular decide whether a controller is visible at all —
+  # Ryujinx's SDL2 sees no Steam Controller without SDL_JOYSTICK_HIDAPI_STEAM —
+  # so a settings screen without them would be binding a pad the game will not
+  # have, or reporting no pad at all.
+  local key value
+  while IFS=$'\t' read -r key value; do
+    [[ -n "$key" ]] || continue
+    export "$key=$value"
+  done < <(jq -r '(.env // {}) | to_entries[] | "\(.key)\t\(.value)"' "$manifest")
+
+  export XDG_CONFIG_HOME="$state/config" XDG_DATA_HOME="$state/data"
+
   # Hand the process over rather than waiting on it: there is nothing to do
   # afterwards, and a settings screen is something you close when you are done.
-  XDG_CONFIG_HOME="$state/config" XDG_DATA_HOME="$state/data" exec "$emulator"
+  exec "$emulator"
 }
