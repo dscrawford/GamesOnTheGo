@@ -455,7 +455,7 @@ Steam is a hostile launch environment, and each of these was learned the hard wa
 ## Development
 
 ```bash
-nix develop        # gotg on PATH, plus python, pytest, ruff, shellcheck, bats
+nix develop        # gotg on PATH, plus uv, the locked python env, ruff, shellcheck, bats
 nix flake check    # every test suite and linter
 ```
 
@@ -464,5 +464,18 @@ tree, with the packaged wrapper's own dependency list on PATH. Edits apply on
 save — there is nothing to rebuild and no shell to re-enter. `nix run .#gotg`
 gives you the packaged article when that is what you want to test.
 
-`nix flake check` runs 119 importer tests (pytest), 147 client tests (bats,
+`nix flake check` runs 130 importer tests (pytest), 167 client tests (bats,
 against a stand-in File Browser over real HTTP), ruff and shellcheck.
+
+**The importer is a uv project.** Its dependencies are resolved and hashed in
+`importer/uv.lock`, and [uv2nix](https://github.com/pyproject-nix/uv2nix) builds
+them straight from it — so `uv lock` and `nix build` agree by construction
+rather than by someone remembering to keep a list of nixpkgs attributes in step
+with `pyproject.toml`. Adding a dependency is `uv add`, and nothing in the flake
+changes.
+
+The dev shell hands you the same environment the package is built from, so
+`pytest` runs there without a `uv sync` first. The client is not a Python
+project — it is bash with one helper for Steam's binary shortcut file, whose
+single dependency comes from nixpkgs; a second lockfile for one library would
+cost more than it saves.

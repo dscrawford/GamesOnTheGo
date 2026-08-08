@@ -1,7 +1,16 @@
+# The importer, built from its own uv.lock rather than from a list of nixpkgs
+# attributes kept in step by hand.
+#
+# `venv` is what uv2nix produced: a virtual environment holding gotg-importer
+# and exactly the dependencies importer/uv.lock resolves to. All this adds is
+# the part uv has no opinion about — the archive and checksum tools the handlers
+# shell out to, wrapped in rather than assumed on PATH so the container image
+# needs no extra wiring.
 {
   lib,
-  python3Packages,
+  runCommand,
   makeWrapper,
+  venv,
   unrar,
   p7zip,
   dolphin-emu,
@@ -10,27 +19,22 @@
   coreutils,
 }:
 
-python3Packages.buildPythonApplication {
-  pname = "gotg-importer";
-  version = "0.1.0";
-  pyproject = true;
+runCommand "gotg-importer-0.1.0"
+  {
+    nativeBuildInputs = [ makeWrapper ];
+    inherit venv;
 
-  src = lib.cleanSource ./.;
+    # Read by the image builder and by anything else that wants to tag a build.
+    passthru.version = "0.1.0";
 
-  build-system = [ python3Packages.setuptools ];
-
-  dependencies = with python3Packages; [
-    qbittorrent-api
-    pyyaml
-  ];
-
-  nativeBuildInputs = [ makeWrapper ];
-  nativeCheckInputs = [ python3Packages.pytestCheckHook ];
-
-  # Archive/checksum tools the handlers shell out to. Wrapped in rather than
-  # assumed on PATH, so the container image needs no extra PATH wiring.
-  postFixup = ''
-    wrapProgram $out/bin/gotg-importer \
+    meta = {
+      description = "Organizes completed game torrents into the GOTG /Games tree";
+      mainProgram = "gotg-importer";
+    };
+  }
+  ''
+    mkdir -p $out/bin
+    makeWrapper $venv/bin/gotg-importer $out/bin/gotg-importer \
       --prefix PATH : ${
         lib.makeBinPath [
           unrar
@@ -44,10 +48,4 @@ python3Packages.buildPythonApplication {
           coreutils
         ]
       }
-  '';
-
-  meta = {
-    description = "Organizes completed game torrents into the GOTG /Games tree";
-    mainProgram = "gotg-importer";
-  };
-}
+  ''

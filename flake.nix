@@ -1,10 +1,38 @@
 {
   description = "GamesOnTheGo — on-demand game downloader, importer and emulator launcher";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    # The importer is a uv project: its dependencies are resolved and hashed in
+    # importer/uv.lock, and uv2nix builds them straight from that. `uv lock` and
+    # `nix build` therefore agree by construction, rather than by someone
+    # remembering to update a list of nixpkgs attributes to match.
+    pyproject-nix = {
+      url = "github:pyproject-nix/pyproject.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    uv2nix = {
+      url = "github:pyproject-nix/uv2nix";
+      inputs.pyproject-nix.follows = "pyproject-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    pyproject-build-systems = {
+      url = "github:pyproject-nix/build-system-pkgs";
+      inputs.pyproject-nix.follows = "pyproject-nix";
+      inputs.uv2nix.follows = "uv2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      pyproject-nix,
+      uv2nix,
+      pyproject-build-systems,
+    }:
     let
       systems = [
         "x86_64-linux"
@@ -23,6 +51,29 @@
             }
           )
         );
+      # The importer's dependency set, straight out of importer/uv.lock.
+      #
+      # sourcePreference = "wheel": these are pure-python packages published as
+      # wheels, so building from sdists would only add work and a build-system
+      # to resolve for each. Anything needing a compiler would want "sdist".
+      pythonSets = forAllSystems (
+        pkgs:
+        let
+          workspace = uv2nix.lib.workspace.loadWorkspace { workspaceRoot = ./importer; };
+          overlay = workspace.mkPyprojectOverlay { sourcePreference = "wheel"; };
+        in
+        {
+          inherit workspace;
+          set =
+            (pkgs.callPackage pyproject-nix.build.packages { python = pkgs.python312; }).overrideScope
+              (
+                nixpkgs.lib.composeManyExtensions [
+                  pyproject-build-systems.overlays.default
+                  overlay
+                ]
+              );
+        }
+      );
     in
     {
       packages = forAllSystems (
@@ -31,11 +82,14 @@
           # One launchable environment per platform, plus one per game that needs
           # its own settings — see client/env. `gotg play` builds these by name.
           envs = import ./client/env { inherit pkgs; };
+          py = pythonSets.${pkgs.stdenv.hostPlatform.system};
         in
         envs
         // rec {
           gotg = pkgs.callPackage ./client { inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg-pads; };
-          gotg-importer = pkgs.callPackage ./importer { };
+          gotg-importer = pkgs.callPackage ./importer {
+            venv = py.set.mkVirtualEnv "gotg-importer-env" py.workspace.deps.default;
+          };
           default = gotg;
 
 
@@ -58,7 +112,7 @@
           #   skopeo copy docker-archive:result docker://localhost:30500/gotg-importer:0.1.0
           importer-image = pkgs.dockerTools.buildLayeredImage {
             name = "gotg-importer";
-            tag = gotg-importer.version;
+            tag = gotg-importer.passthru.version;
             contents = [
               gotg-importer
               pkgs.cacert
@@ -104,12 +158,20 @@
           packages = [
             gotg-dev
           ]
+          ++ [
+            # The importer's own dependencies, out of its lock rather than a
+            # second list that drifts from it. `uv` is here to edit that lock —
+            # `uv lock`, `uv add` — after which `nix build` picks the change up
+            # with nothing else to update.
+            (
+              let
+                py = pythonSets.${pkgs.stdenv.hostPlatform.system};
+              in
+              py.set.mkVirtualEnv "gotg-importer-dev-env" py.workspace.deps.all
+            )
+            pkgs.uv
+          ]
           ++ (with pkgs; [
-            (python3.withPackages (ps: [
-              ps.qbittorrent-api
-              ps.pyyaml
-              ps.pytest
-            ]))
             ruff
             shellcheck
             bats
@@ -133,6 +195,23 @@
 
       checks = forAllSystems (pkgs: {
         importer = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-importer;
+
+        # buildPythonApplication used to run these through pytestCheckHook; a
+        # uv2nix venv has no such hook, so they get a check of their own rather
+        # than quietly stopping.
+        importer-tests =
+          let
+            py = pythonSets.${pkgs.stdenv.hostPlatform.system};
+            # deps.all rather than deps.default: the dev group is where pytest is.
+            venv = py.set.mkVirtualEnv "gotg-importer-test-env" py.workspace.deps.all;
+          in
+          pkgs.runCommand "check-importer-tests" { nativeBuildInputs = [ venv ]; } ''
+            cp -r ${./importer} importer
+            chmod -R u+w importer
+            cd importer
+            python -m pytest tests/
+            touch $out
+          '';
         client = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg;
 
         shellcheck =
