@@ -13,9 +13,9 @@ is discarded. The caller checks for that; this only reports what it did.
 from __future__ import annotations
 
 import argparse
+import binascii
 import json
 import os
-import random
 import shutil
 import sys
 from pathlib import Path
@@ -70,15 +70,24 @@ def save(path: Path, shortcuts: dict) -> None:
     os.replace(tmp, path)
 
 
-def new_appid() -> int:
-    """A fresh shortcut id, as a signed 32-bit with the high bit set.
+def app_ids(exe: str, name: str) -> tuple[int, int]:
+    """The shortcut id, and the long form Big Picture files artwork under.
 
-    Not derived from the name or path: Steam's own ids do not reproduce under
-    any of the published crc32 formulas, so it evidently assigns them randomly
-    now. Ours only has to be unique and stable once written — which it is,
-    because an update keeps whatever id the entry already had.
+    Transcribed from Steam ROM Manager's generate-app-id.ts, which EmuDeck
+    follows too. Deterministic on purpose: every piece of artwork for a
+    non-Steam game lives in userdata/<user>/config/grid named after this id, so
+    an id chosen at random orphans the art the moment anything is rewritten.
+
+    Steam's own "Add a Non-Steam Game" does choose randomly — an entry it made
+    will not reproduce under this — which is precisely why the tools compute it
+    instead: it lets artwork be put in place without asking Steam anything.
+
+    The path is the bare one, not the quoted form stored in Exe, matching what
+    EmuDeck hashes.
     """
-    return random.randint(0x80000000, 0xFFFFFFFF) - 0x100000000
+    top = binascii.crc32((exe + name).encode()) | 0x80000000
+    long_id = (top << 32) | 0x02000000
+    return (long_id >> 32) - 0x100000000, long_id
 
 
 def find_entry(shortcuts: dict, exe: str) -> str | None:
@@ -104,23 +113,41 @@ def cmd_add(args: argparse.Namespace) -> int:
 
     index = find_entry(shortcuts, exe)
     if index is not None:
+        # Only the fields we own are rewritten; IsHidden, AllowOverlay,
+        # LastPlayTime and anything else Steam put there survive, which is the
+        # rule Steam ROM Manager follows too.
         entry = dict(shortcuts[index])
         action = "updated"
     else:
         entry = dict(DEFAULTS)
-        entry["appid"] = new_appid()
         index = str(len(shortcuts))
         action = "added"
 
+    appid, grid_appid = app_ids(args.exe, args.name)
+    entry["appid"] = appid
     entry["AppName"] = args.name
     entry["Exe"] = exe
     entry["StartDir"] = start_dir
     if args.launch_options is not None:
         entry["LaunchOptions"] = args.launch_options
+    # A tag is a Steam collection. EmuDeck tags everything it adds so the games
+    # arrive grouped rather than scattered through the library.
+    if args.tag:
+        entry["tags"] = {"0": args.tag}
 
     shortcuts[index] = entry
     save(path, shortcuts)
-    print(json.dumps({"action": action, "name": args.name, "appid": entry["appid"]}))
+    print(
+        json.dumps(
+            {
+                "action": action,
+                "name": args.name,
+                "appid": appid,
+                # What artwork is filed under, for whoever adds it later.
+                "grid_appid": str(grid_appid),
+            }
+        )
+    )
     return 0
 
 
@@ -147,6 +174,8 @@ def cmd_list(args: argparse.Namespace) -> int:
                     "name": e.get("AppName", ""),
                     "exe": e.get("Exe", "").strip('"'),
                     "options": e.get("LaunchOptions", ""),
+                    "appid": e.get("appid", 0),
+                    "tags": list((e.get("tags") or {}).values()),
                 }
                 for e in shortcuts.values()
             ]
@@ -165,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     add.add_argument("--exe", required=True)
     add.add_argument("--start-dir", required=True)
     add.add_argument("--launch-options")
+    add.add_argument("--tag", help="Steam collection to file it under")
     add.set_defaults(func=cmd_add)
 
     remove = sub.add_parser("remove")

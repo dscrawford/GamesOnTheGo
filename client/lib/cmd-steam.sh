@@ -125,7 +125,8 @@ steam_add() {
 
   local result
   result="$(steam_helper --file "$(steam_shortcuts_file)" add \
-    --name "$name" --exe "$launcher" --start-dir "$(dirname "$launcher")")" ||
+    --name "$name" --exe "$launcher" --start-dir "$(dirname "$launcher")" \
+    --tag "$(manifest_field "$game" platform)")" ||
     die "could not write the Steam shortcut"
 
   log "$(jq -r '"\(.action): \(.name)"' <<<"$result")"

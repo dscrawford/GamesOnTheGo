@@ -82,8 +82,18 @@ gotg steam remove usa.super_mario_sunshine bse
 gotg steam list
 ```
 
-Each variant gets its own launcher and its own entry, named `Title (variant)`,
-so `bse` and `bsmso` sit side by side in the library.
+Each variant gets its own launcher and its own entry, named `Title (variant)`
+from the catalog's own title, so `bse` and `bsmso` sit side by side. Entries are
+tagged with their platform, which Steam shows as a collection.
+
+**The appid is computed, not random**, by the same formula Steam ROM Manager and
+EmuDeck use — `crc32(exe + name)` folded into the high half. That is the
+convention worth following: artwork for a non-Steam game is filed under that id
+in `userdata/<user>/config/grid`, so an id chosen at random orphans the art
+whenever anything is rewritten. Steam's own *Add a Non-Steam Game* does pick
+randomly, which is why an entry it created will not reproduce under the formula.
+`gotg steam add` reports both the shortcut id and the long form Big Picture
+artwork uses.
 
 **Steam has to be closed.** It rewrites its shortcut file when it exits, so a
 change made while it is running is thrown away without a word — which is why

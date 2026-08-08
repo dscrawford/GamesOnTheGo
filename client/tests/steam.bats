@@ -55,13 +55,23 @@ seed_existing() {
   [ "$(jq -r '.[0].name' <<<"$output")" = "New Name" ]
 }
 
-@test "an update keeps the appid Steam already assigned" {
-  # Artwork is filed under the appid, so changing it on a rename would orphan it.
+@test "the appid follows the name, as Steam ROM Manager and EmuDeck do" {
+  # It is computed from exe and name rather than kept, which is the convention
+  # those tools set so artwork can be filed under a predictable id. The cost is
+  # that renaming a game is a new id — they accept that and re-place the art.
+  # Unchanged inputs give an unchanged id, which is the property that matters:
+  # see steam-conventions.bats.
   run helper add --name "First" --exe "/games/play.sh" --start-dir "/games"
   local first
   first="$(jq -r '.appid' <<<"$output")"
   run helper add --name "Second" --exe "/games/play.sh" --start-dir "/games"
-  [ "$(jq -r '.appid' <<<"$output")" = "$first" ]
+  [ "$(jq -r '.appid' <<<"$output")" != "$first" ]
+
+  run helper add --name "Second" --exe "/games/play.sh" --start-dir "/games"
+  local again
+  again="$(jq -r '.appid' <<<"$output")"
+  run helper add --name "Second" --exe "/games/play.sh" --start-dir "/games"
+  [ "$(jq -r '.appid' <<<"$output")" = "$again" ]
 }
 
 @test "shortcuts that are not ours are left alone" {
