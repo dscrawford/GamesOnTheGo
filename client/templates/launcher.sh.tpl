@@ -41,4 +41,4 @@ if [[ -z "$GOTG" || ! -x "$GOTG" ]]; then
   exit 1
 fi
 
-exec "$GOTG" play "@REF@" "$@"
+exec "$GOTG" play "@REF@"@VARIANT@ "$@"

@@ -12,7 +12,7 @@ _gotg() {
     sub="${COMP_WORDS[2]:-}"
     COMPREPLY=()
 
-    local commands="login refresh list info download install play configure saves controllers sync help"
+    local commands="login refresh list info download install play configure steam saves controllers sync help"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
         mapfile -t COMPREPLY < <(compgen -W "$commands" -- "$cur")
@@ -55,6 +55,21 @@ _gotg() {
                     else
                         mapfile -t COMPREPLY < <(compgen -W "$(gotg complete ids)" -- "$cur")
                     fi
+                    ;;
+            esac
+            ;;
+        steam)
+            case $COMP_CWORD in
+                2) mapfile -t COMPREPLY < <(compgen -W "add remove list" -- "$cur") ;;
+                3)
+                    case "$sub" in
+                        add | remove) mapfile -t COMPREPLY < <(compgen -W "$(gotg complete ids)" -- "$cur") ;;
+                    esac
+                    ;;
+                4)
+                    case "$sub" in
+                        add | remove) mapfile -t COMPREPLY < <(compgen -W "$(gotg complete variants "${COMP_WORDS[3]}")" -- "$cur") ;;
+                    esac
                     ;;
             esac
             ;;

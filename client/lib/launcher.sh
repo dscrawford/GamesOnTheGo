@@ -7,12 +7,19 @@
 # Steam.
 
 launcher_path() {
-  local game="$1" id platform
+  local game="$1" variant="${2:-}" id platform
   id="$(manifest_field "$game" id)"
   platform="$(manifest_field "$game" platform)"
   validate_id "$id"
   validate_platform "$platform"
-  printf '%s/%s/play-%s.sh' "$GOTG_GAMES_DIR" "$platform" "$id"
+  # A variant is a different way to run the same game — a mod, a port, a frame
+  # rate — so it gets a launcher of its own rather than overwriting the plain
+  # one. Both can then sit in Steam at once.
+  if [[ -n "$variant" ]]; then
+    printf '%s/%s/play-%s-%s.sh' "$GOTG_GAMES_DIR" "$platform" "$id" "$variant"
+  else
+    printf '%s/%s/play-%s.sh' "$GOTG_GAMES_DIR" "$platform" "$id"
+  fi
 }
 
 # The argument the launcher passes back to `gotg play`. Qualified with the
@@ -30,14 +37,15 @@ launcher_ref() {
 }
 
 launcher_write() {
-  local game="$1" dest template id title ref
-  dest="$(launcher_path "$game")"
+  local game="$1" variant="${2:-}" dest template id title ref
+  dest="$(launcher_path "$game" "$variant")"
   template="$GOTG_TEMPLATES/launcher.sh.tpl"
   [[ -f "$template" ]] || die "missing launcher template at $template"
 
   id="$(manifest_field "$game" id)"
   title="$(sanitize_title "$(manifest_field "$game" title)")"
   : "${title:=$id}"
+  [[ -z "$variant" ]] || title="$title ($variant)"
   ref="$(launcher_ref "$game")"
 
   # Back up a launcher we did not write, so a hand-tuned script is never lost.
@@ -55,6 +63,11 @@ launcher_write() {
   content="$(cat "$template")"
   content="${content//@ID@/$(escape_replacement "$id")}"
   content="${content//@REF@/$(escape_replacement "$ref")}"
+  # Rendered as a whole argument or as nothing at all, so a launcher with no
+  # variant is byte-identical to what it was before variants existed.
+  content="${content//@VARIANT@/$(
+    if [[ -n "$variant" ]]; then printf ' "%s"' "$(escape_replacement "$variant")"; fi
+  )}"
   content="${content//@TITLE@/$(escape_replacement "$title")}"
   content="${content//@FLAKE@/$(escape_replacement "$(gotg_flake)")}"
 

@@ -16,6 +16,8 @@
   gnused,
   gawk,
   util-linux,
+  procps,
+  python3,
   nix,
 }:
 
@@ -35,6 +37,8 @@ let
     gnugrep
     gnused
     gawk
+    procps # `gotg steam` has to know whether Steam is running
+    (python3.withPackages (ps: [ ps.vdf ])) # binary shortcuts.vdf
     gotg-pads # reports what SDL sees, for generated bindings
     gnutar # save bundles
     zstd
@@ -59,7 +63,8 @@ stdenvNoCC.mkDerivation {
     mkdir -p $out/share/gotg
     # env/ is shipped for its file names, not to be evaluated from here: the CLI
     # reads them to work out which flake attribute a game wants, without nix.
-    cp -r lib data templates env $out/share/gotg/
+    cp -r lib data templates env steam $out/share/gotg/
+    chmod +x $out/share/gotg/steam/shortcuts.py
     install -Dm644 completions/gotg.bash \
       $out/share/bash-completion/completions/gotg
     install -Dm755 bin/gotg $out/share/gotg/bin/gotg

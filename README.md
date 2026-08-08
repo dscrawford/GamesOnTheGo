@@ -70,9 +70,27 @@ rather than going to the server. The package installs it to
 `programs.bash.completion.enable`; `nix develop` sources the one in the checkout
 instead, so edits to it apply on save.
 
-`install` prints the path of a `play-<id>.sh` script. Add that to Steam with
-**Games → Add a Non-Steam Game → Browse**. Launching it downloads the game if it
-is missing (with a progress dialog) and then starts the emulator.
+`install` prints the path of a `play-<id>.sh` script. Launching it downloads the
+game if it is missing (with a progress dialog) and then starts the emulator.
+
+**Putting it in Steam is a command**, rather than Games → Add a Non-Steam Game →
+Browse → change the filter to All Files → find the script → rename the entry:
+
+```bash
+gotg steam add usa.super_mario_sunshine bse   # writes the launcher too
+gotg steam remove usa.super_mario_sunshine bse
+gotg steam list
+```
+
+Each variant gets its own launcher and its own entry, named `Title (variant)`,
+so `bse` and `bsmso` sit side by side in the library.
+
+**Steam has to be closed.** It rewrites its shortcut file when it exits, so a
+change made while it is running is thrown away without a word — which is why
+this refuses rather than reporting a success that will not survive. The file is
+binary, and every non-Steam game you have lives in it, so the previous version
+is kept beside it before each write and entries that are not ours are left
+alone.
 
 ### Controllers
 

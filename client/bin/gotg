@@ -51,6 +51,8 @@ source "$GOTG_LIB/cmd-saves.sh"
 source "$GOTG_LIB/cmd-controllers.sh"
 # shellcheck source=lib/cmd-configure.sh
 source "$GOTG_LIB/cmd-configure.sh"
+# shellcheck source=lib/cmd-steam.sh
+source "$GOTG_LIB/cmd-steam.sh"
 # shellcheck source=lib/cmd-complete.sh
 source "$GOTG_LIB/cmd-complete.sh"
 
@@ -70,6 +72,7 @@ usage: gotg <command> [args]
   controllers <cmd>  what SDL sees, and where its inputs land
   configure <id> [variant]
                      open that environment's own emulator settings
+  steam <command>    add / remove / list non-Steam games (steam help)
   sync               rebuild gotg and the environment GC roots after a git pull
 
 Ids look like usa.legend_of_zelda_majoras_mask. When the same id exists on more
@@ -98,6 +101,7 @@ main() {
     saves) cmd_saves "$@" ;;
     controllers) cmd_controllers "$@" ;;
     configure) cmd_configure "$@" ;;
+    steam) cmd_steam "$@" ;;
     # Not in the usage: this is what shell completion calls.
     complete) cmd_complete "$@" ;;
     sync) cmd_sync "$@" ;;

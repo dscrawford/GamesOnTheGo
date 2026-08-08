@@ -14,6 +14,7 @@ gotg play <id>              fetch and build what is missing, then launch
 gotg saves <command>        setup / status / push / pull, between machines
 gotg controllers <command>  list what SDL sees; order; apply bindings
 gotg configure <id> [var]   open that environment's own emulator settings
+gotg steam <command>        add / remove / list non-Steam games
 gotg sync                   rebuild the GC roots after a git pull
 ```
 
@@ -32,6 +33,8 @@ gotg sync                   rebuild the GC roots after a git pull
 | `lib/launcher.sh` | rendering the Steam launcher |
 | `lib/cmd-play.sh` | `install`, `play`, `sync` |
 | `lib/cmd-configure.sh` | `configure` — the emulator's own settings screen |
+| `lib/cmd-steam.sh` | `steam` — which game, which launcher, which account |
+| `steam/shortcuts.py` | Steam's binary shortcuts.vdf, read and written |
 | `lib/keys.sh` | console keys, fetched from beside the games |
 | `lib/cmd-complete.sh` | the lists shell completion asks for |
 | `completions/gotg.bash` | bash completion, installed where bash looks |
@@ -83,6 +86,6 @@ log; `gotg install <id>` from a terminal is still the smoother first run.
 nix flake check     # or: GOTG_BIN=$(which gotg) bats client/tests/
 ```
 
-147 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
+162 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
 of the real API — including `Range` requests — that resume is exercised against a
 genuinely truncated transfer rather than a simulated one.

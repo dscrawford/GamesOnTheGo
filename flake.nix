@@ -155,7 +155,7 @@
                 bats
                 jq
                 curl
-                python3
+                (python3.withPackages (ps: [ ps.vdf ]))
                 coreutils
                 zip
                 unzip
@@ -172,7 +172,7 @@
               cp -r ${./client/tests} tests
               chmod -R u+w tests
               export HOME=$TMPDIR
-              bats tests/
+              bats --print-output-on-failure tests/
               touch $out
             '';
 
