@@ -1,4 +1,4 @@
-# Luigi's Mansion 2 HD at 120 FPS — `gotg play world.banra 120fps`.
+# Luigi's Mansion 2 HD at 120 FPS — `gotg play world.luigis_mansion_2_hd 120fps`.
 #
 # The same patch as the `60fps` variant, which presents one frame per vblank —
 # so the frame rate is whatever the emulated refresh rate is, and this sets that

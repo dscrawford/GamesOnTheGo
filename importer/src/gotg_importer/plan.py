@@ -141,7 +141,13 @@ def plan_scene_archive(platform: str, games_root: str, src_dir: str,
     """Plan a scene RAR -> single rom extraction. Scene names carry no region
     tag, so region defaults (world, or a caller-supplied override) and is flagged
     for confirmation; content metadata (nstool) can refine it at execution time."""
-    title = _clean_scene_name(inner_name) or _clean_scene_name(release_name)
+    # The release directory, not the file inside it. Scene rules put the game's
+    # name on the directory; the file is frequently an abbreviation or an
+    # outright codename — Luigi's Mansion 2 HD ships as hr-banra.xci inside
+    # Luigis_Mansion_2_HD_NSW-HR, and reading the inner name filed it under
+    # "Banra". The inner name stays as the fallback for a release whose
+    # directory cleans away to nothing.
+    title = _clean_scene_name(release_name) or _clean_scene_name(inner_name)
     slug = title_slug(title)
     ext = inner_name.rsplit(".", 1)[-1].lower() if "." in inner_name else "nsp"
     entry = f"{region}.{slug}"

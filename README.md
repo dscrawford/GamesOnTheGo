@@ -311,8 +311,8 @@ usa.super_mario_sunshine bse`. Without a variant you get the plain game.
 gotg play usa.super_mario_sunshine        # the game as it shipped
 gotg play usa.super_mario_sunshine bse    # + BetterSunshineEngine
 gotg play usa.super_mario_sunshine bsmso  # + Better Super Mario Sunshine Online
-gotg play world.banra 60fps               # Luigi's Mansion 2 HD, unlocked to 60
-gotg play world.banra 120fps              # the same patch at a 120Hz refresh rate
+gotg play world.luigis_mansion_2_hd 60fps   # Luigi's Mansion 2 HD, unlocked to 60
+gotg play world.luigis_mansion_2_hd 120fps  # the same patch at a 120Hz refresh rate
 ```
 
 Not every variant rebuilds a disc. The Switch one installs a `.pchtxt` into the

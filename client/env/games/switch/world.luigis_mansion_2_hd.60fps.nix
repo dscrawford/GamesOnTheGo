@@ -1,4 +1,4 @@
-# Luigi's Mansion 2 HD at 60 FPS — `gotg play world.banra 60fps`.
+# Luigi's Mansion 2 HD at 60 FPS — `gotg play world.luigis_mansion_2_hd 60fps`.
 #
 # The game ships locked to 30. There are two ways to raise that and only one of
 # them is right.
@@ -18,9 +18,6 @@
 # emulated refresh rate, which is the mod author's stated ceiling and does lean
 # on the mechanism described above.
 #
-# NOTE ON THE NAME: `world.banra` is the scene release's internal codename, not
-# the game's. It came in that way and the id is the catalog's, so this file is
-# named to match. When the entry is renamed, this renames with it.
 { base, helpers, ... }:
 
 base

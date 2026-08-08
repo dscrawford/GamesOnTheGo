@@ -285,3 +285,25 @@ def test_a_lone_archive_is_planned_end_to_end(tmp_path, monkeypatch):
     assert len(ops) == 1
     assert ops[0].action == ACTION_CONVERT
     assert ops[0].dst == "/Games/gamecube/usa.super_mario_sunshine.rvz"
+
+
+def test_scene_title_comes_from_the_release_not_the_inner_codename(roots):
+    """A scene release names the game in its directory; the file inside is often
+    a codename. Luigi's Mansion 2 HD shipped as hr-banra.xci inside
+    Luigis_Mansion_2_HD_NSW-HR, and taking the inner name gave a library entry
+    called "Banra"."""
+    src, games = roots
+    stem = "hr-banra"
+    make_dir(
+        src,
+        "Luigis_Mansion_2_HD_NSW-HR",
+        files=(f"{stem}.nfo", f"{stem}.xci", f"{stem}.rar", f"{stem}.r00", f"{stem}.sfv"),
+    )
+
+    ops = plan_source(src / "Luigis_Mansion_2_HD_NSW-HR", games, RULES)
+
+    assert len(ops) == 1
+    op = ops[0]
+    assert op.entry_id == "world.luigis_mansion_2_hd"
+    # "HD" survives as an initialism rather than becoming "Hd".
+    assert op.title == "Luigis Mansion 2 HD"
