@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch artwork for a Steam shortcut from SteamGridDB.
+"""Fetch artwork for a Steam shortcut.
 
 Steam finds a non-Steam game's pictures by filename, keyed on the shortcut's
 appid, in ``userdata/<user>/config/grid``. The five names below are transcribed
@@ -10,6 +10,16 @@ silence, so these are the whole contract.
 EmuDeck itself does not talk to SteamGridDB: it copies out of Steam ROM
 Manager's cache, having had SRM do the fetching. This does that half directly,
 which is a smaller thing than either of them and needs no GUI.
+
+Two sources, tried in that order:
+
+  * SteamGridDB, which has assets cut to Steam's own shapes and is the better
+    answer whenever it has the game — but it needs an API key.
+  * libretro-thumbnails, which needs nothing at all and is keyed by No-Intro
+    filenames. See libretro.py. It fills whatever the first source left, so a
+    machine with no key still gets pictures, and Switch titles — which libretro
+    has none of, and whose SteamGridDB artwork Nintendo has largely had taken
+    down — are the gap between them.
 
 Everything here is best-effort. A shortcut with no picture is a working
 shortcut; a failed download that took the shortcut with it would not be. Every
@@ -28,7 +38,12 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+import libretro
+
 DEFAULT_BASE_URL = "https://www.steamgriddb.com"
+
+# Shipped beside this file, so the table travels with the code that reads it.
+DEFAULT_PLAYLISTS = Path(__file__).resolve().parent.parent / "data" / "libretro-playlists.json"
 
 # kind on the API -> the filename Steam looks for, relative to the grid dir.
 # The extension is what Steam expects, not what the download happens to be;
@@ -90,49 +105,40 @@ def best_asset(base_url: str, api_key: str, game_id: int, kind: str) -> str | No
     return max(data, key=lambda a: a.get("score", 0)).get("url")
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--grid-dir", required=True)
-    parser.add_argument("--appid", required=True)
-    parser.add_argument("--name", required=True)
-    parser.add_argument("--api-key")
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="replace artwork that is already there",
-    )
-    args = parser.parse_args(argv)
+def _write(dest: Path, body: bytes) -> None:
+    """Written whole and moved, so a half-downloaded file is never left looking
+    like artwork Steam should use."""
+    tmp = dest.with_suffix(dest.suffix + ".gotg-tmp")
+    tmp.write_bytes(body)
+    tmp.replace(dest)
 
-    def report(**fields) -> int:
-        print(json.dumps(fields))
-        return 0
 
+def from_steamgriddb(args, grid: Path, taken: set[str]) -> tuple[list[str], list[str], dict]:
+    """The first source. Returns what it wrote, what it left, and why if it
+    could not run at all."""
     # No key is the ordinary case on a fresh machine, not a fault. An
     # unauthenticated request to the real API is a 401, so there is nothing to
     # try without one.
     if not args.api_key:
-        return report(skipped="no api key")
-
-    grid = Path(args.grid_dir)
-    grid.mkdir(parents=True, exist_ok=True)
+        return [], [], {"skipped": "no api key"}
 
     try:
         game = find_game(args.base_url, args.api_key, args.name)
     except urllib.error.HTTPError as error:
         reason = "the api key was refused" if error.code == 401 else f"http {error.code}"
-        return report(skipped=reason)
+        return [], [], {"skipped": reason}
     except (urllib.error.URLError, OSError, ValueError) as error:
-        return report(skipped=f"steamgriddb unreachable: {error}")
+        return [], [], {"skipped": f"steamgriddb unreachable: {error}"}
 
     if not game:
-        return report(skipped="no match", name=args.name)
+        return [], [], {"skipped": "no match", "name": args.name}
 
     downloaded, kept = [], []
     for kind, template in ARTWORK.items():
         dest = grid / template.format(appid=args.appid)
         if dest.exists() and not args.force:
             kept.append(dest.name)
+            taken.add(kind)
             continue
         try:
             url = best_asset(args.base_url, args.api_key, game["id"], kind)
@@ -142,19 +148,76 @@ def main(argv: list[str] | None = None) -> int:
         except (urllib.error.URLError, OSError, ValueError):
             # One missing picture is not a reason to abandon the other four.
             continue
-        # Written whole and moved, so a half-downloaded file is never left
-        # looking like artwork Steam should use.
-        tmp = dest.with_suffix(dest.suffix + ".gotg-tmp")
-        tmp.write_bytes(body)
-        tmp.replace(dest)
+        _write(dest, body)
+        downloaded.append(dest.name)
+        taken.add(kind)
+
+    return downloaded, kept, {"game": game.get("name"), "game_id": game.get("id")}
+
+
+def from_libretro(args, grid: Path, taken: set[str]) -> dict:
+    """The second source, filling only what the first did not."""
+    if not args.platform or not args.id:
+        return {"skipped": "no platform or id given"}
+
+    playlists_file = Path(args.playlists) if args.playlists else DEFAULT_PLAYLISTS
+    try:
+        playlists = libretro.load_playlists(playlists_file)
+    except (OSError, ValueError) as error:
+        return {"skipped": f"cannot read {playlists_file}: {error}"}
+
+    cache = Path(args.cache_dir) if args.cache_dir else None
+    images, note = libretro.artwork(
+        args.libretro_url, playlists, args.platform, args.name, args.id, cache
+    )
+
+    downloaded, kept = [], []
+    for kind, body in images.items():
+        dest = grid / ARTWORK[kind].format(appid=args.appid)
+        # SteamGridDB already covered this shape, or a picture is already there.
+        if kind in taken:
+            continue
+        if dest.exists() and not args.force:
+            kept.append(dest.name)
+            continue
+        _write(dest, body)
         downloaded.append(dest.name)
 
-    return report(
-        game=game.get("name"),
-        game_id=game.get("id"),
-        downloaded=downloaded,
-        kept=kept,
+    return {**note, "downloaded": downloaded, "kept": kept}
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--grid-dir", required=True)
+    parser.add_argument("--appid", required=True)
+    parser.add_argument("--name", required=True)
+    parser.add_argument("--api-key")
+    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    # The second source needs to know which system to look under and which
+    # region the id declares; without them it simply does not run.
+    parser.add_argument("--id", help="the gotg id, whose prefix names the region")
+    parser.add_argument("--platform", help="the gotg platform, e.g. n64")
+    parser.add_argument("--libretro-url", default=libretro.DEFAULT_BASE_URL)
+    parser.add_argument("--playlists", help="platform -> libretro system table")
+    parser.add_argument("--cache-dir", help="where to keep the fetched name lists")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="replace artwork that is already there",
     )
+    args = parser.parse_args(argv)
+
+    grid = Path(args.grid_dir)
+    grid.mkdir(parents=True, exist_ok=True)
+
+    # Which kinds are settled, so the second source only fills the gaps.
+    taken: set[str] = set()
+    downloaded, kept, note = from_steamgriddb(args, grid, taken)
+    report = {**note, "downloaded": downloaded, "kept": kept}
+    report["libretro"] = from_libretro(args, grid, taken)
+
+    print(json.dumps(report))
+    return 0
 
 
 if __name__ == "__main__":

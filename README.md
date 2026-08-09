@@ -86,20 +86,42 @@ Each variant gets its own launcher and its own entry, named `Title (variant)`
 from the catalog's own title, so `bse` and `bsmso` sit side by side. Entries are
 tagged with their platform, which Steam shows as a collection.
 
-**Artwork is fetched too**, from SteamGridDB — the top-scoring grid, hero, logo
-and icon, written under the names Steam looks for. It needs a free API key,
-which is the one part that cannot be automated: an unauthenticated request to
-their API is a 401.
+**Artwork is fetched too**, written under the names Steam looks for, from two
+sources tried in order:
+
+**SteamGridDB** — the top-scoring grid, hero, logo and icon, already cut to
+Steam's own shapes. Needs a free API key, which is the one part that cannot be
+automated: an unauthenticated request to their API is a 401.
+
+**libretro-thumbnails** — needs nothing at all, and fills whatever the first
+source left. It is keyed by No-Intro filenames, which is how this library is
+already named, so matching a catalog title to one is tractable rather than a
+guess. Three things make it work, all three checked against the live index:
+No-Intro moves the article to the end (`Legend of Zelda, The - Majora's Mask`),
+so articles are dropped from both sides rather than reordered; region and
+revision live in parentheses, so they are stripped for comparison and read back
+afterwards to choose between the releases that remain; and the id already
+declares the region — `usa.legend_of_zelda_majoras_mask` — which is a better
+signal than anything in the title and is free.
 
 ```bash
+gotg steam art usa.super_mario_sunshine bse [--force]     # works with no key at all
 echo '{"api_key": "..."}' > ~/.config/gotg/steamgriddb.json   # from steamgriddb.com
-gotg steam art usa.super_mario_sunshine bse [--force]
 ```
 
-Without a key, `add` says so and carries on: a shortcut with no picture is a
-working shortcut, so every failure here is a warning rather than a refusal.
-EmuDeck does the same job by shelling out to Steam ROM Manager and copying from
-its cache; this asks SteamGridDB directly, which is smaller and needs no GUI.
+Which Steam name a box art becomes is decided by its shape, not its platform: a
+cartridge box is landscape and belongs in the wide capsule, a disc case is
+portrait and belongs in the library tile. Filing a 512×357 N64 box as a 600×900
+tile would pillarbox it down the middle of the library.
+
+**Switch is the gap between the two.** libretro has no Switch playlist at all,
+and Nintendo has had much of the Switch-era artwork taken down from SteamGridDB,
+so those are the entries most likely to stay blank.
+
+Every failure here is a warning rather than a refusal — a shortcut with no
+picture is a working shortcut. EmuDeck does the same job by shelling out to
+Steam ROM Manager and copying from its cache; this asks both sources directly,
+which is smaller and needs no GUI.
 
 **The appid is computed, not random**, by the same formula Steam ROM Manager and
 EmuDeck use — `crc32(exe + name)` folded into the high half. That is the

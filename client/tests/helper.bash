@@ -21,6 +21,13 @@ setup_env() {
   export GOTG_SAVES_DIR="$GOTG_STATE_DIR/saves"
   export GOTG_APP_ROOT="$GOTG_STATE_DIR/app"
   export GOTG_LOG_DIR="$GOTG_STATE_DIR/logs"
+
+  # Artwork has a source that needs no key, so it is reached on any `steam add`
+  # — including from tests that are not about artwork at all. Pointed at a
+  # closed port by default: refused instantly, and no test can quietly depend
+  # on the internet. The ones that mean to override it.
+  export GOTG_LIBRETRO_URL="http://127.0.0.1:1"
+
   mkdir -p "$SERVER_ROOT/Games/.gotg" "$GOTG_GAMES_DIR"
 }
 

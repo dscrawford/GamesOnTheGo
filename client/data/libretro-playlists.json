@@ -1,0 +1,24 @@
+{
+  "_comment": [
+    "gotg platform -> the folder thumbnails.libretro.com files that system under.",
+    "The names are RetroArch playlist names, which follow the No-Intro and Redump",
+    "dat names; they are exact, and a system missing from here is simply one",
+    "libretro has no artwork for. Every name below was checked against the live",
+    "server rather than transcribed from documentation.",
+    "",
+    "switch is deliberately absent: there is no Switch playlist at all, so those",
+    "games need SteamGridDB — which is also where Nintendo has had a good deal of",
+    "Switch-era artwork taken down. Between the two, Switch art is the gap."
+  ],
+  "playlists": {
+    "nes": "Nintendo - Nintendo Entertainment System",
+    "snes": "Nintendo - Super Nintendo Entertainment System",
+    "n64": "Nintendo - Nintendo 64",
+    "gb": "Nintendo - Game Boy",
+    "gbc": "Nintendo - Game Boy Color",
+    "gba": "Nintendo - Game Boy Advance",
+    "gamecube": "Nintendo - GameCube",
+    "wii": "Nintendo - Wii",
+    "wiiu": "Nintendo - Wii U"
+  }
+}

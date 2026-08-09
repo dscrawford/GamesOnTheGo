@@ -118,40 +118,61 @@ steam_api_key() {
 }
 
 # Best-effort by design: a shortcut with no picture is a working shortcut.
+#
+# Two sources. SteamGridDB is better when it has the game, but needs a key;
+# libretro-thumbnails needs nothing and is keyed by No-Intro names, so it runs
+# whether or not there is a key and fills whatever the first source left. That
+# is why a missing key is a note rather than a reason to stop.
 steam_fetch_artwork() {
-  local name="$1" appid="$2"
-  shift 2
+  local name="$1" appid="$2" game="$3"
+  shift 3
 
-  local key
+  local key say_key="no"
   key="$(steam_api_key)"
-  if [[ -z "$key" ]]; then
-    log ""
-    log "No SteamGridDB key, so no artwork. To add one:"
-    log "  https://www.steamgriddb.com/profile/preferences/api"
-    log "  echo '{\"api_key\": \"...\"}' > $GOTG_CONFIG_DIR/steamgriddb.json"
-    log "  gotg steam art <id>"
-    return 0
-  fi
+  [[ -n "$key" ]] || say_key="yes"
 
   # Overridable so the tests can point at a stand-in rather than the real
   # service, the same seam GOTG_STEAM_SHORTCUTS provides for Steam's own file.
-  local base=()
+  local base=() lr=()
   [[ -z "${GOTG_STEAMGRIDDB_URL:-}" ]] || base=(--base-url "$GOTG_STEAMGRIDDB_URL")
+  [[ -z "${GOTG_LIBRETRO_URL:-}" ]] || lr=(--libretro-url "$GOTG_LIBRETRO_URL")
+  [[ -z "$key" ]] || base+=(--api-key "$key")
 
   local result
   result="$(steam_artwork_helper --grid-dir "$(steam_grid_dir)" \
-    --appid "$appid" --name "$name" --api-key "$key" "${base[@]}" "$@")" || {
+    --appid "$appid" --name "$name" \
+    --id "$(manifest_field "$game" id)" \
+    --platform "$(manifest_field "$game" platform)" \
+    --playlists "$GOTG_DATA/libretro-playlists.json" \
+    --cache-dir "$GOTG_STATE_DIR/libretro" \
+    "${base[@]}" "${lr[@]}" "$@")" || {
     warn "artwork fetch failed; the shortcut is fine"
     return 0
   }
 
-  local skipped
-  skipped="$(jq -r '.skipped // empty' <<<"$result")"
-  if [[ -n "$skipped" ]]; then
-    warn "no artwork: $skipped"
-    return 0
+  local got lr_got kept
+  got="$(jq -r '.downloaded | length' <<<"$result")"
+  lr_got="$(jq -r '.libretro.downloaded | length' <<<"$result")"
+  # Counted, because "everything is already there" and "neither source had
+  # anything" both download nothing and are not the same news.
+  kept="$(jq -r '(.kept | length) + (.libretro.kept | length)' <<<"$result")"
+
+  if ((got == 0 && lr_got == 0 && kept == 0)); then
+    warn "no artwork: $(jq -r '[.skipped, .libretro.skipped] | map(select(.)) | join("; ")' <<<"$result")"
+  else
+    log "artwork: $((got + lr_got)) file(s)$(jq -r 'if .game then " for \(.game)" else "" end' <<<"$result")"
+    ((lr_got == 0)) || log "  $lr_got from libretro-thumbnails"
   fi
-  log "artwork: $(jq -r '"\(.downloaded | length) file(s) for \(.game)"' <<<"$result")"
+
+  # Said once, at the end, and only when it would have made a difference.
+  if [[ "$say_key" == "yes" ]]; then
+    log ""
+    log "No SteamGridDB key. libretro-thumbnails needs none and was used instead;"
+    log "for Switch games, which it has none of, add a key:"
+    log "  https://www.steamgriddb.com/profile/preferences/api"
+    log "  echo '{\"api_key\": \"...\"}' > $GOTG_CONFIG_DIR/steamgriddb.json"
+    log "  gotg steam art <id> --force"
+  fi
 }
 
 steam_art() {
@@ -177,7 +198,7 @@ steam_art() {
     jq -r --arg e "$launcher" '.[] | select(.exe == $e) | .appid')"
   [[ -n "$appid" ]] || die "$name is not in Steam yet — run: gotg steam add $want${variant:+ $variant}"
 
-  steam_fetch_artwork "$name" "$appid" "${force[@]}"
+  steam_fetch_artwork "$name" "$appid" "$game" "${force[@]}"
 }
 
 steam_add() {
@@ -214,7 +235,7 @@ steam_add() {
   log "$(jq -r '"\(.action): \(.name)"' <<<"$result")"
   log "  $launcher"
 
-  steam_fetch_artwork "$name" "$(jq -r '.appid' <<<"$result")"
+  steam_fetch_artwork "$name" "$(jq -r '.appid' <<<"$result")" "$game"
 
   log ""
   log "Start Steam and it will be in your library."

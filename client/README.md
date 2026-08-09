@@ -35,7 +35,8 @@ gotg sync                   rebuild the GC roots after a git pull
 | `lib/cmd-configure.sh` | `configure` — the emulator's own settings screen |
 | `lib/cmd-steam.sh` | `steam` — which game, which launcher, which account |
 | `steam/shortcuts.py` | Steam's binary shortcuts.vdf, read and written |
-| `steam/artwork.py` | grids, heroes, logos and icons from SteamGridDB |
+| `steam/artwork.py` | grids, heroes, logos and icons, from two sources |
+| `steam/libretro.py` | the source that needs no key, matched on No-Intro names |
 | `lib/keys.sh` | console keys, fetched from beside the games |
 | `lib/cmd-complete.sh` | the lists shell completion asks for |
 | `completions/gotg.bash` | bash completion, installed where bash looks |
@@ -86,7 +87,7 @@ log; `gotg install <id>` from a terminal is still the smoother first run.
 nix flake check     # or: GOTG_BIN=$(which gotg) bats client/tests/
 ```
 
-173 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
+188 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
 of the real API — including `Range` requests — that resume is exercised against a
 genuinely truncated transfer rather than a simulated one. The save tests drive
 the real ludusavi and rclone against an rclone `alias` remote, which is a whole
