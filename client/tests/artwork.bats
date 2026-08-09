@@ -257,7 +257,23 @@ setup_steam() {
   stop_server
 }
 
-@test "with no key, adding still works and says how to add one" {
+@test "the cluster proxy is used when one is configured, and no key is needed" {
+  setup_steam
+  # No steamgriddb.json at all — the whole point of the proxy is that a client
+  # holds one token for our own service instead of a key for somebody else's.
+  jq -n --arg u "$SGDB_URL" '{url: $u, token: "client-token"}' >"$TEST_TMP/api.json"
+  export GOTG_API_FILE="$TEST_TMP/api.json"
+  unset GOTG_STEAMGRIDDB_URL
+
+  gotg steam add usa.super_mario_sunshine
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"artwork: 5 file(s)"* ]]
+  # And it does not nag about a key it does not need.
+  [[ "$stderr" != *"No SteamGridDB key"* ]]
+  stop_server
+}
+
+@test "with no key and no proxy, adding still works and says how to add one" {
   setup_steam
   gotg steam add usa.super_mario_sunshine
   [ "$status" -eq 0 ]

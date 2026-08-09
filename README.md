@@ -109,6 +109,24 @@ gotg steam art usa.super_mario_sunshine bse [--force]     # works with no key at
 echo '{"api_key": "..."}' > ~/.config/gotg/steamgriddb.json   # from steamgriddb.com
 ```
 
+**Or hold the key once, in the cluster.** `Kubernetes/GOTG/api.yaml` deploys a
+reverse proxy that holds the SteamGridDB key — and, if you give it one, an IGDB
+client id and secret, whose access token expires every sixty days and which it
+mints and refreshes so no client has to. A machine pointed at it needs no
+SteamGridDB key of its own, only a token for our own service:
+
+```bash
+echo '{"url": "https://gotg-api.dcraw.net", "token": "..."}' > ~/.config/gotg/api.json
+chmod 600 ~/.config/gotg/api.json
+```
+
+It is a reverse proxy rather than a forward one: nothing configures it as a
+proxy and reaches arbitrary destinations through it — to the client it simply
+*is* the API, under a prefix. Which is why the client needed no new code path
+for the fetching itself, only for choosing the base URL: it sends its own token
+and the proxy swaps in the real key on the way out. Rotating that key is one
+`kubectl` command rather than a tour of the house.
+
 Which Steam name a box art becomes is decided by its shape, not its platform: a
 cartridge box is landscape and belongs in the wide capsule, a disc case is
 portrait and belongs in the library tile. Filing a 512×357 N64 box as a 600×900

@@ -118,6 +118,21 @@ steam_api_key() {
   jq -r '.api_key // empty' "$file" 2>/dev/null || true
 }
 
+# The cluster proxy, if this machine has been pointed at one.
+#
+# It holds the real keys and swaps them in, so a client configured this way
+# needs no SteamGridDB key of its own — which is the whole reason it exists.
+# One token for our own service beats a key for somebody else's on every laptop
+# and Steam Deck, and rotating it is one kubectl command rather than a tour of
+# the house.
+steam_api_file() { printf '%s' "${GOTG_API_FILE:-$GOTG_CONFIG_DIR/api.json}"; }
+steam_api_field() {
+  local file
+  file="$(steam_api_file)"
+  [[ -f "$file" ]] || return 1
+  jq -re --arg f "$1" '.[$f] // empty' "$file" 2>/dev/null
+}
+
 # Best-effort by design: a shortcut with no picture is a working shortcut.
 #
 # Two sources. SteamGridDB is better when it has the game, but needs a key;
@@ -128,16 +143,33 @@ steam_fetch_artwork() {
   local name="$1" appid="$2" game="$3"
   shift 3
 
-  local key say_key="no"
-  key="$(steam_api_key)"
-  [[ -n "$key" ]] || say_key="yes"
-
   # Overridable so the tests can point at a stand-in rather than the real
   # service, the same seam GOTG_STEAM_SHORTCUTS provides for Steam's own file.
-  local base=() lr=()
-  [[ -z "${GOTG_STEAMGRIDDB_URL:-}" ]] || base=(--base-url "$GOTG_STEAMGRIDDB_URL")
+  local base=() lr=() key say_key="no"
   [[ -z "${GOTG_LIBRETRO_URL:-}" ]] || lr=(--libretro-url "$GOTG_LIBRETRO_URL")
-  [[ -z "$key" ]] || base+=(--api-key "$key")
+
+  local proxy="" proxy_token=""
+  proxy="$(steam_api_field url)" || proxy=""
+  proxy_token="$(steam_api_field token)" || proxy_token=""
+
+  if [[ -n "${GOTG_STEAMGRIDDB_URL:-}" ]]; then
+    # An explicit override wins over everything, including the proxy.
+    base=(--base-url "$GOTG_STEAMGRIDDB_URL")
+    key="$(steam_api_key)"
+    [[ -z "$key" ]] || base+=(--api-key "$key")
+    [[ -n "$key" ]] || say_key="yes"
+  elif [[ -n "$proxy" && -n "$proxy_token" ]]; then
+    # The client sends its own token; the proxy swaps in the real key. Nothing
+    # about the helper changes — it is the same API under a prefix.
+    base=(--base-url "$proxy/steamgriddb" --api-key "$proxy_token")
+  else
+    key="$(steam_api_key)"
+    if [[ -n "$key" ]]; then
+      base=(--api-key "$key")
+    else
+      say_key="yes"
+    fi
+  fi
 
   local result rc=0
   result="$(steam_artwork_helper --grid-dir "$(steam_grid_dir)" \
@@ -184,7 +216,10 @@ steam_fetch_artwork() {
   if [[ "$say_key" == "yes" ]]; then
     log ""
     log "No SteamGridDB key. libretro-thumbnails needs none and was used instead;"
-    log "for Switch games, which it has none of, add a key:"
+    log "for Switch games, which it has none of, either point at the cluster"
+    log "proxy, which holds the key for every machine:"
+    log "  echo '{\"url\": \"https://gotg-api.dcraw.net\", \"token\": \"...\"}' > $(steam_api_file)"
+    log "or give this machine its own key:"
     log "  https://www.steamgriddb.com/profile/preferences/api"
     log "  echo '{\"api_key\": \"...\"}' > $GOTG_CONFIG_DIR/steamgriddb.json"
     log "  gotg steam art <id> --force"

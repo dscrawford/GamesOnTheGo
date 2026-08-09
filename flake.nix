@@ -90,6 +90,7 @@
           gotg-importer = pkgs.callPackage ./importer {
             venv = py.set.mkVirtualEnv "gotg-importer-env" py.workspace.deps.default;
           };
+          gotg-proxy = pkgs.callPackage ./proxy { };
           default = gotg;
 
 
@@ -120,6 +121,29 @@
             config = {
               Entrypoint = [ (pkgs.lib.getExe gotg-importer) ];
               Env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" ];
+            };
+          };
+
+          # Image for the in-cluster API proxy. cacert is not optional here:
+          # every upstream it talks to is HTTPS, and a container with no trust
+          # store fails every one of them at the handshake.
+          #
+          #   nix build .#proxy-image
+          #   skopeo copy docker-archive:result docker://localhost:30500/gotg-proxy:0.1.0
+          proxy-image = pkgs.dockerTools.buildLayeredImage {
+            name = "gotg-proxy";
+            tag = gotg-proxy.passthru.version;
+            contents = [
+              gotg-proxy
+              pkgs.cacert
+            ];
+            config = {
+              Entrypoint = [ (pkgs.lib.getExe gotg-proxy) ];
+              Env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" ];
+              ExposedPorts = { "8080/tcp" = { }; };
+              # Nothing here needs root, and a service holding every API
+              # credential is the last place to hand it out.
+              User = "65534:65534";
             };
           };
         }
@@ -195,6 +219,10 @@
 
       checks = forAllSystems (pkgs: {
         importer = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-importer;
+
+        # The proxy runs its own tests in its checkPhase, being an ordinary
+        # buildPythonApplication rather than a uv2nix venv.
+        proxy = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-proxy;
 
         # buildPythonApplication used to run these through pytestCheckHook; a
         # uv2nix venv has no such hook, so they get a check of their own rather

@@ -46,6 +46,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         path = self.path.split("?")[0]
 
+        # Also answers under /steamgriddb, standing in for the cluster proxy —
+        # which presents this same API under that prefix and supplies the key
+        # itself. Not a fudge: that is exactly what the real one does.
+        if path.startswith("/steamgriddb/"):
+            path = path[len("/steamgriddb") :]
+
         # The real service sits behind Cloudflare, which rejects the default
         # python agent outright — a 403 no key can fix, and one a mock that
         # answered anything would never have caught.
