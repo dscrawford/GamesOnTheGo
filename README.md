@@ -393,16 +393,25 @@ test and costs nothing.
 
 ### Saves
 
-Saves can be carried between machines through the same File Browser that serves
-the library — no new infrastructure, the same account, under the hidden `.gotg`
-directory the catalog already uses.
+Saves are carried between machines by [Ludusavi](https://github.com/mtkennerly/ludusavi),
+driven by gotg. The library is served read-only, so saves get their own WebDAV
+endpoint rather than a hole cut in that one.
 
 ```bash
-gotg saves setup                  # choose a backend, and prove it works
-gotg saves status --all           # what each side has; writes nothing
-gotg saves push usa.zelda         # send this machine's saves
-gotg saves pull --all             # take the remote's
+gotg saves setup https://saves.example.net   # point at the remote, and prove it works
+gotg saves status --all                      # what each side has; writes nothing
+gotg saves push usa.zelda                    # send this machine's saves
+gotg saves pull --all                        # take the remote's
 ```
+
+**Ludusavi does the moving; gotg says what moves.** Walking a save set,
+noticing what changed, keeping the last few copies and driving rclone are the
+same problems for everyone, and are not worth solving again. What is ours is
+the part Ludusavi cannot know: which environment a game belongs to, where that
+environment keeps its saves, and what counts as one. Each environment's
+`saves.json` — emitted by its own derivation — becomes a Ludusavi *custom game*
+in a config gotg regenerates on every run, under its own state directory rather
+than the one a person's own Ludusavi uses.
 
 **The unit is the environment, not the game.** `env-snes` is shared by every
 SNES title and holds all their saves at once, so an id is resolved the way
@@ -418,19 +427,27 @@ copies rather than moves, so a wrong guess costs disk and not a save. The first
 launch after upgrading does it once by itself, because a Steam shortcut is the
 only place many of these games are ever started from.
 
-A save set travels as one deterministic `tar.zst`, so an unchanged one hashes
-identically and a push from a machine that has changed nothing uploads nothing.
-Each push is a numbered generation kept alongside the last, and one `latest.json`
-says which is current.
-
 **Nothing here ever deletes a save.** A push that would overwrite work done
-elsewhere stops and prints both sides with the three commands that resolve it; a
-`--force` keeps the generation it overtook; a pull archives what was here first,
-under `~/.local/state/gotg/saves/local/`. Times and device ids are printed for
-you to read and are never used to decide anything — Decks suspend and their
-clocks drift, and an mtime rule silently picks the wrong side.
+elsewhere stops and prints the three commands that resolve it — because an
+upload mirrors this machine over the remote, so anything up there that has not
+been taken down first would go. A pull archives what was here first, under
+`~/.local/state/gotg/saves/local/`, in gotg's own directory rather than
+Ludusavi's: the next download mirrors the remote over Ludusavi's and would take
+an archive kept there along with it. Times are printed for you to read and are
+never used to decide anything — Decks suspend and their clocks drift, and an
+mtime rule silently picks the wrong side.
 
-Bundles are **not encrypted**: anyone who can read `/Games/.gotg/saves` can read
+Two guards are gotg's rather than Ludusavi's. A save set far larger than a save
+set should be is **refused before anything is copied**, naming what made it
+large — the guard that catches a glob which has quietly started matching a disc
+image, and worth more than any exclude list because it does not have to be
+complete to work. And a backup restores to the absolute paths recorded in it,
+which arrived over the network: left unchecked that is a write-anywhere
+primitive, so every recorded path must sit under a directory named for the
+environment itself, and only then is that root redirected, whole, to where this
+machine keeps it.
+
+Saves are **not encrypted**: anyone who can read the saves endpoint can read
 your saves.
 
 **Saves only.** A pull restores what you played, not what you installed. Cemu's

@@ -11,7 +11,7 @@ gotg info <id>              one game's details
 gotg download <id>          fetch a game, nothing else
 gotg install <id>           fetch + build its environment + write a Steam launcher
 gotg play <id>              fetch and build what is missing, then launch
-gotg saves <command>        setup / status / push / pull, between machines
+gotg saves <command>        setup / status / push / pull / adopt, between machines
 gotg controllers <command>  list what SDL sees; order; apply bindings
 gotg configure <id> [var]   open that environment's own emulator settings
 gotg steam <command>        add / remove / art / list non-Steam games
@@ -39,10 +39,9 @@ gotg sync                   rebuild the GC roots after a git pull
 | `lib/keys.sh` | console keys, fetched from beside the games |
 | `lib/cmd-complete.sh` | the lists shell completion asks for |
 | `completions/gotg.bash` | bash completion, installed where bash looks |
-| `lib/remote.sh` | the five blob operations, and which backend serves them |
-| `lib/remote-filebrowser.sh` | those five against File Browser |
-| `lib/saves.sh` | bundling, generations, and verifying what arrives |
-| `lib/cmd-saves.sh` | `saves setup`, `status`, `push`, `pull` |
+| `lib/saves.sh` | what a save is, adopting older ones, archiving before a pull |
+| `lib/ludusavi.sh` | Ludusavi's whole config, generated from those manifests |
+| `lib/cmd-saves.sh` | `saves setup`, `status`, `push`, `pull`, `adopt` |
 | `lib/pads.sh` | generating emulator bindings from what SDL reports |
 | `lib/pads-dolphin.sh` | the same for Dolphin, which needs no table |
 | `lib/cmd-controllers.sh` | `controllers list`, `controllers apply` |
@@ -87,6 +86,8 @@ log; `gotg install <id>` from a terminal is still the smoother first run.
 nix flake check     # or: GOTG_BIN=$(which gotg) bats client/tests/
 ```
 
-180 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
+173 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
 of the real API — including `Range` requests — that resume is exercised against a
-genuinely truncated transfer rather than a simulated one.
+genuinely truncated transfer rather than a simulated one. The save tests drive
+the real ludusavi and rclone against an rclone `alias` remote, which is a whole
+cloud round trip with no server in it.

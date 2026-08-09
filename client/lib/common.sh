@@ -27,9 +27,6 @@ GOTG_PLATFORM_RE='^[a-z0-9][a-z0-9_-]*$'
 # directories and remote directories all at once, so they are checked wherever
 # one arrives from somewhere other than env_attr.
 GOTG_ATTR_RE='^env-[a-z0-9][a-z0-9_-]*$'
-# The only two shapes of remote key that exist. Everything a backend is asked
-# for goes through this before it becomes a URL or an argv entry.
-GOTG_BLOB_KEY_RE='^env-[a-z0-9][a-z0-9_-]*/(gen/[0-9]{6}-[0-9a-f]{12}\.tar\.zst|latest\.json)$'
 
 # Plain by default: colour marks the exceptions, and everything being an
 # exception is the same as nothing being one. The label is coloured rather than
@@ -76,12 +73,6 @@ validate_attr() {
   local attr="$1"
   [[ -n "$attr" ]] || die "empty environment name"
   [[ "$attr" =~ $GOTG_ATTR_RE ]] || die "invalid environment name: $attr"
-}
-
-# Remote keys are built here but read back from listings the server controls.
-validate_blob_key() {
-  local key="$1"
-  [[ "$key" =~ $GOTG_BLOB_KEY_RE ]] || die "invalid remote key: $key"
 }
 
 # UTC stamp for the metadata a person reads when choosing between two saves.
