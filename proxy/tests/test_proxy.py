@@ -313,3 +313,144 @@ def test_the_upstream_prefix_may_be_included(proxy):
 def test_the_igdb_prefix_may_be_included_too(proxy):
     call(f"{proxy}/igdb/v4/games", data=b"fields name;")
     assert Upstream.seen[0]["path"] == "/v4/games"
+
+
+# --- what a hostile client can make us do -----------------------------------
+#
+# The proxy attaches a real credential to whatever path follows the upstream
+# prefix, so the path is attacker-controlled input to a credentialed request.
+# Two things must not follow from that: the request escaping /api/v2 on the
+# upstream, and the credential following a redirect off the upstream host.
+# urllib does both by default — it sends a path verbatim, and its redirect
+# handler copies every header except Content-* onto the new request, including
+# Authorization, even when the redirect crosses hosts.
+
+
+def raw_call(base: str, path: str, token: str = "client-token"):
+    """http.client with the path used verbatim — urllib normalizes some of
+    these away on the client side, which would make the test test nothing."""
+    import http.client
+
+    host = base.removeprefix("http://")
+    conn = http.client.HTTPConnection(host, timeout=10)
+    conn.putrequest("GET", path, skip_accept_encoding=True)
+    conn.putheader("Authorization", f"Bearer {token}")
+    conn.endheaders()
+    response = conn.getresponse()
+    body = response.read()
+    conn.close()
+    return response.status, body
+
+
+def test_a_path_that_climbs_out_of_the_api_is_refused(proxy):
+    status, _ = raw_call(proxy, "/steamgriddb/../oauth/anything")
+    assert status == 400
+    assert Upstream.seen == []
+
+
+def test_a_percent_encoded_climb_is_refused_too(proxy):
+    # The proxy forwards the path still encoded, and the upstream decodes it —
+    # so the check has to happen on the decoded form or it checks nothing.
+    status, _ = raw_call(proxy, "/steamgriddb/%2e%2e/oauth/anything")
+    assert status == 400
+    assert Upstream.seen == []
+
+
+def test_a_redirect_is_relayed_to_the_client_not_followed(upstream):
+    # If the proxy followed it, the upstream would see a second request — with
+    # the key attached — at wherever the first one pointed. An open redirect on
+    # the upstream would then walk the key off to any host on the internet.
+    class Redirecting(Upstream):
+        def do_GET(self):  # noqa: N802
+            self._record(b"")
+            self.send_response(302)
+            self.send_header("Location", "http://evil.example/steal")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    server, url = serve(Redirecting)
+    config = Config(token="client-token", steamgriddb_key="k", steamgriddb_url=url)
+    proxy_server = make_server("127.0.0.1", free_port(), config)
+    threading.Thread(target=proxy_server.serve_forever, daemon=True).start()
+    try:
+        status, _ = call(f"http://127.0.0.1:{proxy_server.server_port}/steamgriddb/x")
+        assert status == 302
+        assert len(Upstream.seen) == 1  # exactly one upstream request, no follow
+    finally:
+        proxy_server.shutdown()
+        server.shutdown()
+
+
+def test_a_body_far_larger_than_a_query_is_refused(proxy):
+    # IGDB queries are a line or two. A caller claiming to send megabytes is
+    # either broken or trying to make the proxy hold it all in memory. The
+    # guarantee is that it is neither buffered nor forwarded: rejecting a
+    # racing upload may reach the client as a 413 or as a reset, exactly as a
+    # real server's would, so both count — what must hold is that the upstream
+    # never saw it.
+    big = b"x" * (2 * 1024 * 1024)
+    try:
+        status, _ = call(f"{proxy}/igdb/games", data=big)
+    except (urllib.error.URLError, ConnectionError):
+        status = "reset"
+    assert status in (413, "reset")
+    assert Upstream.seen == []
+
+
+def test_a_nonsense_content_length_is_a_clean_error(proxy):
+    # int("garbage") would be a 500 with a traceback; a malformed length is the
+    # client's fault and should read as one.
+    import http.client
+
+    host = proxy.removeprefix("http://")
+    conn = http.client.HTTPConnection(host, timeout=10)
+    conn.putrequest("POST", "/igdb/games", skip_accept_encoding=True)
+    conn.putheader("Authorization", "Bearer client-token")
+    conn.putheader("Content-Length", "not-a-number")
+    conn.endheaders()
+    try:
+        status = conn.getresponse().status
+    except Exception:  # noqa: BLE001 — a reset would also be acceptable, a hang not
+        status = 400
+    conn.close()
+    assert status == 400
+
+
+def test_a_hostile_content_type_cannot_split_our_response():
+    # Content-Type is the one upstream-controlled value echoed into our own
+    # headers. A folded value arrives with a raw CRLF still in it, and writing
+    # that back out is response splitting — harmless with the client here,
+    # which re-folds it, but parsers differ and this one is free to close.
+    import socket
+
+    def hostile(sock):
+        conn, _ = sock.accept()
+        conn.recv(65536)
+        conn.sendall(
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n Injected: yes\r\n"
+            b"Content-Length: 2\r\n\r\nhi"
+        )
+        conn.close()
+
+    listener = socket.socket()
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    threading.Thread(target=hostile, args=(listener,), daemon=True).start()
+
+    config = Config(
+        token="client-token",
+        steamgriddb_key="k",
+        steamgriddb_url=f"http://127.0.0.1:{listener.getsockname()[1]}",
+    )
+    server = make_server("127.0.0.1", free_port(), config)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        request = urllib.request.Request(f"http://127.0.0.1:{server.server_port}/steamgriddb/x")
+        request.add_header("Authorization", "Bearer client-token")
+        with urllib.request.urlopen(request, timeout=10) as response:
+            seen = response.headers.get("Content-Type", "")
+        assert "\r" not in seen and "\n" not in seen
+    finally:
+        server.shutdown()
+        listener.close()

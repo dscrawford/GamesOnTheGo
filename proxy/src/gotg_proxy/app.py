@@ -43,12 +43,60 @@ USER_AGENT = "gotg-proxy/0.1.0"
 # of them stop the proxy answering anybody.
 TIMEOUT = 20
 
+# The largest request body worth accepting. An IGDB query is a line or two; a
+# caller claiming megabytes is broken or trying to make the proxy hold it all
+# in memory. nginx caps this too, but the proxy also runs without it — under a
+# port-forward, or if the ingress annotation is ever dropped.
+MAX_BODY = 64 * 1024
+
 # Refresh a token with less than this left. IGDB issues them for about sixty
 # days, so a day of slack costs nothing and removes the race where a token
 # expires between the check and the upstream call.
 REFRESH_MARGIN = 24 * 60 * 60
 
 STEAMGRIDDB_URL = "https://www.steamgriddb.com"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Relay a 3xx instead of following it.
+
+    urllib's default redirect handler copies every header except Content-* onto
+    the new request — Authorization included, even when the Location crosses
+    hosts. Behind a credential-injecting proxy that is the whole failure: one
+    open redirect on the upstream and the key walks off to any host on the
+    internet. The client can follow the redirect itself, without our header.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ARG002
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect())
+
+
+def safe_content_type(value: str) -> str:
+    """An upstream's Content-Type, made safe to write into our own headers.
+
+    It is the one upstream-controlled value that is echoed back, and a folded
+    header arrives with the CRLF still in it — writing that out again is
+    response splitting. Truncated at the first control character rather than
+    stripped, because everything after one in a folded value was a separate
+    header the upstream chose, not part of the type.
+    """
+    cut = min((i for i, c in enumerate(value) if c in "\r\n"), default=len(value))
+    return value[:cut].strip() or "application/octet-stream"
+
+
+def path_climbs(rest: str) -> bool:
+    """Whether a path tries to escape the API prefix it will be appended to.
+
+    The path is attacker-controlled input to a request that carries a real
+    credential, and it is forwarded still percent-encoded — the upstream is the
+    one that decodes it. So the check is on the decoded form, or `%2e%2e`
+    climbs exactly as well as `..` while the check watches nothing happen.
+    """
+    decoded = urllib.parse.unquote(rest.split("?")[0])
+    return any(segment == ".." for segment in decoded.split("/"))
 IGDB_URL = "https://api.igdb.com"
 IGDB_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 
@@ -106,7 +154,7 @@ class TokenCache:
                 data=body,
                 headers={"User-Agent": USER_AGENT},
             )
-            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310
+            with _OPENER.open(request, timeout=TIMEOUT) as response:  # noqa: S310
                 payload = json.loads(response.read())
 
             self.value = payload["access_token"]
@@ -146,7 +194,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _problem(self, code: int, message: str) -> None:
+    def _problem(self, code: int, message: str, *, close: bool = False) -> None:
+        # close: for rejections raised before the request body is read. On a
+        # kept-alive HTTP/1.1 connection the unread body would otherwise frame
+        # the next request, so the client sees a reset instead of this reply.
+        if close:
+            self.close_connection = True
         self._send(code, json.dumps({"error": message}).encode(), "application/json")
 
     # --- who is asking ------------------------------------------------------
@@ -168,15 +221,15 @@ class Handler(BaseHTTPRequestHandler):
             request.add_header(name, value)
 
         try:
-            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310
+            with _OPENER.open(request, timeout=TIMEOUT) as response:  # noqa: S310
                 payload = response.read()
-                kind = response.headers.get("Content-Type", "application/octet-stream")
+                kind = safe_content_type(response.headers.get("Content-Type", ""))
                 self._send(response.status, payload, kind)
         except urllib.error.HTTPError as error:
             # Relayed rather than swallowed: a 404 from SteamGridDB means the
             # game is not there, which the client needs to hear as a 404.
             payload = error.read()
-            kind = error.headers.get("Content-Type", "application/json") if error.headers else "application/json"
+            kind = safe_content_type(error.headers.get("Content-Type", "")) if error.headers else "application/json"
             self._send(error.code, payload, kind)
         except (urllib.error.URLError, OSError, ValueError) as error:
             self._problem(502, f"upstream unreachable: {error}")
@@ -224,10 +277,23 @@ class Handler(BaseHTTPRequestHandler):
             self._problem(401, "a bearer token is required")
             return
 
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self._problem(400, "malformed Content-Length", close=True)
+            return
+        if length < 0:
+            self._problem(400, "negative Content-Length", close=True)
+            return
+        if length > MAX_BODY:
+            self._problem(413, "request body too large", close=True)
+            return
         body = self.rfile.read(length) if length else None
 
         prefix, _, rest = path.partition("/")
+        if path_climbs(rest):
+            self._problem(400, "the path climbs out of the API it is proxied to")
+            return
         if prefix == "steamgriddb":
             self._steamgriddb(rest)
         elif prefix == "igdb":

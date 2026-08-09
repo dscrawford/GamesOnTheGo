@@ -323,3 +323,16 @@ setup_steam() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.downloaded | length' <<<"$output")" -eq 5 ]
 }
+
+@test "a world-readable proxy token is refused, since it is a credential" {
+  setup_steam
+  jq -n --arg u "$SGDB_URL" '{url: $u, token: "client-token"}' >"$TEST_TMP/api.json"
+  chmod 644 "$TEST_TMP/api.json"          # readable by anyone on the machine
+  export GOTG_API_FILE="$TEST_TMP/api.json"
+  unset GOTG_STEAMGRIDDB_URL
+  gotg steam add usa.super_mario_sunshine
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"mode 644"* ]]
+  [[ "$stderr" == *"chmod 600"* ]]
+  stop_server
+}

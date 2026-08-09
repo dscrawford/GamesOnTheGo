@@ -130,6 +130,10 @@ steam_api_field() {
   local file
   file="$(steam_api_file)"
   [[ -f "$file" ]] || return 1
+  # It holds a bearer token for a service on the public internet, so it is
+  # checked the same way the server credentials are — a token anyone on the
+  # machine can read is a token anyone on the machine can spend.
+  config_check_perms "$file"
   jq -re --arg f "$1" '.[$f] // empty' "$file" 2>/dev/null
 }
 
