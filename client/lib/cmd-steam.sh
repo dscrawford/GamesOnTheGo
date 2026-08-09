@@ -21,6 +21,7 @@ usage: gotg steam <command> [args]
 
   add <id> [variant]     put it in Steam, writing the launcher if needed
   remove <id> [variant]  take it out again
+  art <id> [variant]     fetch its artwork again, --force to replace
   list                   every non-Steam game Steam knows about
 
 Steam must be closed: it rewrites its shortcut file on exit, so a change made
@@ -34,6 +35,7 @@ cmd_steam() {
   case "$verb" in
     add) steam_add "$@" ;;
     remove | rm) steam_remove "$@" ;;
+    art | artwork) steam_art "$@" ;;
     list | ls) steam_list "$@" ;;
     help | --help | -h | "") steam_usage ;;
     *)
@@ -98,6 +100,86 @@ steam_helper() {
   python3 "${GOTG_STEAM_HELPER:-$GOTG_ROOT/steam/shortcuts.py}" "$@"
 }
 
+steam_artwork_helper() {
+  python3 "${GOTG_STEAM_ARTWORK:-$GOTG_ROOT/steam/artwork.py}" "$@"
+}
+
+# Where Steam keeps a non-Steam game's pictures: beside the shortcuts, keyed by
+# the appid the shortcut carries.
+steam_grid_dir() { printf '%s/grid' "$(dirname "$(steam_shortcuts_file)")"; }
+
+# The SteamGridDB key. Its own file, like the controller order: it is a
+# credential, but not the server password, and it is the one part of this that
+# cannot be automated — an unauthenticated request to their API is a 401.
+steam_api_key() {
+  local file="${GOTG_STEAMGRIDDB_KEY_FILE:-$GOTG_CONFIG_DIR/steamgriddb.json}"
+  [[ -f "$file" ]] || return 0
+  jq -r '.api_key // empty' "$file" 2>/dev/null || true
+}
+
+# Best-effort by design: a shortcut with no picture is a working shortcut.
+steam_fetch_artwork() {
+  local name="$1" appid="$2"
+  shift 2
+
+  local key
+  key="$(steam_api_key)"
+  if [[ -z "$key" ]]; then
+    log ""
+    log "No SteamGridDB key, so no artwork. To add one:"
+    log "  https://www.steamgriddb.com/profile/preferences/api"
+    log "  echo '{\"api_key\": \"...\"}' > $GOTG_CONFIG_DIR/steamgriddb.json"
+    log "  gotg steam art <id>"
+    return 0
+  fi
+
+  # Overridable so the tests can point at a stand-in rather than the real
+  # service, the same seam GOTG_STEAM_SHORTCUTS provides for Steam's own file.
+  local base=()
+  [[ -z "${GOTG_STEAMGRIDDB_URL:-}" ]] || base=(--base-url "$GOTG_STEAMGRIDDB_URL")
+
+  local result
+  result="$(steam_artwork_helper --grid-dir "$(steam_grid_dir)" \
+    --appid "$appid" --name "$name" --api-key "$key" "${base[@]}" "$@")" || {
+    warn "artwork fetch failed; the shortcut is fine"
+    return 0
+  }
+
+  local skipped
+  skipped="$(jq -r '.skipped // empty' <<<"$result")"
+  if [[ -n "$skipped" ]]; then
+    warn "no artwork: $skipped"
+    return 0
+  fi
+  log "artwork: $(jq -r '"\(.downloaded | length) file(s) for \(.game)"' <<<"$result")"
+}
+
+steam_art() {
+  local want="${1:-}" variant="" force=()
+  [[ -n "$want" ]] || die "usage: gotg steam art <id> [variant] [--force]"
+  shift
+  if [[ $# -gt 0 && "$1" != -* ]]; then
+    variant="$1"
+    shift
+  fi
+  [[ "${1:-}" != "--force" ]] || force=(--force)
+
+  manifest_ensure
+  local game launcher name appid
+  game="$(manifest_find "$want")"
+  launcher="$(launcher_path "$game" "$variant")"
+  name="$(sanitize_title "$(manifest_field "$game" title)")"
+  [[ -z "$variant" ]] || name="$name ($variant)"
+
+  # The id Steam files artwork under is the one on the shortcut, so it is read
+  # back rather than recomputed — if the two ever disagree, the shortcut wins.
+  appid="$(steam_helper --file "$(steam_shortcuts_file)" list |
+    jq -r --arg e "$launcher" '.[] | select(.exe == $e) | .appid')"
+  [[ -n "$appid" ]] || die "$name is not in Steam yet — run: gotg steam add $want${variant:+ $variant}"
+
+  steam_fetch_artwork "$name" "$appid" "${force[@]}"
+}
+
 steam_add() {
   local want="${1:-}" variant=""
   [[ -n "$want" ]] || die "usage: gotg steam add <id> [variant]"
@@ -131,6 +213,9 @@ steam_add() {
 
   log "$(jq -r '"\(.action): \(.name)"' <<<"$result")"
   log "  $launcher"
+
+  steam_fetch_artwork "$name" "$(jq -r '.appid' <<<"$result")"
+
   log ""
   log "Start Steam and it will be in your library."
 }

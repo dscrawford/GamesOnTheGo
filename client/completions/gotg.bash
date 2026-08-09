@@ -60,15 +60,15 @@ _gotg() {
             ;;
         steam)
             case $COMP_CWORD in
-                2) mapfile -t COMPREPLY < <(compgen -W "add remove list" -- "$cur") ;;
+                2) mapfile -t COMPREPLY < <(compgen -W "add remove art list" -- "$cur") ;;
                 3)
                     case "$sub" in
-                        add | remove) mapfile -t COMPREPLY < <(compgen -W "$(gotg complete ids)" -- "$cur") ;;
+                        add | remove | art) mapfile -t COMPREPLY < <(compgen -W "$(gotg complete ids)" -- "$cur") ;;
                     esac
                     ;;
                 4)
                     case "$sub" in
-                        add | remove) mapfile -t COMPREPLY < <(compgen -W "$(gotg complete variants "${COMP_WORDS[3]}")" -- "$cur") ;;
+                        add | remove | art) mapfile -t COMPREPLY < <(compgen -W "$(gotg complete variants "${COMP_WORDS[3]}")" -- "$cur") ;;
                     esac
                     ;;
             esac

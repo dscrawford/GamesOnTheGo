@@ -86,6 +86,21 @@ Each variant gets its own launcher and its own entry, named `Title (variant)`
 from the catalog's own title, so `bse` and `bsmso` sit side by side. Entries are
 tagged with their platform, which Steam shows as a collection.
 
+**Artwork is fetched too**, from SteamGridDB — the top-scoring grid, hero, logo
+and icon, written under the names Steam looks for. It needs a free API key,
+which is the one part that cannot be automated: an unauthenticated request to
+their API is a 401.
+
+```bash
+echo '{"api_key": "..."}' > ~/.config/gotg/steamgriddb.json   # from steamgriddb.com
+gotg steam art usa.super_mario_sunshine bse [--force]
+```
+
+Without a key, `add` says so and carries on: a shortcut with no picture is a
+working shortcut, so every failure here is a warning rather than a refusal.
+EmuDeck does the same job by shelling out to Steam ROM Manager and copying from
+its cache; this asks SteamGridDB directly, which is smaller and needs no GUI.
+
 **The appid is computed, not random**, by the same formula Steam ROM Manager and
 EmuDeck use — `crc32(exe + name)` folded into the high half. That is the
 convention worth following: artwork for a non-Steam game is filed under that id
