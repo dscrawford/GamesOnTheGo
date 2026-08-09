@@ -22,6 +22,7 @@ usage: gotg steam <command> [args]
   add <id> [variant]     put it in Steam, writing the launcher if needed
   remove <id> [variant]  take it out again
   art <id> [variant]     fetch its artwork again, --force to replace
+                         --from <file|url> to choose the picture yourself
   list                   every non-Steam game Steam knows about
 
 Steam must be closed: it rewrites its shortcut file on exit, so a change made
@@ -138,17 +139,32 @@ steam_fetch_artwork() {
   [[ -z "${GOTG_LIBRETRO_URL:-}" ]] || lr=(--libretro-url "$GOTG_LIBRETRO_URL")
   [[ -z "$key" ]] || base+=(--api-key "$key")
 
-  local result
+  local result rc=0
   result="$(steam_artwork_helper --grid-dir "$(steam_grid_dir)" \
     --appid "$appid" --name "$name" \
     --id "$(manifest_field "$game" id)" \
     --platform "$(manifest_field "$game" platform)" \
     --playlists "$GOTG_DATA/libretro-playlists.json" \
     --cache-dir "$GOTG_STATE_DIR/libretro" \
-    "${base[@]}" "${lr[@]}" "$@")" || {
+    "${base[@]}" "${lr[@]}" "$@")" || rc=$?
+
+  # A picture named by hand is the one case that is not best-effort: somebody
+  # typed a path, so a path that cannot be used is an error rather than a
+  # warning to read past.
+  local problem
+  problem="$(jq -r '.error // empty' <<<"$result" 2>/dev/null || true)"
+  [[ -z "$problem" ]] || die "$problem"
+  ((rc == 0)) || {
     warn "artwork fetch failed; the shortcut is fine"
     return 0
   }
+
+  local wrote
+  wrote="$(jq -r '.wrote // empty' <<<"$result")"
+  if [[ -n "$wrote" ]]; then
+    log "artwork: $wrote, from $(jq -r '.source' <<<"$result")"
+    return 0
+  fi
 
   local got lr_got kept
   got="$(jq -r '.downloaded | length' <<<"$result")"
@@ -176,14 +192,29 @@ steam_fetch_artwork() {
 }
 
 steam_art() {
-  local want="${1:-}" variant="" force=()
-  [[ -n "$want" ]] || die "usage: gotg steam art <id> [variant] [--force]"
+  local want="${1:-}" variant="" opts=()
+  [[ -n "$want" ]] || die "usage: gotg steam art <id> [variant] [--force] [--from <file|url> [--as tile|capsule|hero|logo|icon]]"
   shift
   if [[ $# -gt 0 && "$1" != -* ]]; then
     variant="$1"
     shift
   fi
-  [[ "${1:-}" != "--force" ]] || force=(--force)
+  # Passed through rather than enumerated: --from and --as belong to the
+  # helper, which is where their meaning and their error messages live.
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force)
+        opts+=(--force)
+        shift
+        ;;
+      --from | --as)
+        [[ -n "${2:-}" ]] || die "$1 needs a value"
+        opts+=("$1" "$2")
+        shift 2
+        ;;
+      *) die "unknown option for steam art: $1" ;;
+    esac
+  done
 
   manifest_ensure
   local game launcher name appid
@@ -198,7 +229,7 @@ steam_art() {
     jq -r --arg e "$launcher" '.[] | select(.exe == $e) | .appid')"
   [[ -n "$appid" ]] || die "$name is not in Steam yet — run: gotg steam add $want${variant:+ $variant}"
 
-  steam_fetch_artwork "$name" "$appid" "$game" "${force[@]}"
+  steam_fetch_artwork "$name" "$appid" "$game" "${opts[@]}"
 }
 
 steam_add() {

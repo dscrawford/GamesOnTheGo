@@ -17,9 +17,11 @@ Two sources, tried in that order:
     answer whenever it has the game — but it needs an API key.
   * libretro-thumbnails, which needs nothing at all and is keyed by No-Intro
     filenames. See libretro.py. It fills whatever the first source left, so a
-    machine with no key still gets pictures, and Switch titles — which libretro
-    has none of, and whose SteamGridDB artwork Nintendo has largely had taken
-    down — are the gap between them.
+    machine with no key still gets pictures.
+
+And ``--from``, a picture named on the command line, for the handful of games
+in neither: libretro has no Switch playlist at all, and Nintendo has had some
+Switch-era artwork taken down from SteamGridDB.
 
 Everything here is best-effort. A shortcut with no picture is a working
 shortcut; a failed download that took the shortcut with it would not be. Every
@@ -32,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import struct
 import sys
 import urllib.error
 import urllib.parse
@@ -41,6 +44,11 @@ from pathlib import Path
 import libretro
 
 DEFAULT_BASE_URL = "https://www.steamgriddb.com"
+
+# Sent on every request, because www.steamgriddb.com sits behind Cloudflare and
+# Cloudflare answers the default "Python-urllib/3.x" with a 403 whatever the key
+# says. A plain honest name is enough; nothing here pretends to be a browser.
+USER_AGENT = "gotg/0.1.0"
 
 # Shipped beside this file, so the table travels with the code that reads it.
 DEFAULT_PLAYLISTS = Path(__file__).resolve().parent.parent / "data" / "libretro-playlists.json"
@@ -71,6 +79,7 @@ TIMEOUT = 20
 
 def _get(url: str, api_key: str | None) -> bytes:
     request = urllib.request.Request(url)
+    request.add_header("User-Agent", USER_AGENT)
     if api_key:
         request.add_header("Authorization", f"Bearer {api_key}")
     with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310
@@ -103,6 +112,99 @@ def best_asset(base_url: str, api_key: str, game_id: int, kind: str) -> str | No
     if not data:
         return None
     return max(data, key=lambda a: a.get("score", 0)).get("url")
+
+
+# What a person calls each of the five, since "grids_portrait" is our word for
+# it and not anybody else's.
+KIND_NAMES = {
+    "tile": "grids_portrait",
+    "capsule": "grids",
+    "hero": "heroes",
+    "logo": "logos",
+    "icon": "icons",
+}
+
+
+def jpeg_size(body: bytes) -> tuple[int, int] | None:
+    """Width and height out of a JPEG's frame header.
+
+    Walked marker by marker rather than guessed at an offset: the header is
+    preceded by any number of variable-length segments, and only the SOF ones
+    carry the dimensions.
+    """
+    if not body.startswith(b"\xff\xd8"):
+        return None
+    i = 2
+    while i + 9 < len(body):
+        if body[i] != 0xFF:
+            i += 1
+            continue
+        marker = body[i + 1]
+        # SOF0..SOF15, excluding the four that are not frame headers.
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            height, width = struct.unpack(">HH", body[i + 5 : i + 9])
+            return width, height
+        if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+            i += 2
+            continue
+        (length,) = struct.unpack(">H", body[i + 2 : i + 4])
+        i += 2 + length
+    return None
+
+
+def image_size(body: bytes) -> tuple[int, int] | None:
+    return libretro.png_size(body) or jpeg_size(body)
+
+
+def kind_for_shape(width: int, height: int) -> str:
+    """Which of the five a picture of this shape belongs in.
+
+    Steam's own shapes are the boundaries: a 600x900 tile is 0.67 wide, a
+    920x430 capsule is 2.14, and a 1920x620 hero is 3.1. Anything clearly
+    taller than it is wide is a tile; anything much wider than a capsule is a
+    hero; the broad middle is a capsule.
+    """
+    ratio = width / height
+    if ratio < 0.9:
+        return "grids_portrait"
+    if ratio > 2.6:
+        return "heroes"
+    return "grids"
+
+
+def read_source(source: str) -> bytes:
+    """A local file or a URL — whichever the person had to hand."""
+    if source.startswith(("http://", "https://")):
+        return _get(source, None)
+    return Path(source).read_bytes()
+
+
+def from_manual(args, grid: Path) -> tuple[dict, int]:
+    """A picture named on the command line.
+
+    Unlike the two automatic sources this is not best-effort: somebody typed a
+    path, so if it cannot be used they need to be told, not warned past.
+    """
+    try:
+        body = read_source(args.source)
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        return {"error": f"cannot read {args.source}: {error}"}, 1
+
+    kind = KIND_NAMES.get(args.as_kind) if args.as_kind else None
+    if kind is None:
+        size = image_size(body)
+        if size is None:
+            return {
+                "error": f"cannot tell the shape of {args.source}, so cannot tell "
+                f"which picture it is. Say so with --as ({', '.join(KIND_NAMES)})."
+            }, 1
+        kind = kind_for_shape(*size)
+
+    dest = grid / ARTWORK[kind].format(appid=args.appid)
+    # No --force needed: naming a file is already the intent that --force
+    # exists to express when a database chose for you.
+    _write(dest, body)
+    return {"source": args.source, "wrote": dest.name, "as": kind}, 0
 
 
 def _write(dest: Path, body: bytes) -> None:
@@ -200,6 +302,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--libretro-url", default=libretro.DEFAULT_BASE_URL)
     parser.add_argument("--playlists", help="platform -> libretro system table")
     parser.add_argument("--cache-dir", help="where to keep the fetched name lists")
+    # The last resort, and the only one that always works: a picture found by
+    # hand. Given one, neither source is consulted at all.
+    parser.add_argument("--from", dest="source", help="a file or URL to use as-is")
+    parser.add_argument(
+        "--as",
+        dest="as_kind",
+        choices=sorted(KIND_NAMES),
+        help="which picture --from is; inferred from its shape otherwise",
+    )
     parser.add_argument(
         "--force",
         action="store_true",
@@ -209,6 +320,11 @@ def main(argv: list[str] | None = None) -> int:
 
     grid = Path(args.grid_dir)
     grid.mkdir(parents=True, exist_ok=True)
+
+    if args.source:
+        report, code = from_manual(args, grid)
+        print(json.dumps(report))
+        return code
 
     # Which kinds are settled, so the second source only fills the gaps.
     taken: set[str] = set()

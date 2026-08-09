@@ -85,6 +85,11 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802
+        # Same rule as the SteamGridDB stand-in: identify yourself.
+        if self.headers.get("User-Agent", "").startswith("Python-urllib"):
+            self._send(403, b"forbidden", "text/plain")
+            return
+
         path = urllib.parse.unquote(self.path.split("?")[0]).lstrip("/")
         parts = path.split("/")
         if len(parts) < 2 or parts[0] != SYSTEM:

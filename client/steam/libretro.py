@@ -39,6 +39,11 @@ from pathlib import Path
 
 DEFAULT_BASE_URL = "https://thumbnails.libretro.com"
 
+# Identify ourselves. libretro's server does not insist, but SteamGridDB's
+# Cloudflare does — a 403 for the default python agent — and there is no reason
+# for the two sources to differ about basic manners.
+USER_AGENT = "gotg/0.1.0"
+
 # The four folders every system has. The Steam name each becomes is decided
 # later for box art, which is the only one whose shape varies.
 BOXARTS, LOGOS, SNAPS, TITLES = (
@@ -79,7 +84,8 @@ TIMEOUT = 20
 
 
 def _get(url: str) -> bytes:
-    with urllib.request.urlopen(url, timeout=TIMEOUT) as response:  # noqa: S310
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310
         return response.read()
 
 

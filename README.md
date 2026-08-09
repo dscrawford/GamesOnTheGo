@@ -114,11 +114,28 @@ cartridge box is landscape and belongs in the wide capsule, a disc case is
 portrait and belongs in the library tile. Filing a 512×357 N64 box as a 600×900
 tile would pillarbox it down the middle of the library.
 
-**Switch is the gap between the two.** libretro has no Switch playlist at all,
-and Nintendo has had much of the Switch-era artwork taken down from SteamGridDB,
-so those are the entries most likely to stay blank.
+**If neither has it, name the picture yourself.** libretro has no Switch
+playlist at all, and Nintendo has had some Switch-era artwork taken down from
+SteamGridDB, so a handful of entries have no automatic answer. For those, one
+file settles it — and because the appid is derived rather than random, it stays
+attached through every re-add.
 
-Every failure here is a warning rather than a refusal — a shortcut with no
+```bash
+gotg steam art world.luigis_mansion_2_hd --from ~/Pictures/cover.png
+gotg steam art world.luigis_mansion_2_hd --from https://example/hero.jpg --as hero
+```
+
+Which of the five it becomes is read from the picture's own shape, or said
+outright with `--as tile|capsule|hero|logo|icon`. Unlike the two automatic
+sources this one is not best-effort: somebody typed a path, so a path that
+cannot be used is an error rather than a warning to read past.
+
+**Requests identify themselves as `gotg/0.1.0`**, which is not cosmetic:
+`www.steamgriddb.com` is behind Cloudflare, and Cloudflare answers the default
+`Python-urllib/3.x` with a 403 whatever the API key says. Against a mock that
+answers anything, that bug is invisible.
+
+Every other failure here is a warning rather than a refusal — a shortcut with no
 picture is a working shortcut. EmuDeck does the same job by shelling out to
 Steam ROM Manager and copying from its cache; this asks both sources directly,
 which is smaller and needs no GUI.

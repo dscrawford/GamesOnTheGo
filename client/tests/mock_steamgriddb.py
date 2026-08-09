@@ -46,6 +46,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         path = self.path.split("?")[0]
 
+        # The real service sits behind Cloudflare, which rejects the default
+        # python agent outright — a 403 no key can fix, and one a mock that
+        # answered anything would never have caught.
+        if self.headers.get("User-Agent", "").startswith("Python-urllib"):
+            self._json(403, {"success": False, "errors": ["Forbidden"]})
+            return
+
         # A fake image, served without auth the way a CDN would.
         if path.startswith("/img/"):
             body = b"\x89PNG\r\n\x1a\n" + path.encode()

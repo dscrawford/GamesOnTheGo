@@ -121,6 +121,97 @@ art() {
   [[ "$(jq -r '.skipped' <<<"$output")" != "null" ]]
 }
 
+# --- a picture chosen by hand -----------------------------------------------
+#
+# The last resort, and the only one that always works. Some games are in no
+# database — Switch titles especially, which libretro has none of and whose
+# SteamGridDB artwork has largely been taken down — and for a handful of those,
+# finding the image yourself once is a better answer than a cleverer scraper.
+
+# A real PNG of a given shape, built by the mock's own generator so the two
+# cannot disagree about what a valid PNG is.
+make_png() {
+  python3 -c "
+import sys
+sys.path.insert(0, '$BATS_TEST_DIRNAME')
+import mock_libretro
+sys.stdout.buffer.write(mock_libretro.png(int(sys.argv[1]), int(sys.argv[2])))
+" "$2" "$3" >"$1"
+}
+
+manual() {
+  python3 "$ART" --grid-dir "$GRID" --appid 77 --name "Some Game" "$@"
+}
+
+@test "a portrait picture becomes the library tile" {
+  make_png "$TEST_TMP/box.png" 600 900
+  run manual --from "$TEST_TMP/box.png"
+  [ "$status" -eq 0 ]
+  [ -f "$GRID/77p.png" ]
+}
+
+@test "a landscape picture becomes the wide capsule" {
+  make_png "$TEST_TMP/box.png" 920 430
+  run manual --from "$TEST_TMP/box.png"
+  [ "$status" -eq 0 ]
+  [ -f "$GRID/77.jpg" ]
+}
+
+@test "a very wide picture becomes the hero" {
+  make_png "$TEST_TMP/wide.png" 1920 620
+  run manual --from "$TEST_TMP/wide.png"
+  [ "$status" -eq 0 ]
+  [ -f "$GRID/77_hero.jpg" ]
+}
+
+@test "saying which one it is overrides the shape" {
+  make_png "$TEST_TMP/box.png" 600 900
+  run manual --from "$TEST_TMP/box.png" --as logo
+  [ "$status" -eq 0 ]
+  [ -f "$GRID/77_logo.png" ]
+  [ ! -f "$GRID/77p.png" ]
+}
+
+@test "a picture whose shape cannot be read must be told where it goes" {
+  printf 'not an image at all' >"$TEST_TMP/junk.png"
+  run manual --from "$TEST_TMP/junk.png"
+  [ "$status" -ne 0 ]
+  [[ "$output$stderr" == *"--as"* ]]
+  [ -z "$(ls -A "$GRID")" ]
+}
+
+@test "a file that is not there is an error, not a silent skip" {
+  run manual --from "$TEST_TMP/nope.png"
+  [ "$status" -ne 0 ]
+  [ -z "$(ls -A "$GRID")" ]
+}
+
+@test "a url works the same as a path" {
+  run manual --from "$SGDB_URL/img/whatever.png" --as hero
+  [ "$status" -eq 0 ]
+  [ -f "$GRID/77_hero.jpg" ]
+}
+
+@test "choosing by hand replaces what is there, without asking for --force" {
+  printf 'old' >"$GRID/77p.png"
+  make_png "$TEST_TMP/box.png" 600 900
+  run manual --from "$TEST_TMP/box.png"
+  [ "$status" -eq 0 ]
+  # Naming a file is the intent that --force exists to express elsewhere.
+  [ "$(cat "$GRID/77p.png")" != "old" ]
+}
+
+@test "choosing by hand does not go looking online" {
+  make_png "$TEST_TMP/box.png" 600 900
+  # A dead SteamGridDB and a dead libretro: neither should be reached at all.
+  run manual --from "$TEST_TMP/box.png" \
+    --base-url "http://127.0.0.1:1" --api-key testkey \
+    --libretro-url "http://127.0.0.1:1" --id usa.x --platform n64
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.source' <<<"$output")" = "$TEST_TMP/box.png" ]
+  [ "$(jq -r '.libretro' <<<"$output")" = "null" ]
+}
+
 # --- the command around it -------------------------------------------------
 
 setup_steam() {
@@ -175,10 +266,44 @@ setup_steam() {
   stop_server
 }
 
+@test "art takes a picture named on the command line" {
+  setup_steam
+  gotg steam add usa.super_mario_sunshine
+  make_png "$TEST_TMP/mine.png" 600 900
+
+  gotg steam art usa.super_mario_sunshine --from "$TEST_TMP/mine.png"
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"from $TEST_TMP/mine.png"* ]]
+  stop_server
+
+  local appid
+  appid="$(python3 "$(dirname "$GOTG_BIN")/../share/gotg/steam/shortcuts.py" \
+    --file "$SHORTCUTS" list | jq -r '.[0].appid')"
+  cmp -s "$TEST_TMP/mine.png" "$(dirname "$SHORTCUTS")/grid/${appid}p.png"
+}
+
+@test "art says so when the picture named cannot be used" {
+  setup_steam
+  gotg steam add usa.super_mario_sunshine
+  gotg steam art usa.super_mario_sunshine --from "$TEST_TMP/absent.png"
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"absent.png"* ]]
+  stop_server
+}
+
 @test "art refuses for a game that is not in Steam yet" {
   setup_steam
   gotg steam art usa.super_mario_sunshine
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"not in Steam yet"* ]]
   stop_server
+}
+
+@test "it identifies itself, because the default python agent is refused" {
+  # Not a hypothetical: www.steamgriddb.com is behind Cloudflare, which answers
+  # Python-urllib with a 403 whatever the key says. The mocks refuse it too, so
+  # this cannot regress into a source that only ever worked against a stand-in.
+  run art
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.downloaded | length' <<<"$output")" -eq 5 ]
 }
