@@ -90,6 +90,15 @@ source ~/.local/state/gotg/app/share/bash-completion/completions/gotg
 `nix develop` sources the one in the checkout instead, so edits to it apply on
 save.
 
+**The dev shell keeps the built app current.** `gotg` inside it runs the working
+tree, but a Steam launcher does not — it execs `~/.local/state/gotg/app`, a
+`nix build -o` symlink that stays at whatever it was last built from, so
+launching a game from Steam would test yesterday's code. `.envrc` watches
+`client/` and rebuilds that symlink when something changes, and says so when it
+does. It also warns about untracked files under `client/`: a flake only sees
+what git tracks, so a brand-new `lib/*.sh` is simply absent from the build,
+which looks exactly like the change having no effect.
+
 `install` prints the path of a `play-<id>.sh` script. Launching it downloads the
 game if it is missing (with a progress dialog) and then starts the emulator.
 
