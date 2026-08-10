@@ -4,6 +4,26 @@
 # fetches — a tab that blocks on the network is worse than no completion. Ids
 # are safe to word-split on because the entry-id contract has no spaces in them.
 
+# Ids that match anywhere, not only at the front.
+#
+# There are thousands of them and they begin with a region — usa., world.,
+# jpn., eur. — which nobody remembers and which gives the whole set no common
+# prefix for bash to insert. So a plain prefix match on `metroid` offers
+# nothing, while an empty prefix offers all of them and readline asks whether
+# you would like to see two thousand possibilities.
+#
+# Matching on any part turns that into the search it wants to be: `metroid`
+# finds world.super_metroid. -F because an id is a literal here, not a pattern,
+# and a stray `.` or `+` in what has been typed should match itself.
+_gotg_ids() {
+    local cur="$1"
+    if [[ -z "$cur" ]]; then
+        gotg complete ids
+    else
+        gotg complete ids | grep -iF -- "$cur"
+    fi
+}
+
 _gotg() {
     local cur prev cmd sub
     cur="${COMP_WORDS[COMP_CWORD]}"
@@ -27,11 +47,11 @@ _gotg() {
     case "$cmd" in
         info | download | install)
             [[ $COMP_CWORD -eq 2 ]] &&
-                mapfile -t COMPREPLY < <(compgen -W "$(gotg complete ids)" -- "$cur")
+                mapfile -t COMPREPLY < <(_gotg_ids "$cur")
             ;;
         play | configure)
             if [[ $COMP_CWORD -eq 2 ]]; then
-                mapfile -t COMPREPLY < <(compgen -W "$(gotg complete ids)" -- "$cur")
+                mapfile -t COMPREPLY < <(_gotg_ids "$cur")
             elif [[ $COMP_CWORD -eq 3 ]]; then
                 mapfile -t COMPREPLY < <(compgen -W "$(gotg complete variants "$sub")" -- "$cur")
             fi
@@ -43,7 +63,10 @@ _gotg() {
                 # A pattern is a regex over ids, titles and platforms. Offering
                 # the ids makes the common case — completing one — work, and
                 # anything else is still typed by hand.
-                mapfile -t COMPREPLY < <(compgen -W "$(gotg complete ids) $(gotg complete platforms)" -- "$cur")
+                mapfile -t COMPREPLY < <(
+                    _gotg_ids "$cur"
+                    compgen -W "$(gotg complete platforms)" -- "$cur"
+                )
             fi
             ;;
         saves)
@@ -56,7 +79,7 @@ _gotg() {
                     if [[ "$cur" == -* ]]; then
                         mapfile -t COMPREPLY < <(compgen -W "--all --yes --force" -- "$cur")
                     else
-                        mapfile -t COMPREPLY < <(compgen -W "$(gotg complete ids)" -- "$cur")
+                        mapfile -t COMPREPLY < <(_gotg_ids "$cur")
                     fi
                     ;;
             esac
@@ -79,7 +102,7 @@ _gotg() {
                 2) mapfile -t COMPREPLY < <(compgen -W "add remove art list" -- "$cur") ;;
                 3)
                     case "$sub" in
-                        add | remove | art) mapfile -t COMPREPLY < <(compgen -W "$(gotg complete ids)" -- "$cur") ;;
+                        add | remove | art) mapfile -t COMPREPLY < <(_gotg_ids "$cur") ;;
                     esac
                     ;;
                 *)
@@ -102,7 +125,12 @@ _gotg() {
                 *)
                     case "$sub" in
                         order) mapfile -t COMPREPLY < <(compgen -W "--set --clear --json" -- "$cur") ;;
-                        apply) mapfile -t COMPREPLY < <(compgen -W "--all $(gotg complete ids)" -- "$cur") ;;
+                        apply)
+                            mapfile -t COMPREPLY < <(
+                                _gotg_ids "$cur"
+                                compgen -W "--all" -- "$cur"
+                            )
+                            ;;
                     esac
                     ;;
             esac

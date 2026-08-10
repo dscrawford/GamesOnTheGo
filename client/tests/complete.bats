@@ -178,3 +178,30 @@ comp() {
   run comp gotg saves setup ""
   [[ "$output" != *"usa.zelda"* ]]
 }
+
+@test "an id matches on any part of it, not just the front" {
+  # Nobody remembers whether a game is usa. or world., and with thousands of
+  # ids a prefix match on an empty prefix offers everything and helps nobody.
+  add_game snes world.super_metroid.sfc "rom" "Super Metroid"
+  add_game n64 usa.legend_of_zelda_majoras_mask.z64 "rom" "Majora's Mask"
+  gotg refresh
+  run comp gotg steam add "metroid"
+  [[ "$output" == *"world.super_metroid"* ]]
+}
+
+@test "matching anywhere still narrows — it is not just everything" {
+  add_game snes world.super_metroid.sfc "rom" "Super Metroid"
+  add_game n64 usa.legend_of_zelda_majoras_mask.z64 "rom" "Majora's Mask"
+  gotg refresh
+  run comp gotg steam add "metroid"
+  # Non-empty first: a matcher that found nothing would satisfy the line below.
+  [[ "$output" == *"world.super_metroid"* ]]
+  [[ "$output" != *"majoras_mask"* ]]
+}
+
+@test "a substring match works for play and install too" {
+  add_game snes world.super_metroid.sfc "rom" "Super Metroid"
+  gotg refresh
+  run comp gotg install "metroid"
+  [[ "$output" == *"world.super_metroid"* ]]
+}

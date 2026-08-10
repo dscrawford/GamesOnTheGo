@@ -61,7 +61,14 @@ one reads as "that is everything", which is the one thing it must not.
 ```
 gotg play world.legend_of_zelda<TAB>   → world.legend_of_zelda_skyward_sword_hd
 gotg play usa.super_mario_sunshine <TAB>  → bse  bsmso
+gotg steam add metroid<TAB>            → world.super_metroid
 ```
+
+**Ids match on any part**, not just the front. They begin with a region nobody
+remembers — `usa.`, `world.`, `jpn.`, `eur.` — which also means the full set
+shares no common prefix, so a plain prefix match offers either nothing or all
+two thousand of them, and readline asks whether you would really like to see
+them. Matching anywhere turns tab completion into the search it wants to be.
 
 `gotg steam add`, `gotg steam art --as`, `gotg saves push` and the rest complete
 the same way; `--from` hands over to the shell's own file completion.
