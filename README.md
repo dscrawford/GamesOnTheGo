@@ -63,12 +63,32 @@ gotg play world.legend_of_zelda<TAB>   → world.legend_of_zelda_skyward_sword_h
 gotg play usa.super_mario_sunshine <TAB>  → bse  bsmso
 ```
 
+`gotg steam add`, `gotg steam art --as`, `gotg saves push` and the rest complete
+the same way; `--from` hands over to the shell's own file completion.
+
 It reads the cached catalog and **never fetches** — a tab that blocks on the
 network is worse than no completion, so a missing catalog completes nothing
-rather than going to the server. The package installs it to
-`share/bash-completion/completions/gotg`, which NixOS picks up with
-`programs.bash.completion.enable`; `nix develop` sources the one in the checkout
-instead, so edits to it apply on save.
+rather than going to the server.
+
+**Bash has to be able to find it**, which is the part that catches people out.
+The package installs it to `share/bash-completion/completions/gotg`, and bash
+searches that path only under directories on `XDG_DATA_DIRS` — which means the
+package has to be *installed*, not merely built and put on `PATH`:
+
+```nix
+home.packages = [ inputs.gotg.packages.${pkgs.system}.gotg ];   # or environment.systemPackages
+```
+
+Building with `nix build -o ~/.local/state/gotg/app` and adding that to `PATH`
+gets you the command but never the completion, because nothing searches that
+symlink's `share/`. To keep that arrangement, source the file directly:
+
+```bash
+source ~/.local/state/gotg/app/share/bash-completion/completions/gotg
+```
+
+`nix develop` sources the one in the checkout instead, so edits to it apply on
+save.
 
 `install` prints the path of a `play-<id>.sh` script. Launching it downloads the
 game if it is missing (with a progress dialog) and then starts the emulator.

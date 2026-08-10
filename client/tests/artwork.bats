@@ -27,7 +27,13 @@ setup() {
   start_sgdb
 }
 
-teardown() { stop_sgdb; }
+# Both, always. A test that fails before its own `stop_server` leaves the mock
+# holding this test's stdout, and bats waits on that — so one failed assertion
+# hangs the entire file instead of failing one test.
+teardown() {
+  stop_sgdb
+  stop_server
+}
 
 start_sgdb() {
   SGDB_PORT="$(pick_port)"
@@ -262,6 +268,7 @@ setup_steam() {
   # No steamgriddb.json at all — the whole point of the proxy is that a client
   # holds one token for our own service instead of a key for somebody else's.
   jq -n --arg u "$SGDB_URL" '{url: $u, token: "client-token"}' >"$TEST_TMP/api.json"
+  chmod 600 "$TEST_TMP/api.json"          # as the docs tell you to create it
   export GOTG_API_FILE="$TEST_TMP/api.json"
   unset GOTG_STEAMGRIDDB_URL
 

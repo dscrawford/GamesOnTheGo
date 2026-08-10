@@ -96,3 +96,85 @@ teardown() { stop_server; }
   [ -f "$root/share/bash-completion/completions/gotg" ]
   grep -q "complete -F _gotg gotg" "$root/share/bash-completion/completions/gotg"
 }
+
+# --- the completion script itself -------------------------------------------
+#
+# Above this line the tests cover the lists `gotg complete` produces. What was
+# never covered is the script that asks for them — which case fires for which
+# command line — and that is exactly where the two commands drifted from the
+# CLI without anything noticing.
+#
+# So: source the shipped script and drive its function the way bash does, by
+# setting COMP_WORDS and COMP_CWORD and reading COMPREPLY back.
+
+# Complete the given command line. A trailing "" argument means the cursor sits
+# on an empty word, which is what pressing tab after a space does.
+comp() {
+  local root
+  root="$(cd "$(dirname "$GOTG_BIN")/.." && pwd)"
+
+  # The script calls `gotg`; give it the one under test rather than whatever is
+  # installed on the machine running the suite.
+  gotg() { "$GOTG_BIN" "$@"; }
+  export -f gotg 2>/dev/null || true
+
+  # shellcheck source=/dev/null
+  source "$root/share/bash-completion/completions/gotg"
+
+  COMP_WORDS=("$@")
+  COMP_CWORD=$(($# - 1))
+  COMPREPLY=()
+  _gotg
+  printf '%s\n' "${COMPREPLY[@]}"
+}
+
+@test "steam add completes game ids" {
+  add_game n64 usa.zelda.z64 "rom" "Zelda"
+  add_game snes usa.metroid.sfc "rom" "Metroid"
+  gotg refresh
+  run comp gotg steam add ""
+  [[ "$output" == *"usa.zelda"* ]]
+  [[ "$output" == *"usa.metroid"* ]]
+}
+
+@test "steam add narrows to what has been typed" {
+  add_game n64 usa.zelda.z64 "rom" "Zelda"
+  add_game snes usa.metroid.sfc "rom" "Metroid"
+  gotg refresh
+  run comp gotg steam add "usa.z"
+  [[ "$output" == *"usa.zelda"* ]]
+  [[ "$output" != *"usa.metroid"* ]]
+}
+
+@test "list completes a platform name" {
+  add_game n64 usa.zelda.z64 "rom" "Zelda"
+  gotg refresh
+  run comp gotg list "n"
+  [[ "$output" == *"n64"* ]]
+}
+
+@test "steam art offers its own options" {
+  add_game n64 usa.zelda.z64 "rom" "Zelda"
+  gotg refresh
+  run comp gotg steam art usa.zelda "--"
+  [[ "$output" == *"--from"* ]]
+  [[ "$output" == *"--force"* ]]
+}
+
+@test "--as offers the five names a picture can be" {
+  add_game n64 usa.zelda.z64 "rom" "Zelda"
+  gotg refresh
+  run comp gotg steam art usa.zelda --as ""
+  [[ "$output" == *"tile"* ]]
+  [[ "$output" == *"capsule"* ]]
+  [[ "$output" == *"hero"* ]]
+  [[ "$output" == *"logo"* ]]
+  [[ "$output" == *"icon"* ]]
+}
+
+@test "saves setup wants a url, so it does not offer game ids" {
+  add_game n64 usa.zelda.z64 "rom" "Zelda"
+  gotg refresh
+  run comp gotg saves setup ""
+  [[ "$output" != *"usa.zelda"* ]]
+}

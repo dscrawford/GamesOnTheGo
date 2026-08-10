@@ -50,6 +50,9 @@ _gotg() {
             case $COMP_CWORD in
                 2) mapfile -t COMPREPLY < <(compgen -W "setup status push pull adopt" -- "$cur") ;;
                 *)
+                    # setup takes the remote's URL, which nothing here knows and
+                    # a list of game ids is actively unhelpful for.
+                    [[ "$sub" == "setup" ]] && return
                     if [[ "$cur" == -* ]]; then
                         mapfile -t COMPREPLY < <(compgen -W "--all --yes --force" -- "$cur")
                     else
@@ -59,6 +62,19 @@ _gotg() {
             esac
             ;;
         steam)
+            # --from takes a path, so hand it to the shell's own file
+            # completion; --as takes one of the five names a picture can be.
+            case "$prev" in
+                --from)
+                    mapfile -t COMPREPLY < <(compgen -f -- "$cur")
+                    return
+                    ;;
+                --as)
+                    mapfile -t COMPREPLY < <(compgen -W "tile capsule hero logo icon" -- "$cur")
+                    return
+                    ;;
+            esac
+
             case $COMP_CWORD in
                 2) mapfile -t COMPREPLY < <(compgen -W "add remove art list" -- "$cur") ;;
                 3)
@@ -66,10 +82,17 @@ _gotg() {
                         add | remove | art) mapfile -t COMPREPLY < <(compgen -W "$(gotg complete ids)" -- "$cur") ;;
                     esac
                     ;;
-                4)
-                    case "$sub" in
-                        add | remove | art) mapfile -t COMPREPLY < <(compgen -W "$(gotg complete variants "${COMP_WORDS[3]}")" -- "$cur") ;;
-                    esac
+                *)
+                    if [[ "$cur" == -* ]]; then
+                        # Only `art` has options; the others take a variant and
+                        # nothing else, so offering flags there would be a lie.
+                        [[ "$sub" == "art" ]] &&
+                            mapfile -t COMPREPLY < <(compgen -W "--force --from --as" -- "$cur")
+                    elif [[ $COMP_CWORD -eq 4 ]]; then
+                        case "$sub" in
+                            add | remove | art) mapfile -t COMPREPLY < <(compgen -W "$(gotg complete variants "${COMP_WORDS[3]}")" -- "$cur") ;;
+                        esac
+                    fi
                     ;;
             esac
             ;;

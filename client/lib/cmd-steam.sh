@@ -130,11 +130,21 @@ steam_api_field() {
   local file
   file="$(steam_api_file)"
   [[ -f "$file" ]] || return 1
-  # It holds a bearer token for a service on the public internet, so it is
-  # checked the same way the server credentials are — a token anyone on the
-  # machine can read is a token anyone on the machine can spend.
-  config_check_perms "$file"
   jq -re --arg f "$1" '.[$f] // empty' "$file" 2>/dev/null
+}
+
+# It holds a bearer token for a service on the public internet, so it is checked
+# the same way the server credentials are — a token anyone on the machine can
+# read is a token anyone on the machine can spend.
+#
+# Called here rather than from steam_api_field, which is only ever run inside a
+# command substitution: a die in there ends the subshell and nothing else, so
+# the refusal was swallowed by the caller and the token read anyway. The check
+# has to happen where it can actually stop the command.
+steam_check_api_perms() {
+  local file
+  file="$(steam_api_file)"
+  [[ ! -f "$file" ]] || config_check_perms "$file"
 }
 
 # Best-effort by design: a shortcut with no picture is a working shortcut.
@@ -151,6 +161,8 @@ steam_fetch_artwork() {
   # service, the same seam GOTG_STEAM_SHORTCUTS provides for Steam's own file.
   local base=() lr=() key say_key="no"
   [[ -z "${GOTG_LIBRETRO_URL:-}" ]] || lr=(--libretro-url "$GOTG_LIBRETRO_URL")
+
+  steam_check_api_perms
 
   local proxy="" proxy_token=""
   proxy="$(steam_api_field url)" || proxy=""
