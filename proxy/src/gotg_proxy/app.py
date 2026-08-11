@@ -1,24 +1,30 @@
-"""A reverse proxy that holds the API credentials so the clients do not.
+"""The GOTG service: one endpoint holding the credentials and the saves.
 
-Every machine that runs `gotg steam art` otherwise needs its own SteamGridDB
-key, and IGDB is worse: its access token is minted from a client id and secret
-and expires in about sixty days, so each client would have to hold two secrets
-and implement a refresh. Putting one service in the cluster in front of both
-turns that into a single credential to rotate, in a Secret, in one place.
+Two jobs, one bearer token, one deployment.
 
-It is a reverse proxy rather than a forward one: a client does not configure it
-and then reach arbitrary destinations through it, it simply *is* the API as far
-as the client is concerned. `gotg steam art --base-url https://.../steamgriddb`
-needs no code change to use it — it sends its own token, and this swaps in the
-real one.
+The first is a reverse proxy for the artwork APIs. Every machine that runs
+`gotg steam art` otherwise needs its own SteamGridDB key, and IGDB is worse:
+its access token is minted from a client id and secret and expires in about
+sixty days, so each client would have to hold two secrets and implement a
+refresh. Putting one service in front of both turns that into a single
+credential to rotate, in a Secret, in one place. It is a reverse proxy rather
+than a forward one: a client does not configure it and then reach arbitrary
+destinations through it, it simply *is* the API as far as the client is
+concerned — it sends its own token, and this swaps in the real one.
 
 Which makes the important property this: **the client's token must never reach
-an upstream, and an upstream's key must never reach a client.** Most of what is
-here is in service of that.
+an upstream, and an upstream's key must never reach a client.** Most of the
+proxy half is in service of that.
+
+The second is the saves store — see saves.py. It lives here rather than on a
+separate WebDAV endpoint because a store with one process in front of it can
+decide conflicts atomically, which a dumb blob store never could, and because
+one service means a client is configured once: the same url and token that
+fetch artwork carry saves.
 
 Authentication is not optional. This sits on the public internet behind an
-ingress, and an open relay would be somebody else's free SteamGridDB quota and,
-eventually, our banned key.
+ingress, and an open relay would be somebody else's free SteamGridDB quota,
+somebody else's save hosting and, eventually, our banned key.
 
 Only the standard library. It is a few hundred requests a week from a handful of
 machines; a framework and a WSGI server would be more moving parts than the job
@@ -37,7 +43,9 @@ import urllib.request
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-USER_AGENT = "gotg-proxy/0.1.0"
+from .saves import SavesStore
+
+USER_AGENT = "gotg-proxy/0.2.0"
 
 # Bounded, because a request that never returns holds a thread open and enough
 # of them stop the proxy answering anybody.
@@ -176,6 +184,7 @@ def strip_prefix(rest: str, prefix: str) -> str:
 class Handler(BaseHTTPRequestHandler):
     config: Config
     tokens: TokenCache
+    store: SavesStore | None
 
     server_version = USER_AGENT
     protocol_version = "HTTP/1.1"
@@ -259,6 +268,68 @@ class Handler(BaseHTTPRequestHandler):
             body,
         )
 
+    # --- the saves store ----------------------------------------------------
+
+    def _saves(self, rest: str, body: bytes | None) -> None:
+        """`/saves/<attr>` is the whole surface: PUT is `.save()`, GET is
+        `.retrieve()`, and `/saves/<attr>/meta` says what is current without
+        moving the bytes. Conflicts are answered here — a PUT carries the hash
+        of the generation it descends from, and a parent that is not the head
+        is a 409 carrying what the head actually is."""
+        if self.store is None:
+            self._problem(503, "this service holds no saves store")
+            return
+
+        parts = urllib.parse.urlsplit("/" + rest)
+        segments = parts.path.strip("/").split("/")
+        attr = segments[0]
+        want_meta = segments[1:] == ["meta"]
+        if segments[1:] not in ([], ["meta"]):
+            self._problem(404, f"nothing lives at /saves/{parts.path.strip('/')}")
+            return
+
+        try:
+            if self.command == "GET" and want_meta:
+                meta = self.store.meta(attr)
+                if meta is None:
+                    self._problem(404, f"nothing has been pushed for {attr}")
+                    return
+                self._send(200, json.dumps(meta).encode(), "application/json")
+            elif self.command == "GET":
+                meta = self.store.meta(attr)
+                path = self.store.bundle_path(attr)
+                if meta is None or path is None:
+                    self._problem(404, f"nothing has been pushed for {attr}")
+                    return
+                payload = path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zstd")
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("X-Gotg-Generation", str(meta["generation"]))
+                self.send_header("X-Gotg-Hash", meta["hash"])
+                self.end_headers()
+                self.wfile.write(payload)
+            elif self.command == "PUT":
+                if not body:
+                    self._problem(400, "a save must arrive with its bundle as the body")
+                    return
+                published = self.store.save(
+                    attr,
+                    body,
+                    parent=self.headers.get("X-Gotg-Parent", ""),
+                    # Stored and echoed back in metadata, so it is made
+                    # printable and short rather than trusted.
+                    device="".join(c for c in self.headers.get("X-Gotg-Device", "") if c.isprintable())[:32],
+                    force="force=1" in parts.query.split("&"),
+                )
+                self._send(published.status, json.dumps(published.meta).encode(), "application/json")
+            else:
+                self._problem(405, f"{self.command} is not something the saves store answers")
+        except ValueError as error:
+            self._problem(400, str(error))
+        except OSError as error:
+            self._problem(500, str(error))
+
     # --- routing ------------------------------------------------------------
 
     def _handle(self) -> None:
@@ -277,6 +348,14 @@ class Handler(BaseHTTPRequestHandler):
             self._problem(401, "a bearer token is required")
             return
 
+        prefix, _, rest = path.partition("/")
+
+        # A save bundle is the one body that is allowed to be big; everything
+        # else keeps the small cap, because an IGDB query is a line or two.
+        max_body = MAX_BODY
+        if prefix == "saves" and self.command == "PUT" and self.store is not None:
+            max_body = self.store.max_bytes
+
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
@@ -285,12 +364,11 @@ class Handler(BaseHTTPRequestHandler):
         if length < 0:
             self._problem(400, "negative Content-Length", close=True)
             return
-        if length > MAX_BODY:
+        if length > max_body:
             self._problem(413, "request body too large", close=True)
             return
         body = self.rfile.read(length) if length else None
 
-        prefix, _, rest = path.partition("/")
         if path_climbs(rest):
             self._problem(400, "the path climbs out of the API it is proxied to")
             return
@@ -298,6 +376,8 @@ class Handler(BaseHTTPRequestHandler):
             self._steamgriddb(rest)
         elif prefix == "igdb":
             self._igdb(rest, body)
+        elif prefix == "saves":
+            self._saves(rest, body)
         else:
             self._problem(404, f"nothing is proxied at /{prefix}")
 
@@ -307,8 +387,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         self._handle()
 
+    def do_PUT(self) -> None:  # noqa: N802
+        self._handle()
 
-def make_server(host: str, port: int, config: Config) -> ThreadingHTTPServer:
+
+def make_server(
+    host: str, port: int, config: Config, store: SavesStore | None = None
+) -> ThreadingHTTPServer:
     """Threading, because one slow upstream must not block every other client."""
-    handler = type("BoundHandler", (Handler,), {"config": config, "tokens": TokenCache()})
+    handler = type(
+        "BoundHandler",
+        (Handler,),
+        {"config": config, "tokens": TokenCache(), "store": store},
+    )
     return ThreadingHTTPServer((host, port), handler)

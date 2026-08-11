@@ -1,4 +1,4 @@
-# The credential-holding proxy.
+# The GOTG service: the credential-holding proxy and the saves store.
 #
 # A plain buildPythonApplication rather than the uv2nix route the importer
 # takes, because there is nothing to reproduce: this has no dependencies
@@ -11,7 +11,7 @@
 
 python3.pkgs.buildPythonApplication {
   pname = "gotg-proxy";
-  version = "0.1.0";
+  version = "0.2.0";
   pyproject = true;
   src = lib.cleanSource ./.;
 
@@ -24,10 +24,10 @@ python3.pkgs.buildPythonApplication {
     runHook postCheck
   '';
 
-  passthru.version = "0.1.0";
+  passthru.version = "0.2.0";
 
   meta = {
-    description = "Holds the game-artwork API credentials so the clients do not";
+    description = "The GOTG service: holds the artwork API credentials and the saves";
     mainProgram = "gotg-proxy";
   };
 }

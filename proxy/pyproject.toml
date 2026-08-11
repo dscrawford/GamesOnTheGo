@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gotg-proxy"
-version = "0.1.0"
-description = "Holds the game-artwork API credentials so the clients do not"
+version = "0.2.0"
+description = "The GOTG service: holds the artwork API credentials and the saves"
 requires-python = ">=3.11"
 # Deliberately none. A few hundred requests a week from a handful of machines
 # does not need a framework, and a service whose whole job is holding secrets
