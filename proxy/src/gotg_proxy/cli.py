@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from .app import Config, make_server
+from .catalog import CatalogStore
 from .saves import DEFAULT_KEEP, DEFAULT_MAX_BYTES, SavesStore
 
 
@@ -23,7 +24,21 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
         steamgriddb_key=env.get("STEAMGRIDDB_API_KEY", ""),
         igdb_client_id=env.get("IGDB_CLIENT_ID", ""),
         igdb_client_secret=env.get("IGDB_CLIENT_SECRET", ""),
+        index_token=env.get("GOTG_INDEX_TOKEN", ""),
     ).validate()
+
+
+def catalog_from_env(env: Mapping[str, str] | None = None) -> CatalogStore | None:
+    """The catalog, or None: a deployment with no library roots is one that
+    serves only the proxy and saves halves, and says so with a 503."""
+    env = os.environ if env is None else env
+    db = env.get("GOTG_CATALOG_DB", "")
+    roots = [Path(r) for r in env.get("GOTG_LIBRARY_ROOTS", "").split(":") if r]
+    if not db and not roots:
+        return None
+    if not (db and roots):
+        raise ValueError("GOTG_CATALOG_DB and GOTG_LIBRARY_ROOTS are set together or not at all")
+    return CatalogStore(db=Path(db), roots=roots)
 
 
 def store_from_env(env: Mapping[str, str] | None = None) -> SavesStore | None:
@@ -45,16 +60,26 @@ def main(argv: list[str] | None = None) -> int:
     port = int(os.environ.get("PORT", "8080"))
     try:
         config = config_from_env()
+        catalog = catalog_from_env()
+        store = store_from_env()
+        # A catalog row grants read on its path, so the library must not be
+        # able to name what the service itself writes.
+        if store and catalog:
+            saves_root = Path(os.path.realpath(store.root))
+            for root in catalog.roots:
+                if saves_root.is_relative_to(root):
+                    raise ValueError(f"the saves directory {store.root} is inside library root {root}")
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
 
-    store = store_from_env()
-    server = make_server("0.0.0.0", port, config, store)  # noqa: S104 — a container listens on all of its own
+    server = make_server("0.0.0.0", port, config, store, catalog)  # noqa: S104 — a container listens on all of its own
     held = [name for name, on in (("steamgriddb", config.steamgriddb_key),
                                   ("igdb", config.igdb_client_id)) if on]
     saves = f"saves under {store.root}" if store else "no saves store"
-    print(f"gotg service on :{port}, holding credentials for: {', '.join(held) or 'nothing'}; {saves}")
+    games = f"catalog at {catalog.db}" if catalog else "no catalog"
+    creds = ", ".join(held) or "nothing"
+    print(f"gotg service on :{port}, holding credentials for: {creds}; {saves}; {games}")
     server.serve_forever()
     return 0
 

@@ -43,6 +43,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from .catalog import CatalogStore, Conflict, SweepRefused
 from .saves import SavesStore
 
 USER_AGENT = "gotg-proxy/0.2.0"
@@ -121,6 +122,10 @@ class Config:
     igdb_client_secret: str = ""
     igdb_url: str = IGDB_URL
     igdb_token_url: str = IGDB_TOKEN_URL
+    # The write credential for the catalog. Lives in one CronJob Secret where
+    # the client token lives on every laptop; catalog writes without it answer
+    # 503 rather than ever falling back to the client token.
+    index_token: str = ""
 
     def validate(self) -> Config:
         if not self.token:
@@ -128,6 +133,11 @@ class Config:
                 "no client token set. Refusing to start: an empty token "
                 "authenticates everybody, which makes this an open relay for "
                 "somebody else's API quota."
+            )
+        if self.index_token and self.index_token == self.token:
+            raise ValueError(
+                "the index token equals the client token. Refusing to start: "
+                "that would let every client rewrite the catalog."
             )
         return self
 
@@ -185,6 +195,7 @@ class Handler(BaseHTTPRequestHandler):
     config: Config
     tokens: TokenCache
     store: SavesStore | None
+    catalog: CatalogStore | None
 
     server_version = USER_AGENT
     protocol_version = "HTTP/1.1"
@@ -213,13 +224,24 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- who is asking ------------------------------------------------------
 
-    def _authenticated(self) -> bool:
+    def _bearer(self) -> str:
         header = self.headers.get("Authorization", "")
-        if not header.startswith("Bearer "):
-            return False
+        return header[len("Bearer ") :] if header.startswith("Bearer ") else ""
+
+    def _authenticated(self) -> bool:
         # compare_digest rather than ==: a plain comparison returns early on the
         # first wrong byte, which leaks the secret a character at a time.
-        return hmac.compare_digest(header[len("Bearer ") :], self.config.token)
+        bearer = self._bearer()
+        if hmac.compare_digest(bearer, self.config.token):
+            return True
+        return bool(self.config.index_token) and hmac.compare_digest(
+            bearer, self.config.index_token
+        )
+
+    def _is_index(self) -> bool:
+        return bool(self.config.index_token) and hmac.compare_digest(
+            self._bearer(), self.config.index_token
+        )
 
     # --- forwarding ---------------------------------------------------------
 
@@ -330,6 +352,84 @@ class Handler(BaseHTTPRequestHandler):
         except OSError as error:
             self._problem(500, str(error))
 
+    def _catalog(self, rest: str, body: bytes | None) -> None:
+        """`/catalog` reads for everyone; writes for the index principal only.
+
+        PUT upserts one entry, and answers 409 when the stored entry points at
+        different bytes — two torrents producing the same id is a real error
+        the old hardlink collision used to surface, and an upsert must not
+        swallow it. The sweep reports what a completed scan did not confirm;
+        it deletes nothing.
+        """
+        if self.catalog is None:
+            self._problem(503, "this service holds no catalog")
+            return
+
+        parts = urllib.parse.urlsplit("/" + rest)
+        segments = [s for s in parts.path.strip("/").split("/") if s]
+        query = parts.query.split("&")
+
+        def needs_index() -> bool:
+            if not self.config.index_token:
+                self._problem(503, "no index token is configured; the catalog is read-only")
+                return False
+            if not self._is_index():
+                self._problem(403, "catalog writes need the index token")
+                return False
+            return True
+
+        try:
+            if self.command == "GET" and not segments:
+                full = "full=1" in query
+                if full and not self._is_index():
+                    self._problem(403, "the full catalog view needs the index token")
+                    return
+                view = self.catalog.view(full=full)
+                self._send(200, json.dumps(view).encode(), "application/json")
+            elif self.command == "PUT" and len(segments) == 2:
+                if not needs_index():
+                    return
+                if not body:
+                    self._problem(400, "an entry must arrive as the request body")
+                    return
+                entry = self.catalog.upsert(
+                    segments[0],
+                    segments[1],
+                    json.loads(body),
+                    force="force=1" in query,
+                )
+                self._send(200, json.dumps(entry).encode(), "application/json")
+            elif self.command == "POST" and segments == ["sweep"]:
+                if not needs_index():
+                    return
+                payload = json.loads(body) if body else {}
+                report = self.catalog.sweep(
+                    str(payload.get("since", "")),
+                    confirm="confirm=1" in query,
+                )
+                self._send(200, json.dumps(report).encode(), "application/json")
+            elif self.command == "DELETE" and len(segments) == 2:
+                if not needs_index():
+                    return
+                if self.catalog.delete(segments[0], segments[1]):
+                    self._send(200, b'{"deleted":true}', "application/json")
+                else:
+                    self._problem(404, f"no entry {segments[0]}/{segments[1]}")
+            else:
+                self._problem(404, f"nothing lives at /catalog/{parts.path.strip('/')}")
+        except Conflict as conflict:
+            self._send(
+                409,
+                json.dumps({"error": str(conflict), "stored": conflict.stored}).encode(),
+                "application/json",
+            )
+        except SweepRefused as refused:
+            self._problem(409, str(refused))
+        except (ValueError, json.JSONDecodeError) as error:
+            self._problem(400, str(error))
+        except OSError as error:
+            self._problem(500, str(error))
+
     # --- routing ------------------------------------------------------------
 
     def _handle(self) -> None:
@@ -349,6 +449,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         prefix, _, rest = path.partition("/")
+        # A query on a bare prefix — /catalog?full=1 — otherwise rides along
+        # in the prefix and matches no route.
+        if "?" in prefix:
+            prefix, _, query = prefix.partition("?")
+            rest = f"?{query}"
 
         # A save bundle is the one body that is allowed to be big; everything
         # else keeps the small cap, because an IGDB query is a line or two.
@@ -378,6 +483,8 @@ class Handler(BaseHTTPRequestHandler):
             self._igdb(rest, body)
         elif prefix == "saves":
             self._saves(rest, body)
+        elif prefix == "catalog":
+            self._catalog(rest, body)
         else:
             self._problem(404, f"nothing is proxied at /{prefix}")
 
@@ -390,14 +497,21 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self) -> None:  # noqa: N802
         self._handle()
 
+    def do_DELETE(self) -> None:  # noqa: N802
+        self._handle()
+
 
 def make_server(
-    host: str, port: int, config: Config, store: SavesStore | None = None
+    host: str,
+    port: int,
+    config: Config,
+    store: SavesStore | None = None,
+    catalog: CatalogStore | None = None,
 ) -> ThreadingHTTPServer:
     """Threading, because one slow upstream must not block every other client."""
     handler = type(
         "BoundHandler",
         (Handler,),
-        {"config": config, "tokens": TokenCache(), "store": store},
+        {"config": config, "tokens": TokenCache(), "store": store, "catalog": catalog},
     )
     return ThreadingHTTPServer((host, port), handler)
