@@ -11,13 +11,20 @@ EmuDeck itself does not talk to SteamGridDB: it copies out of Steam ROM
 Manager's cache, having had SRM do the fetching. This does that half directly,
 which is a smaller thing than either of them and needs no GUI.
 
-Two sources, tried in that order:
+Where a picture comes from is deliberately not the caller's business: each
+place is an ImageSource whose whole surface is fetch(kind) -> bytes, and the
+Artwork facade asks them in order until one answers. Today that order is:
 
   * SteamGridDB, which has assets cut to Steam's own shapes and is the better
-    answer whenever it has the game — but it needs an API key.
+    answer whenever it has the game. Reached directly with a personal key, or
+    through the GOTG service holding the real one — the API is identical, so
+    the source cannot tell and does not care.
   * libretro-thumbnails, which needs nothing at all and is keyed by No-Intro
     filenames. See libretro.py. It fills whatever the first source left, so a
     machine with no key still gets pictures.
+
+A new database is a new class with a fetch(), not a change to anything that
+calls one.
 
 And ``--from``, a picture named on the command line, for the handful of games
 in neither: libretro has no Switch playlist at all, and Nintendo has had some
@@ -39,7 +46,9 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 import libretro
 
@@ -215,77 +224,148 @@ def _write(dest: Path, body: bytes) -> None:
     tmp.replace(dest)
 
 
-def from_steamgriddb(args, grid: Path, taken: set[str]) -> tuple[list[str], list[str], dict]:
-    """The first source. Returns what it wrote, what it left, and why if it
-    could not run at all."""
-    # No key is the ordinary case on a fresh machine, not a fault. An
-    # unauthenticated request to the real API is a 401, so there is nothing to
-    # try without one.
-    if not args.api_key:
-        return [], [], {"skipped": "no api key"}
+# --- where pictures come from ------------------------------------------------
 
-    try:
-        game = find_game(args.base_url, args.api_key, args.name)
-    except urllib.error.HTTPError as error:
-        reason = "the api key was refused" if error.code == 401 else f"http {error.code}"
-        return [], [], {"skipped": reason}
-    except (urllib.error.URLError, OSError, ValueError) as error:
-        return [], [], {"skipped": f"steamgriddb unreachable: {error}"}
 
-    if not game:
-        return [], [], {"skipped": "no match", "name": args.name}
+class ImageSource(Protocol):
+    """One place pictures come from.
 
-    downloaded, kept = [], []
-    for kind, template in ARTWORK.items():
-        dest = grid / template.format(appid=args.appid)
-        if dest.exists() and not args.force:
-            kept.append(dest.name)
-            taken.add(kind)
-            continue
+    fetch() answers with the bytes of the best picture of that kind, or None —
+    and None means "not from here", never an error: a source that cannot run
+    at all says why in note() and answers None to everything. The caller's
+    side of the contract is exactly these two methods; which database sits
+    behind them is not its business.
+    """
+
+    def fetch(self, kind: str) -> bytes | None: ...
+
+    def note(self) -> dict: ...
+
+
+class SteamGridDBSource:
+    """SteamGridDB — directly with a personal key, or through the GOTG service
+    holding the real one. The API is identical either way, which is the point:
+    the service *is* SteamGridDB as far as this class can tell."""
+
+    def __init__(self, base_url: str, api_key: str | None, name: str):
+        self.base_url = base_url
+        self.api_key = api_key
+        self.name = name
+        self._note: dict = {}
+        self._game_id: int | None = None
+        self._looked = False
+
+    def _game(self) -> int | None:
+        """The game, found once and remembered — including the not-found."""
+        if self._looked:
+            return self._game_id
+        self._looked = True
+
+        # No key is the ordinary case on a fresh machine, not a fault. An
+        # unauthenticated request to the real API is a 401, so there is
+        # nothing to try without one.
+        if not self.api_key:
+            self._note = {"skipped": "no api key"}
+            return None
         try:
-            url = best_asset(args.base_url, args.api_key, game["id"], kind)
+            game = find_game(self.base_url, self.api_key, self.name)
+        except urllib.error.HTTPError as error:
+            reason = "the api key was refused" if error.code == 401 else f"http {error.code}"
+            self._note = {"skipped": reason}
+            return None
+        except (urllib.error.URLError, OSError, ValueError) as error:
+            self._note = {"skipped": f"steamgriddb unreachable: {error}"}
+            return None
+
+        if not game:
+            self._note = {"skipped": "no match", "name": self.name}
+            return None
+        self._note = {"game": game.get("name"), "game_id": game.get("id")}
+        self._game_id = game.get("id")
+        return self._game_id
+
+    def fetch(self, kind: str) -> bytes | None:
+        game_id = self._game()
+        if game_id is None or not self.api_key:
+            return None
+        try:
+            url = best_asset(self.base_url, self.api_key, game_id, kind)
             if not url:
-                continue
-            body = _get(url, None)
+                return None
+            return _get(url, None)
         except (urllib.error.URLError, OSError, ValueError):
             # One missing picture is not a reason to abandon the other four.
-            continue
-        _write(dest, body)
-        downloaded.append(dest.name)
-        taken.add(kind)
+            return None
 
-    return downloaded, kept, {"game": game.get("name"), "game_id": game.get("id")}
+    def note(self) -> dict:
+        return self._note
 
 
-def from_libretro(args, grid: Path, taken: set[str]) -> dict:
-    """The second source, filling only what the first did not."""
-    if not args.platform or not args.id:
-        return {"skipped": "no platform or id given"}
+class LibretroSource:
+    """libretro-thumbnails, which needs no key and knows games by their
+    No-Intro names. Its images arrive as one batch, fetched on the first ask."""
 
-    playlists_file = Path(args.playlists) if args.playlists else DEFAULT_PLAYLISTS
-    try:
-        playlists = libretro.load_playlists(playlists_file)
-    except (OSError, ValueError) as error:
-        return {"skipped": f"cannot read {playlists_file}: {error}"}
+    def __init__(
+        self,
+        base_url: str,
+        playlists_file: Path,
+        platform: str | None,
+        name: str,
+        game_id: str | None,
+        cache_dir: Path | None,
+    ):
+        self.base_url = base_url
+        self.playlists_file = playlists_file
+        self.platform = platform
+        self.name = name
+        self.game_id = game_id
+        self.cache_dir = cache_dir
+        self._note: dict = {}
+        self._images: dict[str, bytes] | None = None
 
-    cache = Path(args.cache_dir) if args.cache_dir else None
-    images, note = libretro.artwork(
-        args.libretro_url, playlists, args.platform, args.name, args.id, cache
-    )
+    def _load(self) -> dict[str, bytes]:
+        if self._images is not None:
+            return self._images
+        self._images = {}
 
-    downloaded, kept = [], []
-    for kind, body in images.items():
-        dest = grid / ARTWORK[kind].format(appid=args.appid)
-        # SteamGridDB already covered this shape, or a picture is already there.
-        if kind in taken:
-            continue
-        if dest.exists() and not args.force:
-            kept.append(dest.name)
-            continue
-        _write(dest, body)
-        downloaded.append(dest.name)
+        if not self.platform or not self.game_id:
+            self._note = {"skipped": "no platform or id given"}
+            return self._images
+        try:
+            playlists = libretro.load_playlists(self.playlists_file)
+        except (OSError, ValueError) as error:
+            self._note = {"skipped": f"cannot read {self.playlists_file}: {error}"}
+            return self._images
 
-    return {**note, "downloaded": downloaded, "kept": kept}
+        self._images, self._note = libretro.artwork(
+            self.base_url, playlists, self.platform, self.name, self.game_id, self.cache_dir
+        )
+        return self._images
+
+    def fetch(self, kind: str) -> bytes | None:
+        return self._load().get(kind)
+
+    def note(self) -> dict:
+        return self._note
+
+
+@dataclass
+class Artwork:
+    """The five pictures, from whichever source has each.
+
+    fetch() asks the sources in order and returns the first answer along with
+    who gave it — the caller needs the attribution only for its report, never
+    to decide anything.
+    """
+
+    sources: list[ImageSource] = field(default_factory=list)
+
+    def fetch(self, kind: str) -> tuple[bytes, ImageSource] | None:
+        for source in self.sources:
+            body = source.fetch(kind)
+            if body is not None:
+                return body, source
+        return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -326,12 +406,39 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report))
         return code
 
-    # Which kinds are settled, so the second source only fills the gaps.
-    taken: set[str] = set()
-    downloaded, kept, note = from_steamgriddb(args, grid, taken)
-    report = {**note, "downloaded": downloaded, "kept": kept}
-    report["libretro"] = from_libretro(args, grid, taken)
+    sgdb = SteamGridDBSource(args.base_url, args.api_key, args.name)
+    lr = LibretroSource(
+        args.libretro_url,
+        Path(args.playlists) if args.playlists else DEFAULT_PLAYLISTS,
+        args.platform,
+        args.name,
+        args.id,
+        Path(args.cache_dir) if args.cache_dir else None,
+    )
+    artwork = Artwork([sgdb, lr])
 
+    # The facade hides who answers; the report still says, because "where did
+    # this picture come from" is a fair question for a person reading a log.
+    downloaded: dict[int, list[str]] = {id(sgdb): [], id(lr): []}
+    kept: list[str] = []
+    for kind, template in ARTWORK.items():
+        dest = grid / template.format(appid=args.appid)
+        if dest.exists() and not args.force:
+            kept.append(dest.name)
+            continue
+        found = artwork.fetch(kind)
+        if found is None:
+            continue
+        body, source = found
+        _write(dest, body)
+        downloaded[id(source)].append(dest.name)
+
+    report = {
+        **sgdb.note(),
+        "downloaded": downloaded[id(sgdb)],
+        "kept": kept,
+        "libretro": {**lr.note(), "downloaded": downloaded[id(lr)], "kept": []},
+    }
     print(json.dumps(report))
     return 0
 
