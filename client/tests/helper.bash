@@ -63,6 +63,41 @@ stop_server() {
   wait "${MOCK_PID:-}" 2>/dev/null || true
 }
 
+# The GOTG service itself, real rather than mocked: the saves conflict rules
+# live server-side now, and a stand-in would only ever test a copy of them.
+start_saves_service() {
+  export SAVES_DATA_DIR="$TEST_TMP/service-saves"
+  export SERVICE_PORT
+  SERVICE_PORT="$(pick_port)"
+  GOTG_PROXY_TOKEN="test-token" GOTG_SAVES_DIR="$SAVES_DATA_DIR" PORT="$SERVICE_PORT" \
+    "${GOTG_SERVICE_BIN:-gotg-proxy}" >"$TEST_TMP/service.log" 2>&1 &
+  export SERVICE_PID=$!
+  export GOTG_SERVICE_URL="http://127.0.0.1:$SERVICE_PORT"
+
+  local i
+  for i in $(seq 1 50); do
+    if curl -s -o /dev/null "$GOTG_SERVICE_URL/healthz" 2>/dev/null; then return 0; fi
+    sleep 0.1
+  done
+  echo "the gotg service did not start" >&2
+  return 1
+}
+
+stop_saves_service() {
+  [[ -n "${SERVICE_PID:-}" ]] && kill "$SERVICE_PID" 2>/dev/null
+  wait "${SERVICE_PID:-}" 2>/dev/null || true
+}
+
+# What `gotg saves setup` writes: the one config that carries both artwork
+# and saves to the one service.
+write_api_config() {
+  mkdir -p "$GOTG_CONFIG_DIR"
+  chmod 700 "$GOTG_CONFIG_DIR"
+  jq -n --arg url "$GOTG_SERVICE_URL" --arg token "${1:-test-token}" \
+    '{url: $url, token: $token}' >"$GOTG_CONFIG_DIR/api.json"
+  chmod 600 "$GOTG_CONFIG_DIR/api.json"
+}
+
 write_config() {
   mkdir -p "$GOTG_CONFIG_DIR"
   jq -n --arg s "$GOTG_SERVER_URL" \
@@ -116,7 +151,7 @@ load_client_libs() {
 
   # shellcheck source=/dev/null
   local lib
-  for lib in color common config api manifest download env launcher pads pads-dolphin keys saves ludusavi; do
+  for lib in color common config api manifest download env launcher pads pads-dolphin keys remote saves; do
     source "$GOTG_LIB/$lib.sh"
   done
   GOTG_SERVER="$GOTG_SERVER_URL"

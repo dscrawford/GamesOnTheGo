@@ -74,7 +74,6 @@ validate_attr() {
   [[ -n "$attr" ]] || die "empty environment name"
   [[ "$attr" =~ $GOTG_ATTR_RE ]] || die "invalid environment name: $attr"
 }
-
 # UTC stamp for the metadata a person reads when choosing between two saves.
 # Deliberately never an input to any decision — see docs/saves.md — so making it
 # deterministic for the tests costs nothing.
@@ -86,6 +85,10 @@ iso_now() { printf '%s' "${GOTG_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"; }
 # be uploaded — and it is worth more than an exclude list, because it does not
 # have to be complete to work.
 saves_max_bytes() { printf '%s' "${GOTG_SAVES_MAX_BYTES:-67108864}"; }
+
+# How many pre-pull archives survive here. The service keeps its own last few
+# generations remotely; this is the local half of the same promise.
+saves_keep() { printf '%s' "${GOTG_SAVES_KEEP:-3}"; }
 
 # Reject anything that could climb out of the games directory.
 validate_remote_path() {

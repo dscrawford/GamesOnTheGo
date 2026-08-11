@@ -72,6 +72,16 @@ cmd_play() {
   # be started from, so it goes to the log and play continues either way.
   saves_adopt_once "$attr" || warn "could not adopt older saves for $attr"
 
+  # Take the latest save from the remote before the emulator opens it. Only
+  # when nothing can be lost — the local set must be unchanged since the last
+  # sync — and never at the cost of the launch. In a subshell so its scratch
+  # directory and trap belong to a process that will actually exit: the exec
+  # below replaces this one, and an EXIT trap does not survive that.
+  (
+    saves_tmp_init
+    saves_pull_auto "$attr"
+  ) || warn "could not take the latest save for $attr — launching with what is here"
+
   # Point the emulator at whatever controller is actually plugged in, every
   # launch, so a new pad needs no visit to a settings screen. Never fatal: a
   # launch with no controller is a launch on the keyboard, which beats not

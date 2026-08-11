@@ -9,8 +9,6 @@
   gotg-pads,
   gnutar,
   zstd,
-  ludusavi,
-  rclone,
   zenity,
   coreutils,
   findutils,
@@ -42,11 +40,8 @@ let
     procps # `gotg steam` has to know whether Steam is running
     (python3.withPackages (ps: [ ps.vdf ])) # binary shortcuts.vdf
     gotg-pads # reports what SDL sees, for generated bindings
-    gnutar # the archive a pull takes before it overwrites anything
+    gnutar # save bundles, and the archive a pull takes before it overwrites
     zstd
-    # Saves: ludusavi decides what moves, rclone moves it.
-    ludusavi
-    rclone
     util-linux # flock, for the per-game download lock
     # `gotg install` builds emulators; launching never evaluates nix.
     nix

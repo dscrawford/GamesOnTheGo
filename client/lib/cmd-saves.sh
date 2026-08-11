@@ -5,18 +5,20 @@
 # and one command that sometimes rebuilds emulators and sometimes uploads saves
 # would be a bad thing to mistype.
 #
-# The moving itself is Ludusavi's; see lib/ludusavi.sh for what gotg keeps hold
-# of and why. What is here is the command surface: which environment, which
-# direction, and what to refuse.
+# What moves is a generation: one bundle per environment, addressed by its
+# content, holding paths relative to the state directory and nothing about the
+# machine that made it. The GOTG service keeps the newest few generations and
+# decides conflicts; which files a bundle becomes, and where, is decided by
+# the machine pulling it at the moment it pulls it.
 
 saves_usage() {
   cat <<'EOF'
 usage: gotg saves <command> [args]
 
-  setup [url]            point at the remote, and check it works
-  status [<id>|--all]    compare this machine with the remote; writes nothing
-  push   [<id>|--all]    send this machine's saves
-  pull   [<id>|--all]    take the remote's saves
+  setup [url]            point at the GOTG service, and check it answers
+  status [<id>|--all]    compare this machine with the service; writes nothing
+  push   [<id>|--all]    send this machine's saves         [--force]
+  pull   [<id>|--all]    take the service's saves
   adopt  [<id>|--all]    copy in saves from before the emulators were
                          told where to put them          [--yes]
 
@@ -24,8 +26,9 @@ An id is resolved the same way `play` resolves it, but saves belong to the
 *environment*, which several games can share — env-snes holds every SNES memory
 save. The commands say which environment they are working on.
 
-Nothing here ever deletes a save. A pull archives what was here first, and the
-last few backups are kept on both sides.
+A push that would overwrite work done elsewhere stops and says so. A pull
+archives what was here first, and the last few generations are kept on both
+sides.
 EOF
 }
 
@@ -88,49 +91,43 @@ saves_resolve() {
   printf '%s\n' "$attr"
 }
 
-saves_targets() {
-  local attrs=()
-  mapfile -t attrs < <(saves_resolve "${1:-}")
-  [[ ${#attrs[@]} -gt 0 ]] || return 1
-  printf '%s\n' "${attrs[@]}"
-}
-
+# Point at the GOTG service. The same api.json carries the artwork requests,
+# so a machine set up for one is set up for both — which is the point of there
+# being one service. Merged rather than written, for the same reason
+# config_patch merges: setting up saves must not unconfigure anything else.
 saves_cmd_setup() {
   local url="${1:-}"
-  config_load
 
   if [[ -n "$url" ]]; then
+    [[ "$url" == http://* || "$url" == https://* ]] ||
+      die "the service is an http(s) URL: $url"
+    local token existing='{}' file
+    file="$(saves_api_file)"
+    token="$(prompt_secret "token for ${url%/}: ")"
+    [[ -n "$token" ]] || die "a token is required — it is what keeps the service closed"
+
     mkdir -p "$GOTG_CONFIG_DIR"
     chmod 700 "$GOTG_CONFIG_DIR"
-    local user pass
-    read -r -p "username for $url: " user
-    read -r -s -p "password: " pass
-    printf '\n'
-    jq -n --arg url "$url" --arg username "$user" --arg password "$pass" \
-      '{type: "webdav", url: $url, username: $username, password: $password}' \
-      >"$(lud_remote_file)"
-    chmod 600 "$(lud_remote_file)"
+    [[ -f "$file" ]] && existing="$(cat "$file")"
+    : >"$file.tmp"
+    chmod 600 "$file.tmp"
+    jq -n --argjson existing "$existing" --arg url "${url%/}" --arg token "$token" \
+      '$existing + {url: $url, token: $token}' >"$file.tmp"
+    mv "$file.tmp" "$file"
   fi
 
-  lud_have_remote ||
-    die "no remote configured. Point at one with:
-       gotg saves setup https://saves.example.net"
+  saves_have_remote ||
+    die "no service configured. Point at one with:
+       gotg saves setup https://gotg-api.example.net"
 
-  local attrs=()
-  mapfile -t attrs < <(saves_resolve --all)
-  lud_write_config "${attrs[@]}"
-
-  # Prove it end to end rather than claiming it works: a directory created and
-  # removed is exactly the access a push and a tidy-up need.
-  log "checking the remote…"
-  local conf probe="gotg-setup-probe"
-  conf="$(lud_rclone_conf)"
-  rclone --config "$conf" mkdir "$LUD_REMOTE:$probe" ||
-    die "could not write to the remote. Nothing has been changed."
-  rclone --config "$conf" rmdir "$LUD_REMOTE:$probe" ||
-    warn "wrote to the remote but could not remove the probe directory $probe.
-     Saves will still work; tidying old ones will not."
-  log "  upload and delete: ok"
+  # Prove it answers with this token rather than claiming it does. A 404 for
+  # an environment nobody has pushed is the service working; store_meta dies
+  # by itself on a refused token.
+  log "checking the service…"
+  local rc=0
+  store_meta env-setup-probe >/dev/null || rc=$?
+  ((rc == 2)) && die "could not reach the GOTG service at $(saves_api_url)"
+  log "  reachable, and the token is accepted"
   log ""
   log "Ready. Try: gotg saves status --all"
 }
@@ -146,7 +143,6 @@ saves_cmd_status() {
     return 0
   }
 
-  lud_write_config "${attrs[@]}"
   local attr
   for attr in "${attrs[@]}"; do
     saves_status_one "$attr"
@@ -154,45 +150,66 @@ saves_cmd_status() {
 }
 
 saves_status_one() {
-  local attr="$1" scan
-  printf '%s%s%s\n' "$C_HEAD" "$attr" "$C_RESET"
+  local attr="$1" tmp hash="" files=0
+  tmp="$(saves_tmp)"
 
-  if ! scan="$(lud_scan backup "$attr")"; then
-    printf '  %slocal  %s no saves here yet\n' "$C_MUTED" "$C_RESET"
-  else
-    # Unpushed work is the one thing on this line that might need acting on, so
-    # it is the one thing that is not the default colour.
-    local changed="" n
-    n="$(lud_changed_count "$scan")"
-    ((n > 0)) && changed="$C_WARN, changed since the last sync$C_RESET"
-    printf '  %slocal  %s %s file(s), %s%s\n' \
-      "$C_MUTED" "$C_RESET" \
-      "$(lud_file_count "$scan")" "$(human_size "$(lud_byte_count "$scan")")" "$changed"
+  if saves_bundle "$attr" "$tmp/status.tar.zst" 2>/dev/null; then
+    hash="$(saves_hash "$tmp/status.tar.zst")"
+    files="$(saves_member_count "$attr")"
   fi
 
-  if ! lud_have_remote; then
+  local base_gen base_hash pushed
+  base_gen="$(saves_journal_get "$attr" base_generation)"
+  base_hash="$(saves_journal_get "$attr" base_hash)"
+  pushed="$(saves_journal_get "$attr" pushed_hash)"
+  : "${base_gen:=0}"
+
+  printf '%s%s%s\n' "$C_HEAD" "$attr" "$C_RESET"
+  if [[ -z "$hash" ]]; then
+    printf '  %slocal  %s no saves here yet\n' "$C_MUTED" "$C_RESET"
+  else
+    # Unpushed work is the one thing on this line that might need acting on,
+    # so it is the one thing that is not the default colour.
+    local changed=""
+    if [[ "$hash" != "$pushed" && "$hash" != "$base_hash" ]]; then
+      changed="$C_WARN, changed since the last sync$C_RESET"
+    fi
+    printf '  %slocal  %s %s file(s), %s, generation %s%s\n' \
+      "$C_MUTED" "$C_RESET" \
+      "$files" "$(human_size "$(stat -c '%s' "$tmp/status.tar.zst")")" "$base_gen" \
+      "$changed"
+  fi
+
+  if ! saves_have_remote; then
     printf '  %sremote %s none configured — gotg saves setup <url>\n' "$C_MUTED" "$C_RESET"
     return 0
   fi
 
-  local pending
-  # Named, so the count belongs to this environment. Without the name the
-  # preview is of every environment at once, and printing that same number
-  # under each one in turn says something untrue about all but one of them.
-  #
-  # A remote that cannot be reached is a fact to report, not a failure: this
-  # command is most useful precisely when something is wrong.
-  if ! pending="$(lud_run cloud upload --preview "$attr" 2>&1)"; then
+  # An unreachable service is a fact to report, not a failure: this command is
+  # most useful precisely when something is wrong. The service tells "nothing
+  # pushed" and "cannot ask" apart, so the report can too.
+  local latest rc=0
+  latest="$(store_meta "$attr" 2>/dev/null)" || rc=$?
+  if ((rc == 1)); then
+    printf '  %sremote %s nothing pushed yet\n' "$C_MUTED" "$C_RESET"
+    return 0
+  elif ((rc != 0)); then
     printf '  %sremote %s unreachable\n' "$C_MUTED" "$C_RESET"
     return 0
   fi
-  # Ludusavi prints one bracketed line per file it would move.
-  local changes
-  changes="$(grep -c '^\[' <<<"$pending" || true)"
-  if ((changes == 0)); then
+
+  local rgen rdev rat rsize
+  rgen="$(jq -r '.generation' <<<"$latest")"
+  rdev="$(jq -r '.device // "?"' <<<"$latest")"
+  rat="$(jq -r '.written_at // "?"' <<<"$latest")"
+  rsize="$(jq -r '.size // 0' <<<"$latest")"
+  printf '  %sremote %s generation %s from device %s, %s, %s\n' \
+    "$C_MUTED" "$C_RESET" "$rgen" "$rdev" "$(human_size "$rsize")" "$rat"
+
+  if [[ -n "$hash" && "$hash" == "$(jq -r '.hash' <<<"$latest")" ]]; then
     printf '  in step with the remote\n'
-  else
-    printf '  %s change(s) to send\n' "$changes"
+  elif ((rgen > base_gen)); then
+    printf '  the remote has moved on since this machine last synced\n'
   fi
 }
 
@@ -209,116 +226,76 @@ saves_cmd_push() {
   local attrs=()
   mapfile -t attrs < <(saves_resolve "$want")
   [[ ${#attrs[@]} -gt 0 ]] || die "nothing to push — no environment is built here"
-  lud_write_config "${attrs[@]}"
 
-  local attr scan changing=()
-  for attr in "${attrs[@]}"; do
-    if ! scan="$(lud_scan backup "$attr")"; then
-      log "$attr: no saves here to push"
-      continue
-    fi
-    # Before the backup, so a save set that should never have been collected is
-    # refused before it is copied anywhere at all.
-    lud_check_size "$attr" "$scan"
-    if [[ "$(lud_changed_count "$scan")" == "0" ]]; then
-      log "$attr: already up to date"
-      continue
-    fi
-    changing+=("$attr")
-  done
-
-  if [[ ${#changing[@]} -gt 0 ]]; then
-    log "backing up ${changing[*]}"
-    lud_run backup --force "${changing[@]}" >/dev/null ||
-      die "ludusavi could not back up ${changing[*]}. Nothing was uploaded."
-  fi
-
-  lud_have_remote || {
-    log "no remote configured, so nothing was uploaded — gotg saves setup <url>"
-    return 0
-  }
-
-  # An upload mirrors this machine over the remote, so anything up there that
-  # has not been taken down first would go. Asking what a download would bring
-  # is the same question as "has someone else played since I last synced?", and
-  # it is asked before the mirroring rather than discovered afterwards.
-  if [[ "$force" != "force" ]]; then
-    local incoming=""
-    incoming="$(lud_run cloud download --preview "${attrs[@]}" 2>&1)" || incoming=""
-    if grep -q '^\[' <<<"$incoming"; then
-      die "the remote has saves this machine has not taken yet.
-     Nothing was uploaded. Both sides are intact; choose one:
-       Take the remote first (what is here is archived):  gotg saves pull ${attrs[0]}
-       Keep yours and replace the remote:                 gotg saves push --force ${attrs[0]}
-       Look before choosing:                              gotg saves status ${attrs[0]}"
-    fi
-  fi
-
-  lud_run cloud upload --force "${attrs[@]}" >/dev/null ||
-    die "could not upload to the remote. What is here is backed up and intact."
-  log "pushed"
-}
-
-saves_cmd_pull() {
-  config_load
-  local want="" arg
-  for arg in "$@"; do
-    case "$arg" in
-      --force) ;;
-      *) want="$arg" ;;
-    esac
-  done
-
-  local attrs=()
-  mapfile -t attrs < <(saves_resolve "$want")
-  [[ ${#attrs[@]} -gt 0 ]] || die "nothing to pull into — no environment is built here"
-  lud_write_config "${attrs[@]}"
-
-  lud_have_remote ||
+  saves_have_remote ||
     die "no remote configured. Point at one with: gotg saves setup <url>"
-
-  lud_run cloud download --force "${attrs[@]}" >/dev/null ||
-    die "could not download from the remote. Nothing local has been touched."
 
   local attr
   for attr in "${attrs[@]}"; do
-    saves_pull_one "$attr"
+    saves_push_one "$attr" "$force"
   done
 }
 
-saves_pull_one() {
-  local attr="$1" scan
-  if ! scan="$(lud_scan restore "$attr")"; then
-    log "$attr: nothing has been pushed yet"
+saves_push_one() {
+  local attr="$1" force="$2" tmp bundle hash
+  tmp="$(saves_tmp)"
+  bundle="$tmp/push-$attr.tar.zst"
+
+  if ! saves_bundle "$attr" "$bundle"; then
+    log "$attr: no saves here to push"
+    return 0
+  fi
+  hash="$(saves_hash "$bundle")"
+
+  # An unchanged save set bundles to identical bytes, so a machine that has
+  # already pushed does nothing at all — which is what makes it cheap enough to
+  # run after every session.
+  if [[ "$hash" == "$(saves_journal_get "$attr" pushed_hash)" ]]; then
+    log "$attr: already up to date"
     return 0
   fi
 
-  # Where the backup wants to write, checked before anything is written.
-  local recorded state
-  recorded="$(lud_recorded_root "$attr" "$scan")"
-  state="$(env_state_dir "$attr")"
+  log "$attr: pushing $(saves_member_count "$attr") file(s), $(human_size "$(stat -c '%s' "$bundle")")"
 
-  if [[ "$recorded" != "$state" ]]; then
-    # The other machine keeps this environment somewhere else. Move the root,
-    # whole — which is safe precisely because every path in it was just checked
-    # to be under that root.
-    log "$attr: these saves were written under $recorded; restoring them into $state"
-    LUD_REDIRECT_FROM="$recorded" LUD_REDIRECT_TO="$state" lud_write_config "$attr"
+  # One request: the parent hash rides along, and the service either advances
+  # the head atomically or answers with what is actually there. There is no
+  # read-compare-write window for another machine to slip through.
+  local meta rc=0
+  meta="$(store_save "$attr" "$bundle" "$(saves_journal_get "$attr" base_hash)" "$force")" || rc=$?
+  if ((rc == 2)); then
+    saves_divergence "$attr" "$meta" "$bundle"
+  elif ((rc != 0)); then
+    # store_save already said what went wrong, from inside the substitution.
+    exit 1
   fi
 
-  # A pull is the one operation that can overwrite local work, so what is here
-  # is archived first — into gotg's own directory, not Ludusavi's, because the
-  # next cloud download mirrors the remote over Ludusavi's and would take an
-  # archive kept there with it.
-  saves_snapshot "$attr"
+  local gen
+  gen="$(jq -r '.generation' <<<"$meta")"
+  saves_journal_set "$attr" "$(jq -nc \
+    --argjson generation "$gen" --arg hash "$hash" \
+    '{base_generation: $generation, base_hash: $hash, pushed_hash: $hash}')"
+  log "$attr: pushed generation $gen"
+}
 
-  log "$attr: restoring $(lud_file_count "$scan") file(s)"
-  lud_run restore --force "$attr" >/dev/null ||
-    die "$attr: ludusavi could not restore. What was here is archived and intact."
-  log "$attr: restored"
+# The 409 body is the head this push lost to, which is everything a person
+# needs to choose a side.
+saves_divergence() {
+  local attr="$1" head="$2" bundle="$3"
+  local rgen rdev rat rsize base_gen
+  rgen="$(jq -r '.generation' <<<"$head")"
+  rdev="$(jq -r '.device // "?"' <<<"$head")"
+  rat="$(jq -r '.written_at // "?"' <<<"$head")"
+  rsize="$(jq -r '.size // 0' <<<"$head")"
+  base_gen="$(saves_journal_get "$attr" base_generation)"
+  : "${base_gen:=0}"
 
-  # Leave the config as the rest of the commands expect to find it.
-  lud_write_config "$attr"
+  die "$attr has moved on since this machine last synced.
+     remote  generation $rgen  from device $rdev  $(human_size "$rsize")  $rat
+     local   generation $base_gen  this device ($(device_id))  $(human_size "$(stat -c '%s' "$bundle")")  changed since the pull
+   Nothing was uploaded. Both sides are intact; choose one:
+     Take the remote (what is here is archived first):  gotg saves pull <id>
+     Take yours (the remote generation is kept):        gotg saves push --force <id>
+     Look before choosing:                              gotg saves status <id>"
 }
 
 saves_cmd_adopt() {
@@ -357,4 +334,110 @@ saves_cmd_adopt() {
     log "$total file(s) would be copied. Nothing has been changed."
     log "Run it again with --yes to do it."
   fi
+}
+
+saves_cmd_pull() {
+  config_load
+  local want="" arg
+  for arg in "$@"; do
+    case "$arg" in
+      --force) ;;
+      *) want="$arg" ;;
+    esac
+  done
+
+  local attrs=()
+  mapfile -t attrs < <(saves_resolve "$want")
+  [[ ${#attrs[@]} -gt 0 ]] || die "nothing to pull into — no environment is built here"
+
+  saves_have_remote ||
+    die "no remote configured. Point at one with: gotg saves setup <url>"
+
+  local attr
+  for attr in "${attrs[@]}"; do
+    saves_pull_one "$attr"
+  done
+}
+
+saves_pull_one() {
+  local attr="$1" tmp latest rc=0
+  tmp="$(saves_tmp)"
+
+  latest="$(store_meta "$attr")" || rc=$?
+  if ((rc == 1)); then
+    log "$attr: nothing has been pushed yet"
+    return 0
+  elif ((rc != 0)); then
+    die "$attr: could not reach the GOTG service at $(saves_api_url)"
+  fi
+
+  local rhash rgen rsize
+  rhash="$(jq -r '.hash' <<<"$latest")"
+  rgen="$(jq -r '.generation' <<<"$latest")"
+  rsize="$(jq -r '.size // 0' <<<"$latest")"
+
+  local current=""
+  if saves_bundle "$attr" "$tmp/current.tar.zst" 2>/dev/null; then
+    current="$(saves_hash "$tmp/current.tar.zst")"
+  fi
+  if [[ "$current" == "$rhash" ]]; then
+    log "$attr: already has generation $rgen"
+    saves_journal_set "$attr" "$(jq -nc --argjson g "$rgen" --arg h "$rhash" \
+      '{base_generation: $g, base_hash: $h}')"
+    return 0
+  fi
+
+  # A pull is the one operation that can overwrite local work, so what is here
+  # is archived first.
+  saves_snapshot "$attr"
+
+  # The retrieve says which generation its bytes are — the head can have moved
+  # since the meta was read, and the journal must record what actually arrived.
+  # store_retrieve hands curl the size cap, so an oversized answer is refused
+  # in flight rather than measured afterwards.
+  log "$attr: fetching generation $rgen ($(human_size "$rsize"))"
+  local got
+  got="$(store_retrieve "$attr" "$tmp/pull.tar.zst")" ||
+    die "$attr: could not download the bundle from $(saves_api_url)"
+  read -r rgen rhash <<<"$got"
+
+  saves_verify_bundle "$attr" "$tmp/pull.tar.zst" "$rhash"
+  saves_extract "$attr" "$tmp/pull.tar.zst"
+
+  saves_journal_set "$attr" "$(jq -nc --argjson g "$rgen" --arg h "$rhash" --arg at "$(iso_now)" \
+    '{base_generation: $g, base_hash: $h, pushed_hash: $h, pulled_at: $at}')"
+  log "$attr: now at generation $rgen"
+}
+
+# Take the remote's save on the way into a game, but only when doing so cannot
+# lose anything: the remote must have moved on, and the local tree must be
+# unchanged since the last sync. Divergence is a decision for a person, made
+# with `gotg saves status` — a launch is the wrong place to make it, so it is
+# named and left alone. Never fatal: the game starting matters more.
+saves_pull_auto() {
+  local attr="$1"
+  saves_have_remote || return 0
+  [[ -f "$(env_saves_manifest "$attr")" ]] || return 0
+
+  local latest rgen base_gen
+  latest="$(store_meta "$attr" 2>/dev/null)" || return 0
+  rgen="$(jq -r '.generation' <<<"$latest")"
+  base_gen="$(saves_journal_get "$attr" base_generation)"
+  : "${base_gen:=0}"
+  ((rgen > base_gen)) || return 0
+
+  local tmp current="" base_hash pushed
+  tmp="$(saves_tmp)"
+  if saves_bundle "$attr" "$tmp/auto.tar.zst" 2>/dev/null; then
+    current="$(saves_hash "$tmp/auto.tar.zst")"
+  fi
+  base_hash="$(saves_journal_get "$attr" base_hash)"
+  pushed="$(saves_journal_get "$attr" pushed_hash)"
+  if [[ -n "$current" && "$current" != "$base_hash" && "$current" != "$pushed" ]]; then
+    warn "$attr: this machine and the remote both have new saves. Launching with
+     what is here; reconcile with: gotg saves status"
+    return 0
+  fi
+
+  saves_pull_one "$attr"
 }

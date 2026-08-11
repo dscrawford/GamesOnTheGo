@@ -124,9 +124,11 @@
             };
           };
 
-          # Image for the in-cluster API proxy. cacert is not optional here:
+          # Image for the in-cluster GOTG service. cacert is not optional here:
           # every upstream it talks to is HTTPS, and a container with no trust
-          # store fails every one of them at the handshake.
+          # store fails every one of them at the handshake. The saves store
+          # turns on when the deployment mounts a volume and points
+          # GOTG_SAVES_DIR at it; without one the service is proxy-only.
           #
           #   nix build .#proxy-image
           #   skopeo copy docker-archive:result docker://localhost:30500/gotg-proxy:0.1.0
@@ -253,8 +255,9 @@
               touch $out
             '';
 
-        # End-to-end against a stand-in File Browser: real HTTP, real resume,
-        # real checksums, no network.
+        # End-to-end against a stand-in File Browser — real HTTP, real resume,
+        # real checksums, no network — and against the real GOTG service for
+        # saves, since its conflict rules are the thing under test.
         client-tests =
           pkgs.runCommand "check-client-tests"
             {
@@ -272,6 +275,7 @@
                 gnused
                 gawk
                 diffutils
+                self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-proxy
               ];
               GOTG_BIN = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.gotg;
             }

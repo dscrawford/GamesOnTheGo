@@ -10,8 +10,8 @@
 config_exists() { [[ -f "$GOTG_CONFIG_FILE" ]]; }
 
 # Refuse to read a secret anyone else can read. Takes a path because the config
-# is no longer the only such file — an rclone.conf holds OAuth refresh tokens,
-# which are worth rather more than one library password.
+# is no longer the only such file — api.json holds the GOTG service token, which
+# carries both artwork and saves.
 config_check_perms() {
   local file="${1:-$GOTG_CONFIG_FILE}" mode
   mode="$(stat -c '%a' "$file")"

@@ -39,10 +39,10 @@ source "$GOTG_LIB/pads.sh"
 source "$GOTG_LIB/pads-dolphin.sh"
 # shellcheck source=lib/keys.sh
 source "$GOTG_LIB/keys.sh"
+# shellcheck source=lib/remote.sh
+source "$GOTG_LIB/remote.sh"
 # shellcheck source=lib/saves.sh
 source "$GOTG_LIB/saves.sh"
-# shellcheck source=lib/ludusavi.sh
-source "$GOTG_LIB/ludusavi.sh"
 # shellcheck source=lib/cmd-saves.sh
 source "$GOTG_LIB/cmd-saves.sh"
 # shellcheck source=lib/cmd-controllers.sh

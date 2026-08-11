@@ -1,10 +1,10 @@
 #!/usr/bin/env bats
 # Adoption: the saves that existed before an emulator was told where to put them.
 #
-# Moving between machines is Ludusavi's now and is tested in ludusavi.bats. What
-# is here is the part no save-sync tool can do for us, because it is about gotg
-# having changed where an emulator writes: finding what the old location still
-# holds, and copying it forward exactly once.
+# Moving between machines is tested in saves-sync.bats. What is here is the part
+# no sync can do for us, because it is about gotg having changed where an
+# emulator writes: finding what the old location still holds, and copying it
+# forward exactly once.
 
 bats_require_minimum_version 1.5.0
 
