@@ -24,16 +24,25 @@ manifest_is_stale() {
   ((age > MANIFEST_MAX_AGE))
 }
 
+# Returns rather than dies on failure: the callers know whether a cached
+# catalog makes the failure survivable, and a die here cannot be caught — it
+# exits straight through `manifest_refresh || fallback`.
 manifest_refresh() {
   config_load
   local token payload
-  token="$(api_login)"
-  payload="$(api_fetch "$(manifest_remote_path)" "$token")" || {
-    die "could not fetch the catalog from $GOTG_SERVER$(manifest_remote_path).
-     Has the importer run yet? It publishes the catalog after its first import."
+  token="$(api_login)" || {
+    warn "could not reach $GOTG_SERVER to refresh the catalog"
+    return 1
   }
-  jq -e '.games | type == "array"' >/dev/null 2>&1 <<<"$payload" ||
-    die "catalog at $(manifest_remote_path) is not valid GOTG JSON"
+  payload="$(api_fetch "$(manifest_remote_path)" "$token")" || {
+    warn "could not fetch the catalog from $GOTG_SERVER$(manifest_remote_path)."
+    warn "Has the importer run yet? It publishes the catalog after its first import."
+    return 1
+  }
+  jq -e '.games | type == "array"' >/dev/null 2>&1 <<<"$payload" || {
+    warn "catalog at $(manifest_remote_path) is not valid GOTG JSON"
+    return 1
+  }
 
   mkdir -p "$GOTG_STATE_DIR"
   local tmp="$GOTG_CACHE_FILE.tmp"
@@ -45,10 +54,11 @@ manifest_refresh() {
   log "catalog updated: $count game(s)"
 }
 
-# Refresh only when there is nothing usable cached, or it has aged out.
+# Refresh only when there is nothing usable cached, or it has aged out. A
+# failed refresh over a stale cache is survivable; over no cache it is not.
 manifest_ensure() {
   if ! manifest_cached; then
-    manifest_refresh
+    manifest_refresh || die "no catalog cached and none could be fetched"
   elif manifest_is_stale; then
     manifest_refresh || warn "using the cached catalog"
   fi
@@ -129,7 +139,7 @@ game_is_installed() {
   [[ -e "$path" ]]
 }
 
-cmd_refresh() { manifest_refresh; }
+cmd_refresh() { manifest_refresh || die "catalog refresh failed"; }
 
 # How many games a bare `gotg list` prints. A full library runs to hundreds,
 # and a screenful you can read beats a scrollback you have to hunt through.

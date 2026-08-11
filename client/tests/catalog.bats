@@ -156,3 +156,42 @@ teardown() {
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"invalid platform"* ]]
 }
+
+@test "a stale cache survives an unreachable server — the offline fallback" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  stop_server
+
+  # Everything cached is stale, so list has to attempt a refresh — and the
+  # refresh failing must degrade to the cache, not kill the command.
+  touch -d '2 days ago' "$GOTG_CACHE_FILE"
+  gotg list
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"usa.zelda"* ]]
+  [[ "$stderr" == *"using the cached catalog"* ]]
+}
+
+@test "no cache and no server is a plain failure, not a silent one" {
+  stop_server
+  gotg list
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"catalog"* ]]
+}
+
+@test "an explicit refresh against a dead server fails loudly" {
+  stop_server
+  gotg refresh
+  [ "$status" -ne 0 ]
+}
+
+@test "a filename with a slash, a traversal or a leading dot is invalid" {
+  load_client_libs
+  run validate_filename "usa.zelda.z64"
+  [ "$status" -eq 0 ]
+  run validate_filename "Legend of Zelda, The (USA).z64"
+  [ "$status" -eq 0 ]
+  local bad
+  for bad in "a/b.z64" ".." "." ".hidden" "" "$(printf 'a\tb')"; do
+    run -1 --separate-stderr validate_filename "$bad"
+  done
+}
