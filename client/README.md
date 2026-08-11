@@ -40,8 +40,8 @@ gotg sync                   rebuild the GC roots after a git pull
 | `lib/keys.sh` | console keys, fetched from beside the games |
 | `lib/cmd-complete.sh` | the lists shell completion asks for |
 | `completions/gotg.bash` | bash completion, installed where bash looks |
-| `lib/saves.sh` | what a save is, adopting older ones, archiving before a pull |
-| `lib/ludusavi.sh` | Ludusavi's whole config, generated from those manifests |
+| `lib/saves.sh` | what a save is: bundles, generations, verifying and placing them |
+| `lib/remote.sh` | save and retrieve, against the one GOTG service |
 | `lib/cmd-saves.sh` | `saves setup`, `status`, `push`, `pull`, `adopt` |
 | `lib/pads.sh` | generating emulator bindings from what SDL reports |
 | `lib/pads-dolphin.sh` | the same for Dolphin, which needs no table |
@@ -87,8 +87,9 @@ log; `gotg install <id>` from a terminal is still the smoother first run.
 nix flake check     # or: GOTG_BIN=$(which gotg) bats client/tests/
 ```
 
-211 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
+217 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
 of the real API — including `Range` requests — that resume is exercised against a
-genuinely truncated transfer rather than a simulated one. The save tests drive
-the real ludusavi and rclone against an rclone `alias` remote, which is a whole
-cloud round trip with no server in it.
+genuinely truncated transfer rather than a simulated one. The save tests run
+against the real GOTG service — the same process that runs in the cluster —
+because the conflict rules live server-side now, and a mock would only ever
+test a copy of them.

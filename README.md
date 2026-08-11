@@ -145,15 +145,17 @@ gotg steam art usa.super_mario_sunshine bse [--force]     # works with no key at
 echo '{"api_key": "..."}' > ~/.config/gotg/steamgriddb.json   # from steamgriddb.com
 ```
 
-**Or hold the key once, in the cluster.** `Kubernetes/GOTG/api.yaml` deploys a
-reverse proxy that holds the SteamGridDB key — and, if you give it one, an IGDB
-client id and secret, whose access token expires every sixty days and which it
-mints and refreshes so no client has to. A machine pointed at it needs no
-SteamGridDB key of its own, only a token for our own service:
+**Or hold the key once, in the cluster.** `Kubernetes/GOTG/api.yaml` deploys
+the GOTG service, which holds the SteamGridDB key — and, if you give it one, an
+IGDB client id and secret, whose access token expires every sixty days and
+which it mints and refreshes so no client has to. The same service is also the
+saves store (below), so a machine pointed at it needs no SteamGridDB key of its
+own, only a token for our own service — one url and one token for everything:
 
 ```bash
 echo '{"url": "https://gotg-api.dcraw.net", "token": "..."}' > ~/.config/gotg/api.json
 chmod 600 ~/.config/gotg/api.json
+# or, the same thing with a prompt: gotg saves setup https://gotg-api.dcraw.net
 ```
 
 It is a reverse proxy rather than a forward one: nothing configures it as a
@@ -486,25 +488,28 @@ test and costs nothing.
 
 ### Saves
 
-Saves are carried between machines by [Ludusavi](https://github.com/mtkennerly/ludusavi),
-driven by gotg. The library is served read-only, so saves get their own WebDAV
-endpoint rather than a hole cut in that one.
+Saves are carried between machines as content-addressed bundles, kept by the
+same GOTG service that fronts the artwork APIs. The client's whole vocabulary
+is save and retrieve; deciding which side wins is the service's job, because
+it is the one place that decision can be made atomically.
 
 ```bash
-gotg saves setup https://saves.example.net   # point at the remote, and prove it works
+gotg saves setup https://gotg-api.dcraw.net  # point at the service, prove it answers
 gotg saves status --all                      # what each side has; writes nothing
 gotg saves push usa.zelda                    # send this machine's saves
-gotg saves pull --all                        # take the remote's
+gotg saves pull --all                        # take the service's
 ```
 
-**Ludusavi does the moving; gotg says what moves.** Walking a save set,
-noticing what changed, keeping the last few copies and driving rclone are the
-same problems for everyone, and are not worth solving again. What is ours is
-the part Ludusavi cannot know: which environment a game belongs to, where that
-environment keeps its saves, and what counts as one. Each environment's
-`saves.json` — emitted by its own derivation — becomes a Ludusavi *custom game*
-in a config gotg regenerates on every run, under its own state directory rather
-than the one a person's own Ludusavi uses.
+**A save on the service knows nothing about any machine.** One deterministic
+`tar.zst` per environment, whose members are relative to that environment's
+state directory — no absolute path from anyone's home ever leaves the machine
+that has it. The store holds, per environment, the last three of those bundles
+under `gen/` plus a pointer; one sha256 over the bundle *is* the generation's
+identity and the whole conflict model. Which files a bundle becomes, and
+where, is decided by the machine pulling it, at the moment it pulls it — which
+is what lets a desktop and a Deck with different homes and different state
+layouts share one save. What counts as a save comes from each environment's
+own `saves.json`, emitted by its derivation.
 
 **The unit is the environment, not the game.** `env-snes` is shared by every
 SNES title and holds all their saves at once, so an id is resolved the way
@@ -520,28 +525,34 @@ copies rather than moves, so a wrong guess costs disk and not a save. The first
 launch after upgrading does it once by itself, because a Steam shortcut is the
 only place many of these games are ever started from.
 
-**Nothing here ever deletes a save.** A push that would overwrite work done
-elsewhere stops and prints the three commands that resolve it — because an
-upload mirrors this machine over the remote, so anything up there that has not
-been taken down first would go. A pull archives what was here first, under
-`~/.local/state/gotg/saves/local/`, in gotg's own directory rather than
-Ludusavi's: the next download mirrors the remote over Ludusavi's and would take
-an archive kept there along with it. Times are printed for you to read and are
-never used to decide anything — Decks suspend and their clocks drift, and an
-mtime rule silently picks the wrong side.
+**A push never overwrites work done elsewhere.** Every push carries the hash
+of the generation this machine last synced with, and the service advances the
+head only when that is still the head — atomically, so there is no window for
+two machines to slip through. Anything else is refused with what is actually
+there, and the client prints the three commands that resolve it; `--force`
+publishes anyway, and even then the losing generation stays in `gen/` until
+retention ages it out. A pull archives what was here first, under
+`~/.local/state/gotg/saves/local/`; the last three generations are kept on the
+service and the last three archives here. Times are printed for you to read
+and are never used to decide anything — Decks suspend and their clocks drift,
+and an mtime rule silently picks the wrong side.
 
-Two guards are gotg's rather than Ludusavi's. A save set far larger than a save
+`gotg play` takes the newest generation by itself on the way into a game —
+only when the local save set is unchanged since the last sync, so a boot can
+fast-forward but never lose, and never at the cost of the launch itself.
+
+Two guards stand in front of every transfer. A save set far larger than a save
 set should be is **refused before anything is copied**, naming what made it
 large — the guard that catches a glob which has quietly started matching a disc
 image, and worth more than any exclude list because it does not have to be
-complete to work. And a backup restores to the absolute paths recorded in it,
-which arrived over the network: left unchecked that is a write-anywhere
-primitive, so every recorded path must sit under a directory named for the
-environment itself, and only then is that root redirected, whole, to where this
-machine keeps it.
+complete to work. And a bundle that arrived over the network is verified before
+tar is allowed near it: its hash must match what the service claimed for it,
+and every member must be a plain file on a relative path that the environment
+itself declares as a save — a symlink, a device, an absolute path or a `..`
+refuses the whole bundle with the local tree untouched.
 
-Saves are **not encrypted**: anyone who can read the saves endpoint can read
-your saves.
+Saves are **not encrypted**: anyone holding a token for the service can read
+them.
 
 **Saves only.** A pull restores what you played, not what you installed. Cemu's
 `mlc01/usr/title` — installed updates and DLC — is deliberately excluded: it is
