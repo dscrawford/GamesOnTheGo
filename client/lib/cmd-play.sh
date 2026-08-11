@@ -92,8 +92,16 @@ cmd_play() {
   # Fetched once and kept with the environment; a launch without them still
   # starts, because the emulator's own complaint about a specific game is more
   # use than ours about a file.
-  keys_ensure "$attr" "$(manifest_field "$game" platform)" ||
+  local platform
+  platform="$(manifest_field "$game" platform)"
+  keys_ensure "$attr" "$platform" ||
     warn "could not fetch console keys for $attr"
+
+  # Firmware, for the platform whose emulator stops on a dialog without it.
+  # Cached once per platform and hardlinked in, so only the first environment
+  # ever pays for the download.
+  firmware_ensure "$attr" "$platform" ||
+    warn "could not prepare firmware for $attr"
 
   # The environment decides the emulator, its arguments and its settings; all it
   # is told is which file to run, where that came from, and where to keep what

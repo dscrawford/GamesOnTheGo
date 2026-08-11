@@ -28,7 +28,6 @@ base
       titleId = "010048701995e000";
       name = "120fps";
       patch = helpers.luigisMansion2FpsPatch;
-      exe = "${base.emulator}/bin/${base.bin}";
       # Custom, at 120Hz. Mode 2 and the interval's units — a refresh rate in
       # Hz, per Ryujinx's own description — were both read off the emulator
       # rather than assumed.

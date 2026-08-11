@@ -38,6 +38,7 @@ gotg sync                   rebuild the GC roots after a git pull
 | `steam/artwork.py` | grids, heroes, logos and icons, from two sources |
 | `steam/libretro.py` | the source that needs no key, matched on No-Intro names |
 | `lib/keys.sh` | console keys, fetched from beside the games |
+| `lib/firmware.sh` | console firmware, cached once and hardlinked into each environment |
 | `lib/cmd-complete.sh` | the lists shell completion asks for |
 | `completions/gotg.bash` | bash completion, installed where bash looks |
 | `lib/saves.sh` | what a save is: bundles, generations, verifying and placing them |
@@ -45,6 +46,7 @@ gotg sync                   rebuild the GC roots after a git pull
 | `lib/cmd-saves.sh` | `saves setup`, `status`, `push`, `pull`, `adopt` |
 | `lib/pads.sh` | generating emulator bindings from what SDL reports |
 | `lib/pads-dolphin.sh` | the same for Dolphin, which needs no table |
+| `lib/pads-ryujinx.sh` | Ryujinx bindings kept and healed, rather than generated |
 | `lib/cmd-controllers.sh` | `controllers list`, `controllers apply` |
 | `env/<platform>.nix` | the emulator, arguments and settings for a platform |
 | `env/games/<platform>/<id>.nix` | what one game changes about that |

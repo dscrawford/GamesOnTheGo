@@ -69,6 +69,7 @@ api_raw_url() {
 # Fetch a small file (the catalog, a checksum sidecar) to stdout.
 api_fetch() {
   local remote_path="$1" token="$2"
+  shift 2
   api_curl "$token" -sS --fail --connect-timeout 10 --max-time "$API_TIMEOUT" \
-    "$(api_raw_url "$remote_path")"
+    "$@" "$(api_raw_url "$remote_path")"
 }

@@ -275,6 +275,7 @@
                 gnused
                 gawk
                 diffutils
+                util-linux # flock: firmware_ensure serializes on the platform cache
                 self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-proxy
               ];
               GOTG_BIN = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.gotg;

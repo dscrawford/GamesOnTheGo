@@ -72,6 +72,13 @@
   # nor stable — keys track console firmware — so a store path holding them
   # would be both wrong and stale.
   keys ? null,
+  # Console firmware, for the emulator that stops on an install dialog without
+  # it. Same reasoning as keys — not redistributable, so it sits beside them on
+  # the server — but hundreds of megabytes, so the client caches it once per
+  # platform and hardlinks it into each environment.
+  #
+  #   { into = "config/Ryujinx/bis/system/Contents/registered"; file = "firmware.zip"; }
+  firmware ? null,
 }:
 
 let
@@ -186,6 +193,11 @@ pkgs.runCommand "gotg-env-${name}"
       cp ${
         pkgs.writeText "keys.json" (builtins.toJSON keys)
       } $out/share/gotg/keys.json
+    ''}
+    ${lib.optionalString (firmware != null) ''
+      cp ${
+        pkgs.writeText "firmware.json" (builtins.toJSON firmware)
+      } $out/share/gotg/firmware.json
     ''}
     ${lib.optionalString configurable ''
       cp ${

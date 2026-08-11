@@ -13,6 +13,50 @@
   isolate = true;
   args = [ "{target}" ];
 
+  # Not generated bindings like ares and dolphin get — kept ones. See
+  # pads-ryujinx.sh: Ryujinx's settings screen deletes a sleeping pad's entry
+  # from Config.json on save, so the client keeps the last working set and puts
+  # it back before a launch that would otherwise start unbound.
+  padEmulator = "ryujinx";
+
+  preLaunch = ''
+    gotg_ryujinx_config="$XDG_CONFIG_HOME/Ryujinx/Config.json"
+
+    # On a first run there is no config to edit yet — Ryujinx writes one on
+    # startup — so the settings pinned below would not take until the *second*
+    # launch. Starting it once writes the full default config, which is then
+    # edited.
+    #
+    # With the display hidden, so it cannot put a window on screen: Ryujinx
+    # takes no flag that means "just write the config and stop" — it treats an
+    # unknown argument as a file to load, which is how the first attempt at
+    # this opened a second window reporting it "couldn't find any application
+    # in '--help'". Blinded it writes the config and exits on its own, seen and
+    # discarded here.
+    #
+    # Seeding a few keys ourselves was the alternative and is worse: a config
+    # with no version is rejected outright ("Failed to load config! Loading
+    # the default config instead"), and one with a version but few keys leaves
+    # the rest at whatever the deserialiser picks rather than at Ryujinx's own
+    # defaults.
+    if [ ! -f "$gotg_ryujinx_config" ]; then
+      env -u DISPLAY -u WAYLAND_DISPLAY ${pkgs.ryubing}/bin/Ryujinx >/dev/null 2>&1 || true
+    fi
+
+    # Pinned on every launch, not seeded once: these are what makes a launch go
+    # straight to the game and straight back out of it, on a machine where
+    # nothing but the game is on screen. The update check is doubly dead weight
+    # here — the nix build cannot update itself, only the flake can.
+    if [ -f "$gotg_ryujinx_config" ]; then
+      if ${pkgs.jq}/bin/jq '.update_checker_type = "Off" | .show_confirm_exit = false' \
+        "$gotg_ryujinx_config" >"$gotg_ryujinx_config.gotg"; then
+        mv "$gotg_ryujinx_config.gotg" "$gotg_ryujinx_config"
+      else
+        rm -f "$gotg_ryujinx_config.gotg"
+      fi
+    fi
+  '';
+
   env = {
     # Ryujinx ships its own libSDL2.so — genuine SDL2 2.30.0 — and .NET loads
     # that in preference to anything on the system. Genuine SDL2 cannot see a
@@ -49,6 +93,16 @@
       # things, so a missing title.keys is a warning rather than a refusal.
       "title.keys"
     ];
+  };
+
+  # Without firmware Ryujinx stops every game launch on an install dialog, and
+  # no setting suppresses it — pre-installing is the only way past. The layout
+  # the client writes is exactly what the emulator's own installer produces, so
+  # the two are interchangeable. Like the keys it is a console's own software:
+  # fetched from the server, never in the store.
+  firmware = {
+    into = "config/Ryujinx/bis/system/Contents/registered";
+    file = "firmware.zip";
   };
 
   # Ryujinx keeps its emulated NAND under bis/, which is where save data lands.

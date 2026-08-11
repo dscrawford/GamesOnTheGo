@@ -332,8 +332,6 @@
       titleId,
       name,
       patch,
-      # Needed only to generate a config on a first run — see below.
-      exe,
       gameVersion ? "1.0.0",
       vsyncMode,
       customInterval ? null,
@@ -354,32 +352,18 @@
           echo "installed the ${name} patch" >&2
         fi
 
+        # The platform's own preLaunch runs first and generates the default
+        # config on a first run — see switch.nix — so by here there is one to
+        # edit, and the fallback below is only for a game file that stopped
+        # composing over the platform base.
         config="$XDG_CONFIG_HOME/Ryujinx/Config.json"
-
-        # On a first run there is no config to edit yet — Ryujinx writes one on
-        # startup — so the setting below would not take until the *second*
-        # launch, and the first would quietly run at the wrong rate. Starting it
-        # once writes the full 94-key default, which is then edited below.
-        #
-        # With the display hidden, so it cannot put a window on screen: Ryujinx
-        # takes no flag that means "just write the config and stop" — it treats
-        # an unknown argument as a file to load, which is how the first attempt
-        # at this opened a second window reporting it "couldn't find any
-        # application in '--help'". Blinded it writes the config and exits on
-        # its own, seen and discarded here.
-        #
-        # Seeding a few keys ourselves was the alternative and is worse: a
-        # config with no version is rejected outright ("Failed to load config!
-        # Loading the default config instead"), and one with a version but few
-        # keys leaves the rest at whatever the deserialiser picks rather than at
-        # Ryujinx's own defaults.
-        if [ ! -f "$config" ]; then
-          env -u DISPLAY -u WAYLAND_DISPLAY ${exe} >/dev/null 2>&1 || true
-        fi
-
         if [ -f "$config" ]; then
-          ${pkgs.jq}/bin/jq '${lib.concatStringsSep " | " edits}' \
-            "$config" >"$config.gotg" && mv "$config.gotg" "$config"
+          if ${pkgs.jq}/bin/jq '${lib.concatStringsSep " | " edits}' \
+            "$config" >"$config.gotg"; then
+            mv "$config.gotg" "$config"
+          else
+            rm -f "$config.gotg"
+          fi
         else
           echo "gotg: no Ryujinx config yet; the frame rate applies next launch" >&2
         fi

@@ -37,8 +37,12 @@ source "$GOTG_LIB/cmd-play.sh"
 source "$GOTG_LIB/pads.sh"
 # shellcheck source=lib/pads-dolphin.sh
 source "$GOTG_LIB/pads-dolphin.sh"
+# shellcheck source=lib/pads-ryujinx.sh
+source "$GOTG_LIB/pads-ryujinx.sh"
 # shellcheck source=lib/keys.sh
 source "$GOTG_LIB/keys.sh"
+# shellcheck source=lib/firmware.sh
+source "$GOTG_LIB/firmware.sh"
 # shellcheck source=lib/remote.sh
 source "$GOTG_LIB/remote.sh"
 # shellcheck source=lib/saves.sh

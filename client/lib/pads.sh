@@ -248,6 +248,7 @@ pads_configure() {
   case "$emulator" in
     ares) pads_ares_configure "$attr" ;;
     dolphin) pads_dolphin_configure "$attr" ;;
+    ryujinx) pads_ryujinx_configure "$attr" ;;
     *) return 0 ;;
   esac
 }

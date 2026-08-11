@@ -28,7 +28,6 @@ base
       titleId = "010048701995e000";
       name = "60fps";
       patch = helpers.luigisMansion2FpsPatch;
-      exe = "${base.emulator}/bin/${base.bin}";
       # Switch: the console's own 60Hz. The patch does the work; anything else
       # here would only reintroduce what it fixes.
       vsyncMode = 0;
