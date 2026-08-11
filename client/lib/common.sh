@@ -90,6 +90,16 @@ saves_max_bytes() { printf '%s' "${GOTG_SAVES_MAX_BYTES:-67108864}"; }
 # generations remotely; this is the local half of the same promise.
 saves_keep() { printf '%s' "${GOTG_SAVES_KEEP:-3}"; }
 
+# A server-controlled string that becomes a local path component. No slash and
+# no dot-names is what rules out traversal; printable-only rules out control
+# characters in terminal output and shell traps downstream.
+validate_filename() {
+  local name="$1"
+  [[ -n "$name" && ${#name} -le 255 ]] || die "invalid file name: $name"
+  [[ "$name" != */* && "$name" != .* ]] || die "invalid file name: $name"
+  [[ "$name" =~ ^[[:print:]]+$ ]] || die "invalid file name: $name"
+}
+
 # Reject anything that could climb out of the games directory.
 validate_remote_path() {
   local path="$1"
