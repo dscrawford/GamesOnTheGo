@@ -323,6 +323,30 @@
           let
             switch = self.packages.${pkgs.stdenv.hostPlatform.system}.env-switch;
             gamecube = self.packages.${pkgs.stdenv.hostPlatform.system}.env-gamecube;
+            # An environment nothing ships, composing its own pipeline from the
+            # step library — the check that steps are usable à la carte, not
+            # only through the two canned recipes.
+            probe =
+              (import ./src/client/env/lib.nix {
+                inherit pkgs;
+                inherit (pkgs) lib;
+              })
+                {
+                  name = "recipe-probe";
+                  emulator = pkgs.coreutils;
+                  bin = "true";
+                  recipes =
+                    let
+                      steps = import ./src/client/env/steps.nix { inherit pkgs; };
+                    in
+                    {
+                      probe_archive = [
+                        steps.extract7z
+                        steps.pickLargest
+                        steps.keepExtension
+                      ];
+                    };
+                };
           in
           pkgs.runCommand "check-recipes" { } ''
             export HOME=$TMPDIR
@@ -384,12 +408,24 @@
               echo "an unknown handler must fail" >&2; exit 1
             fi
 
+            # A pipeline composed à la carte: extract, pick, keep the extension
+            # — no conversion — through an env the tree does not ship.
+            raw=$TMPDIR/raw-probe && mkdir -p $raw
+            touch "$raw/Game (USA).7z"
+            ${probe}/bin/gotg-recipe probe_archive $raw $TMPDIR/out/usa.probe
+            [ "$(cat $TMPDIR/out/usa.probe.iso)" = iso-bytes ]
+
+            # A step that fails names itself, and staging is swept even then.
+            raw=$TMPDIR/raw-empty && mkdir -p $raw
+            if ${probe}/bin/gotg-recipe probe_archive $raw $TMPDIR/out3/x 2>$TMPDIR/err; then
+              echo "an empty raw dir must fail the extract step" >&2; exit 1
+            fi
+            grep -q 'gotg-recipe\[7z\]' $TMPDIR/err
+            [ -z "$(ls -A $TMPDIR/out3 | grep gotg-recipe || true)" ]
+
             touch $out
           '';
 
-        # A DAT directory mapped to a platform with no environment imports
-        # games nobody can launch. plan.py is pure stdlib, so this reads the
-        # real map rather than a copy of it.
         # A DAT directory mapped to a platform with no environment imports
         # games nobody can launch. plan.py is pure stdlib, so this reads the
         # real map rather than a copy of it.

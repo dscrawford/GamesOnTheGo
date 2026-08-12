@@ -82,16 +82,16 @@
   # How this platform turns a raw catalog source into a runnable game — the
   # client side of the pipeline inversion. The catalog says what a source *is*
   # (its handler); this says what to do about it, so the tool closures stay
-  # with the platform that needs them. Shape:
+  # with the platform that needs them. One pipeline of steps per handler,
+  # composed from env/steps.nix:
   #
-  #   { handlers = [ "scene_archive" ];
-  #     tools = { UNRAR = "${pkgs.unrar}/bin/unrar"; };
-  #     script = ''case "$1" in ...''; }
+  #   { scene_archive = [ steps.verifySfv steps.unrar steps.pickLargest steps.keepExtension ]; }
   #
-  # The script runs as `gotg-recipe <handler> <raw-dir> <dest>` with each tool
-  # exported under its name — overridable from the environment, which is what
-  # lets tests stub a multi-gigabyte conversion into an echo.
-  recipe ? null,
+  # The generated script runs as `gotg-recipe <handler> <raw-dir> <dest>` with
+  # each step tool exported under its name — overridable as GOTG_<name> from
+  # the environment, which is what lets tests stub a multi-gigabyte conversion
+  # into an echo.
+  recipes ? { },
 }:
 
 let
@@ -189,7 +189,13 @@ let
     exec ${exe} ${lib.concatMapStringsSep " " render args} "$@"
   '';
   };
-  recipeApp = lib.optionalAttrs (recipe != null) {
+  # Every tool any step in any pipeline names, deduplicated: the same step
+  # used twice is the same tool, and two steps naming one variable must mean
+  # the same binary by construction (both took it from steps.nix).
+  recipeTools = lib.foldl' (acc: step: acc // (step.tools or { })) { } (
+    lib.concatLists (lib.attrValues recipes)
+  );
+  recipeApp = lib.optionalAttrs (recipes != { }) {
     drv = pkgs.writeShellApplication {
       name = "gotg-recipe";
       text = ''
@@ -201,9 +207,35 @@ let
           lib.mapAttrsToList (var: default: ''
             ${var}="''${GOTG_${var}:-${default}}"
             export ${var}
-          '') (recipe.tools or { })
+          '') recipeTools
         )}
-        ${recipe.script}
+        step=dispatch
+        fail() {
+          echo "gotg-recipe[$step]: $*" >&2
+          exit 1
+        }
+        # One scratch dir for the whole pipeline, swept on any exit — a failed
+        # step must not leave debris where the games live.
+        stage="$(dirname "$dest")/.gotg-recipe-$$"
+        rm -rf "$stage"
+        mkdir -p "$stage" "$(dirname "$dest")"
+        trap 'rm -rf "$stage"' EXIT
+        # The cursor: what the pipeline has made so far. Starts as the raw
+        # member directory; each step leaves it pointing at its own output.
+        cur="$raw"
+        case "$handler" in
+        ${lib.concatLines (
+          lib.mapAttrsToList (handler: steps: ''
+            ${handler})
+              ${lib.concatMapStringsSep "\n" (step: ''
+                step="${step.name}"
+                ${step.script}
+              '') steps}
+              ;;
+          '') recipes
+        )}
+          *) fail "no recipe for $handler" ;;
+        esac
       '';
     };
   };
@@ -230,10 +262,10 @@ pkgs.runCommand "gotg-env-${name}"
         pkgs.writeText "firmware.json" (builtins.toJSON firmware)
       } $out/share/gotg/firmware.json
     ''}
-    ${lib.optionalString (recipe != null) ''
+    ${lib.optionalString (recipes != { }) ''
       ln -s ${recipeApp.drv}/bin/gotg-recipe $out/bin/gotg-recipe
       cp ${
-        pkgs.writeText "recipe.json" (builtins.toJSON { handlers = recipe.handlers; })
+        pkgs.writeText "recipe.json" (builtins.toJSON { handlers = lib.attrNames recipes; })
       } $out/share/gotg/recipe.json
     ''}
     ${lib.optionalString configurable ''

@@ -12,7 +12,7 @@
 
   # Switch releases arrive as scene rar sets; the recipe unpacks one into the
   # XCI/NSP the emulator loads, once, on first install.
-  recipe = helpers.sceneArchiveRecipe;
+  recipes = helpers.sceneArchiveRecipe;
   bin = "Ryujinx";
   isolate = true;
   args = [ "{target}" ];

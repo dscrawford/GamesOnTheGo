@@ -34,6 +34,7 @@ let
     "default"
     "lib"
     "helpers"
+    "steps"
   ] (nixNames ./.);
 
   baseFor = platform: import (./. + "/${platform}.nix") { inherit pkgs lib helpers gotgPkgs; };
