@@ -12,12 +12,12 @@ load helper
 
 setup() {
   setup_env
-  start_server
-  write_config
+  start_saves_service
+  write_api_config
   load_client_libs
 }
 
-teardown() { stop_server; }
+teardown() { stop_saves_service; }
 
 # An environment that declares it needs keys, and the keys sitting on the
 # server where the spec says they live.
@@ -28,9 +28,9 @@ fake_keys_env() {
 }
 
 serve_keys() {
-  mkdir -p "$SERVER_ROOT/Games/switch"
-  printf 'master_key_00 = deadbeef\n' >"$SERVER_ROOT/Games/switch/prod.keys"
-  printf 'title_key_00 = cafe\n' >"$SERVER_ROOT/Games/switch/title.keys"
+  mkdir -p "$SERVICE_FILES_DIR/switch"
+  printf 'master_key_00 = deadbeef\n' >"$SERVICE_FILES_DIR/switch/prod.keys"
+  printf 'title_key_00 = cafe\n' >"$SERVICE_FILES_DIR/switch/title.keys"
 }
 
 keys_dir() { printf '%s/env-switch/config/Ryujinx/system' "$GOTG_STATE_DIR/env"; }
@@ -56,18 +56,18 @@ keys_dir() { printf '%s/env-switch/config/Ryujinx/system' "$GOTG_STATE_DIR/env";
   fake_keys_env
   serve_keys
   keys_ensure env-switch switch
-  # With the server stopped, a fetch would fail; nothing should be attempted.
-  stop_server
+  # With the service stopped, a fetch would fail; nothing should be attempted.
+  stop_saves_service
   run keys_ensure env-switch switch
   [ "$status" -eq 0 ]
   [ -s "$(keys_dir)/prod.keys" ]
-  start_server
+  start_saves_service
 }
 
 @test "a missing key warns and still lets the launch happen" {
   fake_keys_env
-  mkdir -p "$SERVER_ROOT/Games/switch"
-  printf 'master_key_00 = deadbeef\n' >"$SERVER_ROOT/Games/switch/prod.keys"
+  mkdir -p "$SERVICE_FILES_DIR/switch"
+  printf 'master_key_00 = deadbeef\n' >"$SERVICE_FILES_DIR/switch/prod.keys"
   # title.keys deliberately absent: not every dump needs it.
   run keys_ensure env-switch switch
   [ "$status" -eq 0 ]
@@ -87,10 +87,10 @@ keys_dir() { printf '%s/env-switch/config/Ryujinx/system' "$GOTG_STATE_DIR/env";
 
 @test "an unreachable server is a warning, not a failed launch" {
   fake_keys_env
-  stop_server
+  stop_saves_service
   run keys_ensure env-switch switch
   [ "$status" -eq 0 ]
-  start_server
+  start_saves_service
 }
 
 @test "an environment that needs no keys does nothing at all" {

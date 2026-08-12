@@ -45,9 +45,8 @@ keys_ensure() {
   ((have_all == 0)) || return 0
 
   mkdir -p "$dir" || return 0
-  config_load
-  token="$(api_login)" || {
-    warn "could not reach the server for $platform keys — launching without them"
+  service_have || {
+    warn "no service configured for $platform keys — run: gotg login"
     return 0
   }
 
@@ -57,7 +56,8 @@ keys_ensure() {
 
     # Written to a temporary name and moved, so an interrupted fetch cannot
     # leave a half a key file looking like a whole one.
-    if api_fetch "/Games/$platform/$file" "$token" >"$dest.part" 2>/dev/null &&
+    if service_curl -fsS --max-time "${GOTG_API_TIMEOUT:-120}" \
+      "$(service_url)/files/$platform/$file" >"$dest.part" 2>/dev/null &&
       [[ -s "$dest.part" ]]; then
       chmod 600 "$dest.part"
       mv "$dest.part" "$dest"

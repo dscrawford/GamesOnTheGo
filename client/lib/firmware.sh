@@ -139,18 +139,17 @@ firmware_adopt() {
 # The server's copy, unpacked straight into the cache.
 firmware_fetch() {
   local cache="$1" platform="$2" file="$3" token zip rc=0
-  config_load
-  token="$(api_login)" || return 1
+  service_have || return 1
 
   zip="$cache.zip"
   rm -f "$zip"
-  # The default API timeout is sized for catalog calls, not for a few hundred
-  # megabytes on hotel Wi-Fi; curl takes the last --max-time it is given. The
-  # size cap is the other half of not trusting the far end — see
-  # firmware_unpack for the decompressed half.
-  if ! api_fetch "/Games/$platform/$file" "$token" \
+  # A firmware zip is a few hundred megabytes on hotel Wi-Fi, so the timeout
+  # is its own; the size cap is the other half of not trusting the far end —
+  # see firmware_unpack for the decompressed half.
+  if ! service_curl -fsS \
     --max-time "${GOTG_FIRMWARE_FETCH_SECONDS:-900}" \
-    --max-filesize "$(firmware_max_bytes)" >"$zip" 2>/dev/null ||
+    --max-filesize "$(firmware_max_bytes)" \
+    "$(service_url)/files/$platform/$file" >"$zip" 2>/dev/null ||
     [[ ! -s "$zip" ]]; then
     rm -f "$zip"
     return 1

@@ -11,12 +11,12 @@ load helper
 
 setup() {
   setup_env
-  start_server
-  write_config
+  start_saves_service
+  write_api_config
   load_client_libs
 }
 
-teardown() { stop_server; }
+teardown() { stop_saves_service; }
 
 REGISTERED="config/Ryujinx/bis/system/Contents/registered"
 
@@ -37,9 +37,9 @@ serve_firmware() {
   printf 'nca-flat' >"$src/aaaa.nca"
   printf 'nca-meta' >"$src/bbbb.cnmt.nca"
   printf 'nca-dir' >"$src/cccc.nca/00"
-  mkdir -p "$SERVER_ROOT/Games/switch"
+  mkdir -p "$SERVICE_FILES_DIR/switch"
   (cd "$src" && python3 -m zipfile -c \
-    "$SERVER_ROOT/Games/switch/firmware.zip" aaaa.nca bbbb.cnmt.nca cccc.nca)
+    "$SERVICE_FILES_DIR/switch/firmware.zip" aaaa.nca bbbb.cnmt.nca cccc.nca)
 }
 
 registered_dir() { printf '%s/%s/%s' "$GOTG_STATE_DIR/env" "${1:-env-switch}" "$REGISTERED"; }
@@ -67,11 +67,11 @@ registered_dir() { printf '%s/%s/%s' "$GOTG_STATE_DIR/env" "${1:-env-switch}" "$
   fake_firmware_env env-switch-game
   serve_firmware
   firmware_ensure env-switch switch
-  stop_server
+  stop_saves_service
   run firmware_ensure env-switch-game switch
   [ "$status" -eq 0 ]
   [ -f "$(registered_dir env-switch-game)/aaaa.nca/00" ]
-  start_server
+  start_saves_service
 }
 
 @test "environments share one copy — hardlinks, not duplicates" {
@@ -102,10 +102,10 @@ registered_dir() { printf '%s/%s/%s' "$GOTG_STATE_DIR/env" "${1:-env-switch}" "$
   fake_firmware_env
   serve_firmware
   firmware_ensure env-switch switch
-  stop_server
+  stop_saves_service
   run firmware_ensure env-switch switch
   [ "$status" -eq 0 ]
-  start_server
+  start_saves_service
 }
 
 @test "no firmware anywhere warns and still lets the launch happen" {
@@ -118,10 +118,10 @@ registered_dir() { printf '%s/%s/%s' "$GOTG_STATE_DIR/env" "${1:-env-switch}" "$
 
 @test "a zip with no NCAs in it is refused, not installed" {
   fake_firmware_env
-  mkdir -p "$SERVER_ROOT/Games/switch" "$TEST_TMP/junk"
+  mkdir -p "$SERVICE_FILES_DIR/switch" "$TEST_TMP/junk"
   printf 'not firmware' >"$TEST_TMP/junk/readme.txt"
   (cd "$TEST_TMP/junk" && python3 -m zipfile -c \
-    "$SERVER_ROOT/Games/switch/firmware.zip" readme.txt)
+    "$SERVICE_FILES_DIR/switch/firmware.zip" readme.txt)
   run firmware_ensure env-switch switch
   [ "$status" -eq 0 ]
   [ ! -e "$(registered_dir)" ]
@@ -136,12 +136,12 @@ registered_dir() { printf '%s/%s/%s' "$GOTG_STATE_DIR/env" "${1:-env-switch}" "$
 
 @test "a hostile zip cannot write outside its own registered directory" {
   fake_firmware_env
-  mkdir -p "$SERVER_ROOT/Games/switch"
+  mkdir -p "$SERVICE_FILES_DIR/switch"
   # Traversal, an absolute path, a symlink aimed at the system, and the deep
   # folder shape real dumps ship in. python3 -m zipfile contains all of them —
   # the property this test exists to keep against a future switch to unzip,
   # which does not.
-  python3 - "$SERVER_ROOT/Games/switch/firmware.zip" <<'EOF'
+  python3 - "$SERVICE_FILES_DIR/switch/firmware.zip" <<'EOF'
 import sys, zipfile
 with zipfile.ZipFile(sys.argv[1], "w") as z:
     z.writestr("../../escape.nca", "traversal")
@@ -173,9 +173,9 @@ EOF
 @test "a truncated zip is refused with nothing left behind, and a good one heals it" {
   fake_firmware_env
   serve_firmware
-  head -c 20 "$SERVER_ROOT/Games/switch/firmware.zip" \
-    >"$SERVER_ROOT/Games/switch/firmware.zip.t"
-  mv "$SERVER_ROOT/Games/switch/firmware.zip.t" "$SERVER_ROOT/Games/switch/firmware.zip"
+  head -c 20 "$SERVICE_FILES_DIR/switch/firmware.zip" \
+    >"$TEST_TMP/firmware.zip.t"
+  mv "$TEST_TMP/firmware.zip.t" "$SERVICE_FILES_DIR/switch/firmware.zip"
   run firmware_ensure env-switch switch
   [ "$status" -eq 0 ]
   [[ "$output" == *"no switch firmware"* ]]

@@ -67,9 +67,17 @@ stop_server() {
 # live server-side now, and a stand-in would only ever test a copy of them.
 start_saves_service() {
   export SAVES_DATA_DIR="$TEST_TMP/service-saves"
+  export SERVICE_FILES_DIR="$TEST_TMP/service-files"
+  export SERVICE_LIBRARY_DIR="$TEST_TMP/library"
+  mkdir -p "$SERVICE_FILES_DIR" "$SERVICE_LIBRARY_DIR" "$TEST_TMP/service-state"
   export SERVICE_PORT
   SERVICE_PORT="$(pick_port)"
-  GOTG_PROXY_TOKEN="test-token" GOTG_SAVES_DIR="$SAVES_DATA_DIR" PORT="$SERVICE_PORT" \
+  GOTG_PROXY_TOKEN="test-token" GOTG_SAVES_DIR="$SAVES_DATA_DIR" \
+    GOTG_FILES_DIR="$SERVICE_FILES_DIR" \
+    GOTG_LIBRARY_ROOTS="$SERVICE_LIBRARY_DIR" \
+    GOTG_CATALOG_DB="$TEST_TMP/service-state/catalog.db" \
+    GOTG_INDEX_TOKEN="index-token" \
+    PORT="$SERVICE_PORT" \
     "${GOTG_SERVICE_BIN:-gotg-proxy}" >"$TEST_TMP/service.log" 2>&1 &
   export SERVICE_PID=$!
   export GOTG_SERVICE_URL="http://127.0.0.1:$SERVICE_PORT"

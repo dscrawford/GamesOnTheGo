@@ -37,10 +37,21 @@ saves_api_url() {
 # held to the same permission rule as every other secret here, and the token
 # reaches curl on stdin — /proc/<pid>/cmdline is world-readable, and argv is
 # not a place for credentials.
-saves_api_curl() {
+#
+# Auth and nothing else: timeouts, size caps and progress flags belong to each
+# caller — a catalog fetch and a multi-gigabyte download want opposite ones.
+service_curl() {
   config_check_perms "$(saves_api_file)"
   jq -r '"header = \"Authorization: Bearer \(.token)\""' "$(saves_api_file)" |
-    curl --config - -sS --connect-timeout 10 --max-time "${GOTG_API_TIMEOUT:-120}" "$@"
+    curl --config - --connect-timeout 10 "$@"
+}
+
+service_url() { saves_api_url; }
+
+service_have() { saves_have_remote; }
+
+saves_api_curl() {
+  service_curl -sS --max-time "${GOTG_API_TIMEOUT:-120}" "$@"
 }
 
 # .save(): publish this bundle as the next generation.
