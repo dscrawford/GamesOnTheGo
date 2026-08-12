@@ -71,52 +71,61 @@ teardown() {
   [ ! -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
 }
 
-@test "a zipped rom can be unpacked for emulators that need a bare file" {
-  # The No-Intro sets ship zipped ROMs; the 2s2h port wants the .z64 itself.
-  mkdir -p "$TEST_TMP/mkzip" "$SERVICE_LIBRARY_DIR/n64"
-  printf 'rom bytes' > "$TEST_TMP/mkzip/Zelda (USA).z64"
-  (cd "$TEST_TMP/mkzip" && zip -q "$TEST_TMP/usa.zelda.zip" "Zelda (USA).z64")
-  add_game n64 "usa.zelda.zip" "$(cat "$TEST_TMP/usa.zelda.zip")" "Zelda"
-  cp "$TEST_TMP/usa.zelda.zip" "$SERVICE_LIBRARY_DIR/n64/usa.zelda.zip"
-  local sha size mtime
-  sha="$(sha256sum "$SERVICE_LIBRARY_DIR/n64/usa.zelda.zip" | cut -d' ' -f1)"
-  size="$(stat -c '%s' "$SERVICE_LIBRARY_DIR/n64/usa.zelda.zip")"
-  mtime="$(stat -c '%Y' "$SERVICE_LIBRARY_DIR/n64/usa.zelda.zip")"
-  jq -n --arg p "$SERVICE_LIBRARY_DIR/n64/usa.zelda.zip" --argjson s "$size" \
-    --argjson m "$mtime" --arg sha "$sha" \
-    '{handler: "single_file", title: "Zelda",
-      files: [{name: "usa.zelda.zip", path: $p, size_bytes: $s, mtime: $m, sha256: $sha}]}' |
-    curl -fsS -X PUT -H "Authorization: Bearer index-token" \
-      --data-binary @- "$GOTG_SERVICE_URL/catalog/n64/usa.zelda?force=1" >/dev/null
-
-  jq -n '{"n64/usa.zelda": {unzip: true, target: "*.z64"}}' \
-    > "$GOTG_CONFIG_DIR/overrides.json"
-
-  # The unpacking is the game environment's own recipe, not the CLI's: stub
-  # the built per-game env root the way stub_recipe_env does for a platform.
+@test "an unzip game installs as its unpacked tree for both catalog handlers" {
+  # The No-Intro importer stamps no_intro_set on the wire (plan.py maps the
+  # N64 DAT dir to it); the games-root pass stamps single_file. The unzip
+  # override must route both through the environment's recipe.
   export GOTG_ENV_DIR="$TEST_TMP/env"
   mkdir -p "$GOTG_ENV_DIR/games/n64"
-  : >"$GOTG_ENV_DIR/games/n64/usa.zelda.nix"
-  fake_env "env-n64-usa_zelda"
-  stub_unzip_recipe "env-n64-usa_zelda"
+
+  local handler id attr
+  for handler in single_file no_intro_set; do
+    id="usa.zelda_$handler"
+    attr="env-n64-${id/./_}"
+    publish_unzip_game "$id" "$handler"
+    : >"$GOTG_ENV_DIR/games/n64/$id.nix"
+    fake_env "$attr"
+    stub_unzip_recipe "$attr"
+
+    gotg refresh
+    gotg download "$id"
+    [ "$status" -eq 0 ]
+
+    [ -d "$GOTG_GAMES_DIR/n64/$id" ]
+    [ -f "$GOTG_GAMES_DIR/n64/$id/Zelda (USA).z64" ]
+    [ ! -e "$GOTG_GAMES_DIR/n64/$id.zip" ]
+    [ ! -e "$GOTG_PARTIAL_DIR/$id" ]
+
+    # The bare id directory is what game_installed_path reads for this shape.
+    gotg download "$id"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"already installed"* ]]
+  done
+}
+
+@test "an unzip game whose environment declares a different handler set is refused" {
+  export GOTG_ENV_DIR="$TEST_TMP/env"
+  mkdir -p "$GOTG_ENV_DIR/games/n64"
+  publish_unzip_game usa.zeldac no_intro_set
+  : >"$GOTG_ENV_DIR/games/n64/usa.zeldac.nix"
+  fake_env env-n64-usa_zeldac
+  stub_unzip_recipe env-n64-usa_zeldac
+  jq -n '{handlers: ["scene_archive"]}' \
+    >"$GOTG_ROOTS_DIR/env-n64-usa_zeldac/share/gotg/recipe.json"
 
   gotg refresh
-  gotg download usa.zelda
-  [ "$status" -eq 0 ]
-
-  [ -d "$GOTG_GAMES_DIR/n64/usa.zelda" ]
-  [ -f "$GOTG_GAMES_DIR/n64/usa.zelda/Zelda (USA).z64" ]
-  [ ! -e "$GOTG_GAMES_DIR/n64/usa.zelda.zip" ]
+  gotg download usa.zeldac
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"declares no recipe for 'no_intro_set'"* ]]
+  [ ! -e "$GOTG_GAMES_DIR/n64/usa.zeldac" ]
+  # The transfer is the expensive half; the refusal must keep the raw members.
+  [ -f "$GOTG_PARTIAL_DIR/usa.zeldac/usa.zeldac.zip" ]
 }
 
 @test "an unzip game without its environment built says how to fix it" {
-  mkdir -p "$TEST_TMP/mkzip2" "$SERVICE_LIBRARY_DIR/n64"
-  printf 'rom bytes' > "$TEST_TMP/mkzip2/Zelda (USA).z64"
-  (cd "$TEST_TMP/mkzip2" && zip -q "$TEST_TMP/usa.zeldab.zip" "Zelda (USA).z64")
-  cp "$TEST_TMP/usa.zeldab.zip" "$SERVICE_LIBRARY_DIR/n64/usa.zeldab.zip"
-  add_game n64 "usa.zeldab.zip" "$(cat "$TEST_TMP/usa.zeldab.zip")" "Zelda B"
-  jq -n '{"n64/usa.zeldab": {unzip: true, target: "*.z64"}}' \
-    > "$GOTG_CONFIG_DIR/overrides.json"
+  # GOTG_ENV_DIR stays the shipped tree on purpose: env_attr resolves the real
+  # n64.nix to env-n64, whose root was never built here.
+  publish_unzip_game usa.zeldab single_file
 
   gotg refresh
   gotg download usa.zeldab

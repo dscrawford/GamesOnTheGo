@@ -92,17 +92,25 @@
       [ -n "$zip" ] || fail "no .zip in $cur"
       next="$stage/unzip"
       mkdir -p "$next"
-      "$UNZIP" -q "$zip" -d "$next" || fail "unzip failed"
+      # The catalog hash covers the zip, not its expansion; a ROM here is tens
+      # of megabytes, so a member unpacking past 1GiB is an attack on the disk.
+      (
+        ulimit -f $((1024 * 1024))
+        exec "$UNZIP" -q "$zip" -d "$next"
+      ) || fail "unzip failed"
       cur="$next"
     '';
   };
 
   # Terminal: the whole tree, placed as the extensionless destination — the
   # shape overrides.json calls unzip, where the launch target is resolved by
-  # glob inside it.
+  # glob inside it. An archive's contents are its own to choose and extractors
+  # recreate symlink entries, so a tree carrying one is refused at the sink:
+  # what lands in the games directory is plain files only.
   placeTree = {
     name = "place-tree";
     script = ''
+      [ -z "$(find "$cur" -type l -print -quit)" ] || fail "refusing a tree containing symlinks"
       rm -rf "$dest"
       mv "$cur" "$dest" || fail "could not place $dest"
       cur="$dest"
@@ -116,6 +124,7 @@
   keepExtension = {
     name = "keep-extension";
     script = ''
+      [ -f "$cur" ] || fail "keep-extension needs a file, got $(basename "$cur")"
       ext="$(basename "$cur")"
       ext="''${ext##*.}"
       case "$ext" in

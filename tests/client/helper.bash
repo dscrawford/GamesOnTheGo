@@ -122,6 +122,46 @@ add_game() {
       --data-binary @- "$GOTG_SERVICE_URL/catalog/$platform/$id" >/dev/null
 }
 
+# Publish a binary file into the service library and catalog. add_game pipes
+# content through "$()", which drops NUL bytes — a zip cannot travel that way.
+add_binary_game() {
+  local platform="$1" src="$2" name="$3" title="${4:-A Game}" handler="${5:-single_file}"
+  mkdir -p "$SERVICE_LIBRARY_DIR/$platform"
+  cp "$src" "$SERVICE_LIBRARY_DIR/$platform/$name"
+
+  local file="$SERVICE_LIBRARY_DIR/$platform/$name"
+  local sha size mtime id
+  sha="$(sha256sum "$file" | cut -d' ' -f1)"
+  size="$(stat -c '%s' "$file")"
+  mtime="$(stat -c '%Y' "$file")"
+  id="${name%.*}"
+
+  jq -n --arg h "$handler" --arg t "$title" --arg n "$name" --arg p "$file" \
+    --argjson s "$size" --argjson m "$mtime" --arg sha "$sha" \
+    '{handler: $h, title: $t,
+      files: [{name: $n, path: $p, size_bytes: $s, mtime: $m, sha256: $sha}]}' |
+    curl -gfsS -X PUT -H "Authorization: Bearer index-token" \
+      --data-binary @- "$GOTG_SERVICE_URL/catalog/$platform/$id" >/dev/null
+}
+
+# The harkinian shape end to end: a zipped ROM published under the handler the
+# importer stamps, and the override that marks it. Merges into overrides.json
+# so one test can publish several.
+publish_unzip_game() {
+  local id="$1" handler="${2:-no_intro_set}" inner="${3:-Zelda (USA).z64}"
+  local mk="$TEST_TMP/mkzip-$id"
+  mkdir -p "$mk"
+  printf 'rom bytes' >"$mk/$inner"
+  (cd "$mk" && zip -q "$id.zip" "$inner")
+  add_binary_game n64 "$mk/$id.zip" "$id.zip" "Zelda" "$handler"
+
+  local overrides="$GOTG_CONFIG_DIR/overrides.json"
+  [ -f "$overrides" ] || echo '{}' >"$overrides"
+  jq --arg k "n64/$id" '. + {($k): {unzip: true, target: "*.z64"}}' \
+    "$overrides" >"$overrides.tmp"
+  mv "$overrides.tmp" "$overrides"
+}
+
 # The old manifest-shaped seeding, kept for the suites that only need a row
 # to exist: the entry lands in the service catalog, bytes optional.
 add_manifest_entry() {
@@ -213,7 +253,7 @@ unzip -q "$raw"/*.zip -d "$dest"
 SHIM
   } >"$root/bin/gotg-recipe"
   chmod +x "$root/bin/gotg-recipe"
-  jq -n '{handlers: ["single_file"]}' >"$root/share/gotg/recipe.json"
+  jq -n '{handlers: ["single_file", "no_intro_set"]}' >"$root/share/gotg/recipe.json"
 }
 
 # A stand-in `nix`, so that building an environment can be tested where there is

@@ -323,6 +323,22 @@
           let
             switch = self.packages.${pkgs.stdenv.hostPlatform.system}.env-switch;
             gamecube = self.packages.${pkgs.stdenv.hostPlatform.system}.env-gamecube;
+            # The real harkinian envs are too heavy to build in a check (they
+            # carry the ports); a dummy port pins the helper's contract at
+            # eval time instead. Both handlers, because the same zip is
+            # single_file from the games-root pass and no_intro_set from the
+            # DAT torrent path.
+            harkinianProbe =
+              (import ./src/client/env/helpers.nix {
+                inherit pkgs;
+                inherit (pkgs) lib;
+              }).harkinianPort
+                {
+                  port = pkgs.coreutils;
+                  bin = "true";
+                  appName = "probe";
+                  archives = [ ];
+                };
             # An environment nothing ships, composing its own pipeline from the
             # step library — the check that steps are usable à la carte, not
             # only through the two canned recipes.
@@ -359,9 +375,37 @@
                         steps.unzip
                         steps.placeTree
                       ];
+                      # A composition mistake: unzip leaves a directory
+                      # cursor, which keep-extension must refuse rather than
+                      # install <id>.unzip that nothing resolves as installed.
+                      probe_dir_ext = [
+                        steps.unzip
+                        steps.keepExtension
+                      ];
+                      # Inline on purpose — this pins the harness, not a
+                      # step. A tool must be bound, never exported: Info-ZIP's
+                      # unzip reads an UNZIP environment variable as prepended
+                      # arguments, so an exported binding hands unzip its own
+                      # binary as the archive.
+                      probe_hygiene = [
+                        {
+                          name = "assert-unexported";
+                          tools.UNZIP = "${pkgs.unzip}/bin/unzip";
+                          script = ''
+                            [ -x "$UNZIP" ] || fail "UNZIP is not bound inside the script"
+                            if env | grep -q '^UNZIP='; then
+                              fail "UNZIP is exported — unzip would read it as prepended arguments"
+                            fi
+                            mkdir -p "$dest"
+                          '';
+                        }
+                      ];
                     };
                 };
           in
+          assert pkgs.lib.assertMsg (
+            harkinianProbe.recipes ? single_file && harkinianProbe.recipes ? no_intro_set
+          ) "harkinianPort must carry its unzip recipe for both single_file and no_intro_set";
           pkgs.runCommand "check-recipes" { nativeBuildInputs = [ pkgs.zip ]; } ''
             export HOME=$TMPDIR
             mkdir -p $TMPDIR/bin
@@ -493,6 +537,31 @@
             (cd $TMPDIR && zip -q "$raw/usa.zelda.zip" "Zelda (USA).z64")
             ${probe}/bin/gotg-recipe probe_zip $raw $TMPDIR/out/usa.zelda
             [ "$(cat "$TMPDIR/out/usa.zelda/Zelda (USA).z64")" = "rom bytes" ]
+
+            # A tree carrying a symlink is refused at the sink, whole.
+            raw=$TMPDIR/raw-link && mkdir -p $raw/dir
+            printf 'rom bytes' > "$raw/dir/game.z64"
+            ln -s /etc/passwd "$raw/dir/escape"
+            (cd $raw/dir && zip -qy "$raw/usa.linked.zip" game.z64 escape)
+            rm -rf $raw/dir
+            if ${probe}/bin/gotg-recipe probe_zip $raw $TMPDIR/out-link/x 2>$TMPDIR/err-link; then
+              echo "a zip planting a symlink must be refused" >&2; exit 1
+            fi
+            grep -q 'symlink' $TMPDIR/err-link
+            [ ! -e $TMPDIR/out-link/x ]
+
+            # unzip leaves a directory cursor; keep-extension must refuse it.
+            raw=$TMPDIR/raw-dirext && mkdir -p $raw
+            cp $TMPDIR/raw-zip/usa.zelda.zip $raw/
+            if ${probe}/bin/gotg-recipe probe_dir_ext $raw $TMPDIR/out5/x 2>$TMPDIR/err3; then
+              echo "a directory cursor must fail keep-extension" >&2; exit 1
+            fi
+            grep -q 'gotg-recipe\[keep-extension\]' $TMPDIR/err3
+
+            # probe_zip only fails on an exported tool by side effect; this
+            # names the invariant.
+            raw=$TMPDIR/raw-hygiene && mkdir -p $raw
+            ${probe}/bin/gotg-recipe probe_hygiene $raw $TMPDIR/out/hygiene
 
             # recipe.json is what download.sh consults; a migration must not
             # rename a handler on the wire.

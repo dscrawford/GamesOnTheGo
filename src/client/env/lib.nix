@@ -213,8 +213,11 @@ let
         ${lib.concatLines (
           # Assigned, never exported: Info-ZIP's unzip reads an UNZIP variable
           # in its environment as prepended arguments, and other tools have
-          # conventions like it. Only the script itself expands these.
+          # conventions like it. Only the script itself expands these. The
+          # unset matters — a variable arriving already exported keeps its
+          # export attribute through a plain reassignment.
           lib.mapAttrsToList (var: default: ''
+            unset ${var}
             ${var}="''${GOTG_${var}:-${default}}"
           '') recipeTools
         )}

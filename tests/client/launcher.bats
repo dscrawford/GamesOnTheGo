@@ -140,6 +140,25 @@ teardown() {
   [[ "$output" == *"env-n64-usa_zelda launched with: $GOTG_GAMES_DIR/n64/usa.zelda/Zelda (USA).z64"* ]]
 }
 
+@test "a zip with filler and a nested rom still resolves the target by glob" {
+  mkdir -p "$TEST_TMP/mkzip/Zelda (USA)" "$SERVICE_LIBRARY_DIR/n64"
+  printf 'rom bytes' >"$TEST_TMP/mkzip/Zelda (USA)/Zelda (USA).z64"
+  printf 'read me' >"$TEST_TMP/mkzip/readme.txt"
+  (cd "$TEST_TMP/mkzip" && zip -qr "$TEST_TMP/usa.zelda.zip" "Zelda (USA)" readme.txt)
+  add_binary_game n64 "$TEST_TMP/usa.zelda.zip" "usa.zelda.zip" "Zelda"
+  jq -n '{"n64/usa.zelda": {unzip: true, target: "*.z64"}}' >"$TEST_TMP/data/overrides.json"
+
+  mkdir -p "$GOTG_ENV_DIR/games/n64"
+  : >"$GOTG_ENV_DIR/games/n64/usa.zelda.nix"
+  fake_env env-n64-usa_zelda
+  stub_unzip_recipe env-n64-usa_zelda
+
+  gotg refresh
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"env-n64-usa_zelda launched with: $GOTG_GAMES_DIR/n64/usa.zelda/Zelda (USA)/Zelda (USA).z64"* ]]
+}
+
 @test "every override in the shipped data is keyed by a well-formed id" {
   local shipped
   shipped="$(dirname "$GOTG_BIN")/../share/gotg/data/overrides.json"
