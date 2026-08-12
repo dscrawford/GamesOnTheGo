@@ -245,3 +245,85 @@ BML
   run grep -c "GUID" "$TEST_TMP/settings.bml"
   [ "$output" = "1" ]
 }
+
+# --- the first launch of a new console ---------------------------------------
+
+@test "a virgin environment gets its section created and bound in one pass" {
+  # No settings.bml at all: ares has never run here. The first launch must
+  # still produce a working pad, which was the failure that arrived with two
+  # whole libraries at once.
+  local file="$TEST_TMP/fresh/settings.bml"
+  local bindings='{"Up": "ID/0/1/1/Lo;;", "Down": "ID/0/1/1/Hi;;", "A": "ID/0/3/0;;"}'
+
+  pads_ares_ensure_block "$file" GameBoy Game.Boy Controls "$bindings"
+  pads_ares_rewrite "$file" GameBoy Game.Boy Controls "$bindings"
+
+  run cat "$file"
+  [[ "$output" == *"GameBoy"* ]]
+  [[ "$output" == *"        Up: ID/0/1/1/Lo;;"* ]]
+  [[ "$output" == *"        A: ID/0/3/0;;"* ]]
+}
+
+@test "a missing console section is appended without touching its neighbours" {
+  local file="$TEST_TMP/settings.bml"
+  cat >"$file" <<'BML'
+Video
+  Driver: OpenGL
+SuperFamicom
+  Input
+    Controller.Port.1
+      Gamepad
+        Up: KEEP;;
+BML
+  local bindings='{"Up": "NEW;;"}'
+  pads_ares_ensure_block "$file" Famicom Controller.Port.1 Gamepad "$bindings"
+  pads_ares_rewrite "$file" Famicom Controller.Port.1 Gamepad "$bindings"
+
+  grep -q "Driver: OpenGL" "$file"
+  grep -q "Up: KEEP;;" "$file"
+  # The new section carries the new value; the old one kept its own.
+  run awk '/^Famicom$/,0' "$file"
+  [[ "$output" == *"Up: NEW;;"* ]]
+  [[ "$output" != *"KEEP"* ]]
+}
+
+@test "a seeded section nests analog axes the way ares does" {
+  local file="$TEST_TMP/n64/settings.bml"
+  local bindings='{"A": "ID/0/3/1;;", "X-Axis/Lo": "ID/0/0/0/Lo;;", "X-Axis/Hi": "ID/0/0/0/Hi;;"}'
+
+  pads_ares_ensure_block "$file" Nintendo64 Controller.Port.1 Gamepad "$bindings"
+  pads_ares_rewrite "$file" Nintendo64 Controller.Port.1 Gamepad "$bindings"
+
+  run cat "$file"
+  [[ "$output" == *"        X-Axis"* ]]
+  [[ "$output" == *"          Lo: ID/0/0/0/Lo;;"* ]]
+  [[ "$output" == *"          Hi: ID/0/0/0/Hi;;"* ]]
+  [[ "$output" == *"        A: ID/0/3/1;;"* ]]
+}
+
+@test "a second port joins an existing section rather than duplicating it" {
+  local file="$TEST_TMP/two/settings.bml"
+  local p1='{"Up": "PAD1;;"}' p2='{"Up": "PAD2;;"}'
+
+  pads_ares_ensure_block "$file" SuperFamicom Controller.Port.1 Gamepad "$p1"
+  pads_ares_rewrite "$file" SuperFamicom Controller.Port.1 Gamepad "$p1"
+  pads_ares_ensure_block "$file" SuperFamicom Controller.Port.2 Gamepad "$p2"
+  pads_ares_rewrite "$file" SuperFamicom Controller.Port.2 Gamepad "$p2"
+
+  run grep -cx "SuperFamicom" "$file"
+  [ "$output" = "1" ]
+  run grep -cx "  Input" "$file"
+  [ "$output" = "1" ]
+  grep -q "Up: PAD1;;" "$file"
+  grep -q "Up: PAD2;;" "$file"
+}
+
+@test "ensuring an already complete block changes nothing" {
+  local file="$TEST_TMP/idem/settings.bml"
+  local bindings='{"Up": "V;;"}'
+  pads_ares_ensure_block "$file" GameBoy Game.Boy Controls "$bindings"
+  local before
+  before="$(cat "$file")"
+  pads_ares_ensure_block "$file" GameBoy Game.Boy Controls "$bindings"
+  [ "$(cat "$file")" = "$before" ]
+}

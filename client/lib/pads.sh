@@ -91,6 +91,89 @@ pads_ares_assignment() {
 # analog axis as an X-Axis block containing Lo and Hi, and those lines are worth
 # reaching, since binding them is what makes a stick analog rather than four
 # switches.
+# The key lines a fresh pad block needs, one per binding, unbound. A nested
+# "Axis/Sub" key becomes its axis block with the sub-input inside — jq sorts
+# keys, so an axis's subkeys arrive together and the axis header is emitted
+# once.
+pads_ares_skeleton_keys() {
+  local bindings="$1" key axis last_axis=""
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    if [[ "$key" == */* ]]; then
+      axis="${key%%/*}"
+      if [[ "$axis" != "$last_axis" ]]; then
+        printf '        %s\n' "$axis"
+        last_axis="$axis"
+      fi
+      printf '          %s: ;;\n' "${key#*/}"
+    else
+      printf '        %s: ;;\n' "$key"
+      last_axis=""
+    fi
+  done < <(jq -r 'keys[]' <<<"$bindings")
+}
+
+# Make sure the block the rewrite will edit actually exists.
+#
+# ares only creates a console's section after that console has run, which made
+# the first launch of every new platform silently padless — visible at scale
+# the day two whole libraries arrived at once. The file is plain indented
+# text, so the missing levels are written here instead: ares merges an
+# unknown-but-well-formed section on load, and rewrites the file completely on
+# exit, so a skeleton holding only the inputs this pad could bind heals into
+# ares' own full section after one run.
+pads_ares_ensure_block() {
+  local file="$1" console="$2" block="$3" pad="$4" bindings="$5"
+  local keys
+  keys="$(pads_ares_skeleton_keys "$bindings")"
+  [[ -n "$keys" ]] || return 1
+
+  mkdir -p "$(dirname "$file")"
+  [[ -f "$file" ]] || : >"$file"
+
+  # What already exists, scoped exactly as the rewrite scopes it.
+  local state
+  state="$(awk -v c="$console" -v b="    $block" -v p="      $pad" '
+    { indent = match($0, /[^ ]/) - 1 }
+    indent == 0 { inC = ($0 == c); if (inC) hc = 1; inI = 0; inB = 0 }
+    inC && indent == 2 && $0 == "  Input" { inI = 1; hi = 1 }
+    inI && indent == 4 && $0 == b { inB = 1; hb = 1 }
+    inB && indent == 6 && $0 == p { hp = 1 }
+    END { printf "%d%d%d%d", hc + 0, hi + 0, hb + 0, hp + 0 }
+  ' "$file")" || return 1
+  [[ "$state" == "1111" ]] && return 0
+
+  # The missing tail, and which existing line it slots in after. Inserting
+  # directly after the parent line only reorders siblings, which bml does not
+  # care about.
+  local payload anchor
+  case "$state" in
+    0???)
+      printf '%s\n  Input\n    %s\n      %s\n%s\n' \
+        "$console" "$block" "$pad" "$keys" >>"$file"
+      return 0
+      ;;
+    10??) payload="  Input"$'\n'"    $block"$'\n'"      $pad"$'\n'"$keys" anchor="console" ;;
+    110?) payload="    $block"$'\n'"      $pad"$'\n'"$keys" anchor="input" ;;
+    111?) payload="      $pad"$'\n'"$keys" anchor="block" ;;
+    *) return 1 ;;
+  esac
+
+  local tmp="$file.gotg-tmp"
+  awk -v c="$console" -v b="    $block" -v anchor="$anchor" -v payload="$payload" '
+    { indent = match($0, /[^ ]/) - 1 }
+    indent == 0 { inC = ($0 == c) }
+    { print }
+    !done && inC && anchor == "console" && indent == 0 { print payload; done = 1 }
+    !done && inC && anchor == "input" && indent == 2 && $0 == "  Input" { print payload; done = 1 }
+    !done && inC && anchor == "block" && indent == 4 && $0 == b { print payload; done = 1 }
+  ' "$file" >"$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  mv "$tmp" "$file"
+}
+
 pads_ares_rewrite() {
   local file="$1" console="$2" block="$3" pad="$4" bindings="$5"
 
@@ -274,15 +357,6 @@ pads_ares_configure() {
   }
 
   file="$(env_state_dir "$attr")/data/ares/settings.bml"
-  [[ -f "$file" ]] || return 0
-
-  # ares writes a console's section the first time that console runs, so the
-  # very first launch of a platform has nothing to bind into. Say so, rather
-  # than looking like it worked — the next launch will take.
-  grep -qx "$console" "$file" || {
-    log "ares has not run $console yet — its bindings go in on the next launch"
-    return 0
-  }
 
   pads="$("$(pads_bin)" 2>/dev/null)" || return 0
 
@@ -320,8 +394,13 @@ pads_ares_configure() {
     bindings="$(pads_ares_bindings "$console" "$identity" "$slot" "$map")"
     [[ "$(jq 'length' <<<"$bindings")" != "0" ]] || continue
 
-    # A console with fewer ports than there are controllers simply has no
-    # section for the later ones, and the rewrite finds nothing to change.
+    # ares has not run this console yet? Then the section it would have made
+    # is made here, so the very first launch already has a working pad.
+    pads_ares_ensure_block "$file" "$console" "$block" "$padBlock" "$bindings" || {
+      warn "could not prepare the $console bindings section for $attr"
+      continue
+    }
+
     if pads_ares_rewrite "$file" "$console" "$block" "$padBlock" "$bindings"; then
       log "player $port: $name -> $where ($(jq 'length' <<<"$bindings") inputs)"
     else

@@ -284,10 +284,11 @@ standard gamepad element and SDL is asked what that element is on *this* pad.
 Dolphin names standard elements itself, so there is no table — only the device
 line, which is inert if it names a device Dolphin cannot see.
 
-Three present limits: a console needs an entry in `ares-pads.json`; an emulator
-creates a console's section the first time that console runs, so the first
-launch of a platform has nothing to write into and the one after it does; and
-Wii remotes are not generated, only GameCube pads.
+Two present limits: a console needs an entry in `ares-pads.json`, and Wii
+remotes are not generated, only GameCube pads. (A console's settings section
+used to exist only after its first launch, leaving that launch padless — the
+section is written on the way in now, so the first launch of a brand-new
+platform already has its controller.)
 
 **Ryujinx bindings are kept rather than generated.** Ryujinx never unbinds a
 pad on hotplug — a pad that goes to sleep mid-game rebinds itself when it

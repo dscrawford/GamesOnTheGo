@@ -95,20 +95,23 @@ BML
   grep -q "B: 050000005e040000/0/3/0;;" "$state/settings.bml"
 }
 
-@test "a console ares has never run is reported, not silently skipped" {
+@test "a console ares has never run gets its section made, not skipped" {
   fake_env env-snes
   mkdir -p "$GOTG_ROOTS_DIR/env-snes/share/gotg"
   jq -n '{console: "SuperFamicom"}' >"$GOTG_ROOTS_DIR/env-snes/share/gotg/pads.json"
 
   local state="$GOTG_ENV_STATE_DIR/env-snes/data/ares"
   mkdir -p "$state"
-  # ares writes a console's section the first time that console runs, so there
-  # is nothing to bind into yet.
+  # ares only writes a console's section after that console has run — which
+  # used to leave the first launch of a new platform padless. The section is
+  # written on the way in now, and ares' own settings survive beside it.
   printf 'Video\n  Driver: OpenGL\n' >"$state/settings.bml"
 
   gotg controllers apply --all
   [ "$status" -eq 0 ]
-  [[ "$stderr" == *"has not run SuperFamicom yet"* ]]
+  [[ "$stderr" == *"player 1"*"SuperFamicom"* ]]
+  grep -qx "SuperFamicom" "$state/settings.bml"
+  grep -q "Driver: OpenGL" "$state/settings.bml"
 }
 
 # Two controllers, in the order SDL reports them.
