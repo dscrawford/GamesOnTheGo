@@ -26,6 +26,11 @@ dat_dirs:
   "Nintendo - Game Boy":
     platform: gb
     handler: no_intro_set
+  # The retail set. Matched by exact name, so the (Aftermarket) set below —
+  # homebrew and unlicensed carts — stays excluded on its own line.
+  "Nintendo - Nintendo Entertainment System (Headered)":
+    platform: nes
+    handler: no_intro_set
   # Homebrew/aftermarket set — deliberately not imported (decision 2026-07-26).
   "Nintendo - Nintendo Entertainment System (Headered) (Aftermarket)":
     platform: nes

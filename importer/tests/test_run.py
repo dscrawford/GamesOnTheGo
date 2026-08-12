@@ -344,3 +344,27 @@ def test_the_two_platform_maps_never_drift(cfg):
     for name, (platform, handler) in DAT_DIR_PLATFORM.items():
         assert name in RULES.dat_dirs, f"{name} is in plan.py but not rules.yaml"
         assert RULES.dat_dirs[name] == (platform, handler)
+
+
+def test_the_retail_nes_set_imports_and_the_aftermarket_one_does_not(cfg):
+    # The names differ by a suffix, and the map is matched exactly: mapping the
+    # retail set must not quietly un-exclude the homebrew one beside it.
+    zipped_set(cfg, "Nintendo - Nintendo Entertainment System (Headered)")
+    zipped_set(cfg, "Nintendo - Nintendo Entertainment System (Headered) (Aftermarket)")
+
+    paths, _ = discover(cfg.source_root, RULES)
+    assert sorted(p.name for p in paths) == [
+        "Nintendo - Nintendo Entertainment System (Headered)",
+        "Nintendo - Nintendo Entertainment System (Headered) (Aftermarket)",
+    ]
+
+    retail = plan_source(cfg.source_root / "Nintendo - Nintendo Entertainment System (Headered)", cfg.games_root, RULES)
+    assert {op.platform for op in retail} == {"nes"}
+    assert all(op.action == "hardlink" for op in retail)
+
+    after = plan_source(
+        cfg.source_root / "Nintendo - Nintendo Entertainment System (Headered) (Aftermarket)",
+        cfg.games_root,
+        RULES,
+    )
+    assert [op.action for op in after] == ["skip"]
