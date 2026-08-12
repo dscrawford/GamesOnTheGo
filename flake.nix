@@ -345,6 +345,14 @@
                         steps.pickLargest
                         steps.keepExtension
                       ];
+                      # A second handler in the same env: the dispatch case
+                      # grows a branch and the tool exports merge across
+                      # pipelines.
+                      probe_scene = [
+                        steps.unrar
+                        steps.pickLargest
+                        steps.keepExtension
+                      ];
                     };
                 };
           in
@@ -354,9 +362,11 @@
 
             cat > $TMPDIR/bin/unrar <<'EOF'
             #!${pkgs.runtimeShell}
-            # unrar x -idq <rar> <stage/>: drop two "extracted" files, sizes apart.
+            # unrar e -idq -o+ <rar> <stage/>: drop two "extracted" files, sizes apart.
             eval "stage=\''${$#}"
-            printf 'big' > "$stage/game.xci"
+            name=game.xci
+            [ "''${GOTG_TEST_UPPER:-0}" = 1 ] && name=GAME.XCI
+            printf 'big' > "$stage/$name"
             printf 'x' > "$stage/readme.txt"
             EOF
             cat > $TMPDIR/bin/rhash <<'EOF'
@@ -367,6 +377,12 @@
             cat > $TMPDIR/bin/7z <<'EOF'
             #!${pkgs.runtimeShell}
             for arg in "$@"; do case "$arg" in -o*) stage="''${arg#-o}";; esac; done
+            if [ "''${GOTG_TEST_7Z_EMPTY:-0}" = 1 ]; then exit 0; fi
+            if [ "''${GOTG_TEST_7Z_MANY:-0}" = 1 ]; then
+              for i in $(seq 3000); do
+                printf 'x' > "$stage/padding-file-with-a-long-name-to-fill-the-pipe-buffer-$i.bin"
+              done
+            fi
             printf 'iso-bytes' > "$stage/game.iso"
             EOF
             cat > $TMPDIR/bin/dolphin-tool <<'EOF'
@@ -404,9 +420,10 @@
             [ "$(cat $TMPDIR/out/usa.game.rvz)" = "rvz-of:iso-bytes" ]
 
             # An unknown handler is a refusal, not a guess.
-            if ${switch}/bin/gotg-recipe mystery $raw $TMPDIR/out/y; then
+            if ${switch}/bin/gotg-recipe mystery $raw $TMPDIR/out/y 2>$TMPDIR/err-dispatch; then
               echo "an unknown handler must fail" >&2; exit 1
             fi
+            grep -q 'gotg-recipe\[dispatch\]' $TMPDIR/err-dispatch
 
             # A pipeline composed à la carte: extract, pick, keep the extension
             # — no conversion — through an env the tree does not ship.
@@ -422,6 +439,51 @@
             fi
             grep -q 'gotg-recipe\[7z\]' $TMPDIR/err
             [ -z "$(ls -A $TMPDIR/out3 | grep gotg-recipe || true)" ]
+
+            # Scene without an .sfv: absence is fine, only a failing check
+            # refuses — and an uppercase extension is stored lowercase, or the
+            # emulator cannot dispatch on it.
+            raw=$TMPDIR/raw-nosfv && mkdir -p $raw
+            touch $raw/group.rar $raw/group.r00
+            GOTG_TEST_UPPER=1 ${switch}/bin/gotg-recipe scene_archive $raw $TMPDIR/out/nosfv.game
+            [ "$(cat $TMPDIR/out/nosfv.game.xci)" = big ]
+
+            # An extraction that succeeds but yields nothing fails
+            # mid-pipeline: the picking step names itself, and the
+            # already-populated staging is swept.
+            raw=$TMPDIR/raw-hollow && mkdir -p $raw
+            touch "$raw/Hollow.7z"
+            if GOTG_TEST_7Z_EMPTY=1 ${probe}/bin/gotg-recipe probe_archive $raw $TMPDIR/out4/x 2>$TMPDIR/err2; then
+              echo "an empty extraction must fail the pick step" >&2; exit 1
+            fi
+            grep -q 'gotg-recipe\[pick-largest\]' $TMPDIR/err2
+            [ -z "$(ls -A $TMPDIR/out4 | grep gotg-recipe || true)" ]
+
+            # An extraction with many files must still pick the largest: head
+            # closing the pipe early must not kill the pipeline under pipefail.
+            raw=$TMPDIR/raw-many && mkdir -p $raw
+            touch "$raw/Many.7z"
+            GOTG_TEST_7Z_MANY=1 ${probe}/bin/gotg-recipe probe_archive $raw $TMPDIR/out/many.probe
+            [ "$(cat $TMPDIR/out/many.probe.iso)" = iso-bytes ]
+
+            # A destination with spaces survives the quoting end to end —
+            # staging is derived from its dirname.
+            raw=$TMPDIR/raw-spaced && mkdir -p $raw
+            touch "$raw/Game (USA).7z"
+            ${probe}/bin/gotg-recipe probe_archive $raw "$TMPDIR/out dir/usa.probe"
+            [ "$(cat "$TMPDIR/out dir/usa.probe.iso")" = iso-bytes ]
+
+            # The second handler of a multi-handler env dispatches
+            # independently.
+            raw=$TMPDIR/raw-two && mkdir -p $raw
+            touch $raw/group.rar
+            ${probe}/bin/gotg-recipe probe_scene $raw $TMPDIR/out/two.game
+            [ "$(cat $TMPDIR/out/two.game.xci)" = big ]
+
+            # recipe.json is what download.sh consults; a migration must not
+            # rename a handler on the wire.
+            grep -q '"scene_archive"' ${switch}/share/gotg/recipe.json
+            grep -q '"single_archive"' ${gamecube}/share/gotg/recipe.json
 
             touch $out
           '';

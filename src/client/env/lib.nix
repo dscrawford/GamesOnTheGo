@@ -189,12 +189,19 @@ let
     exec ${exe} ${lib.concatMapStringsSep " " render args} "$@"
   '';
   };
-  # Every tool any step in any pipeline names, deduplicated: the same step
-  # used twice is the same tool, and two steps naming one variable must mean
-  # the same binary by construction (both took it from steps.nix).
-  recipeTools = lib.foldl' (acc: step: acc // (step.tools or { })) { } (
-    lib.concatLists (lib.attrValues recipes)
-  );
+  # Every tool any step in any pipeline names, deduplicated. Two steps naming
+  # one variable must mean the same binary — asserted, not assumed, because a
+  # hand-written step could shadow a library one silently.
+  recipeTools = lib.foldl' (
+    acc: step:
+    lib.foldlAttrs (
+      a: var: bin:
+      assert lib.assertMsg (
+        !(a ? ${var}) || a.${var} == bin
+      ) "gotg-recipe: tool ${var} is pinned to two different binaries";
+      a // { ${var} = bin; }
+    ) acc (step.tools or { })
+  ) { } (lib.concatLists (lib.attrValues recipes));
   recipeApp = lib.optionalAttrs (recipes != { }) {
     drv = pkgs.writeShellApplication {
       name = "gotg-recipe";
@@ -215,10 +222,10 @@ let
           exit 1
         }
         # One scratch dir for the whole pipeline, swept on any exit — a failed
-        # step must not leave debris where the games live.
-        stage="$(dirname "$dest")/.gotg-recipe-$$"
-        rm -rf "$stage"
-        mkdir -p "$stage" "$(dirname "$dest")"
+        # step must not leave debris where the games live. mktemp rather than
+        # $$: a guessable name in a shared directory is a symlink race.
+        mkdir -p "$(dirname "$dest")"
+        stage="$(mktemp -d "$(dirname "$dest")/.gotg-recipe-XXXXXXXX")"
         trap 'rm -rf "$stage"' EXIT
         # The cursor: what the pipeline has made so far. Starts as the raw
         # member directory; each step leaves it pointing at its own output.

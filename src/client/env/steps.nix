@@ -24,7 +24,7 @@
     name = "verify-sfv";
     tools.RHASH = "${pkgs.rhash}/bin/rhash";
     script = ''
-      sfv="$(find "$cur" -maxdepth 1 -name '*.sfv' | head -1)"
+      sfv="$(find "$cur" -maxdepth 1 -name '*.sfv' | head -1 || true)"
       if [ -n "$sfv" ]; then
         (cd "$cur" && "$RHASH" -c "$sfv") || fail "sfv verification failed"
       fi
@@ -32,27 +32,31 @@
   };
 
   # A rar volume set: point unrar at the first volume and it reads the rest.
-  # unrar is unfree-redistributable; the flake already allows unfree for the
-  # emulators themselves. libarchive is not a substitute — its RAR5 support
-  # is partial.
+  # `e` rather than `x` — nothing downstream wants the archived directory
+  # structure, and flattening removes the path-traversal surface entirely
+  # instead of trusting the extractor's own checks. unrar is
+  # unfree-redistributable; the flake already allows unfree for the emulators
+  # themselves. libarchive is not a substitute — its RAR5 support is partial.
   unrar = {
     name = "unrar";
     tools.UNRAR = "${pkgs.unrar}/bin/unrar";
     script = ''
-      rar="$(find "$cur" -maxdepth 1 -name '*.rar' | head -1)"
+      rar="$(find "$cur" -maxdepth 1 -name '*.rar' | head -1 || true)"
       [ -n "$rar" ] || fail "no .rar in $cur"
       next="$stage/unrar"
       mkdir -p "$next"
-      "$UNRAR" x -idq "$rar" "$next/" || fail "unrar failed"
+      "$UNRAR" e -idq -o+ "$rar" "$next/" || fail "unrar failed"
       cur="$next"
     '';
   };
 
+  # 7zz, the maintained official 7-Zip, not the long-unmaintained p7zip fork:
+  # an archive parser is the largest attacker-controlled surface here.
   extract7z = {
     name = "7z";
-    tools.P7Z = "${pkgs.p7zip}/bin/7z";
+    tools.P7Z = "${pkgs._7zz}/bin/7zz";
     script = ''
-      archive="$(find "$cur" -maxdepth 1 \( -name '*.7z' -o -name '*.rar' \) | head -1)"
+      archive="$(find "$cur" -maxdepth 1 \( -name '*.7z' -o -name '*.rar' \) | head -1 || true)"
       [ -n "$archive" ] || fail "no archive in $cur"
       next="$stage/extract"
       mkdir -p "$next"
@@ -62,24 +66,35 @@
   };
 
   # An extraction leaves the game beside its filler — nfos, samples, subdirs.
-  # The game is the big one.
+  # The game is the big one. NUL-terminated throughout: extracted names are
+  # the archive's to choose, and a newline in one would otherwise forge a
+  # second "larger file" line pointing anywhere at all.
   pickLargest = {
     name = "pick-largest";
     script = ''
-      pick="$(find "$cur" -type f -printf '%s %p\n' | sort -rn | head -1 | cut -d' ' -f2-)"
+      pick="$(find "$cur" -type f -printf '%s\t%p\0' | sort -z -rn | head -z -n1 | cut -z -f2- | tr -d '\0' || true)"
       [ -n "$pick" ] || fail "nothing to pick in $cur"
+      case "$(realpath -- "$pick")" in
+        "$(realpath -- "$cur")"/*) ;;
+        *) fail "picked path escapes $cur" ;;
+      esac
       cur="$pick"
     '';
   };
 
   # Terminal: the source names the format. Emulators dispatch on the
-  # extension, so it has to survive the rename onto the id.
+  # extension, so it has to survive the rename onto the id — but it is an
+  # extracted name's to choose, so anything but a plain one is refused rather
+  # than installed as it stands.
   keepExtension = {
     name = "keep-extension";
     script = ''
       ext="$(basename "$cur")"
       ext="''${ext##*.}"
-      mv "$cur" "$dest.''${ext,,}"
+      case "$ext" in
+        *[!A-Za-z0-9]* | "") fail "unusable extension on $(basename "$cur")" ;;
+      esac
+      mv "$cur" "$dest.''${ext,,}" || fail "could not place $dest.''${ext,,}"
       cur="$dest.''${ext,,}"
     '';
   };
