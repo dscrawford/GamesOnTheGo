@@ -20,11 +20,13 @@ endpoint's problem, and deleting a row never deletes a file.
 
 from __future__ import annotations
 
+import os
 import os.path
 import re
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 PLATFORM_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,15}$")
@@ -122,7 +124,6 @@ class CatalogStore:
         self._write = self._connect()
         with self._write_lock, self._write:
             self._write.executescript(_SCHEMA)
-        self._local = threading.local()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db, check_same_thread=False)
@@ -133,12 +134,18 @@ class CatalogStore:
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
-    def _read(self) -> sqlite3.Connection:
-        conn = getattr(self._local, "conn", None)
-        if conn is None:
-            conn = self._connect()
-            self._local.conn = conn
-        return conn
+    # Opened per operation and closed deterministically, not cached per
+    # thread: the server runs a thread per TCP connection, and a connection
+    # parked in threading.local outlives its thread until a full GC pass —
+    # measured as dozens of stale fds for zero reuse. Opening costs a fraction
+    # of the query it serves.
+    @contextmanager
+    def _read(self):
+        conn = self._connect()
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     def _contained(self, path: str) -> bool:
         # realpath rather than resolve(strict=True): the service may not see
@@ -150,7 +157,9 @@ class CatalogStore:
 
     # --- validation ---------------------------------------------------------
 
-    def _validate(self, platform: str, game_id: str, payload: dict) -> dict:
+    def _validate(self, platform: str, game_id: str, payload: object) -> dict:
+        if not isinstance(payload, dict):
+            raise ValueError("an entry must be a JSON object")
         if not PLATFORM_RE.match(platform):
             raise ValueError(f"invalid platform: {platform!r}")
         if not ID_RE.match(game_id):
@@ -160,8 +169,9 @@ class CatalogStore:
         if handler not in HANDLERS:
             raise ValueError(f"unknown handler: {handler!r}")
         title = payload.get("title", "")
-        if not isinstance(title, str) or not title.strip():
-            raise ValueError("an entry needs a title")
+        # Titles end up in client terminal output.
+        if not isinstance(title, str) or not title.strip() or not title.isprintable():
+            raise ValueError("an entry needs a printable title")
 
         files = payload.get("files")
         if not isinstance(files, list) or not files:
@@ -187,9 +197,12 @@ class CatalogStore:
 
             size = member.get("size_bytes")
             mtime = member.get("mtime")
-            if not isinstance(size, int) or size < 0:
+            # type() is int, not isinstance: bool passes isinstance and JSON
+            # true would land as 1. The upper bound is SQLite's INTEGER — an
+            # overflow inside the write transaction is a dropped connection.
+            if type(size) is not int or not 0 <= size < 2**63:
                 raise ValueError(f"invalid size for {name!r}")
-            if not isinstance(mtime, int) or mtime < 0:
+            if type(mtime) is not int or not 0 <= mtime < 2**63:
                 raise ValueError(f"invalid mtime for {name!r}")
 
             sha = member.get("sha256")
@@ -250,14 +263,16 @@ class CatalogStore:
             return cursor.rowcount > 0
 
     def sweep(self, since: str, *, confirm: bool = False) -> dict:
-        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", since):
+        # [0-9], not \d: \d matches Unicode digits, which collate above ASCII
+        # and turn the lexicographic seen_at comparison into nonsense.
+        if not re.match(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$", since):
             raise ValueError(f"since must be an ISO UTC timestamp, got {since!r}")
-        conn = self._read()
-        total = conn.execute("SELECT COUNT(*) FROM entry").fetchone()[0]
-        rows = conn.execute(
-            "SELECT platform, id, seen_at FROM entry WHERE seen_at < ? ORDER BY platform, id",
-            (since,),
-        ).fetchall()
+        with self._read() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM entry").fetchone()[0]
+            rows = conn.execute(
+                "SELECT platform, id, seen_at FROM entry WHERE seen_at < ? ORDER BY platform, id",
+                (since,),
+            ).fetchall()
         if total and len(rows) / total > SWEEP_LIMIT and not confirm:
             raise SweepRefused(len(rows), total)
         return {
@@ -299,26 +314,78 @@ class CatalogStore:
         return view
 
     def view(self, *, full: bool = False) -> dict:
-        conn = self._read()
-        keys = conn.execute("SELECT platform, id FROM entry ORDER BY platform, id").fetchall()
-        return {
-            "version": 2,
-            "games": [self._entry(conn, k["platform"], k["id"], full=full) for k in keys],
-        }
+        # Two queries under one read transaction, not one per entry: a delete
+        # landing mid-iteration must not put a null in the games array, and a
+        # WAL snapshot held across both queries is what rules it out.
+        with self._read() as conn:
+            conn.execute("BEGIN")
+            try:
+                entries = conn.execute("SELECT * FROM entry ORDER BY platform, id").fetchall()
+                files = conn.execute(
+                    "SELECT platform, id, name, path, size_bytes, mtime, sha256"
+                    " FROM entry_file ORDER BY platform, id, name"
+                ).fetchall()
+            finally:
+                conn.execute("COMMIT")
+
+        by_entry: dict[tuple[str, str], list] = {}
+        for row in files:
+            by_entry.setdefault((row["platform"], row["id"]), []).append(
+                self._file_view(row, full=full)
+            )
+        games = []
+        for row in entries:
+            game = {
+                "id": row["id"],
+                "platform": row["platform"],
+                "handler": row["handler"],
+                "title": row["title"],
+                "files": by_entry.get((row["platform"], row["id"]), []),
+            }
+            if full:
+                game["imported_at"] = row["imported_at"]
+                game["seen_at"] = row["seen_at"]
+            games.append(game)
+        return {"version": 2, "games": games}
 
     def lookup(self, platform: str, game_id: str, name: str) -> Path | None:
-        """The absolute path behind one member file, containment re-checked.
+        """The resolved path behind one member file, containment-checked.
 
-        Used by the streaming endpoint; None means 404 whichever half is
-        missing, so a caller cannot probe which ids exist without also being
-        allowed to read them.
+        None means 404 whichever half is missing, so a caller cannot probe
+        which ids exist without also being allowed to read them. This answers
+        a question about the catalog; actually reading the file goes through
+        open_member, which is immune to the path being swapped underneath.
         """
         if not (PLATFORM_RE.match(platform) and ID_RE.match(game_id) and valid_filename(name)):
             return None
-        row = self._read().execute(
-            "SELECT path FROM entry_file WHERE platform = ? AND id = ? AND name = ?",
-            (platform, game_id, name),
-        ).fetchone()
+        with self._read() as conn:
+            row = conn.execute(
+                "SELECT path FROM entry_file WHERE platform = ? AND id = ? AND name = ?",
+                (platform, game_id, name),
+            ).fetchone()
         if row is None or not self._contained(row["path"]):
             return None
-        return Path(row["path"])
+        return Path(os.path.realpath(row["path"]))
+
+    def open_member(self, platform: str, game_id: str, name: str) -> int | None:
+        """An open fd for one member file, or None.
+
+        The containment check and the open are separate syscalls, and anything
+        that can write inside a library root — the torrent client, most of all
+        — could swap a symlink in between them. So the check that counts is on
+        what was actually opened: O_NOFOLLOW refuses a symlink as the final
+        component, and the /proc re-check catches a retargeted directory on
+        the way there. The caller owns the fd.
+        """
+        path = self.lookup(platform, game_id, name)
+        if path is None:
+            return None
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        except OSError:
+            return None
+        real = Path(os.path.realpath(f"/proc/self/fd/{fd}"))
+        if not any(real.is_relative_to(root) for root in self.roots):
+            os.close(fd)
+            return None
+        return fd

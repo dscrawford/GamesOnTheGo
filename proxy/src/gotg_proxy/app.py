@@ -35,6 +35,8 @@ from __future__ import annotations
 
 import hmac
 import json
+import sqlite3
+import sys
 import threading
 import time
 import urllib.error
@@ -224,23 +226,28 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- who is asking ------------------------------------------------------
 
-    def _bearer(self) -> str:
+    def _bearer(self) -> bytes:
+        # Bytes, because compare_digest on str raises on non-ASCII — and the
+        # header arrives latin-1 decoded, so a stray \xff from an
+        # unauthenticated caller would otherwise crash the thread instead of
+        # earning its 401.
         header = self.headers.get("Authorization", "")
-        return header[len("Bearer ") :] if header.startswith("Bearer ") else ""
+        token = header[len("Bearer ") :] if header.startswith("Bearer ") else ""
+        return token.encode("latin-1", "replace")
 
     def _authenticated(self) -> bool:
         # compare_digest rather than ==: a plain comparison returns early on the
         # first wrong byte, which leaks the secret a character at a time.
         bearer = self._bearer()
-        if hmac.compare_digest(bearer, self.config.token):
+        if hmac.compare_digest(bearer, self.config.token.encode()):
             return True
         return bool(self.config.index_token) and hmac.compare_digest(
-            bearer, self.config.index_token
+            bearer, self.config.index_token.encode()
         )
 
     def _is_index(self) -> bool:
         return bool(self.config.index_token) and hmac.compare_digest(
-            self._bearer(), self.config.index_token
+            self._bearer(), self.config.index_token.encode()
         )
 
     # --- forwarding ---------------------------------------------------------
@@ -403,6 +410,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not needs_index():
                     return
                 payload = json.loads(body) if body else {}
+                if not isinstance(payload, dict):
+                    self._problem(400, "the sweep body must be a JSON object")
+                    return
                 report = self.catalog.sweep(
                     str(payload.get("since", "")),
                     confirm="confirm=1" in query,
@@ -425,10 +435,20 @@ class Handler(BaseHTTPRequestHandler):
             )
         except SweepRefused as refused:
             self._problem(409, str(refused))
-        except (ValueError, json.JSONDecodeError) as error:
-            self._problem(400, str(error))
+        # JSONDecodeError is a ValueError; RecursionError is what a deeply
+        # nested body raises inside json.loads, and it must earn a 400 rather
+        # than a thread traceback.
+        except (ValueError, RecursionError) as error:
+            message = "malformed body" if isinstance(error, RecursionError) else str(error)
+            self._problem(400, message)
+        # Neither message reaches the client: a storage error string typically
+        # embeds server paths.
+        except sqlite3.Error as error:
+            print(f"catalog storage error: {error}", file=sys.stderr)
+            self._problem(500, "catalog storage error")
         except OSError as error:
-            self._problem(500, str(error))
+            print(f"catalog error: {error}", file=sys.stderr)
+            self._problem(500, "catalog storage error")
 
     # --- routing ------------------------------------------------------------
 
@@ -437,7 +457,12 @@ class Handler(BaseHTTPRequestHandler):
 
         # Before authentication, and the only thing that is: kubelet has no
         # token, and a health check is not a credentialed operation.
+        # Both replies below go out before the body is read, so they close the
+        # connection: on kept-alive HTTP/1.1 the unread body would frame the
+        # next request — behind an ingress that shares upstream connections,
+        # that is request smuggling, not just the caller's own confusion.
         if path.split("?")[0] == "healthz":
+            self.close_connection = True
             self._send(200, b'{"ok":true}', "application/json")
             return
 
@@ -445,7 +470,7 @@ class Handler(BaseHTTPRequestHandler):
         # cannot learn which upstreams this proxy holds keys for by watching
         # which paths answer 404 and which answer 503.
         if not self._authenticated():
-            self._problem(401, "a bearer token is required")
+            self._problem(401, "a bearer token is required", close=True)
             return
 
         prefix, _, rest = path.partition("/")
