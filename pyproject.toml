@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gotg"
+version = "0.4.0"
+description = "GOTG: the credential-holding service, the saves store, and the torrent indexer"
+requires-python = ">=3.11"
+# The service stays stdlib-only on purpose: it faces the internet and holds
+# every credential, so its supply chain is the standard library.
+dependencies = []
+
+[project.optional-dependencies]
+# Only the indexer reads rules.yaml; keeping yaml an extra keeps it out of the
+# service image by construction.
+indexer = ["PyYAML>=6.0"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[project.scripts]
+# Names kept from the two-package era: helper.bash's service default, both
+# meta.mainProgram values and the image Entrypoints all use them.
+gotg-proxy = "gotg.service.cli:main"
+gotg-importer = "gotg.indexer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["gotg*"]
+
+[tool.setuptools.package-data]
+"gotg.indexer" = ["rules.yaml"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.format]
+# Ported verbatim from the Kubernetes/games reference and kept diffable
+# against it.
+exclude = ["src/gotg/indexer/slugify.py", "src/gotg/indexer/plan.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/gotg/indexer/plan.py" = ["B007"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["gotg"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/service", "tests/indexer"]

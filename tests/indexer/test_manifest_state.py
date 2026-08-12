@@ -1,6 +1,6 @@
 """Catalog persistence."""
 
-from gotg_importer.manifest import Entry, load, save
+from gotg.indexer.manifest import Entry, load, save
 
 
 def entry(path="/Games/n64/usa.zelda.z64", **kw):

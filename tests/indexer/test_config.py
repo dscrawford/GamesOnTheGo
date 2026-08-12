@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from gotg_importer.config import ConfigError, load
+from gotg.indexer.config import ConfigError, load
 
 BASE_ENV = {
     "GAMES_ROOT": "/data/Games",

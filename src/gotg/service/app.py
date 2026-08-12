@@ -49,8 +49,8 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .catalog import CatalogStore, Conflict, SweepRefused
-from .saves import SavesStore
+from ..catalog import CatalogStore, Conflict, SweepRefused
+from ..saves import SavesStore
 
 USER_AGENT = "gotg-proxy/0.3.0"
 
@@ -93,9 +93,7 @@ def open_contained(path: Path, root: Path) -> int | None:
     except OSError:
         return None
     real = Path(os.path.realpath(f"/proc/self/fd/{fd}"))
-    if not stat.S_ISREG(os.fstat(fd).st_mode) or not real.is_relative_to(
-        Path(os.path.realpath(root))
-    ):
+    if not stat.S_ISREG(os.fstat(fd).st_mode) or not real.is_relative_to(Path(os.path.realpath(root))):
         os.close(fd)
         return None
     return fd
@@ -149,6 +147,8 @@ def path_climbs(rest: str) -> bool:
     """
     decoded = urllib.parse.unquote(rest.split("?")[0])
     return any(segment == ".." for segment in decoded.split("/"))
+
+
 IGDB_URL = "https://api.igdb.com"
 IGDB_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 
@@ -295,14 +295,10 @@ class Handler(BaseHTTPRequestHandler):
         bearer = self._bearer()
         if hmac.compare_digest(bearer, self.config.token.encode()):
             return True
-        return bool(self.config.index_token) and hmac.compare_digest(
-            bearer, self.config.index_token.encode()
-        )
+        return bool(self.config.index_token) and hmac.compare_digest(bearer, self.config.index_token.encode())
 
     def _is_index(self) -> bool:
-        return bool(self.config.index_token) and hmac.compare_digest(
-            self._bearer(), self.config.index_token.encode()
-        )
+        return bool(self.config.index_token) and hmac.compare_digest(self._bearer(), self.config.index_token.encode())
 
     # --- forwarding ---------------------------------------------------------
 

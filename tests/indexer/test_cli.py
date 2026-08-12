@@ -2,7 +2,7 @@
 
 import json
 
-from gotg_importer.cli import EXIT_CONFIG, EXIT_FAILED, EXIT_OK, _bootstrap_paths, main
+from gotg.indexer.cli import EXIT_CONFIG, EXIT_FAILED, EXIT_OK, _bootstrap_paths, main
 
 ENV = {
     "GAMES_ROOT": "/data/Games",

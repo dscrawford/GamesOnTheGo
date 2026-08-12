@@ -19,8 +19,8 @@ import urllib.request
 import pytest
 from test_proxy import free_port
 
-from gotg_proxy.app import Config, make_server
-from gotg_proxy.saves import SavesStore
+from gotg.saves import SavesStore
+from gotg.service.app import Config, make_server
 
 
 @pytest.fixture

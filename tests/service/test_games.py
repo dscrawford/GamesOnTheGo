@@ -22,8 +22,8 @@ import urllib.request
 import pytest
 from test_proxy import free_port
 
-from gotg_proxy.app import Config, make_server
-from gotg_proxy.catalog import CatalogStore
+from gotg.catalog import CatalogStore
+from gotg.service.app import Config, make_server
 
 CLIENT = "client-token"
 INDEX = "index-token"
@@ -73,9 +73,7 @@ def catalog(tmp_path, library):
 @pytest.fixture
 def service(catalog, files_dir):
     config = Config(token=CLIENT, index_token=INDEX)
-    server = make_server(
-        "127.0.0.1", free_port(), config, None, catalog, files_dir=files_dir, stream_slots=2
-    )
+    server = make_server("127.0.0.1", free_port(), config, None, catalog, files_dir=files_dir, stream_slots=2)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{server.server_port}", server
     server.shutdown()
@@ -103,9 +101,7 @@ def add_member(catalog, library, game_id, name, data, sha=None):
         {
             "handler": "single_file",
             "title": "Extra",
-            "files": [
-                {"name": name, "path": str(path), "size_bytes": len(data), "mtime": 1, "sha256": sha}
-            ],
+            "files": [{"name": name, "path": str(path), "size_bytes": len(data), "mtime": 1, "sha256": sha}],
         },
     )
     return f"/games/n64/{game_id}/{urllib.parse.quote(name)}"
@@ -149,9 +145,7 @@ def test_a_full_download_carries_every_resume_header(service):
 )
 def test_range_semantics(service, range_header, status, piece, content_range):
     base, _ = service
-    got, body, headers = fetch(
-        base, "/games/n64/usa.zelda/usa.zelda.z64", headers={"Range": range_header}
-    )
+    got, body, headers = fetch(base, "/games/n64/usa.zelda/usa.zelda.z64", headers={"Range": range_header})
     assert got == status
     assert body == piece
     assert headers.get("Content-Range") == content_range
@@ -327,9 +321,7 @@ def test_a_large_file_streams_intact_with_a_mid_file_resume(service, library, ca
     status, body, headers = fetch(base, "/games/n64/usa.big/usa.big.z64")
     assert status == 200 and body == blob
     assert "ETag" not in headers, "no hash, no validator"
-    status, tail, _ = fetch(
-        base, "/games/n64/usa.big/usa.big.z64", headers={"Range": f"bytes={len(blob) // 2}-"}
-    )
+    status, tail, _ = fetch(base, "/games/n64/usa.big/usa.big.z64", headers={"Range": f"bytes={len(blob) // 2}-"})
     assert status == 206 and tail == blob[len(blob) // 2 :]
 
 
@@ -361,9 +353,7 @@ def test_head_with_a_range_carries_206_headers_and_no_body(service):
     assert (status, body) == (206, b"")
     assert headers["Content-Range"] == f"bytes 2-5/{len(ROM)}"
     assert headers["Content-Length"] == "4"
-    status, body, _ = fetch(
-        base, "/games/n64/usa.zelda/usa.zelda.z64", method="HEAD", headers={"Range": "bytes=999-"}
-    )
+    status, body, _ = fetch(base, "/games/n64/usa.zelda/usa.zelda.z64", method="HEAD", headers={"Range": "bytes=999-"})
     assert (status, body) == (416, b"")
 
 
@@ -374,14 +364,16 @@ def test_a_head_404_is_bodiless_and_the_connection_stays_framed(service):
     conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=10)
     try:
         conn.request(
-            "HEAD", "/games/none/usa.ghost/x.z64",
+            "HEAD",
+            "/games/none/usa.ghost/x.z64",
             headers={"Authorization": f"Bearer {CLIENT}"},
         )
         response = conn.getresponse()
         assert response.status == 404
         assert response.read() == b""
         conn.request(
-            "GET", "/games/n64/usa.zelda/usa.zelda.z64",
+            "GET",
+            "/games/n64/usa.zelda/usa.zelda.z64",
             headers={"Authorization": f"Bearer {CLIENT}"},
         )
         response = conn.getresponse()
@@ -409,9 +401,7 @@ def test_the_sendfile_fallback_streams_the_same_bytes(service, monkeypatch):
     base, _ = service
     status, body, _ = fetch(base, "/games/n64/usa.zelda/usa.zelda.z64")
     assert (status, body) == (200, ROM)
-    status, body, _ = fetch(
-        base, "/games/n64/usa.zelda/usa.zelda.z64", headers={"Range": "bytes=4-9"}
-    )
+    status, body, _ = fetch(base, "/games/n64/usa.zelda/usa.zelda.z64", headers={"Range": "bytes=4-9"})
     assert (status, body) == (206, ROM[4:10])
 
 
@@ -450,10 +440,7 @@ def test_two_pinned_streams_saturate_the_cap_for_real(service, library, catalog)
         {
             "handler": "single_file",
             "title": "Big",
-            "files": [
-                {"name": "usa.big.z64", "path": str(big), "size_bytes": 64 << 20,
-                 "mtime": 1, "sha256": None}
-            ],
+            "files": [{"name": "usa.big.z64", "path": str(big), "size_bytes": 64 << 20, "mtime": 1, "sha256": None}],
         },
     )
 
@@ -524,8 +511,13 @@ def test_a_nested_member_streams_through_its_nested_url(service, library, catalo
             "handler": "wiiu_decrypted",
             "title": "Tree",
             "files": [
-                {"name": "code/app.rpx", "path": str(release / "code" / "app.rpx"),
-                 "size_bytes": 4, "mtime": 1, "sha256": None}
+                {
+                    "name": "code/app.rpx",
+                    "path": str(release / "code" / "app.rpx"),
+                    "size_bytes": 4,
+                    "mtime": 1,
+                    "sha256": None,
+                }
             ],
         },
     )
@@ -547,9 +539,7 @@ def test_a_member_at_the_depth_limit_streams(service, library, catalog):
         {
             "handler": "wiiu_decrypted",
             "title": "Deep",
-            "files": [
-                {"name": name, "path": str(deep / "leaf.bin"), "size_bytes": 4, "mtime": 1, "sha256": None}
-            ],
+            "files": [{"name": name, "path": str(deep / "leaf.bin"), "size_bytes": 4, "mtime": 1, "sha256": None}],
         },
     )
     base, _ = service

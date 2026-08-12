@@ -4,9 +4,9 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-    # The importer is a uv project: its dependencies are resolved and hashed in
-    # importer/uv.lock, and uv2nix builds them straight from that. `uv lock` and
-    # `nix build` therefore agree by construction, rather than by someone
+    # The Python package is a uv project: its dependencies are resolved and
+    # hashed in uv.lock, and uv2nix builds them straight from that. `uv lock`
+    # and `nix build` therefore agree by construction, rather than by someone
     # remembering to update a list of nixpkgs attributes to match.
     pyproject-nix = {
       url = "github:pyproject-nix/pyproject.nix";
@@ -51,7 +51,8 @@
             }
           )
         );
-      # The importer's dependency set, straight out of importer/uv.lock.
+      # The one Python workspace — service and indexer are roles of a single
+      # package, resolved from the root uv.lock.
       #
       # sourcePreference = "wheel": these are pure-python packages published as
       # wheels, so building from sdists would only add work and a build-system
@@ -59,7 +60,7 @@
       pythonSets = forAllSystems (
         pkgs:
         let
-          workspace = uv2nix.lib.workspace.loadWorkspace { workspaceRoot = ./importer; };
+          workspace = uv2nix.lib.workspace.loadWorkspace { workspaceRoot = ./.; };
           overlay = workspace.mkPyprojectOverlay { sourcePreference = "wheel"; };
         in
         {
@@ -87,10 +88,14 @@
         envs
         // rec {
           gotg = pkgs.callPackage ./client { inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg-pads; };
-          gotg-importer = pkgs.callPackage ./importer {
-            venv = py.set.mkVirtualEnv "gotg-importer-env" py.workspace.deps.default;
+          # Both roles come from the one workspace: the indexer venv carries
+          # the yaml extra, the service venv carries nothing at all.
+          gotg-importer = pkgs.callPackage ./nix/gotg-importer.nix {
+            venv = py.set.mkVirtualEnv "gotg-indexer-env" py.workspace.deps.optionals;
           };
-          gotg-proxy = pkgs.callPackage ./proxy { };
+          gotg-proxy = pkgs.callPackage ./nix/gotg-proxy.nix {
+            venv = py.set.mkVirtualEnv "gotg-service-env" py.workspace.deps.default;
+          };
           default = gotg;
 
 
@@ -193,7 +198,7 @@
               let
                 py = pythonSets.${pkgs.stdenv.hostPlatform.system};
               in
-              py.set.mkVirtualEnv "gotg-importer-dev-env" py.workspace.deps.all
+              py.set.mkVirtualEnv "gotg-dev-env" py.workspace.deps.all
             )
             pkgs.uv
           ]
@@ -229,17 +234,17 @@
         # buildPythonApplication used to run these through pytestCheckHook; a
         # uv2nix venv has no such hook, so they get a check of their own rather
         # than quietly stopping.
-        importer-tests =
+        python-tests =
           let
             py = pythonSets.${pkgs.stdenv.hostPlatform.system};
             # deps.all rather than deps.default: the dev group is where pytest is.
-            venv = py.set.mkVirtualEnv "gotg-importer-test-env" py.workspace.deps.all;
+            venv = py.set.mkVirtualEnv "gotg-test-env" py.workspace.deps.all;
           in
-          pkgs.runCommand "check-importer-tests" { nativeBuildInputs = [ venv ]; } ''
-            cp -r ${./importer} importer
-            chmod -R u+w importer
-            cd importer
-            python -m pytest tests/
+          pkgs.runCommand "check-python-tests" { nativeBuildInputs = [ venv ]; } ''
+            mkdir repo && cd repo
+            cp -r ${./tests} tests
+            chmod -R u+w tests
+            python -m pytest tests/service tests/indexer -q
             touch $out
           '';
         client = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg;
@@ -372,9 +377,9 @@
         # real map rather than a copy of it.
         platforms =
           pkgs.runCommand "check-platforms" { nativeBuildInputs = [ pkgs.python312 ]; } ''
-            export PYTHONPATH=${./importer/src}
+            export PYTHONPATH=${./src}
             export GOTG_ENV_DIR=${./client/env}
-            python3 ${./importer/tests/check_platforms.py}
+            python3 ${./tests/indexer/check_platforms.py}
             touch $out
           '';
 
@@ -385,8 +390,8 @@
             }
             ''
               cd ${./.}
-              ruff check --no-cache importer
-              ruff format --no-cache --check importer
+              ruff check --no-cache src/gotg tests/service tests/indexer
+              ruff format --no-cache --check src/gotg tests/service tests/indexer
               touch $out
             '';
       });

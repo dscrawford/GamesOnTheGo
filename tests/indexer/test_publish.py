@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from gotg_importer.execute import STATUS_DONE, STATUS_ERROR, Result
-from gotg_importer.plan import (
+from gotg.indexer.execute import STATUS_DONE, STATUS_ERROR, Result
+from gotg.indexer.plan import (
     ACTION_ARCHIVE,
     ACTION_CONVERT,
     ACTION_EXTRACT,
@@ -24,7 +24,7 @@ from gotg_importer.plan import (
     ACTION_MANUAL,
     Op,
 )
-from gotg_importer.publish import CatalogAPI, Collision, Publisher, PublishError, _members
+from gotg.indexer.publish import CatalogAPI, Collision, Publisher, PublishError, _members
 
 
 class StubCatalog(BaseHTTPRequestHandler):
@@ -190,7 +190,7 @@ def test_an_unchanged_member_keeps_the_stored_hash_without_rehashing(stub, tmp_p
     def never(*args, **kwargs):
         raise AssertionError("an unchanged member must not be re-hashed")
 
-    monkeypatch.setattr("gotg_importer.publish.ex.sha256_file", never)
+    monkeypatch.setattr("gotg.indexer.publish.ex.sha256_file", never)
     Publisher(CatalogAPI(base, "t")).publish(result)
     assert handler.puts[0][1]["files"][0]["sha256"] == "f" * 64
 
@@ -224,7 +224,7 @@ def test_a_link_reuses_the_sidecar_execute_wrote(stub, tmp_path, monkeypatch):
     def never(*args, **kwargs):
         raise AssertionError("the sidecar hash was already paid for")
 
-    monkeypatch.setattr("gotg_importer.publish.ex.sha256_file", never)
+    monkeypatch.setattr("gotg.indexer.publish.ex.sha256_file", never)
     Publisher(CatalogAPI(base, "t")).publish(result)
     assert handler.puts[0][1]["files"][0]["sha256"] == "e" * 64
 
@@ -260,8 +260,8 @@ def test_an_unreachable_api_is_a_publish_error():
 
 
 def test_diff_catalog_maps_links_by_bytes_and_derived_by_presence(stub):
-    from gotg_importer.manifest import Entry
-    from gotg_importer.publish import diff_catalog
+    from gotg.indexer.manifest import Entry
+    from gotg.indexer.publish import diff_catalog
 
     base, handler = stub
     handler.games = [
@@ -300,8 +300,8 @@ def test_diff_catalog_maps_links_by_bytes_and_derived_by_presence(stub):
 
 
 def test_diff_catalog_flags_a_link_hash_mismatch(stub):
-    from gotg_importer.manifest import Entry
-    from gotg_importer.publish import diff_catalog
+    from gotg.indexer.manifest import Entry
+    from gotg.indexer.publish import diff_catalog
 
     base, handler = stub
     handler.games = [
@@ -389,7 +389,7 @@ def test_a_fractional_mtime_still_matches_the_stored_integer_row(stub, tmp_path,
     def never(*args, **kwargs):
         raise AssertionError("a same-second mtime must not trigger a rehash")
 
-    monkeypatch.setattr("gotg_importer.publish.ex.sha256_file", never)
+    monkeypatch.setattr("gotg.indexer.publish.ex.sha256_file", never)
     Publisher(CatalogAPI(base, "t")).publish(result)
     member = handler.puts[0][1]["files"][0]
     assert member["sha256"] == "f" * 64
@@ -423,14 +423,14 @@ def test_an_unhashed_row_is_rehashed_when_hashing_returns(stub, tmp_path):
 
 
 def test_diff_of_an_empty_manifest_against_an_empty_catalog_is_clean(stub):
-    from gotg_importer.publish import diff_catalog
+    from gotg.indexer.publish import diff_catalog
 
     base, _ = stub
     assert diff_catalog({}, CatalogAPI(base, "t")) == []
 
 
 def test_an_empty_manifest_reports_every_catalog_row(stub):
-    from gotg_importer.publish import diff_catalog
+    from gotg.indexer.publish import diff_catalog
 
     base, handler = stub
     handler.games = [
@@ -445,8 +445,8 @@ def test_an_empty_manifest_reports_every_catalog_row(stub):
 
 
 def test_an_empty_catalog_reports_every_manifest_entry(stub):
-    from gotg_importer.manifest import Entry
-    from gotg_importer.publish import diff_catalog
+    from gotg.indexer.manifest import Entry
+    from gotg.indexer.publish import diff_catalog
 
     base, _ = stub
     manifest = {
@@ -456,8 +456,8 @@ def test_an_empty_catalog_reports_every_manifest_entry(stub):
 
 
 def test_a_link_entry_with_extra_members_is_flagged(stub):
-    from gotg_importer.manifest import Entry
-    from gotg_importer.publish import diff_catalog
+    from gotg.indexer.manifest import Entry
+    from gotg.indexer.publish import diff_catalog
 
     base, handler = stub
     handler.games = [
@@ -478,9 +478,9 @@ def test_a_link_entry_with_extra_members_is_flagged(stub):
 
 
 def test_the_games_root_pass_covers_what_no_longer_seeds(stub, tmp_path):
-    from gotg_importer.config import load as load_config
-    from gotg_importer.manifest import Entry
-    from gotg_importer.publish import publish_games_root
+    from gotg.indexer.config import load as load_config
+    from gotg.indexer.manifest import Entry
+    from gotg.indexer.publish import publish_games_root
 
     base, handler = stub
     games = tmp_path / "Games"
@@ -508,9 +508,9 @@ def test_the_games_root_pass_covers_what_no_longer_seeds(stub, tmp_path):
 
 
 def test_a_games_root_entry_missing_on_disk_is_an_error_not_a_crash(stub, tmp_path):
-    from gotg_importer.config import load as load_config
-    from gotg_importer.manifest import Entry
-    from gotg_importer.publish import publish_games_root
+    from gotg.indexer.config import load as load_config
+    from gotg.indexer.manifest import Entry
+    from gotg.indexer.publish import publish_games_root
 
     base, _ = stub
     (tmp_path / "Games").mkdir()

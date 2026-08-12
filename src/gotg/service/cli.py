@@ -12,9 +12,9 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
+from ..catalog import CatalogStore
+from ..saves import DEFAULT_KEEP, DEFAULT_MAX_BYTES, SavesStore
 from .app import Config, make_server
-from .catalog import CatalogStore
-from .saves import DEFAULT_KEEP, DEFAULT_MAX_BYTES, SavesStore
 
 
 def config_from_env(env: Mapping[str, str] | None = None) -> Config:
@@ -90,8 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         files_dir=files_dir,
         stream_slots=stream_slots,
     )
-    held = [name for name, on in (("steamgriddb", config.steamgriddb_key),
-                                  ("igdb", config.igdb_client_id)) if on]
+    held = [name for name, on in (("steamgriddb", config.steamgriddb_key), ("igdb", config.igdb_client_id)) if on]
     saves = f"saves under {store.root}" if store else "no saves store"
     games = f"catalog at {catalog.db}" if catalog else "no catalog"
     creds = ", ".join(held) or "nothing"

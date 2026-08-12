@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from gotg_importer.classify import (
+from gotg.indexer.classify import (
     HANDLER_EXCLUDED,
     HANDLER_MANUAL,
     HANDLER_NO_INTRO_SET,
@@ -15,8 +15,8 @@ from gotg_importer.classify import (
     HANDLER_WIIU_NUS,
     classify,
 )
-from gotg_importer.rules import defaults, load
-from gotg_importer.scan import Source
+from gotg.indexer.rules import defaults, load
+from gotg.indexer.scan import Source
 
 RULES = defaults()
 

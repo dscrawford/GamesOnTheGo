@@ -6,7 +6,7 @@ the games root, and that every op names a destination the client can serve.
 
 import pytest
 
-from gotg_importer.plan import (
+from gotg.indexer.plan import (
     ACTION_ARCHIVE,
     ACTION_CONVERT,
     ACTION_EXTRACT,
@@ -15,9 +15,9 @@ from gotg_importer.plan import (
     ACTION_SKIP,
     plan_single_archive,
 )
-from gotg_importer.planner import plan_source, summarize
-from gotg_importer.rules import defaults
-from gotg_importer.slugify import ENTRY_RE
+from gotg.indexer.planner import plan_source, summarize
+from gotg.indexer.rules import defaults
+from gotg.indexer.slugify import ENTRY_RE
 
 RULES = defaults()
 
@@ -99,7 +99,7 @@ def test_scene_release_plans_an_extraction(roots):
 def test_scene_release_without_an_unpacked_rom_reads_the_archive(roots, monkeypatch):
     # The live library ships only the .rar set, which previously produced a
     # platform-less op writing to "/Games//world.….r00".
-    import gotg_importer.scan as scanmod
+    import gotg.indexer.scan as scanmod
 
     src, games = roots
     stem = "v-the_legend_of_zelda_skyward_sword_hd"
@@ -120,7 +120,7 @@ def test_scene_release_without_an_unpacked_rom_reads_the_archive(roots, monkeypa
 
 
 def test_scene_release_of_an_unknown_platform_is_flagged_not_guessed(roots, monkeypatch):
-    import gotg_importer.scan as scanmod
+    import gotg.indexer.scan as scanmod
 
     src, games = roots
     make_dir(src, "Some_Release-GRP", files=("x.rar", "x.r00", "x.sfv"))
@@ -272,9 +272,9 @@ def test_a_lone_archive_is_planned_end_to_end(tmp_path, monkeypatch):
     finds it — which is exactly the seam a real dry run caught as
     "unknown handler 'single_archive'".
     """
-    from gotg_importer import scan as sc
-    from gotg_importer.planner import plan_source
-    from gotg_importer.rules import load as load_rules
+    from gotg.indexer import scan as sc
+    from gotg.indexer.planner import plan_source
+    from gotg.indexer.rules import load as load_rules
 
     src = tmp_path / "Super Mario Sunshine (USA).7z"
     src.write_bytes(b"archive")

@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from gotg_proxy.app import Config, make_server
+from gotg.service.app import Config, make_server
 
 # --- a stub for whatever sits upstream --------------------------------------
 
@@ -285,7 +285,7 @@ def test_timing_safe_comparison_is_used():
     # the code: a plain == on a shared secret leaks its length and prefix.
     import inspect
 
-    from gotg_proxy import app
+    from gotg.service import app
 
     assert "compare_digest" in inspect.getsource(app)
 
@@ -293,7 +293,7 @@ def test_timing_safe_comparison_is_used():
 def test_upstream_calls_are_bounded():
     # A request that never returns holds a thread open; with enough of them the
     # proxy stops answering anybody.
-    from gotg_proxy import app
+    from gotg.service import app
 
     assert 0 < app.TIMEOUT <= 30
 
@@ -426,10 +426,7 @@ def test_a_hostile_content_type_cannot_split_our_response():
     def hostile(sock):
         conn, _ = sock.accept()
         conn.recv(65536)
-        conn.sendall(
-            b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n Injected: yes\r\n"
-            b"Content-Length: 2\r\n\r\nhi"
-        )
+        conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n Injected: yes\r\nContent-Length: 2\r\n\r\nhi")
         conn.close()
 
     listener = socket.socket()

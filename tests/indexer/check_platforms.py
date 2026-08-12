@@ -9,7 +9,7 @@ import os
 import pathlib
 import sys
 
-from gotg_importer.plan import DAT_DIR_PLATFORM, EXT_PLATFORM
+from gotg.indexer.plan import DAT_DIR_PLATFORM, EXT_PLATFORM
 
 envs = pathlib.Path(os.environ["GOTG_ENV_DIR"])
 missing = []

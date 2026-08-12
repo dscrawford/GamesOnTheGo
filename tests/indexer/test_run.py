@@ -9,13 +9,13 @@ import re
 
 import pytest
 
-from gotg_importer.config import load as load_config
-from gotg_importer.execute import STATUS_ERROR, Result, cleanup_staging
-from gotg_importer.plan import ACTION_HARDLINK, Op
-from gotg_importer.planner import plan_source
-from gotg_importer.publish import Collision, PublishError
-from gotg_importer.rules import defaults
-from gotg_importer.run import discover, run_paths, run_scan
+from gotg.indexer.config import load as load_config
+from gotg.indexer.execute import STATUS_ERROR, Result, cleanup_staging
+from gotg.indexer.plan import ACTION_HARDLINK, Op
+from gotg.indexer.planner import plan_source
+from gotg.indexer.publish import Collision, PublishError
+from gotg.indexer.rules import defaults
+from gotg.indexer.run import discover, run_paths, run_scan
 
 RULES = defaults()
 
@@ -51,7 +51,7 @@ def test_catalog_survives_a_run_that_dies_later(cfg):
     exploding = cfg.source_root / "second"
     exploding.mkdir()
 
-    import gotg_importer.run as runmod
+    import gotg.indexer.run as runmod
 
     real = runmod.process_source
     calls = {"n": 0}
@@ -128,8 +128,8 @@ def test_cleanup_on_a_missing_games_root_is_harmless(tmp_path):
 def test_scan_finds_games_and_walks_past_everything_else(tmp_path):
     """The source tree is shared with film and television: a TV episode is not a
     low-confidence game, it is not a game, and must not become a manual item."""
-    from gotg_importer.rules import load as load_rules
-    from gotg_importer.run import discover
+    from gotg.indexer.rules import load as load_rules
+    from gotg.indexer.run import discover
 
     root = tmp_path / "Torrents"
     root.mkdir()
@@ -266,7 +266,7 @@ def test_a_scan_with_a_failed_import_does_not_sweep(cfg, monkeypatch):
         op = Op(ACTION_HARDLINK, "n64", str(path), "", "usa.body_harvest")
         return [Result(op, STATUS_ERROR, "disk full")]
 
-    monkeypatch.setattr("gotg_importer.run.process_source", fail)
+    monkeypatch.setattr("gotg.indexer.run.process_source", fail)
     publisher = FakePublisher()
 
     stats = run_scan(cfg.source_root, cfg, RULES, dry_run=False, publisher=publisher)
@@ -339,7 +339,7 @@ def test_films_and_television_stay_quiet(cfg, caplog):
 def test_the_two_platform_maps_never_drift(cfg):
     # rules.yaml overlays the code defaults, so a name in one and not the other
     # is a silent disagreement — the shape of the Game Boy miss.
-    from gotg_importer.plan import DAT_DIR_PLATFORM
+    from gotg.indexer.plan import DAT_DIR_PLATFORM
 
     for name, (platform, handler) in DAT_DIR_PLATFORM.items():
         assert name in RULES.dat_dirs, f"{name} is in plan.py but not rules.yaml"

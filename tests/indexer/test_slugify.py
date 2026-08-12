@@ -2,7 +2,7 @@
 
 import pytest
 
-from gotg_importer.slugify import ENTRY_RE, parse, select_1g1r, title_slug
+from gotg.indexer.slugify import ENTRY_RE, parse, select_1g1r, title_slug
 
 # --- GOTG spec examples (must match verbatim) --------------------------------
 

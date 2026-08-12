@@ -1,11 +1,6 @@
-# The importer, built from its own uv.lock rather than from a list of nixpkgs
-# attributes kept in step by hand.
-#
-# `venv` is what uv2nix produced: a virtual environment holding gotg-importer
-# and exactly the dependencies importer/uv.lock resolves to. All this adds is
-# the part uv has no opinion about — the archive and checksum tools the handlers
-# shell out to, wrapped in rather than assumed on PATH so the container image
-# needs no extra wiring.
+# The indexer, from the same workspace venv as the service, plus the archive
+# and checksum tools its handlers shell out to — wrapped in rather than
+# assumed on PATH, so the container image needs no extra wiring.
 {
   lib,
   runCommand,
@@ -19,16 +14,13 @@
   coreutils,
 }:
 
-runCommand "gotg-importer-0.1.0"
+runCommand "gotg-importer-0.4.0"
   {
     nativeBuildInputs = [ makeWrapper ];
     inherit venv;
-
-    # Read by the image builder and by anything else that wants to tag a build.
-    passthru.version = "0.1.0";
-
+    passthru.version = "0.4.0";
     meta = {
-      description = "Organizes completed game torrents into the GOTG /Games tree";
+      description = "Indexes completed game torrents into the GOTG catalog and /Games";
       mainProgram = "gotg-importer";
     };
   }

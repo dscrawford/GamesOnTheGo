@@ -16,9 +16,9 @@ import urllib.request
 import pytest
 from test_proxy import free_port
 
-import gotg_proxy.catalog as catalog_module
-from gotg_proxy.app import Config, make_server
-from gotg_proxy.catalog import CatalogStore, Conflict, SweepRefused
+import gotg.catalog as catalog_module
+from gotg.catalog import CatalogStore, Conflict, SweepRefused
+from gotg.service.app import Config, make_server
 
 CLIENT = "client-token"
 INDEX = "index-token"
@@ -224,8 +224,13 @@ def test_multi_file_entries_round_trip(catalog, library):
         "handler": "scene_archive",
         "title": "Luigis Mansion 2 HD",
         "files": [
-            {"name": f"hr-banra.r{i:02d}", "path": str(library / "rel" / f"hr-banra.r{i:02d}"),
-             "size_bytes": 100, "mtime": 1, "sha256": None}
+            {
+                "name": f"hr-banra.r{i:02d}",
+                "path": str(library / "rel" / f"hr-banra.r{i:02d}"),
+                "size_bytes": 100,
+                "mtime": 1,
+                "sha256": None,
+            }
             for i in range(3)
         ],
     }
@@ -288,16 +293,14 @@ def test_concurrent_reads_during_writes(catalog, library):
 
 
 def test_reads_for_clients_writes_for_the_index(service, library):
-    status, _ = call(f"{service}/catalog/n64/usa.zelda", method="PUT",
-                     token=INDEX, body=entry(library))
+    status, _ = call(f"{service}/catalog/n64/usa.zelda", method="PUT", token=INDEX, body=entry(library))
     assert status == 200
 
     status, view = call(f"{service}/catalog")
     assert status == 200
     assert view["games"][0]["id"] == "usa.zelda"
 
-    status, _ = call(f"{service}/catalog/n64/usa.zelda", method="PUT",
-                     token=CLIENT, body=entry(library))
+    status, _ = call(f"{service}/catalog/n64/usa.zelda", method="PUT", token=CLIENT, body=entry(library))
     assert status == 403
 
     status, _ = call(f"{service}/catalog?full=1")
@@ -314,20 +317,19 @@ def test_wire_conflict_carries_the_stored_entry(service, library):
     status, body = call(f"{service}/catalog/n64/usa.zelda", method="PUT", token=INDEX, body=other)
     assert status == 409
     assert body["stored"]["id"] == "usa.zelda"
-    status, _ = call(f"{service}/catalog/n64/usa.zelda?force=1", method="PUT",
-                     token=INDEX, body=other)
+    status, _ = call(f"{service}/catalog/n64/usa.zelda?force=1", method="PUT", token=INDEX, body=other)
     assert status == 200
 
 
 def test_wire_sweep_and_delete(service, library):
     call(f"{service}/catalog/n64/usa.zelda", method="PUT", token=INDEX, body=entry(library))
 
-    status, _ = call(f"{service}/catalog/sweep", method="POST", token=CLIENT,
-                     body={"since": "2099-01-01T00:00:00Z"})
+    status, _ = call(f"{service}/catalog/sweep", method="POST", token=CLIENT, body={"since": "2099-01-01T00:00:00Z"})
     assert status == 403
 
-    status, report = call(f"{service}/catalog/sweep?confirm=1", method="POST", token=INDEX,
-                          body={"since": "2099-01-01T00:00:00Z"})
+    status, report = call(
+        f"{service}/catalog/sweep?confirm=1", method="POST", token=INDEX, body={"since": "2099-01-01T00:00:00Z"}
+    )
     assert status == 200
     assert report["vanished"]
 
@@ -366,8 +368,7 @@ def test_an_unset_index_token_makes_the_catalog_read_only(catalog, library):
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}"
     try:
-        status, _ = call(f"{base}/catalog/n64/usa.zelda", method="PUT",
-                         token=CLIENT, body=entry(library))
+        status, _ = call(f"{base}/catalog/n64/usa.zelda", method="PUT", token=CLIENT, body=entry(library))
         assert status == 503, "writes must never fall back to the client token"
         status, _ = call(f"{base}/catalog")
         assert status == 200
@@ -382,8 +383,13 @@ def test_a_failing_upsert_leaves_the_stored_entry_intact(catalog, library):
     catalog.upsert("n64", "usa.zelda", entry(library))
     bad = entry(library)
     bad["files"].append(
-        {"name": "usa.extra", "path": str(library / "some-release" / "usa.extra"),
-         "size_bytes": 2**64, "mtime": 1, "sha256": None}
+        {
+            "name": "usa.extra",
+            "path": str(library / "some-release" / "usa.extra"),
+            "size_bytes": 2**64,
+            "mtime": 1,
+            "sha256": None,
+        }
     )
     with pytest.raises((OverflowError, ValueError)):
         catalog.upsert("n64", "usa.zelda", bad, force=True)
@@ -594,8 +600,13 @@ def test_a_wiiu_sized_entry_fits_the_catalog_cap(service, library):
     fat = entry(library)
     fat["handler"] = "wiiu_decrypted"
     fat["files"] = [
-        {"name": f"content/{i:05}.pack", "path": str(library / "rel" / f"{i:05}.pack"),
-         "size_bytes": 1, "mtime": 1, "sha256": "a" * 64}
+        {
+            "name": f"content/{i:05}.pack",
+            "path": str(library / "rel" / f"{i:05}.pack"),
+            "size_bytes": 1,
+            "mtime": 1,
+            "sha256": "a" * 64,
+        }
         for i in range(5000)
     ]
     status, stored = call(f"{service}/catalog/wiiu/usa.big", method="PUT", token=INDEX, body=fat)
@@ -622,8 +633,9 @@ def test_a_nesting_bomb_is_a_400_not_a_crash(service):
 
 def test_unicode_titles_survive_the_wire(service, library):
     title = "ゼルダの伝説 時のオカリナ 🎮"
-    status, stored = call(f"{service}/catalog/n64/usa.zelda", method="PUT", token=INDEX,
-                          body=entry(library, title=title))
+    status, stored = call(
+        f"{service}/catalog/n64/usa.zelda", method="PUT", token=INDEX, body=entry(library, title=title)
+    )
     assert status == 200 and stored["title"] == title
     status, view = call(f"{service}/catalog")
     assert view["games"][0]["title"] == title
@@ -635,8 +647,9 @@ def test_a_non_ascii_bearer_token_earns_a_401_not_a_crash(service):
 
 
 def test_percent_encoded_hostility_in_the_path_is_refused(service, library):
-    status, _ = call(f"{service}/catalog/n64%27%3B%20DROP%20TABLE%20entry/usa.zelda",
-                     method="PUT", token=INDEX, body=entry(library))
+    status, _ = call(
+        f"{service}/catalog/n64%27%3B%20DROP%20TABLE%20entry/usa.zelda", method="PUT", token=INDEX, body=entry(library)
+    )
     assert status == 400
 
 
@@ -657,7 +670,7 @@ def test_malformed_catalog_routes_are_404(service, library, method, path):
 
 
 def test_catalog_env_vars_come_as_a_pair(tmp_path):
-    from gotg_proxy.cli import catalog_from_env
+    from gotg.service.cli import catalog_from_env
 
     assert catalog_from_env({}) is None
     with pytest.raises(ValueError, match="set together"):
@@ -671,13 +684,14 @@ def test_nested_member_names_carry_a_wiiu_tree(catalog, library):
         "handler": "wiiu_decrypted",
         "title": "Wind Waker HD",
         "files": [
-            {"name": name, "path": str(library / "rel" / name),
-             "size_bytes": 1, "mtime": 1, "sha256": None}
+            {"name": name, "path": str(library / "rel" / name), "size_bytes": 1, "mtime": 1, "sha256": None}
             for name in ["code/app.rpx", "content/scene/x.pack", "meta/meta.xml"]
         ],
     }
     catalog.upsert("wiiu", "usa.wind_waker_hd", tree)
     game = catalog.view()["games"][0]
     assert [f["name"] for f in game["files"]] == [
-        "code/app.rpx", "content/scene/x.pack", "meta/meta.xml",
+        "code/app.rpx",
+        "content/scene/x.pack",
+        "meta/meta.xml",
     ]

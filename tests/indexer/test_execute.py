@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from gotg_importer.config import load as load_config
-from gotg_importer.execute import (
+from gotg.indexer.config import load as load_config
+from gotg.indexer.execute import (
     STATUS_DONE,
     STATUS_ERROR,
     STATUS_MANUAL,
@@ -16,7 +16,7 @@ from gotg_importer.execute import (
     sha256_file,
     write_sidecar,
 )
-from gotg_importer.plan import ACTION_ARCHIVE, ACTION_HARDLINK, ACTION_MANUAL, ACTION_SKIP, Op
+from gotg.indexer.plan import ACTION_ARCHIVE, ACTION_HARDLINK, ACTION_MANUAL, ACTION_SKIP, Op
 
 
 @pytest.fixture
@@ -211,7 +211,7 @@ def test_archive_of_a_directory_without_decrypted_output_fails_cleanly(cfg):
 
 
 def test_extract_hardlinks_an_already_unpacked_rom(cfg):
-    from gotg_importer.plan import ACTION_EXTRACT
+    from gotg.indexer.plan import ACTION_EXTRACT
 
     release = cfg.source_root / "Game_NSW-GRP"
     release.mkdir()
@@ -231,7 +231,7 @@ def test_extract_hardlinks_an_already_unpacked_rom(cfg):
 
 
 def test_extract_without_archive_or_rom_fails_cleanly(cfg):
-    from gotg_importer.plan import ACTION_EXTRACT
+    from gotg.indexer.plan import ACTION_EXTRACT
 
     release = cfg.source_root / "Game_NSW-GRP"
     release.mkdir()
@@ -269,7 +269,7 @@ def test_convert_normalizes_an_archived_image_and_leaves_the_source_alone(cfg, m
     dolphin-tool is stubbed — the conversion itself was verified against the real
     file (IMPORTER_SPEC.md §5a); what matters here is the staging discipline.
     """
-    from gotg_importer import execute as ex
+    from gotg.indexer import execute as ex
 
     games = cfg.games_root
     src = cfg.source_root / "Some Game (USA).7z"

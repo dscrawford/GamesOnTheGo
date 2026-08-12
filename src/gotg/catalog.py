@@ -98,11 +98,7 @@ def _now() -> str:
 
 
 def _valid_segment(segment: str) -> bool:
-    return (
-        0 < len(segment) <= 255
-        and segment.isprintable()
-        and not segment.startswith(".")
-    )
+    return 0 < len(segment) <= 255 and segment.isprintable() and not segment.startswith(".")
 
 
 # A member name is a relative path: one segment for almost everything, nested
@@ -219,9 +215,7 @@ class CatalogStore:
             if sha is not None and (not isinstance(sha, str) or not SHA256_RE.match(sha)):
                 raise ValueError(f"invalid sha256 for {name!r}")
 
-            cleaned.append(
-                {"name": name, "path": path, "size_bytes": size, "mtime": mtime, "sha256": sha}
-            )
+            cleaned.append({"name": name, "path": path, "size_bytes": size, "mtime": mtime, "sha256": sha})
 
         return {"handler": handler, "title": title.strip(), "files": cleaned}
 
@@ -249,9 +243,7 @@ class CatalogStore:
                 " handler=excluded.handler, title=excluded.title, seen_at=excluded.seen_at",
                 (platform, game_id, entry["handler"], entry["title"], imported_at, now),
             )
-            self._write.execute(
-                "DELETE FROM entry_file WHERE platform = ? AND id = ?", (platform, game_id)
-            )
+            self._write.execute("DELETE FROM entry_file WHERE platform = ? AND id = ?", (platform, game_id))
             self._write.executemany(
                 "INSERT INTO entry_file (platform, id, name, path, size_bytes, mtime, sha256)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -267,9 +259,7 @@ class CatalogStore:
 
     def delete(self, platform: str, game_id: str) -> bool:
         with self._write_lock, self._write:
-            cursor = self._write.execute(
-                "DELETE FROM entry WHERE platform = ? AND id = ?", (platform, game_id)
-            )
+            cursor = self._write.execute("DELETE FROM entry WHERE platform = ? AND id = ?", (platform, game_id))
             return cursor.rowcount > 0
 
     def sweep(self, since: str, *, confirm: bool = False) -> dict:
@@ -293,14 +283,11 @@ class CatalogStore:
     # --- reads --------------------------------------------------------------
 
     def _entry(self, conn: sqlite3.Connection, platform: str, game_id: str, *, full: bool) -> dict | None:
-        row = conn.execute(
-            "SELECT * FROM entry WHERE platform = ? AND id = ?", (platform, game_id)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM entry WHERE platform = ? AND id = ?", (platform, game_id)).fetchone()
         if row is None:
             return None
         files = conn.execute(
-            "SELECT name, path, size_bytes, mtime, sha256 FROM entry_file"
-            " WHERE platform = ? AND id = ? ORDER BY name",
+            "SELECT name, path, size_bytes, mtime, sha256 FROM entry_file WHERE platform = ? AND id = ? ORDER BY name",
             (platform, game_id),
         ).fetchall()
         entry = {
@@ -340,9 +327,7 @@ class CatalogStore:
 
         by_entry: dict[tuple[str, str], list] = {}
         for row in files:
-            by_entry.setdefault((row["platform"], row["id"]), []).append(
-                self._file_view(row, full=full)
-            )
+            by_entry.setdefault((row["platform"], row["id"]), []).append(self._file_view(row, full=full))
         games = []
         for row in entries:
             game = {
