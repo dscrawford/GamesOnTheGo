@@ -367,20 +367,13 @@ class CatalogStore:
             return None
         return Path(os.path.realpath(row["path"]))
 
-    def member(self, platform: str, game_id: str, name: str) -> dict | None:
-        """One member's client-safe metadata — what the response headers need."""
-        if not (PLATFORM_RE.match(platform) and ID_RE.match(game_id) and valid_filename(name)):
-            return None
-        with self._read() as conn:
-            row = conn.execute(
-                "SELECT name, size_bytes, sha256 FROM entry_file"
-                " WHERE platform = ? AND id = ? AND name = ?",
-                (platform, game_id, name),
-            ).fetchone()
-        return dict(row) if row else None
+    def open_member(self, platform: str, game_id: str, name: str) -> tuple[dict, int | None] | None:
+        """One member's metadata and an open fd — or fd None for a stale row,
+        or None outright when the catalog has no such member.
 
-    def open_member(self, platform: str, game_id: str, name: str) -> int | None:
-        """An open fd for one member file, or None.
+        One query serves both, on purpose: metadata and bytes read in two
+        snapshots could pair an old sha256 (sent as the ETag that validates
+        resumes) with new bytes — the exact splice If-Range exists to prevent.
 
         The containment check and the open are separate syscalls, and anything
         that can write inside a library root — the torrent client, most of all
@@ -389,15 +382,23 @@ class CatalogStore:
         component, and the /proc re-check catches a retargeted directory on
         the way there. The caller owns the fd.
         """
-        path = self.lookup(platform, game_id, name)
-        if path is None:
+        if not (PLATFORM_RE.match(platform) and ID_RE.match(game_id) and valid_filename(name)):
             return None
+        with self._read() as conn:
+            row = conn.execute(
+                "SELECT name, path, size_bytes, mtime, sha256 FROM entry_file"
+                " WHERE platform = ? AND id = ? AND name = ?",
+                (platform, game_id, name),
+            ).fetchone()
+        if row is None or not self._contained(row["path"]):
+            return None
+        meta = self._file_view(row, full=False)
         try:
-            fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+            fd = os.open(row["path"], os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
         except OSError:
-            return None
+            return meta, None
         real = Path(os.path.realpath(f"/proc/self/fd/{fd}"))
         if not any(real.is_relative_to(root) for root in self.roots):
             os.close(fd)
-            return None
-        return fd
+            return meta, None
+        return meta, fd

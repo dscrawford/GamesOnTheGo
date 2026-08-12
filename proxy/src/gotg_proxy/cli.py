@@ -74,6 +74,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     files_dir = Path(os.environ["GOTG_FILES_DIR"]) if os.environ.get("GOTG_FILES_DIR") else None
+    try:
+        stream_slots = int(os.environ.get("GOTG_STREAM_SLOTS", "4"))
+        if stream_slots < 1:
+            raise ValueError(stream_slots)
+    except ValueError:
+        print("error: GOTG_STREAM_SLOTS must be a positive integer", file=sys.stderr)
+        return 1
     server = make_server(  # noqa: S104 — a container listens on all of its own
         "0.0.0.0",
         port,
@@ -81,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         store,
         catalog,
         files_dir=files_dir,
-        stream_slots=int(os.environ.get("GOTG_STREAM_SLOTS", "4")),
+        stream_slots=stream_slots,
     )
     held = [name for name, on in (("steamgriddb", config.steamgriddb_key),
                                   ("igdb", config.igdb_client_id)) if on]

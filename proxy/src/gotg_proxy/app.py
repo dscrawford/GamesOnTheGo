@@ -65,15 +65,15 @@ TIMEOUT = 20
 MAX_BODY = 64 * 1024
 
 # A single byte-range request: bytes=N- or bytes=N-M. Multi-range answers 200
-# with the whole file rather than a multipart body nothing here needs.
-RANGE_RE = re.compile(r"^bytes=([0-9]+)-([0-9]*)$")
+# with the whole file rather than a multipart body nothing here needs. The
+# digit bound matters: int() on thousands of digits raises, and an absurd
+# range should fall through to a plain 200, not a traceback.
+RANGE_RE = re.compile(r"^bytes=([0-9]{1,18})-([0-9]{0,18})$")
 
 # What may be served from the files directory: keys and firmware names.
 # No leading dot by construction (the first class excludes it), no slash by
 # split, and the directory a person curates is the real allowlist.
 FILES_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
-
-STREAM_CHUNK = 1 << 20
 
 
 def open_contained(path: Path, root: Path) -> int | None:
@@ -239,12 +239,19 @@ class Handler(BaseHTTPRequestHandler):
     streams: threading.BoundedSemaphore
 
     server_version = USER_AGENT
+    # A stalled stream must not hold a slot forever: without this the socket
+    # blocks indefinitely on a client that stopped reading, and a handful of
+    # half-dead downloads would pin every stream slot until a restart.
+    timeout = 300
     protocol_version = "HTTP/1.1"
 
     def log_message(self, format, *args):  # noqa: A002
         # One line per request, without the client token ever being one of the
-        # things logged.
-        print(f"{self.command} {self.path.split('?')[0]} {args[1] if len(args) > 1 else ''}".strip())
+        # things logged. The path is raw attacker input, so control characters
+        # are replaced — a crafted request-target must not write live escape
+        # sequences into whoever is tailing the pod logs.
+        line = f"{self.command} {self.path.split('?')[0]} {args[1] if len(args) > 1 else ''}".strip()
+        print("".join(c if c.isprintable() else "�" for c in line))
 
     # --- replies ------------------------------------------------------------
 
@@ -253,7 +260,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        # A HEAD response is bodiless whatever the code: writing the JSON of a
+        # 404 here would sit on the kept-alive connection and be parsed as the
+        # start of the next response.
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     def _problem(self, code: int, message: str, *, close: bool = False) -> None:
         # close: for rejections raised before the request body is read. On a
@@ -511,17 +522,19 @@ class Handler(BaseHTTPRequestHandler):
             return
         platform, game_id, name = segments
 
-        meta = self.catalog.member(platform, game_id, name)
-        fd = self.catalog.open_member(platform, game_id, name) if meta else None
+        found = self.catalog.open_member(platform, game_id, name)
+        if found is None:
+            self._problem(404, f"no such file: {platform}/{game_id}/{name}")
+            return
+        meta, fd = found
         if fd is None:
-            if meta is not None:
-                # The row exists and the bytes do not: the index is stale, and
-                # that is server news, not client news.
-                print(f"catalog names a missing file: {platform}/{game_id}/{name}", file=sys.stderr)
+            # The row exists and the bytes do not: the index is stale, and
+            # that is server news, not client news.
+            print(f"catalog names a missing file: {platform}/{game_id}/{name}", file=sys.stderr)
             self._problem(404, f"no such file: {platform}/{game_id}/{name}")
             return
         try:
-            self._stream_fd(fd, name, meta.get("sha256") if meta else None)
+            self._stream_fd(fd, name, meta.get("sha256"))
         finally:
             os.close(fd)
 
@@ -573,13 +586,18 @@ class Handler(BaseHTTPRequestHandler):
                 start = int(wanted.group(1))
                 if wanted.group(2):
                     end = min(int(wanted.group(2)), size - 1)
-                if start > end or start >= size:
+                if start >= size:
                     self.send_response(416)
                     self.send_header("Content-Range", f"bytes */{size}")
                     self.send_header("Content-Length", "0")
                     self.end_headers()
                     return
-                status = 206
+                if start > end:
+                    # An inverted range makes the whole header invalid, and an
+                    # invalid Range is ignored, not refused (RFC 9110 §14.1.1).
+                    start, end = 0, size - 1
+                else:
+                    status = 206
 
         streaming = self.command == "GET"
         # The cap is what keeps the saves and artwork halves answering while
@@ -613,31 +631,22 @@ class Handler(BaseHTTPRequestHandler):
                 self.streams.release()
 
     def _send_range(self, fd: int, offset: int, remaining: int) -> None:
-        # sendfile keeps the bytes in the kernel; the buffered response writer
-        # must be flushed first or headers arrive after the body.
+        # socket.sendfile rather than a hand-rolled os.sendfile loop: it
+        # handles partial sends, EAGAIN under the socket timeout, and falls
+        # back to plain send() where sendfile is unsupported — and the
+        # timeout is what stops a client that quit reading from holding a
+        # stream slot forever.
         self.wfile.flush()
-        sock = self.connection.fileno()
+        if remaining <= 0:
+            # socket.sendfile treats a falsy count as "the whole file".
+            return
+        sent = 0
         try:
-            while remaining > 0:
-                sent = os.sendfile(sock, fd, offset, min(remaining, STREAM_CHUNK))
-                if sent == 0:
-                    break
-                offset += sent
-                remaining -= sent
+            with open(fd, "rb", buffering=0, closefd=False) as src:
+                sent = self.connection.sendfile(src, offset, remaining)
         except OSError:
-            # Either sendfile is unsupported here (fall back to plain reads)
-            # or the socket died (the reads will find out immediately).
-            try:
-                os.lseek(fd, offset, os.SEEK_SET)
-                while remaining > 0:
-                    chunk = os.read(fd, min(remaining, 64 * 1024))
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
-                    remaining -= len(chunk)
-            except OSError:
-                pass
-        if remaining > 0:
+            pass
+        if sent < remaining:
             # A short body desynchronizes a kept-alive connection.
             self.close_connection = True
 

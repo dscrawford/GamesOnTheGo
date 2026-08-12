@@ -530,20 +530,29 @@ def test_open_member_refuses_a_symlink_swapped_in_after_indexing(catalog, tmp_pa
     target.write_bytes(b"rom!")
     catalog.upsert("n64", "usa.zelda", entry(library))
 
-    fd = catalog.open_member("n64", "usa.zelda", "usa.zelda.z64")
-    assert fd is not None
+    found = catalog.open_member("n64", "usa.zelda", "usa.zelda.z64")
+    assert found is not None and found[1] is not None
+    meta, fd = found
+    assert meta["size_bytes"] == 4
     import os
 
     assert os.read(fd, 4) == b"rom!"
     os.close(fd)
 
     # The torrent client (or anyone who can write inside a root) swaps the
-    # indexed file for a symlink pointing outside. The open must refuse it.
+    # indexed file for a symlink pointing outside. Containment fails on the
+    # resolved path, so the member reads as not-found at all — an attack does
+    # not even earn the stale-index log a merely deleted file gets.
     secret = tmp_path / "secret"
     secret.write_bytes(b"shh")
     target.unlink()
     target.symlink_to(secret)
     assert catalog.open_member("n64", "usa.zelda", "usa.zelda.z64") is None
+
+    # A deleted file, by contrast, is a stale row: metadata answers, no fd.
+    target.unlink()
+    found = catalog.open_member("n64", "usa.zelda", "usa.zelda.z64")
+    assert found is not None and found[1] is None
 
 
 # --- over the wire, the awkward bodies ---------------------------------------
