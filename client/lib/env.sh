@@ -214,8 +214,8 @@ env_refresh() {
 # .rpx inside code/), single-file games are just themselves.
 resolve_target() {
   local game="$1" path pattern match
-  path="$(game_local_path "$game")"
-  [[ -e "$path" ]] || die "not installed: $path"
+  path="$(game_installed_path "$game")" ||
+    die "not installed: $(game_local_path "$game")"
 
   pattern="$(override_field "$game" target)"
   if [[ -z "$pattern" || ! -d "$path" ]]; then

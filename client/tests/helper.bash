@@ -1,6 +1,6 @@
 # shellcheck shell=bash
-# Test harness: an isolated HOME plus a mock File Browser, so nothing here can
-# reach the real server or touch the real ~/Games.
+# Test harness: an isolated HOME plus the real GOTG service, so nothing here
+# can reach the real cluster or touch the real ~/Games.
 
 setup_env() {
   # Neither a terminal nor a display, which is how gotg runs under Steam and the
@@ -9,7 +9,6 @@ setup_env() {
   unset DISPLAY WAYLAND_DISPLAY
 
   export TEST_TMP="$BATS_TEST_TMPDIR"
-  export SERVER_ROOT="$TEST_TMP/server"
   export GOTG_CONFIG_DIR="$TEST_TMP/config"
   export GOTG_STATE_DIR="$TEST_TMP/state"
   export GOTG_GAMES_DIR="$TEST_TMP/Games"
@@ -28,7 +27,7 @@ setup_env() {
   # on the internet. The ones that mean to override it.
   export GOTG_LIBRETRO_URL="http://127.0.0.1:1"
 
-  mkdir -p "$SERVER_ROOT/Games/.gotg" "$GOTG_GAMES_DIR"
+  mkdir -p "$GOTG_GAMES_DIR"
 }
 
 # A free port, so tests can run in parallel.
@@ -40,27 +39,6 @@ s.bind(("127.0.0.1", 0))
 print(s.getsockname()[1])
 s.close()
 EOF
-}
-
-start_server() {
-  export MOCK_PORT
-  MOCK_PORT="$(pick_port)"
-  python3 "$BATS_TEST_DIRNAME/mock_filebrowser.py" "$SERVER_ROOT" "$MOCK_PORT" "$@" &
-  export MOCK_PID=$!
-  export GOTG_SERVER_URL="http://127.0.0.1:$MOCK_PORT"
-
-  local i
-  for i in $(seq 1 50); do
-    if curl -s -o /dev/null "$GOTG_SERVER_URL/api/raw/nope" 2>/dev/null; then return 0; fi
-    sleep 0.1
-  done
-  echo "mock server did not start" >&2
-  return 1
-}
-
-stop_server() {
-  [[ -n "${MOCK_PID:-}" ]] && kill "$MOCK_PID" 2>/dev/null
-  wait "${MOCK_PID:-}" 2>/dev/null || true
 }
 
 # The GOTG service itself, real rather than mocked: the saves conflict rules
@@ -106,36 +84,56 @@ write_api_config() {
   chmod 600 "$GOTG_CONFIG_DIR/api.json"
 }
 
-write_config() {
-  mkdir -p "$GOTG_CONFIG_DIR"
-  jq -n --arg s "$GOTG_SERVER_URL" \
-    '{server: $s, username: "tester", password: "hunter2", remote_root: "/Games"}' \
-    >"$GOTG_CONFIG_FILE"
-  chmod 600 "$GOTG_CONFIG_FILE"
-}
-
-# Publish a game on the mock server and add it to the catalog it serves.
+# Publish a game into the real service's library and catalog, the way the
+# indexer would: bytes in the library root, a row through the index token.
 add_game() {
   local platform="$1" name="$2" content="$3" title="${4:-A Game}"
-  mkdir -p "$SERVER_ROOT/Games/$platform"
-  printf '%s' "$content" >"$SERVER_ROOT/Games/$platform/$name"
+  local handler="${5:-single_file}"
+  mkdir -p "$SERVICE_LIBRARY_DIR/$platform"
+  printf '%s' "$content" >"$SERVICE_LIBRARY_DIR/$platform/$name"
 
-  local sha size
-  sha="$(sha256sum "$SERVER_ROOT/Games/$platform/$name" | cut -d' ' -f1)"
-  size="$(stat -c '%s' "$SERVER_ROOT/Games/$platform/$name")"
-  add_manifest_entry "$platform" "/Games/$platform/$name" file "$size" "$sha" "$title"
+  local file="$SERVICE_LIBRARY_DIR/$platform/$name"
+  local sha size mtime id
+  sha="$(sha256sum "$file" | cut -d' ' -f1)"
+  size="$(stat -c '%s' "$file")"
+  mtime="$(stat -c '%Y' "$file")"
+  id="${name%.*}"
+
+  jq -n --arg h "$handler" --arg t "$title" --arg n "$name" --arg p "$file" \
+    --argjson s "$size" --argjson m "$mtime" --arg sha "$sha" \
+    '{handler: $h, title: $t,
+      files: [{name: $n, path: $p, size_bytes: $s, mtime: $m, sha256: $sha}]}' |
+    curl -gfsS -X PUT -H "Authorization: Bearer index-token" \
+      --data-binary @- "$GOTG_SERVICE_URL/catalog/$platform/$id" >/dev/null
 }
 
+# The old manifest-shaped seeding, kept for the suites that only need a row
+# to exist: the entry lands in the service catalog, bytes optional.
 add_manifest_entry() {
   local platform="$1" path="$2" type="$3" size="$4" sha="$5" title="$6"
-  local manifest="$SERVER_ROOT/Games/.gotg/manifest.json"
-  [[ -f "$manifest" ]] || echo '{"version":1,"games":[]}' >"$manifest"
-  local tmp="$manifest.tmp"
-  jq --arg pf "$platform" --arg p "$path" --arg t "$type" \
-    --argjson s "$size" --arg sha "$sha" --arg title "$title" \
-    '.games += [{platform:$pf, path:$p, type:$t, size_bytes:$s,
-                 sha256:(if $sha == "" then null else $sha end), title:$title}]' \
-    "$manifest" >"$tmp" && mv "$tmp" "$manifest"
+  local name id
+  name="$(basename "$path")"
+  id="${name%.*}"
+  [[ "$type" == "dir" ]] && id="$name"
+  jq -n --arg t "$title" --arg n "$name" \
+    --arg p "$SERVICE_LIBRARY_DIR/$platform/$name" \
+    --argjson s "$size" --arg sha "$sha" \
+    '{handler: "single_file", title: $t,
+      files: [{name: $n, path: $p, size_bytes: $s, mtime: 1,
+               sha256: (if $sha == "" then null else $sha end)}]}' |
+    curl -gfsS -X PUT -H "Authorization: Bearer index-token" \
+      --data-binary @- "$GOTG_SERVICE_URL/catalog/$platform/$id" >/dev/null
+}
+
+# One member added to an existing entry (or a fresh multi-member entry): the
+# scene sets and trees. Callers build the entry JSON themselves when the shape
+# matters; this covers the common cases.
+add_member_game() {
+  local platform="$1" id="$2" title="$3" handler="$4" files_json="$5"
+  jq -n --arg h "$handler" --arg t "$title" --argjson f "$files_json" \
+    '{handler: $h, title: $t, files: $f}' |
+    curl -gfsS -X PUT -H "Authorization: Bearer index-token" \
+      --data-binary @- "$GOTG_SERVICE_URL/catalog/$platform/$id" >/dev/null
 }
 
 gotg() {
@@ -159,13 +157,9 @@ load_client_libs() {
 
   # shellcheck source=/dev/null
   local lib
-  for lib in color common config api manifest download env launcher pads pads-dolphin pads-ryujinx keys firmware remote saves; do
+  for lib in color common config manifest download env launcher pads pads-dolphin pads-ryujinx keys firmware remote saves; do
     source "$GOTG_LIB/$lib.sh"
   done
-  GOTG_SERVER="$GOTG_SERVER_URL"
-  GOTG_USER="tester"
-  GOTG_PASS="hunter2"
-  GOTG_REMOTE_ROOT="/Games"
 }
 
 # A stand-in for a built environment: the GC root that `gotg play` execs, with no

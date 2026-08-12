@@ -19,8 +19,8 @@ load helper
 
 setup() {
   setup_env
-  start_server
-  write_config
+  start_saves_service
+  write_api_config
 
   export GOTG_DEVICE_ID=aaaa1111
   export GOTG_NOW=2026-08-01T12:00:00Z
@@ -38,7 +38,7 @@ setup() {
 
 teardown() {
   stop_saves_service
-  stop_server
+  stop_saves_service
 }
 
 write_save() {
@@ -56,7 +56,7 @@ second_device() {
   export GOTG_ENV_STATE_DIR="$GOTG_STATE_DIR/env"
   export GOTG_SAVES_DIR="$GOTG_STATE_DIR/saves"
   export GOTG_DEVICE_ID=bbbb2222
-  write_config
+  write_api_config
   write_api_config
   fake_env env-n64 '["saves/**"]' '["saves/*.o2r"]'
   STATE="$GOTG_ENV_STATE_DIR/env-n64"

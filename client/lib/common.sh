@@ -95,11 +95,20 @@ saves_keep() { printf '%s' "${GOTG_SAVES_KEEP:-3}"; }
 # name rather than requiring [[:print:]]: under LC_ALL=C that class rejects
 # every multibyte character, and a Japanese dump name is a real member name —
 # the server's own check (Python isprintable) accepts it.
+# A member name may nest — a WiiU dump is fetched as its tree — so each
+# slash-separated segment is validated on its own, mirroring the service.
 validate_filename() {
   local name="$1"
-  [[ -n "$name" && ${#name} -le 255 ]] || die "invalid file name: $name"
-  [[ "$name" != */* && "$name" != .* ]] || die "invalid file name: $name"
+  [[ -n "$name" && ${#name} -le 1024 ]] || die "invalid file name: $name"
   [[ "$name" != *[[:cntrl:]]* ]] || die "invalid file name: $name"
+  local -a segments
+  IFS=/ read -r -a segments <<<"$name"
+  ((${#segments[@]} <= 8)) || die "invalid file name: $name"
+  local segment
+  for segment in "${segments[@]}"; do
+    [[ -n "$segment" && ${#segment} -le 255 && "$segment" != .* ]] ||
+      die "invalid file name: $name"
+  done
 }
 
 # Reject anything that could climb out of the games directory.

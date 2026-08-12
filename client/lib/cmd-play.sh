@@ -10,8 +10,6 @@ cmd_install() {
   game="$(manifest_find "$want")"
   attr="$(env_attr "$game")"
 
-  download_game "$game"
-
   # Refresh rather than skip when a root is already there. This runs from a
   # terminal where nix is cheap and a cached build is quick, and the alternative
   # is what bit twice already: an environment whose definition has moved keeps
@@ -22,6 +20,10 @@ cmd_install() {
   else
     env_build "$attr"
   fi
+
+  # After the environment: a raw source that needs processing is processed by
+  # the recipe that environment carries.
+  download_game "$game"
 
   launcher="$(launcher_write "$game")"
   log ""
@@ -63,7 +65,8 @@ cmd_play() {
 
   local target install env_state
   target="$(resolve_target "$game")"
-  install="$(game_local_path "$game")"
+  install="$(game_installed_path "$game")" ||
+    die "nothing on disk for $(manifest_field "$game" id) after download"
   env_state="$(env_state_dir "$attr")"
 
   # Carry forward saves written before this environment was told where to keep

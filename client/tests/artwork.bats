@@ -32,7 +32,7 @@ setup() {
 # hangs the entire file instead of failing one test.
 teardown() {
   stop_sgdb
-  stop_server
+  stop_saves_service
 }
 
 start_sgdb() {
@@ -221,8 +221,8 @@ manual() {
 # --- the command around it -------------------------------------------------
 
 setup_steam() {
-  start_server
-  write_config
+  start_saves_service
+  write_api_config
   add_game gamecube usa.super_mario_sunshine.rvz "iso" "Super Mario Sunshine"
   export SHORTCUTS="$TEST_TMP/steam/userdata/1234/config/shortcuts.vdf"
   export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
@@ -238,7 +238,7 @@ setup_steam() {
   gotg steam add usa.super_mario_sunshine
   [ "$status" -eq 0 ]
   [[ "$stderr" == *"artwork: 5 file(s)"* ]]
-  stop_server
+
 
   # Filed under the appid the shortcut carries, beside the shortcuts file —
   # which is what makes Steam find it.
@@ -260,13 +260,16 @@ setup_steam() {
   [[ "$stderr" == *"artwork: 0 file(s)"* ]]
   gotg steam art usa.super_mario_sunshine --force
   [[ "$stderr" == *"artwork: 5 file(s)"* ]]
-  stop_server
+
 }
 
 @test "the cluster proxy is used when one is configured, and no key is needed" {
   setup_steam
-  # No steamgriddb.json at all — the whole point of the proxy is that a client
-  # holds one token for our own service instead of a key for somebody else's.
+  # The catalog first, through the real service; the artwork half then rides a
+  # second api.json pointing at the SteamGridDB mock. No steamgriddb.json at
+  # all — the whole point of the proxy is that a client holds one token for
+  # our own service instead of a key for somebody else's.
+  gotg refresh
   jq -n --arg u "$SGDB_URL" '{url: $u, token: "client-token"}' >"$TEST_TMP/api.json"
   chmod 600 "$TEST_TMP/api.json"          # as the docs tell you to create it
   export GOTG_API_FILE="$TEST_TMP/api.json"
@@ -277,16 +280,18 @@ setup_steam() {
   [[ "$stderr" == *"artwork: 5 file(s)"* ]]
   # And it does not nag about a key it does not need.
   [[ "$stderr" != *"No SteamGridDB key"* ]]
-  stop_server
+
 }
 
 @test "with no key and no proxy, adding still works and says how to add one" {
   setup_steam
+  gotg refresh
+  export GOTG_API_FILE="$TEST_TMP/absent-api.json"
   gotg steam add usa.super_mario_sunshine
   [ "$status" -eq 0 ]
   [[ "$stderr" == *"No SteamGridDB key"* ]]
   [[ "$stderr" == *"steamgriddb.json"* ]]
-  stop_server
+
 }
 
 @test "art takes a picture named on the command line" {
@@ -297,7 +302,7 @@ setup_steam() {
   gotg steam art usa.super_mario_sunshine --from "$TEST_TMP/mine.png"
   [ "$status" -eq 0 ]
   [[ "$stderr" == *"from $TEST_TMP/mine.png"* ]]
-  stop_server
+
 
   local appid
   appid="$(python3 "$(dirname "$GOTG_BIN")/../share/gotg/steam/shortcuts.py" \
@@ -311,7 +316,7 @@ setup_steam() {
   gotg steam art usa.super_mario_sunshine --from "$TEST_TMP/absent.png"
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"absent.png"* ]]
-  stop_server
+
 }
 
 @test "art refuses for a game that is not in Steam yet" {
@@ -319,7 +324,7 @@ setup_steam() {
   gotg steam art usa.super_mario_sunshine
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"not in Steam yet"* ]]
-  stop_server
+
 }
 
 @test "it identifies itself, because the default python agent is refused" {
@@ -341,5 +346,5 @@ setup_steam() {
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"mode 644"* ]]
   [[ "$stderr" == *"chmod 600"* ]]
-  stop_server
+
 }

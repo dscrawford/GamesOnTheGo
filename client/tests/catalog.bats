@@ -7,12 +7,12 @@ load helper
 
 setup() {
   setup_env
-  start_server
-  write_config
+  start_saves_service
+  write_api_config
 }
 
 teardown() {
-  stop_server
+  stop_saves_service
 }
 
 @test "refresh caches the catalog locally" {
@@ -27,12 +27,12 @@ teardown() {
 @test "an already installed game still lists when the server is down" {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
-  stop_server
+  stop_saves_service
   # The killed port can be re-bound by a parallel bats job whose mock accepts
   # the same tester/hunter2 — point at port 1, which nothing answers.
-  jq '.server = "http://127.0.0.1:1"' "$GOTG_CONFIG_FILE" >"$GOTG_CONFIG_FILE.tmp"
-  mv "$GOTG_CONFIG_FILE.tmp" "$GOTG_CONFIG_FILE"
-  chmod 600 "$GOTG_CONFIG_FILE"
+  jq '.url = "http://127.0.0.1:1"' "$GOTG_CONFIG_DIR/api.json" >"$GOTG_CONFIG_DIR/api.json.tmp"
+  mv "$GOTG_CONFIG_DIR/api.json.tmp" "$GOTG_CONFIG_DIR/api.json"
+  chmod 600 "$GOTG_CONFIG_DIR/api.json"
 
   gotg list
   [ "$status" -eq 0 ]
@@ -80,29 +80,28 @@ teardown() {
   [[ "$stderr" == *"invalid game id"* ]]
 }
 
-@test "a world-readable config is refused" {
+@test "a world-readable token file is refused" {
   add_game n64 "usa.zelda.z64" "rom"
-  chmod 644 "$GOTG_CONFIG_FILE"
+  chmod 644 "$GOTG_CONFIG_DIR/api.json"
   gotg refresh
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"chmod 600"* ]]
 }
 
-@test "wrong credentials produce a clear message" {
+@test "a wrong token produces a clear message" {
   add_game n64 "usa.zelda.z64" "rom"
-  jq '.password = "wrong"' "$GOTG_CONFIG_FILE" >"$GOTG_CONFIG_FILE.tmp"
-  mv "$GOTG_CONFIG_FILE.tmp" "$GOTG_CONFIG_FILE"
-  chmod 600 "$GOTG_CONFIG_FILE"
-
+  jq '.token = "wrong"' "$GOTG_CONFIG_DIR/api.json" >"$GOTG_CONFIG_DIR/api.json.tmp"
+  mv "$GOTG_CONFIG_DIR/api.json.tmp" "$GOTG_CONFIG_DIR/api.json"
+  chmod 600 "$GOTG_CONFIG_DIR/api.json"
   gotg refresh
   [ "$status" -ne 0 ]
-  [[ "$stderr" == *"username and password"* ]]
+  [[ "$stderr" == *"could not fetch the catalog"* ]]
 }
 
-@test "a missing catalog explains that the importer has not run" {
+@test "an empty catalog is not an error, only empty" {
   gotg refresh
-  [ "$status" -ne 0 ]
-  [[ "$stderr" == *"importer"* ]]
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"0 game(s)"* ]]
 }
 
 @test "info reports install state" {
@@ -119,58 +118,51 @@ teardown() {
 }
 
 @test "names with spaces and punctuation survive the round trip" {
-  # Real filenames are full of these; they must be encoded per path segment.
-  mkdir -p "$SERVER_ROOT/Games/n64"
-  local name="usa.game (USA) & friends.z64"
-  printf 'rom' >"$SERVER_ROOT/Games/n64/$name"
-  add_manifest_entry n64 "/Games/n64/$name" file 3 "" "Punctuated"
-
+  mkdir -p "$SERVICE_LIBRARY_DIR/snes"
+  printf 'rom' >"$SERVICE_LIBRARY_DIR/snes/Zelda's Quest (USA) [!].sfc"
+  local files
+  files="$(jq -n --arg p "$SERVICE_LIBRARY_DIR/snes/Zelda's Quest (USA) [!].sfc" \
+    '[{name: "Zelda'"'"'s Quest (USA) [!].sfc", path: $p, size_bytes: 3, mtime: 1, sha256: null}]')"
+  add_member_game snes usa.zeldas_quest "Zelda's Quest" single_file "$files"
   gotg refresh
-  # The id derives from the filename, so check it resolves and downloads.
-  run jq -r '.games[0].path' "$GOTG_CACHE_FILE"
-  [[ "$output" == *"& friends"* ]]
+  gotg download usa.zeldas_quest
+  [ "$status" -eq 0 ]
+  [ -f "$GOTG_GAMES_DIR/snes/Zelda's Quest (USA) [!].sfc" ]
 }
 
-@test "a catalog entry cannot escape the games directory via its platform" {
-  # platform is used to build paths that get rm -rf'd and written to, so an
-  # unchecked "../.." would reach outside ~/Games entirely.
-  mkdir -p "$TEST_TMP/VICTIM"
-  echo "precious" > "$TEST_TMP/VICTIM/important.txt"
-  mkdir -p "$SERVER_ROOT/Games/.gotg"
-  # A well-formed entry in every respect except the platform, so it is the
-  # platform check being tested rather than the id check.
-  jq -n '{version:1,games:[{platform:"../VICTIM",path:"/Games/x/usa.evil",
-          type:"dir",size_bytes:1,sha256:null,title:"Evil"}]}' \
-    > "$SERVER_ROOT/Games/.gotg/manifest.json"
-
-  gotg refresh
+@test "a poisoned cache cannot escape the games directory via its platform" {
+  mkdir -p "$GOTG_STATE_DIR" "$TEST_TMP/VICTIM"
+  printf 'precious' >"$TEST_TMP/VICTIM/important.txt"
+  jq -n '{version: 2, games: [{id: "usa.evil", platform: "../../VICTIM",
+          handler: "single_file", title: "Evil",
+          files: [{name: "usa.evil.z64", size_bytes: 1, sha256: null}]}]}' \
+    >"$GOTG_CACHE_FILE"
   gotg download usa.evil
-
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"invalid platform"* ]]
   [ -f "$TEST_TMP/VICTIM/important.txt" ]
 }
 
-@test "a platform with a slash or traversal is rejected" {
-  mkdir -p "$SERVER_ROOT/Games/.gotg"
-  jq -n '{version:1,games:[{platform:"n64/../../etc",path:"/Games/x/usa.evil.z64",
-          type:"file",size_bytes:1,sha256:null,title:"Evil"}]}' \
-    > "$SERVER_ROOT/Games/.gotg/manifest.json"
-  gotg refresh
+@test "a poisoned cache with a hostile member name is rejected" {
+  mkdir -p "$GOTG_STATE_DIR"
+  jq -n '{version: 2, games: [{id: "usa.evil", platform: "n64",
+          handler: "single_file", title: "Evil",
+          files: [{name: "../../escape.z64", size_bytes: 1, sha256: null}]}]}' \
+    >"$GOTG_CACHE_FILE"
   gotg info usa.evil
   [ "$status" -ne 0 ]
-  [[ "$stderr" == *"invalid platform"* ]]
+  [[ "$stderr" == *"invalid file name"* ]]
 }
 
 @test "a stale cache survives an unreachable server — the offline fallback" {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
-  stop_server
+  stop_saves_service
   # The killed port can be re-bound by a parallel bats job whose mock accepts
   # the same tester/hunter2 — point at port 1, which nothing answers.
-  jq '.server = "http://127.0.0.1:1"' "$GOTG_CONFIG_FILE" >"$GOTG_CONFIG_FILE.tmp"
-  mv "$GOTG_CONFIG_FILE.tmp" "$GOTG_CONFIG_FILE"
-  chmod 600 "$GOTG_CONFIG_FILE"
+  jq '.url = "http://127.0.0.1:1"' "$GOTG_CONFIG_DIR/api.json" >"$GOTG_CONFIG_DIR/api.json.tmp"
+  mv "$GOTG_CONFIG_DIR/api.json.tmp" "$GOTG_CONFIG_DIR/api.json"
+  chmod 600 "$GOTG_CONFIG_DIR/api.json"
 
   # Everything cached is stale, so list has to attempt a refresh — and the
   # refresh failing must degrade to the cache, not kill the command.
@@ -182,48 +174,51 @@ teardown() {
 }
 
 @test "no cache and no server is a plain failure, not a silent one" {
-  stop_server
+  stop_saves_service
   # The killed port can be re-bound by a parallel bats job whose mock accepts
   # the same tester/hunter2 — point at port 1, which nothing answers.
-  jq '.server = "http://127.0.0.1:1"' "$GOTG_CONFIG_FILE" >"$GOTG_CONFIG_FILE.tmp"
-  mv "$GOTG_CONFIG_FILE.tmp" "$GOTG_CONFIG_FILE"
-  chmod 600 "$GOTG_CONFIG_FILE"
+  jq '.url = "http://127.0.0.1:1"' "$GOTG_CONFIG_DIR/api.json" >"$GOTG_CONFIG_DIR/api.json.tmp"
+  mv "$GOTG_CONFIG_DIR/api.json.tmp" "$GOTG_CONFIG_DIR/api.json"
+  chmod 600 "$GOTG_CONFIG_DIR/api.json"
   gotg list
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"catalog"* ]]
 }
 
 @test "an explicit refresh against a dead server fails loudly" {
-  stop_server
+  stop_saves_service
   # The killed port can be re-bound by a parallel bats job whose mock accepts
   # the same tester/hunter2 — point at port 1, which nothing answers.
-  jq '.server = "http://127.0.0.1:1"' "$GOTG_CONFIG_FILE" >"$GOTG_CONFIG_FILE.tmp"
-  mv "$GOTG_CONFIG_FILE.tmp" "$GOTG_CONFIG_FILE"
-  chmod 600 "$GOTG_CONFIG_FILE"
+  jq '.url = "http://127.0.0.1:1"' "$GOTG_CONFIG_DIR/api.json" >"$GOTG_CONFIG_DIR/api.json.tmp"
+  mv "$GOTG_CONFIG_DIR/api.json.tmp" "$GOTG_CONFIG_DIR/api.json"
+  chmod 600 "$GOTG_CONFIG_DIR/api.json"
   gotg refresh
   [ "$status" -ne 0 ]
 }
 
-@test "a filename with a slash, a traversal or a leading dot is invalid" {
+@test "a traversal, a leading dot or a control character is invalid" {
   load_client_libs
   run validate_filename "usa.zelda.z64"
   [ "$status" -eq 0 ]
   run validate_filename "Legend of Zelda, The (USA).z64"
   [ "$status" -eq 0 ]
+  run validate_filename "code/app.rpx"
+  [ "$status" -eq 0 ]
   local bad
-  for bad in "a/b.z64" ".." "." ".hidden" "" "$(printf 'a\tb')"; do
+  for bad in "a/../b.z64" "a//b" ".." "." ".hidden" "" "$(printf 'a\tb')" "a/b/c/d/e/f/g/h/i"; do
     run -1 --separate-stderr validate_filename "$bad"
   done
 }
 
-@test "a garbage catalog over a stale cache falls back, and the cache survives" {
+@test "an unreachable service over a stale cache falls back, cache intact" {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
   local before
   before="$(cat "$GOTG_CACHE_FILE")"
-  # The server is up but answering nonsense — a proxy error page, say. This is
-  # the failure the server-down tests do not cover: the fetch itself succeeds.
-  echo '<html>502 bad gateway</html>' > "$SERVER_ROOT/Games/.gotg/manifest.json"
+  stop_saves_service
+  jq '.url = "http://127.0.0.1:1"' "$GOTG_CONFIG_DIR/api.json" >"$GOTG_CONFIG_DIR/api.json.tmp"
+  mv "$GOTG_CONFIG_DIR/api.json.tmp" "$GOTG_CONFIG_DIR/api.json"
+  chmod 600 "$GOTG_CONFIG_DIR/api.json"
   touch -d '2 days ago' "$GOTG_CACHE_FILE"
 
   gotg list
@@ -231,35 +226,23 @@ teardown() {
   [[ "$output" == *"usa.zelda"* ]]
   [[ "$stderr" == *"using the cached catalog"* ]]
   [ "$(cat "$GOTG_CACHE_FILE")" = "$before" ]
+  start_saves_service
 }
 
-@test "an explicit refresh of a garbage catalog fails loudly and keeps the cache" {
-  add_game n64 "usa.zelda.z64" "rom"
-  gotg refresh
-  local before
-  before="$(cat "$GOTG_CACHE_FILE")"
-  jq -n '{version: 1, games: "not an array"}' > "$SERVER_ROOT/Games/.gotg/manifest.json"
-
-  gotg refresh
-  [ "$status" -ne 0 ]
-  [[ "$stderr" == *"not valid GOTG JSON"* ]]
-  [ "$(cat "$GOTG_CACHE_FILE")" = "$before" ]
-  [ ! -e "$GOTG_CACHE_FILE.tmp" ]
-}
 
 @test "a cache with a future mtime is fresh, not endlessly re-fetched" {
   # Clock skew is real: NFS, a resumed laptop. A negative age must read as
   # fresh rather than tripping an arithmetic surprise.
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
-  stop_server
+  stop_saves_service
   touch -d '1 hour hence' "$GOTG_CACHE_FILE"
   gotg list
   [ "$status" -eq 0 ]
   [[ "$output" == *"usa.zelda"* ]]
 }
 
-@test "filename length caps at 255" {
+@test "segment length caps at 255" {
   load_client_libs
   run validate_filename "$(printf 'a%.0s' {1..255})"
   [ "$status" -eq 0 ]

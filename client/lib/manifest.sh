@@ -11,9 +11,12 @@
 
 MANIFEST_MAX_AGE="${GOTG_MANIFEST_MAX_AGE:-86400}" # refresh a day-old catalog
 
-manifest_remote_path() { printf '%s/.gotg/manifest.json' "${GOTG_REMOTE_ROOT%/}"; }
-
-manifest_cached() { [[ -s "$GOTG_CACHE_FILE" ]]; }
+# A cached v1 manifest is not a catalog: its entries have no id, no handler
+# and no member files, so it forces a refresh rather than yielding nulls.
+manifest_cached() {
+  [[ -s "$GOTG_CACHE_FILE" ]] &&
+    jq -e '.version == 2' "$GOTG_CACHE_FILE" >/dev/null 2>&1
+}
 
 manifest_is_stale() {
   manifest_cached || return 0
@@ -28,19 +31,21 @@ manifest_is_stale() {
 # catalog makes the failure survivable, and a die here cannot be caught — it
 # exits straight through `manifest_refresh || fallback`.
 manifest_refresh() {
-  config_load
-  local token payload
-  token="$(api_login)" || {
-    warn "could not reach $GOTG_SERVER to refresh the catalog"
+  service_have || {
+    warn "no service configured — run: gotg login"
     return 1
   }
-  payload="$(api_fetch "$(manifest_remote_path)" "$token")" || {
-    warn "could not fetch the catalog from $GOTG_SERVER$(manifest_remote_path)."
-    warn "Has the importer run yet? It publishes the catalog after its first import."
+  local payload
+  payload="$(service_curl -fsS --max-time "${GOTG_API_TIMEOUT:-120}" \
+    "$(service_url)/catalog" 2>&1)" || {
+    # The reason is in the captured output: a refused token file, a TLS error.
+    [[ -n "$payload" ]] && warn "$payload"
+    warn "could not fetch the catalog from $(service_url)/catalog."
+    warn "Has the indexer run yet? It publishes the catalog after its first pass."
     return 1
   }
-  jq -e '.games | type == "array"' >/dev/null 2>&1 <<<"$payload" || {
-    warn "catalog at $(manifest_remote_path) is not valid GOTG JSON"
+  jq -e '.version == 2 and (.games | type == "array")' >/dev/null 2>&1 <<<"$payload" || {
+    warn "the catalog at $(service_url)/catalog is not valid GOTG JSON"
     return 1
   }
 
@@ -64,18 +69,11 @@ manifest_ensure() {
   fi
 }
 
-# Every game as {id, platform, path, type, size_bytes, sha256, title}.
+# Every game as {id, platform, handler, title, files: [{name, size_bytes,
+# sha256}]}. The id is on the wire now; nothing derives it from a path.
 manifest_games() {
   manifest_cached || die "no catalog cached — run: gotg refresh"
-  jq -c '
-    .games[]
-    | . + {id: (
-        (.path | split("/") | last) as $name
-        | if .type == "file" and ($name | test("\\."))
-          then ($name | sub("\\.[^.]+$"; ""))
-          else $name end
-      )}
-  ' "$GOTG_CACHE_FILE"
+  jq -c '.games[]' "$GOTG_CACHE_FILE"
 }
 
 # Resolve a user-supplied id to exactly one game, or explain why it cannot.
@@ -97,10 +95,14 @@ manifest_find() {
   case "$count" in
     0) die "no game called '$want' in the catalog. Try: gotg list | grep $id" ;;
     1)
-      # Check the record before anything builds a path out of it.
+      # Check the record before anything builds a path out of it: every
+      # member name becomes a local path component.
       validate_id "$(manifest_field "$matches" id)"
       validate_platform "$(manifest_field "$matches" platform)"
-      validate_remote_path "$(manifest_field "$matches" path)"
+      local member
+      while IFS= read -r member; do
+        validate_filename "$member"
+      done < <(jq -r '.files[].name' <<<"$matches")
       printf '%s' "$matches"
       ;;
     *)
@@ -118,26 +120,43 @@ manifest_field() {
 
 # Local install path for a game: ~/Games/<platform>/<entry name>.
 #
-# A game marked `unzip` lands as a directory named after its id instead: the
-# No-Intro sets ship zipped ROMs, which most emulators read directly, but native
-# ports want the bare ROM file.
+# Single-file entries land under their canonical member name. Everything a
+# recipe refines, and every tree fetched in place, lands as or under the id —
+# `unzip` overrides included, which keep their old shape.
 game_local_path() {
-  local game="$1" platform name
+  local game="$1" platform name handler
   platform="$(manifest_field "$game" platform)"
   validate_platform "$platform"
+  handler="$(manifest_field "$game" handler)"
   if [[ "$(override_field "$game" unzip)" == "true" ]]; then
     name="$(manifest_field "$game" id)"
+  elif [[ "$handler" == "single_file" || "$handler" == "no_intro_set" ]]; then
+    name="$(jq -r '.files[0].name' <<<"$game")"
+    validate_filename "$name"
   else
-    name="$(basename "$(manifest_field "$game" path)")"
+    name="$(manifest_field "$game" id)"
   fi
   printf '%s/%s/%s' "$GOTG_GAMES_DIR" "$platform" "$name"
 }
 
-game_is_installed() {
-  local path
-  path="$(game_local_path "$1")"
-  [[ -e "$path" ]]
+# A refined artifact keeps the id but the recipe picks the extension: resolve
+# what is actually on disk — the base path, or the one id.<ext> beside it.
+game_installed_path() {
+  local base
+  base="$(game_local_path "$1")"
+  if [[ -e "$base" ]]; then
+    printf '%s' "$base"
+    return 0
+  fi
+  local matches=("$base".*)
+  if [[ -e "${matches[0]}" ]]; then
+    printf '%s' "${matches[0]}"
+    return 0
+  fi
+  return 1
 }
+
+game_is_installed() { game_installed_path "$1" >/dev/null; }
 
 cmd_refresh() { manifest_refresh || die "catalog refresh failed"; }
 
@@ -184,7 +203,7 @@ cmd_list() {
   if ! rows="$(manifest_games |
     jq -r --arg p "$pattern" '
       select($p == "" or ([.id, .title, .platform] | any(test($p; "i"))))
-      | [.platform, .id, .size_bytes, (.path | split("/") | last), .title] | @tsv
+      | [.platform, .id, ([.files[].size_bytes] | add), .files[0].name, .title] | @tsv
     ' 2>&1)"; then
     die "not a valid pattern: $pattern
      It is a regex, so a bare . matches any character and ( must be closed."
@@ -258,10 +277,9 @@ cmd_info() {
     "\($m)id:       \($r) \($id)\(.id)\($r)",
     "\($m)title:    \($r) \(.title)",
     "\($m)platform: \($r) \(.platform)",
-    "\($m)type:     \($r) \(.type)",
-    "\($m)size:     \($r) \(.size_bytes) bytes",
-    "\($m)sha256:   \($r) \(.sha256 // "-")",
-    "\($m)remote:   \($r) \(.path)",
+    "\($m)handler:  \($r) \(.handler)",
+    "\($m)size:     \($r) \([.files[].size_bytes] | add) bytes",
+    "\($m)files:    \($r) \(.files | length)",
     "\($m)local:    \($r) \($local)",
     "\($m)installed:\($r) \(if $installed == "yes" then $ok else $no end)\($installed)\($r)"
   ' <<<"$game"

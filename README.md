@@ -36,7 +36,7 @@ qualify it as `snes/usa.bugs_life`.
 ```bash
 # One-time, from a terminal
 nix build ~/Documents/GOTG#gotg -o ~/.local/state/gotg/app
-~/.local/state/gotg/app/bin/gotg login          # server URL + credentials, saved 0600
+~/.local/state/gotg/app/bin/gotg login          # service URL + token, saved 0600
 
 gotg list                                        # what is on the server, and what is here
 gotg install usa.legend_of_zelda_majoras_mask    # download + build its environment + write launcher
@@ -313,8 +313,9 @@ server, placed by hand:
 /Games/switch/firmware.zip   optional — without it, Ryujinx asks on first launch
 ```
 
-The first launch of a Switch game fetches them into that environment's own key
-directory at mode 0600, and never again. They are **excluded from save
+The first launch of a Switch game fetches them from the service's /files
+endpoint into that environment's own key directory at mode 0600, and never
+again. They are **excluded from save
 bundles** — re-fetchable from the server, and the one thing here worth not
 copying between machines by accident.
 

@@ -11,11 +11,11 @@ load helper
 
 setup() {
   setup_env
-  start_server
-  write_config
+  start_saves_service
+  write_api_config
 }
 
-teardown() { stop_server; }
+teardown() { stop_saves_service; }
 
 # A catalog large enough to be cut off, plus a few known names to search for.
 big_catalog() {

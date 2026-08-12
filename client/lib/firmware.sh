@@ -138,7 +138,7 @@ firmware_adopt() {
 
 # The server's copy, unpacked straight into the cache.
 firmware_fetch() {
-  local cache="$1" platform="$2" file="$3" token zip rc=0
+  local cache="$1" platform="$2" file="$3" zip rc=0
   service_have || return 1
 
   zip="$cache.zip"

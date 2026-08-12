@@ -263,6 +263,7 @@
             {
               nativeBuildInputs = with pkgs; [
                 bats
+                parallel # bats --jobs runs test files concurrently through it
                 jq
                 curl
                 (python3.withPackages (ps: [ ps.vdf ]))
@@ -284,7 +285,11 @@
               cp -r ${./client/tests} tests
               chmod -R u+w tests
               export HOME=$TMPDIR
-              bats --print-output-on-failure tests/
+              # Every test isolates under its own BATS_TEST_TMPDIR and picks
+              # random ports, which is what makes running them concurrently
+              # sound. Bounded rather than nproc: each test can boot a real
+              # gotg-proxy, and the build sandbox shares the machine.
+              bats --print-output-on-failure --jobs 8 tests/
               touch $out
             '';
 
@@ -335,12 +340,12 @@
             # Scene: sfv verified, largest file wins, staging swept.
             raw=$TMPDIR/raw-scene && mkdir -p $raw
             touch $raw/group.rar $raw/group.r00 $raw/group.sfv
-            ${switch}/bin/gotg-recipe scene_archive $raw $TMPDIR/out/world.game.xci
+            ${switch}/bin/gotg-recipe scene_archive $raw $TMPDIR/out/world.game
             [ "$(cat $TMPDIR/out/world.game.xci)" = big ]
             [ -z "$(ls -A $TMPDIR/out | grep gotg-recipe || true)" ]
 
             # Scene with a failing sfv: refused, nothing installed.
-            if GOTG_TEST_SFV_FAILS=1 ${switch}/bin/gotg-recipe scene_archive $raw $TMPDIR/out2/x.xci; then
+            if GOTG_TEST_SFV_FAILS=1 ${switch}/bin/gotg-recipe scene_archive $raw $TMPDIR/out2/x; then
               echo "a failing sfv must fail the recipe" >&2; exit 1
             fi
             [ ! -e $TMPDIR/out2/x.xci ]
@@ -348,7 +353,7 @@
             # Disc: extract then convert, chained through the stubs.
             raw=$TMPDIR/raw-disc && mkdir -p $raw
             touch "$raw/Game (USA).7z"
-            ${gamecube}/bin/gotg-recipe single_archive $raw $TMPDIR/out/usa.game.rvz
+            ${gamecube}/bin/gotg-recipe single_archive $raw $TMPDIR/out/usa.game
             [ "$(cat $TMPDIR/out/usa.game.rvz)" = "rvz-of:iso-bytes" ]
 
             # An unknown handler is a refusal, not a guess.

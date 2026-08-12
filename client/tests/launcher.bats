@@ -8,8 +8,8 @@ load helper
 
 setup() {
   setup_env
-  start_server
-  write_config
+  start_saves_service
+  write_api_config
 
   # A stand-in for client/env. Only the file names decide which environment a
   # game wants, so this is all the CLI reads; the built root is faked alongside
@@ -25,7 +25,7 @@ setup() {
 }
 
 teardown() {
-  stop_server
+  stop_saves_service
 }
 
 @test "install writes an executable launcher next to the game" {
@@ -119,12 +119,12 @@ teardown() {
   # The shape the Zelda ports need: a No-Intro zip unpacked to a bare .z64, a
   # glob to pick that file out of the directory it became, and an environment
   # belonging to the game rather than the platform.
-  mkdir -p "$TEST_TMP/mkzip" "$SERVER_ROOT/Games/n64"
+  mkdir -p "$TEST_TMP/mkzip" "$SERVICE_LIBRARY_DIR/n64"
   printf 'rom bytes' >"$TEST_TMP/mkzip/Zelda (USA).z64"
-  (cd "$TEST_TMP/mkzip" && zip -q "$SERVER_ROOT/Games/n64/usa.zelda.zip" "Zelda (USA).z64")
+  (cd "$TEST_TMP/mkzip" && zip -q "$SERVICE_LIBRARY_DIR/n64/usa.zelda.zip" "Zelda (USA).z64")
   local sha size
-  sha="$(sha256sum "$SERVER_ROOT/Games/n64/usa.zelda.zip" | cut -d' ' -f1)"
-  size="$(stat -c '%s' "$SERVER_ROOT/Games/n64/usa.zelda.zip")"
+  sha="$(sha256sum "$SERVICE_LIBRARY_DIR/n64/usa.zelda.zip" | cut -d' ' -f1)"
+  size="$(stat -c '%s' "$SERVICE_LIBRARY_DIR/n64/usa.zelda.zip")"
   add_manifest_entry n64 "/Games/n64/usa.zelda.zip" file "$size" "$sha" "Zelda"
   jq -n '{"n64/usa.zelda": {unzip: true, target: "*.z64"}}' >"$TEST_TMP/data/overrides.json"
 
@@ -222,11 +222,11 @@ teardown() {
 @test "titles with shell and sed metacharacters produce a sound launcher" {
   # 45 games in the real library have "&" in the title, which sed expands to the
   # matched text; "|" is the delimiter and would abort generation outright.
-  mkdir -p "$SERVER_ROOT/Games/n64"
-  printf 'rom' > "$SERVER_ROOT/Games/n64/usa.cnc.z64"
+  mkdir -p "$SERVICE_LIBRARY_DIR/n64"
+  printf 'rom' > "$SERVICE_LIBRARY_DIR/n64/usa.cnc.z64"
   local sha size
-  sha="$(sha256sum "$SERVER_ROOT/Games/n64/usa.cnc.z64" | cut -d' ' -f1)"
-  size="$(stat -c '%s' "$SERVER_ROOT/Games/n64/usa.cnc.z64")"
+  sha="$(sha256sum "$SERVICE_LIBRARY_DIR/n64/usa.cnc.z64" | cut -d' ' -f1)"
+  size="$(stat -c '%s' "$SERVICE_LIBRARY_DIR/n64/usa.cnc.z64")"
   add_manifest_entry n64 "/Games/n64/usa.cnc.z64" file "$size" "$sha" \
     'Command & Conquer | $(touch /tmp/pwned) `id` \1'
 
@@ -246,15 +246,17 @@ teardown() {
 }
 
 @test "a title containing a newline cannot break out of its comment line" {
-  mkdir -p "$SERVER_ROOT/Games/n64"
-  printf 'rom' > "$SERVER_ROOT/Games/n64/usa.nl.z64"
-  local sha size
-  sha="$(sha256sum "$SERVER_ROOT/Games/n64/usa.nl.z64" | cut -d' ' -f1)"
-  size="$(stat -c '%s' "$SERVER_ROOT/Games/n64/usa.nl.z64")"
-  add_manifest_entry n64 "/Games/n64/usa.nl.z64" file "$size" "$sha" \
-    "$(printf 'Game\ntouch /tmp/pwned-nl')"
+  # The service refuses non-printable titles outright, so the hostile row can
+  # only arrive through a poisoned cache — which is exactly what the launcher
+  # writer must still survive.
+  mkdir -p "$GOTG_GAMES_DIR/n64" "$GOTG_STATE_DIR"
+  printf 'rom' >"$GOTG_GAMES_DIR/n64/usa.nl.z64"
+  jq -n --arg t "$(printf 'Game\ntouch /tmp/pwned-nl')" \
+    '{version: 2, games: [{id: "usa.nl", platform: "n64", handler: "single_file",
+      title: $t, files: [{name: "usa.nl.z64", size_bytes: 3, sha256: null}]}]}' \
+    >"$GOTG_CACHE_FILE"
+  fake_env env-n64
 
-  gotg refresh
   gotg install usa.nl
   [ "$status" -eq 0 ]
   bash -n "$GOTG_GAMES_DIR/n64/play-usa.nl.sh"

@@ -25,15 +25,11 @@ config_get() {
   jq -r --arg k "$key" '.[$k] // empty' "$GOTG_CONFIG_FILE"
 }
 
+# The service credentials live in api.json now; this file holds only local
+# preferences (the flake path). Absent is fine.
 config_load() {
-  config_exists || die "not configured yet — run: gotg login"
+  config_exists || return 0
   config_check_perms
-  GOTG_SERVER="$(config_get server)"
-  GOTG_USER="$(config_get username)"
-  GOTG_PASS="$(config_get password)"
-  GOTG_REMOTE_ROOT="$(config_get remote_root)"
-  : "${GOTG_REMOTE_ROOT:=/Games}"
-  [[ -n "$GOTG_SERVER" ]] || die "no server in $GOTG_CONFIG_FILE — run: gotg login"
 }
 
 # Merge keys into the config, keeping everything already there.
@@ -100,33 +96,38 @@ prompt_line() {
   printf '%s' "${value:-$default}"
 }
 
+# One url, one token: the same api.json that carries saves and artwork now
+# carries the whole library. Verified by fetching the catalog before writing,
+# so a typo is caught here rather than at launch time.
 cmd_login() {
-  local server username password
-  server="$(prompt_line "File Browser URL [https://downloads.dcraw.net]: " "https://downloads.dcraw.net")"
-  server="${server%/}"
-  [[ "$server" == http://* || "$server" == https://* ]] || die "server must be an http(s) URL: $server"
-  username="$(prompt_line "Username: ")"
-  [[ -n "$username" ]] || die "username is required"
-  password="$(prompt_secret "Password: ")"
-  [[ -n "$password" ]] || die "password is required"
+  local url token
+  url="$(prompt_line "GOTG service URL [https://gotg-api.dcraw.net]: " "https://gotg-api.dcraw.net")"
+  url="${url%/}"
+  [[ "$url" == http://* || "$url" == https://* ]] || die "service must be an http(s) URL: $url"
+  token="$(prompt_secret "Token: ")"
+  [[ -n "$token" ]] || die "a token is required"
 
-  local remote_root
-  remote_root="$(prompt_line "Library path on the server [/Games]: " "/Games")"
-  validate_remote_path "$remote_root"
+  curl -fsS --connect-timeout 10 --max-time 30 \
+    -H "Authorization: Bearer $token" "$url/catalog" >/dev/null 2>&1 ||
+    die "the service at $url did not accept that token"
 
-  # Verify before saving, so a typo is caught now rather than at launch time.
-  # api_login reads these three.
-  # shellcheck disable=SC2034
-  {
-    GOTG_SERVER="$server"
-    GOTG_USER="$username"
-    GOTG_PASS="$password"
-  }
-  local token
-  token="$(api_login)" || die "login failed"
-  [[ -n "$token" ]] || die "login failed: no token returned"
+  local file tmp
+  file="${GOTG_API_FILE:-$GOTG_CONFIG_DIR/api.json}"
+  mkdir -p "$(dirname "$file")"
+  tmp="$(mktemp "$file.XXXXXX")"
+  if [[ -f "$file" ]]; then
+    jq --arg url "$url" --arg token "$token" '. + {url: $url, token: $token}' "$file" >"$tmp"
+  else
+    jq -n --arg url "$url" --arg token "$token" '{url: $url, token: $token}' >"$tmp"
+  fi
+  chmod 600 "$tmp"
+  mv "$tmp" "$file"
+  log "saved $file (mode 600)"
 
-  config_write "$server" "$username" "$password" "$remote_root"
-  log "saved $GOTG_CONFIG_FILE (mode 600)"
-  log "logged in to $server as $username"
+  # The File Browser era left a password behind; a dead credential in a 0600
+  # file is still a credential.
+  if [[ -f "$GOTG_CONFIG_FILE" ]] && jq -e '.password' "$GOTG_CONFIG_FILE" >/dev/null 2>&1; then
+    warn "the old File Browser password in $GOTG_CONFIG_FILE is no longer used;"
+    warn "remove it with: jq 'del(.username, .password, .server, .remote_root)' $GOTG_CONFIG_FILE"
+  fi
 }

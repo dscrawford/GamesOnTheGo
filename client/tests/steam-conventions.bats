@@ -27,8 +27,8 @@ load helper
 
 setup() {
   setup_env
-  start_server
-  write_config
+  start_saves_service
+  write_api_config
   add_game gamecube usa.super_mario_sunshine.rvz "iso" "Super Mario Sunshine"
 
   export SHORTCUTS="$TEST_TMP/steam/userdata/1234/config/shortcuts.vdf"
@@ -37,7 +37,7 @@ setup() {
   export GOTG_STEAM_HELPER="$(dirname "$GOTG_BIN")/../share/gotg/steam/shortcuts.py"
 }
 
-teardown() { stop_server; }
+teardown() { stop_saves_service; }
 
 helper() { python3 "$GOTG_STEAM_HELPER" --file "$SHORTCUTS" "$@"; }
 

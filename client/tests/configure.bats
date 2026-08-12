@@ -11,13 +11,13 @@ load helper
 
 setup() {
   setup_env
-  start_server
-  write_config
+  start_saves_service
+  write_api_config
   # A SNES game, so both env-snes and its per-game environment are reachable.
   add_game snes world.super_metroid.sfc "rom" "Super Metroid"
 }
 
-teardown() { stop_server; }
+teardown() { stop_saves_service; }
 
 # A built environment that declares it can be configured.
 fake_configurable_root() {

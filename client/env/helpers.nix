@@ -32,7 +32,10 @@ let
           largest="$(find "$stage" -type f -printf '%s %p\n' | sort -rn | head -1 | cut -d' ' -f2-)"
           [ -n "$largest" ] || { rm -rf "$stage"; echo "gotg-recipe: nothing extracted" >&2; exit 1; }
           mkdir -p "$(dirname "$dest")"
-          mv "$largest" "$dest"
+          # The artifact keeps the id; the source names the format. Emulators
+          # dispatch on the extension, so it has to survive.
+          ext="$(basename "$largest")"; ext="''${ext##*.}"
+          mv "$largest" "$dest.''${ext,,}"
           rm -rf "$stage"
           ;;
         *) echo "gotg-recipe: no recipe for $handler" >&2; exit 1 ;;
@@ -62,7 +65,7 @@ let
           image="$(find "$stage" -type f -printf '%s %p\n' | sort -rn | head -1 | cut -d' ' -f2-)"
           [ -n "$image" ] || { rm -rf "$stage"; echo "gotg-recipe: nothing extracted" >&2; exit 1; }
           mkdir -p "$(dirname "$dest")"
-          "$DOLPHIN_TOOL" convert -f rvz -b 131072 -c zstd -l 5 -i "$image" -o "$dest" ||
+          "$DOLPHIN_TOOL" convert -f rvz -b 131072 -c zstd -l 5 -i "$image" -o "$dest.rvz" ||
             { rm -rf "$stage"; echo "gotg-recipe: conversion failed" >&2; exit 1; }
           rm -rf "$stage"
           ;;

@@ -12,9 +12,8 @@ load helper
 
 setup() {
   setup_env
-  start_server
-  write_config
-  mkdir -p "$SERVER_ROOT/Games/.gotg"
+  start_saves_service
+  write_api_config
 
   export GOTG_DEVICE_ID=aaaa1111
   export GOTG_NOW=2026-08-01T12:00:00Z
@@ -35,7 +34,7 @@ setup() {
 }
 
 teardown() {
-  stop_server
+  stop_saves_service
 }
 
 # An environment that also knows where its emulator used to keep saves, and

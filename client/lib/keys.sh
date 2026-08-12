@@ -22,7 +22,7 @@ keys_manifest() { printf '%s/%s/share/gotg/keys.json' "$GOTG_ROOTS_DIR" "$1"; }
 #
 #   $1 environment attribute   $2 the platform whose directory holds them
 keys_ensure() {
-  local attr="$1" platform="$2" manifest into state token file dest missing=0
+  local attr="$1" platform="$2" manifest into state file dest missing=0
 
   manifest="$(keys_manifest "$attr")"
   [[ -f "$manifest" ]] || return 0

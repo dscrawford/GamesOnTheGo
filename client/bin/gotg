@@ -21,8 +21,6 @@ source "$GOTG_LIB/color.sh"
 source "$GOTG_LIB/common.sh"
 # shellcheck source=lib/config.sh
 source "$GOTG_LIB/config.sh"
-# shellcheck source=lib/api.sh
-source "$GOTG_LIB/api.sh"
 # shellcheck source=lib/manifest.sh
 source "$GOTG_LIB/manifest.sh"
 # shellcheck source=lib/download.sh

@@ -8,49 +8,41 @@
 # Poll interval for the graphical progress dialog.
 PROGRESS_TICK="${GOTG_PROGRESS_TICK:-0.5}"
 
-# The token for the transfer in progress, set by download_game. A plain shell
-# variable and never exported: it reaches curl on stdin, so it appears neither
-# in the URL, nor in any argv, nor in a child process's environment.
-GOTG_DOWNLOAD_TOKEN=""
-
+# Where an entry's raw members stage before install: one directory per game,
+# member names (nested included) preserved inside it.
 download_partial_path() {
-  local id="$1" type="$2"
-  if [[ "$type" == "dir" ]]; then
-    printf '%s/%s.zip' "$GOTG_PARTIAL_DIR" "$id"
-  else
-    printf '%s/%s' "$GOTG_PARTIAL_DIR" "$id"
-  fi
+  printf '%s/%s' "$GOTG_PARTIAL_DIR" "$1"
 }
 
-# curl with resume. Directory downloads are zipped on the fly, so their byte
-# offsets are not stable across requests and resuming would corrupt them.
+# curl with resume, always: every member is a stable file on the service. The
+# If-Range validator makes a resume against changed bytes restart cleanly
+# instead of splicing two files.
 _curl_download() {
-  local url="$1" out="$2" type="$3"
+  local url="$1" out="$2" etag="$3"
   shift 3
-  local resume=(-C -)
-  [[ "$type" == "dir" ]] && resume=()
-  api_auth_config "$GOTG_DOWNLOAD_TOKEN" | curl --config - \
-    -fL --retry 3 --retry-connrefused --retry-delay 2 \
-    --connect-timeout 15 \
-    "${resume[@]}" "$@" -o "$out" "$url"
+  local validate=()
+  [[ -n "$etag" && "$etag" != "null" ]] && validate=(-H "If-Range: \"$etag\"")
+  service_curl \
+    -f --retry 3 --retry-connrefused --retry-delay 2 \
+    -C - "${validate[@]}" "$@" -o "$out" "$url"
 }
 
 _download_terminal() {
-  local url="$1" out="$2" type="$3"
+  local url="$1" out="$2" etag="$3"
   log "downloading to $out"
-  _curl_download "$url" "$out" "$type" --progress-bar
+  _curl_download "$url" "$out" "$etag" --progress-bar
 }
 
 _download_quiet() {
-  local url="$1" out="$2" type="$3"
-  _curl_download "$url" "$out" "$type" --silent --show-error
+  local url="$1" out="$2" etag="$3"
+  _curl_download "$url" "$out" "$etag" --silent --show-error
 }
 
 # Graphical progress. curl runs in the background and the dialog is driven from
 # the size of the partial file, which also works for the streamed zips that have
 # no Content-Length.
 _download_zenity() {
-  local url="$1" out="$2" type="$3" title="$4" expected="${5:-0}"
+  local url="$1" out="$2" etag="$3" title="$4" expected="${5:-0}"
 
   # A private directory for the fifo: mktemp -u then mkfifo races with anything
   # else that could claim the name in between.
@@ -59,19 +51,15 @@ _download_zenity() {
   pipe="$pipedir/progress"
   mkfifo "$pipe"
 
-  # Without a known total there is no percentage to show, which is the normal
-  # case for a directory the server zips as it streams.
   local mode=(--auto-close)
-  if [[ "$type" == "dir" ]] || ((expected <= 0)); then
-    mode+=(--pulsate)
-  fi
+  ((expected <= 0)) && mode+=(--pulsate)
 
   zenity --progress --title="GOTG" \
     --text="Downloading $title…" "${mode[@]}" <"$pipe" &
   zen_pid=$!
 
   exec 9>"$pipe"
-  _curl_download "$url" "$out" "$type" --silent --show-error &
+  _curl_download "$url" "$out" "$etag" --silent --show-error &
   curl_pid=$!
 
   local size pct=0
@@ -115,13 +103,13 @@ _download_zenity() {
 
 # Pick the progress style that suits where we are running.
 _download_with_progress() {
-  local url="$1" out="$2" type="$3" title="$4" expected="$5"
+  local url="$1" out="$2" etag="$3" title="$4" expected="$5"
   if is_tty; then
-    _download_terminal "$url" "$out" "$type"
+    _download_terminal "$url" "$out" "$etag"
   elif has_display && command -v zenity >/dev/null 2>&1; then
-    _download_zenity "$url" "$out" "$type" "$title" "$expected"
+    _download_zenity "$url" "$out" "$etag" "$title" "$expected"
   else
-    _download_quiet "$url" "$out" "$type"
+    _download_quiet "$url" "$out" "$etag"
   fi
 }
 
@@ -168,92 +156,110 @@ _install_zipped_rom() {
   rm -f "$staged_zip"
 }
 
-_install_dir_zip() {
-  local staged_zip="$1" dest="$2"
-  local stage="$GOTG_PARTIAL_DIR/stage-$$"
-  rm -rf "$stage"
-  mkdir -p "$stage"
-
-  unzip -q "$staged_zip" -d "$stage" || {
-    rm -rf "$stage"
-    die "could not unzip $(basename "$staged_zip")"
-  }
-
-  mkdir -p "$(dirname "$dest")"
-  rm -rf "$dest"
-  # File Browser zips a folder with its own name at the root; unwrap that so the
-  # layout matches what the server has.
-  local entries=("$stage"/*)
-  if [[ ${#entries[@]} -eq 1 && -d "${entries[0]}" ]]; then
-    mv "${entries[0]}" "$dest"
-  else
-    mv "$stage" "$dest"
-  fi
-  rm -rf "$stage" "$staged_zip"
-}
-
 # Download one game if it is not already here. Returns 0 when the game is ready.
+#
+# An entry is a list of raw member files; each downloads with resume and its
+# own checksum. What happens after the last member depends on the handler:
+# a single file moves into place, a tree stays a tree, and everything else is
+# a recipe the game's environment carries — unrar, convert, whatever this
+# platform's raw sources need. The raw members are deleted once the refined
+# artifact exists; they are re-downloadable, it is deterministic.
 download_game() {
   local game="$1"
-  local id remote type size sha title dest staged
+  local id platform handler title dest staged
   id="$(manifest_field "$game" id)"
-  remote="$(manifest_field "$game" path)"
-  type="$(manifest_field "$game" type)"
-  size="$(manifest_field "$game" size_bytes)"
-  sha="$(manifest_field "$game" sha256)"
+  platform="$(manifest_field "$game" platform)"
+  handler="$(manifest_field "$game" handler)"
   title="$(manifest_field "$game" title)"
   : "${title:=$id}"
 
   validate_id "$id"
-  validate_remote_path "$remote"
+  validate_platform "$platform"
 
-  dest="$(game_local_path "$game")"
-  if [[ -e "$dest" ]]; then
+  if game_is_installed "$game"; then
     return 0
   fi
+  dest="$(game_local_path "$game")"
 
   mkdir -p "$GOTG_PARTIAL_DIR"
-  staged="$(download_partial_path "$id" "$type")"
+  staged="$(download_partial_path "$id")"
 
-  # Two fetches of one game share a staging file, so a terminal `gotg install`
-  # racing a Steam launch of the same title would interleave two curls into it.
-  # The lock makes the second wait and then see the finished install. It lives in
-  # the state directory, not next to the downloads, so it is not mistaken for a
-  # leftover partial file.
+  # Two fetches of one game share a staging directory, so a terminal
+  # `gotg install` racing a Steam launch of the same title would interleave.
+  # The lock makes the second wait and then see the finished install.
   mkdir -p "$GOTG_STATE_DIR/locks"
   exec 8>"$GOTG_STATE_DIR/locks/$id.lock"
   if ! flock -w 3600 8; then
     die "timed out waiting for another gotg process to finish downloading $id"
   fi
-  if [[ -e "$dest" ]]; then
+  if game_is_installed "$game"; then
     exec 8>&-
     return 0
   fi
 
-  config_load
-  local url
-  GOTG_DOWNLOAD_TOKEN="$(api_login)"
-  url="$(api_raw_url "$remote" "$type")"
+  service_have || die "no service configured — run: gotg login"
 
-  log "fetching $title ($(human_size "$size"))"
-  _download_with_progress "$url" "$staged" "$type" "$title" "${size:-0}" ||
-    die "download failed for $id (partial kept at $staged; run again to resume)"
+  local total count
+  total="$(jq -r '[.files[].size_bytes] | add' <<<"$game")"
+  count="$(jq -r '.files | length' <<<"$game")"
+  log "fetching $title ($(human_size "$total"), $count file(s))"
 
-  if [[ "$type" == "dir" ]]; then
-    _install_dir_zip "$staged" "$dest"
-  else
-    _verify_checksum "$staged" "$sha"
-    if [[ "$(override_field "$game" unzip)" == "true" ]]; then
-      # Verified as downloaded, then unpacked: the checksum still covers what
-      # came off the server.
-      _install_zipped_rom "$staged" "$dest"
-    else
-      _install_file "$staged" "$dest"
-    fi
-  fi
+  local name size sha out url encoded
+  while IFS=$'\t' read -r name size sha; do
+    validate_filename "$name"
+    out="$staged/$name"
+    mkdir -p "$(dirname "$out")"
+    # Encode each segment; the slashes between them are real separators.
+    encoded="$(jq -rn --arg n "$name" '$n | split("/") | map(@uri) | join("/")')"
+    url="$(service_url)/games/$platform/$id/$encoded"
+    _download_with_progress "$url" "$out" "$sha" "$title: $name" "${size:-0}" ||
+      die "download failed for $id (partials kept at $staged; run again to resume)"
+    _verify_checksum "$out" "$sha"
+  done < <(jq -r '.files[] | [.name, .size_bytes, (.sha256 // "null")] | @tsv' <<<"$game")
+
+  case "$handler" in
+    single_file | no_intro_set)
+      local member
+      member="$staged/$(jq -r '.files[0].name' <<<"$game")"
+      if [[ "$(override_field "$game" unzip)" == "true" ]]; then
+        # Verified as downloaded, then unpacked: the checksum still covers
+        # what came off the server.
+        _install_zipped_rom "$member" "$dest"
+      else
+        _install_file "$member" "$dest"
+      fi
+      ;;
+    wiiu_decrypted)
+      mkdir -p "$(dirname "$dest")"
+      rm -rf "$dest"
+      mv "$staged" "$dest"
+      ;;
+    *)
+      _run_recipe "$game" "$handler" "$staged" "$dest"
+      ;;
+  esac
+  rm -rf "$staged"
 
   exec 8>&-
-  log "installed $dest"
+  log "installed $(game_installed_path "$game" || printf '%s' "$dest")"
+}
+
+# The environment owns the recipe and its tools; the catalog only said what
+# the source is. The refined artifact keeps the id and the recipe picks the
+# extension, which game_installed_path resolves by glob.
+_run_recipe() {
+  local game="$1" handler="$2" staged="$3" dest="$4"
+  local attr recipe
+  attr="$(env_attr "$game")"
+  recipe="$GOTG_ROOTS_DIR/$attr/bin/gotg-recipe"
+  [[ -x "$recipe" ]] ||
+    die "$attr has no recipe for '$handler' built yet — run: gotg install $(manifest_field "$game" id)"
+  jq -e --arg h "$handler" '.handlers | index($h)' \
+    "$GOTG_ROOTS_DIR/$attr/share/gotg/recipe.json" >/dev/null 2>&1 ||
+    die "$attr declares no recipe for '$handler'"
+  log "processing $(manifest_field "$game" id) ($handler)"
+  "$recipe" "$handler" "$staged" "$dest" ||
+    die "the $handler recipe failed for $(manifest_field "$game" id)"
 }
 
 cmd_download() {

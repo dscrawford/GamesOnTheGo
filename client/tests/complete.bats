@@ -11,11 +11,11 @@ load helper
 
 setup() {
   setup_env
-  start_server
-  write_config
+  start_saves_service
+  write_api_config
 }
 
-teardown() { stop_server; }
+teardown() { stop_saves_service; }
 
 @test "ids come from the cached catalog" {
   add_game snes world.super_metroid.sfc "rom" "Super Metroid"
@@ -40,7 +40,7 @@ teardown() { stop_server; }
 @test "it never fetches — a dead server still completes from cache" {
   add_game snes world.super_metroid.sfc "rom" "Super Metroid"
   gotg refresh
-  stop_server
+  stop_saves_service
   gotg complete ids
   [ "$status" -eq 0 ]
   [[ "$output" == *"world.super_metroid"* ]]
