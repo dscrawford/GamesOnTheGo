@@ -55,3 +55,15 @@ def test_qbit_credentials_optional_for_bootstrap():
 def test_qbit_url_must_be_http():
     with pytest.raises(ConfigError, match="http"):
         load({**BASE_ENV, "QBIT_URL": "qbittorrent:8080"})
+
+
+def test_gotg_api_env_vars_come_as_a_pair():
+    with pytest.raises(ConfigError, match="set together"):
+        load({**BASE_ENV, "GOTG_API_URL": "http://gotg:8000"})
+    with pytest.raises(ConfigError, match="set together"):
+        load({**BASE_ENV, "GOTG_INDEX_TOKEN": "t"})
+
+
+def test_gotg_api_url_must_be_http():
+    with pytest.raises(ConfigError, match="http"):
+        load({**BASE_ENV, "GOTG_API_URL": "gotg:8000", "GOTG_INDEX_TOKEN": "t"})

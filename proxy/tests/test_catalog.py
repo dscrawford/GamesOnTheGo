@@ -170,6 +170,9 @@ def test_a_non_object_entry_is_refused(catalog):
         ("name", ""),
         ("name", "a\tb"),
         ("name", "a" * 256),
+        ("name", "/".join(["a" * 255] * 3 + ["a" * 254, "aa"])),
+        ("name", "a/"),
+        ("name", "/a"),
         ("name", None),
         ("path", ""),
         ("path", "relative/path"),
@@ -197,9 +200,18 @@ def test_file_members_are_validated(catalog, library, field, value):
         catalog.upsert("n64", "usa.zelda", payload)
 
 
-def test_a_255_character_name_is_inside_the_boundary(catalog, library):
-    catalog.upsert("n64", "usa.zelda", entry(library, name="a" * 255))
-    assert catalog.view()["games"][0]["files"][0]["name"] == "a" * 255
+@pytest.mark.parametrize(
+    "name",
+    [
+        "a" * 255,
+        "a/b/c/d/e/f/g/h",
+        "/".join(["a" * 255] * 3 + ["a" * 254, "a"]),
+    ],
+    ids=["segment-255", "depth-8", "total-1024"],
+)
+def test_names_at_the_limits_are_inside_the_boundary(catalog, library, name):
+    catalog.upsert("n64", "usa.zelda", entry(library, name=name))
+    assert catalog.view()["games"][0]["files"][0]["name"] == name
 
 
 def test_the_db_may_not_live_inside_a_root(library):
@@ -578,14 +590,27 @@ def test_an_empty_put_body_is_a_400(service):
     assert status == 400
 
 
-def test_an_entry_larger_than_the_body_cap_is_a_413(service, library):
+def test_a_wiiu_sized_entry_fits_the_catalog_cap(service, library):
     fat = entry(library)
+    fat["handler"] = "wiiu_decrypted"
     fat["files"] = [
-        {"name": f"usa.vol_{i:05}", "path": str(library / "rel" / f"usa.vol_{i:05}"),
-         "size_bytes": 1, "mtime": 1, "sha256": None}
-        for i in range(1000)
+        {"name": f"content/{i:05}.pack", "path": str(library / "rel" / f"{i:05}.pack"),
+         "size_bytes": 1, "mtime": 1, "sha256": "a" * 64}
+        for i in range(5000)
     ]
-    status, _ = call(f"{service}/catalog/n64/usa.big", method="PUT", token=INDEX, body=fat)
+    status, stored = call(f"{service}/catalog/wiiu/usa.big", method="PUT", token=INDEX, body=fat)
+    assert status == 200
+    assert len(stored["files"]) == 5000
+
+
+def test_an_entry_past_even_the_catalog_cap_is_refused(service):
+    # The 413 closes the connection before the body is read; a client still
+    # mid-upload may see the reset instead of the status. Either is a refusal.
+    blob = b"[" + b"x" * (8 * 1024 * 1024) + b"]"
+    try:
+        status, _ = call(f"{service}/catalog/n64/usa.big", method="PUT", token=INDEX, body=blob)
+    except (urllib.error.URLError, ConnectionError):
+        return
     assert status == 413
 
 

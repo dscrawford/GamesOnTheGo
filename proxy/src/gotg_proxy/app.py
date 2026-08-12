@@ -64,6 +64,10 @@ TIMEOUT = 20
 # port-forward, or if the ingress annotation is ever dropped.
 MAX_BODY = 64 * 1024
 
+# A catalog entry lists every member file of a game; decrypted WiiU trees run
+# to five figures of rows.
+CATALOG_MAX_BODY = 8 * 1024 * 1024
+
 # A single byte-range request: bytes=N- or bytes=N-M. Multi-range answers 200
 # with the whole file rather than a multipart body nothing here needs. The
 # digit bound matters: int() on thousands of digits raises, and an absurd
@@ -682,11 +686,16 @@ class Handler(BaseHTTPRequestHandler):
             prefix, _, query = prefix.partition("?")
             rest = f"?{query}"
 
-        # A save bundle is the one body that is allowed to be big; everything
-        # else keeps the small cap, because an IGDB query is a line or two.
+        # A save bundle and a catalog entry are the two bodies allowed to be
+        # big — a retail WiiU tree runs to ~10k file rows at ~350 bytes each.
+        # Everything else keeps the small cap, because an IGDB query is a line
+        # or two. Auth has already passed by the time a body is read, so the
+        # bigger caps are spent only on credentialed callers.
         max_body = MAX_BODY
         if prefix == "saves" and self.command == "PUT" and self.store is not None:
             max_body = self.store.max_bytes
+        elif prefix == "catalog" and self.command == "PUT":
+            max_body = CATALOG_MAX_BODY
 
         try:
             length = int(self.headers.get("Content-Length") or 0)

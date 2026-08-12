@@ -534,3 +534,30 @@ def test_a_nested_member_streams_through_its_nested_url(service, library, catalo
     assert (status, body) == (200, b"rpx!")
     assert "app.rpx" in headers["Content-Disposition"]
     assert "code" not in headers["Content-Disposition"]
+
+
+def test_a_member_at_the_depth_limit_streams(service, library, catalog):
+    deep = library / "some-release" / "d1" / "d2" / "d3" / "d4" / "d5" / "d6" / "d7"
+    deep.mkdir(parents=True)
+    (deep / "leaf.bin").write_bytes(b"deep")
+    name = "d1/d2/d3/d4/d5/d6/d7/leaf.bin"  # exactly 8 segments
+    catalog.upsert(
+        "n64",
+        "usa.deep",
+        {
+            "handler": "wiiu_decrypted",
+            "title": "Deep",
+            "files": [
+                {"name": name, "path": str(deep / "leaf.bin"), "size_bytes": 4, "mtime": 1, "sha256": None}
+            ],
+        },
+    )
+    base, _ = service
+    status, body, _ = fetch(base, f"/games/n64/usa.deep/{name}")
+    assert (status, body) == (200, b"deep")
+
+
+def test_a_member_beyond_the_depth_limit_is_a_404(service):
+    base, _ = service
+    status, _, _ = fetch(base, "/games/n64/usa.zelda/a/b/c/d/e/f/g/h/i.z64")
+    assert status == 404

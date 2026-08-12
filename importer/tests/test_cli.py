@@ -2,7 +2,7 @@
 
 import json
 
-from gotg_importer.cli import EXIT_CONFIG, EXIT_OK, _bootstrap_paths, main
+from gotg_importer.cli import EXIT_CONFIG, EXIT_FAILED, EXIT_OK, _bootstrap_paths, main
 
 ENV = {
     "GAMES_ROOT": "/data/Games",
@@ -101,3 +101,46 @@ def test_a_payload_needing_review_still_exits_zero(monkeypatch, tmp_path):
     monkeypatch.setenv("STATE_DIR", str(tmp_path / "state"))
 
     assert main(["--bootstrap", str(src / "mystery")]) == EXIT_OK
+
+
+def _publish_env(monkeypatch, tmp_path):
+    src = tmp_path / "Torrents"
+    src.mkdir(exist_ok=True)
+    monkeypatch.setenv("GAMES_ROOT", str(tmp_path / "Games"))
+    monkeypatch.setenv("SOURCE_ROOT", str(src))
+    monkeypatch.setenv("STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("GOTG_API_URL", "http://127.0.0.1:1")  # nothing listens here
+    monkeypatch.setenv("GOTG_INDEX_TOKEN", "t")
+    return src
+
+
+def test_a_down_api_disables_publishing_and_the_import_still_lands(monkeypatch, tmp_path, caplog):
+    src = _publish_env(monkeypatch, tmp_path)
+    (tmp_path / "Games").mkdir()
+    (tmp_path / "state").mkdir()
+    rom = src / "Legend of Zelda, The - Majora's Mask (USA).z64"
+    rom.write_bytes(b"rom")
+
+    assert main(["--bootstrap", str(rom)]) == EXIT_OK
+
+    assert (tmp_path / "Games" / "n64" / "usa.legend_of_zelda_majoras_mask.z64").exists()
+    assert "catalog publishing disabled" in caplog.text
+
+
+def test_a_dry_run_never_dials_the_api(monkeypatch, tmp_path, caplog):
+    src = _publish_env(monkeypatch, tmp_path)
+    (tmp_path / "Games").mkdir()
+    (tmp_path / "state").mkdir()
+    rom = src / "Legend of Zelda, The - Majora's Mask (USA).z64"
+    rom.write_bytes(b"rom")
+
+    assert main(["--dry-run", "--bootstrap", str(rom)]) == EXIT_OK
+
+    assert "catalog publishing disabled" not in caplog.text, "a dry run must not construct a publisher"
+
+
+def test_diff_catalog_against_a_down_api_is_a_hard_failure(monkeypatch, tmp_path):
+    _publish_env(monkeypatch, tmp_path)
+    (tmp_path / "Games").mkdir()
+    (tmp_path / "state").mkdir()
+    assert main(["--diff-catalog"]) == EXIT_FAILED

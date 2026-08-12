@@ -8,8 +8,10 @@ ever stops an import.
 
 import hashlib
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -110,11 +112,13 @@ def test_a_scene_release_lists_its_volume_set(tmp_path):
     ]
 
 
-def test_a_single_archive_is_one_member_under_its_real_name(tmp_path):
+@pytest.mark.parametrize("action", [ACTION_CONVERT, ACTION_EXTRACT])
+def test_a_single_archive_file_is_one_member_under_its_real_name(tmp_path, action):
+    # ACTION_EXTRACT on a lone file is the scene shortcut: same branch as convert.
     archive = tmp_path / "Torrents" / "Game (USA).7z"
     archive.parent.mkdir(exist_ok=True)
     archive.write_bytes(b"7z!")
-    op = Op(ACTION_CONVERT, "gamecube", str(archive), "/g/gamecube/usa.game.rvz", "usa.game", handler="single_archive")
+    op = Op(action, "gamecube", str(archive), "/g/gamecube/usa.game.rvz", "usa.game", handler="single_archive")
     assert [(m.name, str(m.path)) for m in _members(op)] == [("Game (USA).7z", str(archive))]
 
 
@@ -212,6 +216,9 @@ def test_a_link_reuses_the_sidecar_execute_wrote(stub, tmp_path, monkeypatch):
     result = link_result(tmp_path)
     dst = tmp_path / "Games" / "n64" / "usa.zelda.z64"
     dst.parent.mkdir(parents=True)
+    import os
+
+    os.link(result.op.src, dst)  # dual-publish: execute linked before we publish
     (tmp_path / "Games" / "n64" / "usa.zelda.z64.sha256").write_text("e" * 64 + "\n")
 
     def never(*args, **kwargs):
@@ -309,3 +316,162 @@ def test_diff_catalog_flags_a_link_hash_mismatch(stub):
         "/Games/n64/usa.zelda.z64": Entry("n64", "/Games/n64/usa.zelda.z64", "file", 4, "d" * 64, "Zelda"),
     }
     assert diff_catalog(manifest, CatalogAPI(base, "t")) == ["hash mismatch: n64/usa.zelda"]
+
+
+def test_files_inside_a_scene_subdirectory_are_not_members(tmp_path):
+    release = tmp_path / "Torrents" / "Game_NSW-GROUP"
+    (release / "Sample").mkdir(parents=True)
+    (release / "group.rar").write_bytes(b"x")
+    (release / "Sample" / "sample.mkv").write_bytes(b"not the game")
+    op = Op(ACTION_EXTRACT, "switch", str(release), "/g/switch/world.game.xci", "world.game", handler="scene_archive")
+    assert [m.name for m in _members(op)] == ["group.rar"]
+
+
+def test_an_archive_tree_does_pick_up_the_same_nested_files(tmp_path):
+    # The deliberate contrast with the scene case: rglob descends, iterdir does not.
+    release = tmp_path / "Torrents" / "Game [0005000010143600]"
+    (release / "Sample").mkdir(parents=True)
+    (release / "group.rar").write_bytes(b"x")
+    (release / "Sample" / "sample.mkv").write_bytes(b"x")
+    op = Op(ACTION_ARCHIVE, "wiiu", str(release), "/g/wiiu/usa.game.zip", "usa.game", handler="wiiu_decrypted")
+    assert [m.name for m in _members(op)] == ["Sample/sample.mkv", "group.rar"]
+
+
+def test_a_vanished_source_file_is_a_publish_error(stub, tmp_path):
+    base, _ = stub
+    result = link_result(tmp_path)
+    Path(result.op.src).unlink()
+    with pytest.raises(PublishError, match="cannot stat"):
+        Publisher(CatalogAPI(base, "t")).publish(result)
+
+
+def test_a_vanished_extract_dir_is_a_publish_error_not_a_crash(stub, tmp_path):
+    # A pruned torrent must stay a per-entry failure — FileNotFoundError out of
+    # iterdir would escape run_paths' except clause and abort the whole import.
+    base, _ = stub
+    op = Op(
+        ACTION_EXTRACT,
+        "switch",
+        str(tmp_path / "gone_NSW-GROUP"),
+        "/g/switch/world.game.xci",
+        "world.game",
+        handler="scene_archive",
+    )
+    with pytest.raises(PublishError):
+        Publisher(CatalogAPI(base, "t")).publish(Result(op, STATUS_DONE))
+
+
+def test_a_vanished_archive_dir_is_a_publish_error(stub, tmp_path):
+    base, _ = stub
+    op = Op(
+        ACTION_ARCHIVE, "wiiu", str(tmp_path / "gone"), "/g/wiiu/usa.game.zip", "usa.game", handler="wiiu_decrypted"
+    )
+    with pytest.raises(PublishError, match="nothing to publish"):
+        Publisher(CatalogAPI(base, "t")).publish(Result(op, STATUS_DONE))
+
+
+def test_a_fractional_mtime_still_matches_the_stored_integer_row(stub, tmp_path, monkeypatch):
+    # int(123.9) == 123: the stored hash is kept, and the published row carries
+    # the int the service's mtime validation demands. The flip side is inherent:
+    # an edit within the same second keeps a stale hash.
+    base, handler = stub
+    result = link_result(tmp_path)
+    src = Path(result.op.src)
+    os.utime(src, (123.9, 123.9))
+    handler.games = [
+        {
+            "platform": "n64",
+            "id": "usa.zelda",
+            "files": [{"name": "usa.zelda.z64", "path": str(src), "size_bytes": 4, "mtime": 123, "sha256": "f" * 64}],
+        }
+    ]
+
+    def never(*args, **kwargs):
+        raise AssertionError("a same-second mtime must not trigger a rehash")
+
+    monkeypatch.setattr("gotg_importer.publish.ex.sha256_file", never)
+    Publisher(CatalogAPI(base, "t")).publish(result)
+    member = handler.puts[0][1]["files"][0]
+    assert member["sha256"] == "f" * 64
+    assert member["mtime"] == 123
+
+
+def test_an_unhashed_row_is_rehashed_when_hashing_returns(stub, tmp_path):
+    # --allow-unhashed on run one must not become never-hashed: a stored null
+    # sha must not satisfy the skip.
+    base, handler = stub
+    result = link_result(tmp_path)
+    src = Path(result.op.src)
+    st = src.stat()
+    handler.games = [
+        {
+            "platform": "n64",
+            "id": "usa.zelda",
+            "files": [
+                {
+                    "name": "usa.zelda.z64",
+                    "path": str(src),
+                    "size_bytes": st.st_size,
+                    "mtime": int(st.st_mtime),
+                    "sha256": None,
+                }
+            ],
+        }
+    ]
+    Publisher(CatalogAPI(base, "t")).publish(result)
+    assert handler.puts[0][1]["files"][0]["sha256"] == hashlib.sha256(b"rom!").hexdigest()
+
+
+def test_diff_of_an_empty_manifest_against_an_empty_catalog_is_clean(stub):
+    from gotg_importer.publish import diff_catalog
+
+    base, _ = stub
+    assert diff_catalog({}, CatalogAPI(base, "t")) == []
+
+
+def test_an_empty_manifest_reports_every_catalog_row(stub):
+    from gotg_importer.publish import diff_catalog
+
+    base, handler = stub
+    handler.games = [
+        {
+            "platform": "n64",
+            "id": "usa.zelda",
+            "handler": "single_file",
+            "files": [{"name": "usa.zelda.z64", "size_bytes": 4, "sha256": "a" * 64, "path": "/t/z.z64", "mtime": 1}],
+        },
+    ]
+    assert diff_catalog({}, CatalogAPI(base, "t")) == ["in catalog but not the manifest: n64/usa.zelda"]
+
+
+def test_an_empty_catalog_reports_every_manifest_entry(stub):
+    from gotg_importer.manifest import Entry
+    from gotg_importer.publish import diff_catalog
+
+    base, _ = stub
+    manifest = {
+        "/Games/n64/usa.zelda.z64": Entry("n64", "/Games/n64/usa.zelda.z64", "file", 4, "a" * 64, "Zelda"),
+    }
+    assert diff_catalog(manifest, CatalogAPI(base, "t")) == ["missing from catalog: n64/usa.zelda"]
+
+
+def test_a_link_entry_with_extra_members_is_flagged(stub):
+    from gotg_importer.manifest import Entry
+    from gotg_importer.publish import diff_catalog
+
+    base, handler = stub
+    handler.games = [
+        {
+            "platform": "n64",
+            "id": "usa.zelda",
+            "handler": "single_file",
+            "files": [
+                {"name": "usa.zelda.z64", "size_bytes": 4, "sha256": "a" * 64, "path": "/t/z.z64", "mtime": 1},
+                {"name": "extra.bin", "size_bytes": 1, "sha256": None, "path": "/t/e.bin", "mtime": 1},
+            ],
+        },
+    ]
+    manifest = {
+        "/Games/n64/usa.zelda.z64": Entry("n64", "/Games/n64/usa.zelda.z64", "file", 4, "a" * 64, "Zelda"),
+    }
+    assert diff_catalog(manifest, CatalogAPI(base, "t")) == ["link entry with 2 members: n64/usa.zelda"]

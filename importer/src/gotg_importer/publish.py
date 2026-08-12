@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import urllib.error
 import urllib.request
@@ -28,6 +29,21 @@ from . import plan as pl
 log = logging.getLogger("gotg.publish")
 
 TIMEOUT = 30
+
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects: urllib's default copies the Authorization header onto
+    the redirected request even cross-origin, which would hand the index token
+    to whatever a Location header names — the same leak afd63b3 fixed in the
+    proxy."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ARG002
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect())
 
 
 class PublishError(Exception):
@@ -56,7 +72,7 @@ class CatalogAPI:
         )
         request.add_header("Authorization", f"Bearer {self.token}")
         try:
-            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310
+            with _OPENER.open(request, timeout=TIMEOUT) as response:  # noqa: S310
                 return response.status, json.loads(response.read() or b"{}")
         except urllib.error.HTTPError as error:
             try:
@@ -133,21 +149,34 @@ class Publisher:
                 self.known[(game["platform"], game["id"], row["name"])] = row
 
     def _digest(self, op: pl.Op, member: _Member, stat, checksum: bool) -> str | None:
+        # The stored hash must exist to short-circuit: an entry published
+        # under --allow-unhashed must acquire its hash on the next hashing
+        # run, not match its way out of ever getting one.
         stored = self.known.get((op.platform, op.entry_id, member.name))
         if (
             stored
+            and stored.get("sha256")
             and stored.get("path") == str(member.path)
             and stored.get("size_bytes") == stat.st_size
             and stored.get("mtime") == int(stat.st_mtime)
         ):
-            return stored.get("sha256")
+            return stored["sha256"]
         if not checksum:
             return None
         if op.action == pl.ACTION_HARDLINK:
-            # The destination hash execute.py computed is this inode's hash.
+            # The destination hash execute.py computed is this inode's hash —
+            # but only if it still is this inode, and the sidecar is shaped
+            # like a hash. Anything suspect falls through to hashing: this
+            # value becomes the ETag resumes validate against, so a stale one
+            # is worse than a slow one.
             sidecar = Path(op.dst + ".sha256")
-            if sidecar.is_file():
-                return sidecar.read_text().strip() or None
+            try:
+                if sidecar.is_file():
+                    text = sidecar.read_text().strip()
+                    if _SHA256_RE.fullmatch(text) and Path(op.dst).stat().st_ino == stat.st_ino:
+                        return text
+            except OSError:
+                pass
         return ex.sha256_file(member.path)
 
     def publish(self, result: ex.Result, *, checksum: bool = True) -> None:
@@ -156,8 +185,15 @@ class Publisher:
         if op.action in (pl.ACTION_SKIP, pl.ACTION_MANUAL) or not result.ok or not op.entry_id:
             return
 
+        try:
+            members = _members(op)
+        except OSError as error:
+            # A torrent pruned between execute and publish: per-entry, like
+            # every other publish failure, never the whole run's problem.
+            raise PublishError(f"cannot enumerate {op.src!r}: {error}") from error
+
         files = []
-        for member in _members(op):
+        for member in members:
             try:
                 stat = member.path.stat()
             except OSError as error:

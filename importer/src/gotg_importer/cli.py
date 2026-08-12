@@ -132,14 +132,15 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_CONFIG
         from . import manifest as mf
 
+        entries = mf.load(cfg.manifest_path)
         try:
-            problems = pub.diff_catalog(mf.load(cfg.manifest_path), pub.CatalogAPI(cfg.api_url, cfg.index_token))
+            problems = pub.diff_catalog(entries, pub.CatalogAPI(cfg.api_url, cfg.index_token))
         except pub.PublishError as exc:
             log.error("%s", exc)
             return EXIT_FAILED
         for problem in problems:
             log.warning("%s", problem)
-        log.info("diff: %d problem(s) across %d manifest entr(ies)", len(problems), len(mf.load(cfg.manifest_path)))
+        log.info("diff: %d problem(s) across %d manifest entr(ies)", len(problems), len(entries))
         return EXIT_OK if not problems else EXIT_FAILED
 
     checksum = not args.no_checksum
