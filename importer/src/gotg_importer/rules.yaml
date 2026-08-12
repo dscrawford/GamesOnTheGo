@@ -23,6 +23,9 @@ dat_dirs:
   "Nintendo - Super Nintendo Entertainment System":
     platform: snes
     handler: no_intro_set
+  "Nintendo - Game Boy":
+    platform: gb
+    handler: no_intro_set
   # Homebrew/aftermarket set — deliberately not imported (decision 2026-07-26).
   "Nintendo - Nintendo Entertainment System (Headered) (Aftermarket)":
     platform: nes

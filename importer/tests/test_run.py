@@ -12,9 +12,10 @@ import pytest
 from gotg_importer.config import load as load_config
 from gotg_importer.execute import STATUS_ERROR, Result, cleanup_staging
 from gotg_importer.plan import ACTION_HARDLINK, Op
+from gotg_importer.planner import plan_source
 from gotg_importer.publish import Collision, PublishError
 from gotg_importer.rules import defaults
-from gotg_importer.run import run_paths, run_scan
+from gotg_importer.run import discover, run_paths, run_scan
 
 RULES = defaults()
 
@@ -282,3 +283,64 @@ def test_a_failing_sweep_is_counted_not_fatal(cfg):
 
     assert stats.publish_errors == 1
     assert "unpublished=1" in stats.summary()
+
+
+# --- the sets that must never go quiet ---------------------------------------
+
+
+def zipped_set(cfg, dirname, count=6):
+    """A No-Intro directory of zipped ROMs: every file is .zip, so only the
+    directory name can say what console these are."""
+    d = cfg.source_root / dirname
+    d.mkdir(parents=True, exist_ok=True)
+    for i in range(count):
+        (d / f"A Game {i} (USA).zip").write_bytes(b"rom")
+    return d
+
+
+def test_a_mapped_zipped_set_is_found_and_planned(cfg):
+    # Game Boy: 1926 real games sat unimported because this line was missing.
+    zipped_set(cfg, "Nintendo - Game Boy")
+    paths, ignored = discover(cfg.source_root, RULES)
+    assert [p.name for p in paths] == ["Nintendo - Game Boy"]
+    assert ignored == 0
+
+    ops = plan_source(cfg.source_root / "Nintendo - Game Boy", cfg.games_root, RULES)
+    assert {op.platform for op in ops} == {"gb"}
+    assert all(op.handler == "no_intro_set" for op in ops)
+
+
+def test_an_unmapped_zipped_set_is_reported_not_silently_ignored(cfg, caplog):
+    zipped_set(cfg, "Sega - Mega Drive")
+    with caplog.at_level("WARNING", logger="gotg-importer"):
+        paths, ignored = discover(cfg.source_root, RULES)
+    assert paths == []
+    assert ignored == 1
+    # The whole point: a console missing from the library must be loud.
+    assert "going unimported" in caplog.text
+    assert "Sega - Mega Drive" in caplog.text
+    assert "rules.yaml" in caplog.text
+
+
+def test_films_and_television_stay_quiet(cfg, caplog):
+    # The reason the ignore exists at all: this tree holds hundreds of these,
+    # and warning about each would bury the one that matters.
+    for name in ["The Righteous Gemstones S01 1080p WEB-DL", "One Piece E1094 2160p"]:
+        d = cfg.source_root / name
+        d.mkdir(parents=True)
+        (d / "episode.mkv").write_bytes(b"video")
+    with caplog.at_level("WARNING", logger="gotg-importer"):
+        paths, ignored = discover(cfg.source_root, RULES)
+    assert paths == []
+    assert ignored == 2
+    assert "going unimported" not in caplog.text
+
+
+def test_the_two_platform_maps_never_drift(cfg):
+    # rules.yaml overlays the code defaults, so a name in one and not the other
+    # is a silent disagreement — the shape of the Game Boy miss.
+    from gotg_importer.plan import DAT_DIR_PLATFORM
+
+    for name, (platform, handler) in DAT_DIR_PLATFORM.items():
+        assert name in RULES.dat_dirs, f"{name} is in plan.py but not rules.yaml"
+        assert RULES.dat_dirs[name] == (platform, handler)

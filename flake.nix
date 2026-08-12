@@ -364,6 +364,20 @@
             touch $out
           '';
 
+        # A DAT directory mapped to a platform with no environment imports
+        # games nobody can launch. plan.py is pure stdlib, so this reads the
+        # real map rather than a copy of it.
+        # A DAT directory mapped to a platform with no environment imports
+        # games nobody can launch. plan.py is pure stdlib, so this reads the
+        # real map rather than a copy of it.
+        platforms =
+          pkgs.runCommand "check-platforms" { nativeBuildInputs = [ pkgs.python312 ]; } ''
+            export PYTHONPATH=${./importer/src}
+            export GOTG_ENV_DIR=${./client/env}
+            python3 ${./importer/tests/check_platforms.py}
+            touch $out
+          '';
+
         ruff =
           pkgs.runCommand "check-ruff"
             {

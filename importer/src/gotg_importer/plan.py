@@ -19,6 +19,7 @@ from .slugify import ParsedRom, parse, select_1g1r, title_slug
 DAT_DIR_PLATFORM = {
     "Nintendo - Nintendo 64 (BigEndian)": ("n64", "no_intro_set"),
     "Nintendo - Super Nintendo Entertainment System": ("snes", "no_intro_set"),
+    "Nintendo - Game Boy": ("gb", "no_intro_set"),
     # NES aftermarket/homebrew set is excluded by decision (2026-07-26).
     "Nintendo - Nintendo Entertainment System (Headered) (Aftermarket)": ("nes", "excluded"),
 }

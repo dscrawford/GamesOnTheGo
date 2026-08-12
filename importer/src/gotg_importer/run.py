@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import collections
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,6 +24,9 @@ from .planner import plan_source
 from .rules import Rules
 
 log = logging.getLogger("gotg-importer")
+
+# The classifier's own words for "this is a ROM set I cannot place".
+UNMAPPED_SET_RE = re.compile(r"zipped ROMs but directory name is unmapped")
 
 
 @dataclass
@@ -101,9 +105,17 @@ def discover(root: Path, rules: Rules) -> tuple[list[Path], int]:
     --bootstrap: an unrecognised entry there is a low-confidence game worth a
     person's attention, whereas here it is almost certainly a TV episode, and
     quarantining thousands of those would bury the few that matter.
+
+    Silently, with one exception. A directory of zipped ROMs is unmistakably a
+    game set — the archives hide the extension, so only the directory name can
+    name the platform — and one whose name is unmapped is a whole console
+    missing from the library. That is not a TV episode and must never be
+    counted quietly: 1926 Game Boy games sat behind this number until somebody
+    went looking.
     """
     found: list[Path] = []
     ignored = 0
+    unmapped: list[tuple[str, str]] = []
     for child in sorted(root.iterdir()):
         try:
             source = sc.scan(child)
@@ -113,9 +125,14 @@ def discover(root: Path, rules: Rules) -> tuple[list[Path], int]:
             continue
         verdict = cl.classify(source, rules)
         if verdict.handler == cl.HANDLER_MANUAL and not verdict.platform:
+            if UNMAPPED_SET_RE.search(verdict.reason):
+                unmapped.append((child.name, verdict.reason))
             ignored += 1
             continue
         found.append(child)
+
+    for name, reason in unmapped:
+        log.warning("a game set is going unimported: %s — %s", name, reason)
     return found, ignored
 
 
