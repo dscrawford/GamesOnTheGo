@@ -117,6 +117,26 @@ teardown() {
   [[ "$output" == *"installed: yes"* ]]
 }
 
+@test "info lists the mods a game has variant environments for" {
+  add_game gamecube "usa.super_mario_sunshine.rvz" "disc" "Super Mario Sunshine"
+  export GOTG_ENV_DIR="$TEST_TMP/env"
+  mkdir -p "$GOTG_ENV_DIR/games/gamecube"
+  : >"$GOTG_ENV_DIR/games/gamecube/usa.super_mario_sunshine.bse.nix"
+  : >"$GOTG_ENV_DIR/games/gamecube/usa.super_mario_sunshine.bsmso.nix"
+  gotg refresh
+  gotg info usa.super_mario_sunshine
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"mods:"*"bse, bsmso"* ]]
+}
+
+@test "info stays silent about mods when a game has none" {
+  add_game n64 "usa.zelda.z64" "rom" "Zelda"
+  gotg refresh
+  gotg info usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"mods:"* ]]
+}
+
 @test "names with spaces and punctuation survive the round trip" {
   mkdir -p "$SERVICE_LIBRARY_DIR/snes"
   printf 'rom' >"$SERVICE_LIBRARY_DIR/snes/Zelda's Quest (USA) [!].sfc"

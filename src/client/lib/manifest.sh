@@ -173,7 +173,8 @@ cmd_refresh() { manifest_refresh || die "catalog refresh failed"; }
 GOTG_LIST_LIMIT=50
 
 cmd_list() {
-  local pattern="" limit="$GOTG_LIST_LIMIT"
+  local pattern="" limit="$GOTG_LIST_LIMIT" platform="" page=""
+  local usage="usage: gotg list [pattern] [page] [--platform <p>] [--all|--limit N]"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -189,15 +190,35 @@ cmd_list() {
         limit="${1#--limit=}"
         shift
         ;;
+      --platform)
+        platform="${2:-}"
+        shift 2 || die "--platform needs a name"
+        ;;
+      --platform=*)
+        platform="${1#--platform=}"
+        shift
+        ;;
       -*) die "unknown option for list: $1" ;;
       *)
-        [[ -z "$pattern" ]] || die "usage: gotg list [pattern] [--all|--limit N]"
-        pattern="$1"
+        # A bare number is a page, anything else the pattern — so searching
+        # for a literal number needs a regex spelling like '194[2]'.
+        if [[ "$1" =~ ^[0-9]+$ ]]; then
+          [[ -z "$page" ]] || die "$usage"
+          page="$1"
+        else
+          [[ -z "$pattern" ]] || die "$usage"
+          pattern="$1"
+        fi
         shift
         ;;
     esac
   done
   [[ "$limit" =~ ^[0-9]+$ ]] || die "--limit takes a number, not: $limit"
+  [[ -z "$page" || "$page" =~ ^[1-9][0-9]*$ ]] || die "a page starts at 1, not: $page"
+  if ((limit == 0)) && [[ -n "$page" ]]; then
+    die "--all and a page cannot combine — --all is every page at once"
+  fi
+  : "${page:=1}"
 
   manifest_ensure
   local rows
@@ -211,13 +232,14 @@ cmd_list() {
   # The size is humanized inside jq: one process for the whole catalog, where
   # a $(human_size) per row is a fork per row — seconds over --all.
   if ! rows="$(manifest_games |
-    jq -r --arg p "$pattern" '
+    jq -r --arg p "$pattern" --arg plat "${platform,,}" '
       def human: if . < 1024 then "\(.) B"
         elif . < 1048576 then "\(. / 1024 * 10 | round / 10) KB"
         elif . < 1073741824 then "\(. / 1048576 * 10 | round / 10) MB"
         elif . < 1099511627776 then "\(. / 1073741824 * 10 | round / 10) GB"
         else "\(. / 1099511627776 * 10 | round / 10) TB" end;
-      select($p == "" or ([.id, .title, .platform] | any(test($p; "i"))))
+      select($plat == "" or .platform == $plat)
+      | select($p == "" or ([.id, .title, .platform] | any(test($p; "i"))))
       | [.platform, .id, (([.files[].size_bytes] | add) | human), .files[0].name,
          .handler, .title] | @tsv
     ' 2>&1)"; then
@@ -226,20 +248,40 @@ cmd_list() {
   fi
 
   if [[ -z "$rows" ]]; then
+    # A platform nobody has is worth naming apart from an unlucky pattern:
+    # the answer to one is a different platform, to the other a wider regex.
+    if [[ -n "$platform" ]]; then
+      local known
+      known="$(manifest_games | jq -r '.platform' | sort -u | tr '\n' ' ')"
+      if [[ " $known" != *" ${platform,,} "* ]]; then
+        log "no games on platform '$platform'"
+        log "platforms here: ${known% }"
+        return 0
+      fi
+    fi
     if [[ -n "$pattern" ]]; then
-      log "nothing matches $pattern"
+      log "nothing matches $pattern${platform:+ on $platform}"
       return 0
     fi
     log "the catalog is empty"
     return 0
   fi
 
-  local total shown
+  local total pages start end
   total="$(wc -l <<<"$rows")"
-  shown="$total"
-  if ((limit > 0 && total > limit)); then
-    rows="$(head -n "$limit" <<<"$rows")"
-    shown="$limit"
+  pages=1
+  start=1
+  end="$total"
+  if ((limit > 0)); then
+    pages=$(((total + limit - 1) / limit))
+    if ((page > pages)); then
+      log "page $page is past the end — only $pages page(s) ($total game(s))"
+      return 0
+    fi
+    start=$(((page - 1) * limit + 1))
+    end=$((page * limit))
+    ((end > total)) && end="$total"
+    rows="$(sed -n "${start},${end}p" <<<"$rows")"
   fi
 
   # The colour goes in its own argument so the width applies to the value and
@@ -277,10 +319,13 @@ cmd_list() {
 
   # Say what was left out, and how to see it. A silent truncation reads as
   # "that is everything", which is the one thing it must not read as.
-  if ((shown < total)); then
+  if ((pages > 1)); then
     log ""
-    log "${C_WARN}showing $shown of $total.${C_RESET} Narrow it with a pattern:"
-    log "  gotg list zelda          # id, title or platform, as a regex"
+    log "${C_WARN}showing $start-$end of $total (page $page of $pages).${C_RESET} More:"
+    if ((page < pages)); then
+      log "  gotg list${pattern:+ $pattern}${platform:+ --platform $platform} $((page + 1))   # the next page"
+    fi
+    log "  gotg list zelda          # narrow: id, title or platform, as a regex"
     log "  gotg list --all          # every one of them"
   fi
 }
@@ -309,4 +354,16 @@ cmd_info() {
     "\($m)local:    \($r) \($local)",
     "\($m)installed:\($r) \(if $installed == "yes" then $ok else $no end)\($installed)\($r)"
   ' <<<"$game"
+
+  # The variant environments this game has — bse, bsmso, 60fps — each
+  # reachable as `gotg play <id> <mod>`. Silence when there are none: a
+  # "mods: none" line answers a question nobody asked.
+  local -a mods=()
+  mapfile -t mods < <(env_variant_names \
+    "$(manifest_field "$game" platform)" "$(manifest_field "$game" id)")
+  if ((${#mods[@]} > 0)); then
+    local joined
+    printf -v joined '%s, ' "${mods[@]}"
+    printf '%smods:     %s %s\n' "$C_MUTED" "$C_RESET" "${joined%, }"
+  fi
 }

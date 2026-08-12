@@ -34,7 +34,69 @@ big_catalog() {
   [ "$status" -eq 0 ]
   # 50 rows, plus the header.
   [ "$(grep -c "usa\.\|world\." <<<"$output")" -eq 50 ]
-  [[ "$stderr" == *"showing 50 of 62"* ]]
+  [[ "$stderr" == *"showing 1-50 of 62 (page 1 of 2)"* ]]
+  [[ "$stderr" == *"--all"* ]]
+}
+
+@test "the truncation footer offers the next page" {
+  big_catalog
+  gotg list
+  [[ "$stderr" == *"gotg list 2"* ]]
+}
+
+@test "a numeric positional is the page" {
+  big_catalog
+  gotg list 2
+  [ "$status" -eq 0 ]
+  [ "$(grep -c "usa\.\|world\." <<<"$output")" -eq 12 ]
+  [[ "$stderr" == *"showing 51-62 of 62 (page 2 of 2)"* ]]
+}
+
+@test "a page past the end says how many pages there are" {
+  big_catalog
+  gotg list 9
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"only 2 page"* ]]
+}
+
+@test "--platform lists only that platform" {
+  big_catalog
+  gotg list --platform snes
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"world.super_metroid"* ]]
+  [ "$(grep -c "n64" <<<"$output")" -eq 0 ]
+}
+
+@test "--platform composes with a pattern" {
+  big_catalog
+  gotg list --platform n64 metroid
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"nothing matches"* ]]
+  gotg list --platform snes metroid
+  [[ "$output" == *"world.super_metroid"* ]]
+}
+
+@test "pages compose with --platform and --limit" {
+  big_catalog
+  gotg list --platform n64 --limit 10 2
+  [ "$status" -eq 0 ]
+  [ "$(grep -c "usa\." <<<"$output")" -eq 10 ]
+  [[ "$stderr" == *"page 2 of 7"* ]]
+}
+
+@test "an unknown platform names the ones that exist" {
+  big_catalog
+  gotg list --platform vectrex
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"no games on platform 'vectrex'"* ]]
+  [[ "$stderr" == *"n64"* ]]
+  [[ "$stderr" == *"snes"* ]]
+}
+
+@test "--all and a page cannot combine" {
+  big_catalog
+  gotg list --all 2
+  [ "$status" -ne 0 ]
   [[ "$stderr" == *"--all"* ]]
 }
 

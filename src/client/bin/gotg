@@ -62,9 +62,10 @@ usage: gotg <command> [args]
 
   login              save the server URL and credentials (mode 600)
   refresh            re-fetch the game catalog from the server
-  list [pattern]     games matching a regex on id, title or platform,
-                     marking the ones installed here (--all, --limit N)
-  info <id>          show one game's details
+  list [pattern] [page]  games matching a regex on id, title or platform,
+                     marking the ones installed here; a bare number is the
+                     page (--platform <p>, --all, --limit N)
+  info <id>          show one game's details, its mods included
   download <id>      fetch a game without setting up a launcher
   install <id>       fetch it, build its environment, write a Steam launcher
   play <id> [variant] fetch and build whatever is missing, then launch
