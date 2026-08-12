@@ -205,7 +205,7 @@ teardown() {
 
   gotg play usa.mario
   [ "$status" -ne 0 ]
-  [[ "$stderr" == *"client/env/snes.nix"* ]]
+  [[ "$stderr" == *"src/client/env/snes.nix"* ]]
 }
 
 @test "play downloads a game that is missing before launching it" {

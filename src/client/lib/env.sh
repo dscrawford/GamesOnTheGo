@@ -1,13 +1,13 @@
 # shellcheck shell=bash
 # Which environment runs a game, and getting it built.
 #
-# An environment is a nix derivation — see client/env — that wraps one emulator
+# An environment is a nix derivation — see src/client/env — that wraps one emulator
 # together with the arguments and settings a platform, or one particular game,
 # needs. It is built into a GC-rooted symlink under ~/.local/state/gotg/roots and
 # always exposes the same binary, bin/gotg-play.
 #
 # Working out *which* environment a game wants never evaluates nix: it comes from
-# the catalog entry and the names of the files in client/env. That keeps `list`,
+# the catalog entry and the names of the files in src/client/env. That keeps `list`,
 # `info` and a launch of anything already built working offline, and confines nix
 # to the one case that genuinely needs it — an environment that is not here yet.
 
@@ -42,10 +42,10 @@ override_field() {
     '(.[$k1][$f] // .[$k2][$f]) // empty' "$(overrides_json)"
 }
 
-# The flake attribute for a game: its own environment when client/env has a file
+# The flake attribute for a game: its own environment when src/client/env has a file
 # for it, otherwise its platform's. A dot is an attribute path separator in a
 # flake reference and an id always holds one, so it becomes an underscore — the
-# same rule client/env/default.nix names the attributes by.
+# same rule src/client/env/default.nix names the attributes by.
 env_attr() {
   local game="$1" variant="${2:-}" id platform
   id="$(manifest_field "$game" id)"
@@ -66,7 +66,7 @@ env_attr() {
     available="$(env_variants "$platform" "$id")"
     die "no '$variant' variant of $id.
      ${available:-There are no variants of this game.}
-     A variant is client/env/games/$platform/$id.<name>.nix — then: gotg sync"
+     A variant is src/client/env/games/$platform/$id.<name>.nix — then: gotg sync"
   fi
 
   if [[ -f "$GOTG_ENV_DIR/games/$platform/$id.nix" ]]; then
@@ -75,7 +75,7 @@ env_attr() {
     printf 'env-%s' "$platform"
   else
     die "no environment for platform '$platform'.
-     Add one at client/env/$platform.nix — the existing ones are three lines
+     Add one at src/client/env/$platform.nix — the existing ones are three lines
      each — then run: gotg sync"
   fi
 }
@@ -193,7 +193,7 @@ env_build() {
   fi
 
   env_is_built "$attr" ||
-    die "built $attr but $(env_bin "$attr") is missing — check client/env for that platform"
+    die "built $attr but $(env_bin "$attr") is missing — check src/client/env for that platform"
 }
 
 env_ensure() {

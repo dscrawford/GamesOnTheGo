@@ -81,13 +81,13 @@
         pkgs:
         let
           # One launchable environment per platform, plus one per game that needs
-          # its own settings — see client/env. `gotg play` builds these by name.
-          envs = import ./client/env { inherit pkgs; };
+          # its own settings — see src/client/env. `gotg play` builds these by name.
+          envs = import ./src/client/env { inherit pkgs; };
           py = pythonSets.${pkgs.stdenv.hostPlatform.system};
         in
         envs
         // rec {
-          gotg = pkgs.callPackage ./client { inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg-pads; };
+          gotg = pkgs.callPackage ./src/client { inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg-pads; };
           # Both roles come from the one workspace: the indexer venv carries
           # the yaml extra, the service venv carries nothing at all.
           gotg-importer = pkgs.callPackage ./nix/gotg-importer.nix {
@@ -101,7 +101,7 @@
 
           # Asks the same library the emulators ask, so nothing downstream has
           # to guess which physical controller is which.
-          gotg-pads = pkgs.callPackage ./client/gotg-pads { };
+          gotg-pads = pkgs.callPackage ./src/client/gotg-pads { };
 
           # Not in nixpkgs, though its sibling wiimms-iso-tools is. Needed to
           # open and rebuild the Yaz0 archives GameCube games keep their data in.
@@ -175,13 +175,13 @@
           # there when what you want is the packaged article.
           gotg-dev = pkgs.writeShellScriptBin "gotg" ''
             root="''${GOTG_DEV_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-            if [ ! -x "$root/client/bin/gotg" ]; then
-              echo "gotg: no client/bin/gotg under $root" >&2
+            if [ ! -x "$root/src/client/bin/gotg" ]; then
+              echo "gotg: no src/client/bin/gotg under $root" >&2
               echo "      set GOTG_DEV_ROOT to your checkout, or use: nix run .#gotg" >&2
               exit 1
             fi
             export PATH="${pkgs.lib.makeBinPath gotgPkg.runtimeInputs}:$PATH"
-            exec "$root/client/bin/gotg" "$@"
+            exec "$root/src/client/bin/gotg" "$@"
           '';
         in
         {
@@ -217,7 +217,7 @@
             # save like everything else here. Guarded because the builtins it
             # uses exist only where bash was built with programmable completion.
             if [ -n "''${BASH_VERSION:-}" ] && type -t complete >/dev/null 2>&1; then
-              . "$PWD/client/completions/gotg.bash"
+              . "$PWD/src/client/completions/gotg.bash"
             fi
           '';
         };
@@ -256,7 +256,7 @@
             }
             ''
               cd ${./.}
-              shellcheck --external-sources --source-path=client client/bin/gotg client/lib/*.sh
+              shellcheck --external-sources --source-path=src/client src/client/bin/gotg src/client/lib/*.sh
               touch $out
             '';
 
@@ -287,7 +287,7 @@
               GOTG_BIN = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.gotg;
             }
             ''
-              cp -r ${./client/tests} tests
+              cp -r ${./tests/client} tests
               chmod -R u+w tests
               export HOME=$TMPDIR
               # Every test isolates under its own BATS_TEST_TMPDIR and picks
@@ -378,7 +378,7 @@
         platforms =
           pkgs.runCommand "check-platforms" { nativeBuildInputs = [ pkgs.python312 ]; } ''
             export PYTHONPATH=${./src}
-            export GOTG_ENV_DIR=${./client/env}
+            export GOTG_ENV_DIR=${./src/client/env}
             python3 ${./tests/indexer/check_platforms.py}
             touch $out
           '';

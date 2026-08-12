@@ -101,7 +101,7 @@ API: use `X-Auth` for saves and migrate the existing calls in the same work.
 
 ### 2.3 `<remote_root>/.gotg/saves/` is safe from the importer — verified
 
-`importer/src/gotg_importer/execute.py:81-99` (`cleanup_staging`) only removes directories whose
+`src/gotg/indexer/execute.py:81-99` (`cleanup_staging`) only removes directories whose
 name starts with `STAGING_PREFIXES = (".gotg-extract-", ".gotg-zip-")` (line 49). Nothing else
 under `<games_root>` is ever deleted, and `manifest.py` merges into `.gotg/manifest.json`
 without touching siblings. Saves can live inside the existing library root — **no new File
@@ -594,7 +594,7 @@ Repeat for a 2Ship save.
 
 ### Automated
 
-`nix flake check`, or `GOTG_BIN=$(which gotg) bats client/tests/`. Everything against
+`nix flake check`, or `GOTG_BIN=$(which gotg) bats src/client/tests/`. Everything against
 `mock_filebrowser.py` over real HTTP, in the existing spirit.
 
 **Round trips and API surface**

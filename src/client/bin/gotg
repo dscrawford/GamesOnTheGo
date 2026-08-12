@@ -78,8 +78,8 @@ usage: gotg <command> [args]
 Ids look like usa.legend_of_zelda_majoras_mask. When the same id exists on more
 than one platform, qualify it: n64/usa.bugs_life
 
-A game runs in an environment built from the flake: client/env/<platform>.nix,
-or client/env/games/<platform>/<id>.nix where one game wants its own settings.
+A game runs in an environment built from the flake: src/client/env/<platform>.nix,
+or src/client/env/games/<platform>/<id>.nix where one game wants its own settings.
 `play` builds a missing environment on the spot, which compiles an emulator the
 first time and is far happier in a terminal than under Steam — so running
 `install` once, from a terminal, is still the smoother way in.

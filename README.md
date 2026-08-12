@@ -7,8 +7,8 @@ Two components share one contract:
 
 | Component | What it does | Where it runs |
 |---|---|---|
-| **[importer](importer/)** | Indexes completed game torrents into the service catalog, and hardlinks them into `/Games` — the archive that outlives pruned torrents | In-cluster CronJob |
-| **[client](client/)** | `gotg` — fetches a game on demand, builds the environment it runs in, generates a Steam launcher | Desktop, Steam Deck |
+| **[indexer](src/gotg/indexer/)** | Indexes completed game torrents into the service catalog, and hardlinks them into `/Games` — the archive that outlives pruned torrents | In-cluster CronJob |
+| **[client](src/client/)** | `gotg` — fetches a game on demand, builds the environment it runs in, generates a Steam launcher | Desktop, Steam Deck |
 
 ## The entry-id contract
 
@@ -101,8 +101,8 @@ save.
 tree, but a Steam launcher does not — it execs `~/.local/state/gotg/app`, a
 `nix build -o` symlink that stays at whatever it was last built from, so
 launching a game from Steam would test yesterday's code. `.envrc` watches
-`client/` and rebuilds that symlink when something changes, and says so when it
-does. It also warns about untracked files under `client/`: a flake only sees
+`src/client/` and rebuilds that symlink when something changes, and says so when it
+does. It also warns about untracked files under `src/client/`: a flake only sees
 what git tracks, so a brand-new `lib/*.sh` is simply absent from the build,
 which looks exactly like the change having no effect.
 
@@ -388,12 +388,12 @@ settings, exposing a single `bin/gotg-play`. One file per platform, plus one per
 game that needs something of its own:
 
 ```
-client/env/snes.nix                            the base for every SNES game
-client/env/games/snes/world.super_metroid.nix  what Super Metroid changes about it
+src/client/env/snes.nix                            the base for every SNES game
+src/client/env/games/snes/world.super_metroid.nix  what Super Metroid changes about it
 ```
 
 ```nix
-# client/env/wiiu.nix
+# src/client/env/wiiu.nix
 { pkgs, ... }:
 {
   emulator = pkgs.cemu;
@@ -407,7 +407,7 @@ that shape moves into `client/env/helpers.nix` and the platform file names
 itself and whatever differs:
 
 ```nix
-# client/env/snes.nix
+# src/client/env/snes.nix
 { helpers, ... }:
 helpers.aresPlatform {
   platform = "snes";
@@ -423,7 +423,7 @@ than guessing. A platform that needs to differ more stops calling the helper.
 A per-game file states only its differences:
 
 ```nix
-# client/env/games/snes/world.super_metroid.nix
+# src/client/env/games/snes/world.super_metroid.nix
 { ... }:
 {
   isolate = true;   # its own config and saves, under ~/.local/state/gotg/env
@@ -628,7 +628,7 @@ gives you the packaged article when that is what you want to test.
 against the real GOTG service over real HTTP), ruff and shellcheck.
 
 **The importer is a uv project.** Its dependencies are resolved and hashed in
-`importer/uv.lock`, and [uv2nix](https://github.com/pyproject-nix/uv2nix) builds
+`uv.lock`, and [uv2nix](https://github.com/pyproject-nix/uv2nix) builds
 them straight from it — so `uv lock` and `nix build` agree by construction
 rather than by someone remembering to keep a list of nixpkgs attributes in step
 with `pyproject.toml`. Adding a dependency is `uv add`, and nothing in the flake

@@ -81,7 +81,7 @@ log; `gotg install <id>` from a terminal is still the smoother first run.
 ## Tests
 
 ```bash
-nix flake check     # or: GOTG_BIN=$(which gotg) bats client/tests/
+nix flake check     # or: GOTG_BIN=$(which gotg) bats src/client/tests/
 ```
 
 Every suite runs against the real GOTG service — the same process that runs in

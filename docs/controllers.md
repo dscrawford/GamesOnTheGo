@@ -259,7 +259,7 @@ Xbox Wireless Controller            detected, usable   js0  GUID 030000005e04…
 JSON output feeds the roster (§4):
 
 ```
-gotg controllers scan --json > client/data/controllers.json
+gotg controllers scan --json > src/client/data/controllers.json
 ```
 
 Rules for the implementation:
@@ -295,7 +295,7 @@ knowable at runtime. Why not pure runtime: the seating policy must stay
 declarative and diffable, which is the idiom of this repo.
 
 ```nix
-# client/env/controllers.nix — the roster
+# src/client/env/controllers.nix — the roster
 {
   players = [
     { id = "xbox";  sdlName = "Xbox Wireless Controller"; }
@@ -308,7 +308,7 @@ declarative and diffable, which is the idiom of this repo.
 ```
 
 ```nix
-# client/env/gamecube.nix — gains one attribute
+# src/client/env/gamecube.nix — gains one attribute
 { pkgs, ... }:
 {
   emulator = pkgs.dolphin-emu;
