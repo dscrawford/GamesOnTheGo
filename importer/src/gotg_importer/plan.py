@@ -52,6 +52,9 @@ class Op:
     title: str = ""               # human display title for the manifest
     reason: str = ""              # why skipped / flagged
     type: str = "file"            # "file" | "dir"
+    handler: str = ""             # the classification, stamped by plan_source;
+                                  # the catalog carries it so the client knows
+                                  # which recipe turns the raw source into a game
 
 
 def _display_title(p: ParsedRom) -> str:

@@ -38,6 +38,13 @@ def plan_source(path: Path | str, games_root: Path | str, rules: Rules) -> list[
     """Plan every operation for one completed torrent payload."""
     source = scan(Path(path))
     verdict = cl.classify(source, rules)
+    ops = _plan_classified(source, verdict, games_root, rules)
+    for op in ops:
+        op.handler = verdict.handler
+    return ops
+
+
+def _plan_classified(source, verdict, games_root: Path | str, rules: Rules) -> list[pl.Op]:
     games_root = str(games_root).rstrip("/")
     src_dir = str(source.path.parent)
 

@@ -26,6 +26,11 @@ class Config:
     source_root: Path
     path_prefix: str
     state_dir: Path
+    # The GOTG service, for dual-publishing catalog rows beside the /Games
+    # tree. Both empty means the old world only — the CronJob keeps working
+    # unchanged until its deployment gains these.
+    api_url: str = ""
+    index_token: str = ""
 
     @property
     def manifest_path(self) -> Path:
@@ -74,6 +79,13 @@ def load(env: dict[str, str] | None = None, *, require_qbit: bool = True) -> Con
     if not path_prefix.startswith("/"):
         raise ConfigError(f"PATH_PREFIX must start with '/', got {path_prefix}")
 
+    api_url = env.get("GOTG_API_URL", "").strip()
+    index_token = env.get("GOTG_INDEX_TOKEN", "").strip()
+    if api_url and not api_url.startswith(("http://", "https://")):
+        raise ConfigError(f"GOTG_API_URL must be an http(s) URL, got {api_url}")
+    if bool(api_url) != bool(index_token):
+        raise ConfigError("GOTG_API_URL and GOTG_INDEX_TOKEN are set together or not at all")
+
     if require_qbit:
         qbit_url = _require(env, "QBIT_URL")
         if not qbit_url.startswith(("http://", "https://")):
@@ -94,4 +106,6 @@ def load(env: dict[str, str] | None = None, *, require_qbit: bool = True) -> Con
         source_root=source_root,
         path_prefix=path_prefix,
         state_dir=state_dir,
+        api_url=api_url,
+        index_token=index_token,
     )

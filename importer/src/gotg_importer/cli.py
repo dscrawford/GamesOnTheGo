@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from . import config as cfgmod
+from . import publish as pub
 from . import rules as rulesmod
 from .run import QbitError, run_paths, run_queue, run_scan
 
@@ -67,6 +68,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="skip sha256 sidecars (faster first import, no client-side verification)",
     )
+    parser.add_argument(
+        "--diff-catalog",
+        action="store_true",
+        help="compare the manifest against the service catalog and exit; the dual-publish gate",
+    )
+    parser.add_argument(
+        "--allow-unhashed",
+        action="store_true",
+        help="publish catalog rows without a sha256 (bytes the client cannot verify)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     return parser.parse_args(argv)
 
@@ -97,8 +108,8 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(message)s",
     )
 
-    if not args.once and not args.bootstrap and not args.scan:
-        log.error("nothing to do: pass --once (work queue), --scan DIR, or --bootstrap DIR [DIR...]")
+    if not args.once and not args.bootstrap and not args.scan and not args.diff_catalog:
+        log.error("nothing to do: pass --once (work queue), --scan DIR, --bootstrap DIR [DIR...], or --diff-catalog")
         return EXIT_CONFIG
 
     try:
@@ -115,12 +126,42 @@ def main(argv: list[str] | None = None) -> int:
         log.error("%s", exc)
         return EXIT_CONFIG
 
+    if args.diff_catalog:
+        if not cfg.api_url:
+            log.error("--diff-catalog needs GOTG_API_URL and GOTG_INDEX_TOKEN")
+            return EXIT_CONFIG
+        from . import manifest as mf
+
+        try:
+            problems = pub.diff_catalog(mf.load(cfg.manifest_path), pub.CatalogAPI(cfg.api_url, cfg.index_token))
+        except pub.PublishError as exc:
+            log.error("%s", exc)
+            return EXIT_FAILED
+        for problem in problems:
+            log.warning("%s", problem)
+        log.info("diff: %d problem(s) across %d manifest entr(ies)", len(problems), len(mf.load(cfg.manifest_path)))
+        return EXIT_OK if not problems else EXIT_FAILED
+
     checksum = not args.no_checksum
+
+    # Dual-publish is best-effort by design: the /Games tree is still the
+    # thing clients run on, so a down API degrades to the old world with a
+    # loud line rather than failing the import.
+    publisher = None
+    if cfg.api_url and not args.dry_run:
+        try:
+            publisher = pub.Publisher(
+                pub.CatalogAPI(cfg.api_url, cfg.index_token),
+                allow_unhashed=args.allow_unhashed,
+            )
+        except pub.PublishError as exc:
+            log.error("catalog publishing disabled for this run: %s", exc)
+
     try:
         if args.scan:
-            stats = run_scan(args.scan, cfg, rules, dry_run=args.dry_run, checksum=checksum)
+            stats = run_scan(args.scan, cfg, rules, dry_run=args.dry_run, checksum=checksum, publisher=publisher)
         elif paths:
-            stats = run_paths(paths, cfg, rules, dry_run=args.dry_run, checksum=checksum)
+            stats = run_paths(paths, cfg, rules, dry_run=args.dry_run, checksum=checksum, publisher=publisher)
         else:
             stats = run_queue(cfg, rules, dry_run=args.dry_run, checksum=checksum)
     except QbitError as exc:

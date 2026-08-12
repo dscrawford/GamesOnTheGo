@@ -15,6 +15,7 @@ from pathlib import Path
 from . import classify as cl
 from . import manifest as mf
 from . import plan as pl
+from . import publish as pub
 from . import scan as sc
 from .config import Config
 from .execute import STATUS_ERROR, STATUS_MANUAL, Result, cleanup_staging, execute
@@ -30,6 +31,7 @@ log = logging.getLogger("gotg-importer")
 class RunStats:
     actions: collections.Counter[str] = field(default_factory=collections.Counter)
     statuses: collections.Counter[str] = field(default_factory=collections.Counter)
+    publish_errors: int = 0
 
     def record(self, results: list[Result]) -> None:
         for r in results:
@@ -48,6 +50,8 @@ class RunStats:
         ]
         parts.append(f"unchanged={self.statuses['noop']}")
         parts.append(f"error={self.statuses[STATUS_ERROR]}")
+        if self.publish_errors:
+            parts.append(f"unpublished={self.publish_errors}")
         return " ".join(parts)
 
 
@@ -132,11 +136,23 @@ def run_scan(
     *,
     dry_run: bool,
     checksum: bool = True,
+    publisher: pub.Publisher | None = None,
 ) -> RunStats:
     """Import every game under one directory (--scan)."""
+    since = pub.utc_now()
     paths, ignored = discover(root, rules)
     log.info("scanned %s: %d game source(s), %d entry(s) ignored", root, len(paths), ignored)
-    return run_paths(paths, cfg, rules, dry_run=dry_run, checksum=checksum)
+    stats = run_paths(paths, cfg, rules, dry_run=dry_run, checksum=checksum, publisher=publisher)
+
+    # Only a completed full enumeration may sweep: a partial or failed pass
+    # would report the whole untouched library as vanished.
+    if publisher and not dry_run and not stats.failed and not stats.publish_errors:
+        try:
+            publisher.sweep(since)
+        except pub.PublishError as exc:
+            log.error("sweep: %s", exc)
+            stats.publish_errors += 1
+    return stats
 
 
 def run_paths(
@@ -146,6 +162,7 @@ def run_paths(
     *,
     dry_run: bool,
     checksum: bool = True,
+    publisher: pub.Publisher | None = None,
 ) -> RunStats:
     """Import explicit source directories (--bootstrap)."""
     stats = RunStats()
@@ -160,11 +177,21 @@ def run_paths(
     cleanup_staging(cfg.games_root)
     entries = mf.load(cfg.manifest_path)
     for path in paths:
-        stats.record(process_source(path, cfg, rules, entries, checksum=checksum))
+        results = process_source(path, cfg, rules, entries, checksum=checksum)
+        stats.record(results)
         # Publish after every source rather than at the end. A run killed part
         # way through — an OOM during a large extract, an evicted pod — would
         # otherwise leave thousands of imported games with no catalog naming them.
         mf.save(cfg.manifest_path, entries)
+        # The catalog rows ride beside the manifest (dual-publish) until the
+        # cutover; a publish failure is per-entry and never stops the import.
+        if publisher:
+            for result in results:
+                try:
+                    publisher.publish(result, checksum=checksum)
+                except pub.PublishError as exc:
+                    log.error("publish %s: %s", result.op.entry_id or result.op.src, exc)
+                    stats.publish_errors += 1
     return stats
 
 
