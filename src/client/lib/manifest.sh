@@ -284,6 +284,14 @@ cmd_list() {
     rows="$(sed -n "${start},${end}p" <<<"$rows")"
   fi
 
+  # Built before the render loop: its final read clears the loop variables at
+  # EOF, and pattern/platform are about to become row fields.
+  local next_cmd="gotg list"
+  [[ -n "$pattern" ]] && next_cmd+=" $pattern"
+  [[ -n "$platform" ]] && next_cmd+=" --platform $platform"
+  ((limit > 0 && limit != GOTG_LIST_LIMIT)) && next_cmd+=" --limit $limit"
+  next_cmd+=" $((page + 1))"
+
   # The colour goes in its own argument so the width applies to the value and
   # not to the escape bytes, which would silently break every column.
   local platform id size name handler title status c_status installed_glob
@@ -323,7 +331,7 @@ cmd_list() {
     log ""
     log "${C_WARN}showing $start-$end of $total (page $page of $pages).${C_RESET} More:"
     if ((page < pages)); then
-      log "  gotg list${pattern:+ $pattern}${platform:+ --platform $platform} $((page + 1))   # the next page"
+      log "  $next_cmd   # the next page"
     fi
     log "  gotg list zelda          # narrow: id, title or platform, as a regex"
     log "  gotg list --all          # every one of them"

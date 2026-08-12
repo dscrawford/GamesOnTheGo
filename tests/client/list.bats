@@ -82,6 +82,8 @@ big_catalog() {
   [ "$status" -eq 0 ]
   [ "$(grep -c "usa\." <<<"$output")" -eq 10 ]
   [[ "$stderr" == *"page 2 of 7"* ]]
+  # The hint must keep every filter, or "the next page" is a different list.
+  [[ "$stderr" == *"gotg list --platform n64 --limit 10 3"* ]]
 }
 
 @test "an unknown platform names the ones that exist" {
