@@ -7,7 +7,7 @@ Two components share one contract:
 
 | Component | What it does | Where it runs |
 |---|---|---|
-| **[importer](importer/)** | Organizes completed game torrents into a canonical `/Games` tree with hardlinks, and publishes the catalog | In-cluster CronJob |
+| **[importer](importer/)** | Indexes completed game torrents into the service catalog, and hardlinks them into `/Games` — the archive that outlives pruned torrents | In-cluster CronJob |
 | **[client](client/)** | `gotg` — fetches a game on demand, builds the environment it runs in, generates a Steam launcher | Desktop, Steam Deck |
 
 ## The entry-id contract
@@ -624,7 +624,7 @@ save — there is nothing to rebuild and no shell to re-enter. `nix run .#gotg`
 gives you the packaged article when that is what you want to test.
 
 `nix flake check` runs 130 importer tests (pytest), 167 client tests (bats,
-against a stand-in File Browser over real HTTP), ruff and shellcheck.
+against the real GOTG service over real HTTP), ruff and shellcheck.
 
 **The importer is a uv project.** Its dependencies are resolved and hashed in
 `importer/uv.lock`, and [uv2nix](https://github.com/pyproject-nix/uv2nix) builds

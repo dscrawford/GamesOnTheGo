@@ -1,7 +1,9 @@
 """Command line entry point (IMPORTER_SPEC.md §10).
 
-The Kubernetes CronJob invokes this image with ``--once`` and configures everything
-else through the environment, so the flag surface here is a stable interface.
+The Kubernetes CronJob invokes this image with ``--scan`` and configures
+everything else through the environment, so the flag surface is a stable
+interface. The qBittorrent queue mode is gone: production has scanned the
+download tree without WebUI credentials since the first deploy.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from pathlib import Path
 from . import config as cfgmod
 from . import publish as pub
 from . import rules as rulesmod
-from .run import QbitError, run_paths, run_queue, run_scan
+from .run import run_paths, run_scan
 
 log = logging.getLogger("gotg-importer")
 
@@ -27,11 +29,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="gotg-importer",
         description="Organize completed game torrents into the GOTG /Games tree.",
-    )
-    parser.add_argument(
-        "--once",
-        action="store_true",
-        help="process one pass over the qBittorrent work queue and exit",
     )
     parser.add_argument(
         "--dry-run",
@@ -108,13 +105,12 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(message)s",
     )
 
-    if not args.once and not args.bootstrap and not args.scan and not args.diff_catalog:
-        log.error("nothing to do: pass --once (work queue), --scan DIR, --bootstrap DIR [DIR...], or --diff-catalog")
+    if not args.bootstrap and not args.scan and not args.diff_catalog:
+        log.error("nothing to do: pass --scan DIR, --bootstrap DIR [DIR...], or --diff-catalog")
         return EXIT_CONFIG
 
     try:
-        # Only the polling path talks to qBittorrent.
-        cfg = cfgmod.load(require_qbit=bool(args.once))
+        cfg = cfgmod.load()
         rules = rulesmod.load(args.rules)
         paths = _bootstrap_paths(args.bootstrap) if args.bootstrap else []
         for path in paths:
@@ -163,11 +159,6 @@ def main(argv: list[str] | None = None) -> int:
             stats = run_scan(args.scan, cfg, rules, dry_run=args.dry_run, checksum=checksum, publisher=publisher)
         elif paths:
             stats = run_paths(paths, cfg, rules, dry_run=args.dry_run, checksum=checksum, publisher=publisher)
-        else:
-            stats = run_queue(cfg, rules, dry_run=args.dry_run, checksum=checksum)
-    except QbitError as exc:
-        log.error("%s", exc)
-        return EXIT_CONFIG
     except OSError as exc:
         log.error("%s", exc)
         return EXIT_FAILED

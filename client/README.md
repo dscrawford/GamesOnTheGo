@@ -4,7 +4,7 @@ Downloads a game from the server the first time you launch it, then runs it in
 the right emulator. Meant to be driven from Steam.
 
 ```
-gotg login                  save the server URL and credentials (mode 600)
+gotg login                  save the service URL and token (mode 600)
 gotg refresh                re-fetch the catalog
 gotg list [pattern]         games matching a regex; 50 at a time
 gotg info <id>              one game's details
@@ -25,8 +25,7 @@ gotg sync                   rebuild the GC roots after a git pull
 | `bin/gotg` | argument dispatch only |
 | `lib/color.sh` | the palette, and the rules for when there is none |
 | `lib/common.sh` | paths, logging, id and path validation |
-| `lib/config.sh` | credentials in a 0600 file, `gotg login` |
-| `lib/api.sh` | File Browser login and raw-download URLs |
+| `lib/config.sh` | the service url + token in a 0600 api.json, `gotg login` |
 | `lib/manifest.sh` | the catalog, id resolution, `list` and `info` |
 | `lib/download.sh` | staging, resume, checksums, unzip, progress UI |
 | `lib/env.sh` | which environment, GC roots, building one |
@@ -58,10 +57,6 @@ of nix entirely.
 
 ## Things worth knowing
 
-**Tokens are never cached.** File Browser's JWTs expire in hours, so every
-command logs in again — one cheap request that removes a class of failures where
-a stale token only shows up at launch time.
-
 **Colour marks the exceptions.** Ordinary output is plain, because if
 everything is highlighted then nothing is: what takes a colour is a warning, an
 error, a game that is installed, saves that have changed since the last sync.
@@ -89,9 +84,9 @@ log; `gotg install <id>` from a terminal is still the smoother first run.
 nix flake check     # or: GOTG_BIN=$(which gotg) bats client/tests/
 ```
 
-217 tests run against `tests/mock_filebrowser.py`, a stand-in that speaks enough
-of the real API — including `Range` requests — that resume is exercised against a
-genuinely truncated transfer rather than a simulated one. The save tests run
-against the real GOTG service — the same process that runs in the cluster —
-because the conflict rules live server-side now, and a mock would only ever
-test a copy of them.
+Every suite runs against the real GOTG service — the same process that runs in
+the cluster — seeded through its own index API, because the catalog, download
+and conflict rules all live server-side now and a mock would only ever test a
+copy of them. Resume is exercised against genuinely truncated transfers, not
+simulated ones. `bats --jobs 8`: each test isolates its own state directory and
+picks a free port, so they run concurrently.

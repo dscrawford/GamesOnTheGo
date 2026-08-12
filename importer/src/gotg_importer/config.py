@@ -18,10 +18,6 @@ class ConfigError(Exception):
 
 @dataclass(frozen=True)
 class Config:
-    qbit_url: str
-    qbit_user: str
-    qbit_pass: str
-    qbit_category: str
     games_root: Path
     source_root: Path
     path_prefix: str
@@ -60,12 +56,8 @@ def _abs_dir(env: dict[str, str], key: str) -> Path:
     return path
 
 
-def load(env: dict[str, str] | None = None, *, require_qbit: bool = True) -> Config:
-    """Build a Config from the environment.
-
-    ``require_qbit`` is False for ``--bootstrap`` runs, which walk explicit source
-    directories and never talk to qBittorrent.
-    """
+def load(env: dict[str, str] | None = None, **_compat) -> Config:
+    """Build a Config from the environment."""
     env = dict(os.environ if env is None else env)
 
     games_root = _abs_dir(env, "GAMES_ROOT")
@@ -86,22 +78,7 @@ def load(env: dict[str, str] | None = None, *, require_qbit: bool = True) -> Con
     if bool(api_url) != bool(index_token):
         raise ConfigError("GOTG_API_URL and GOTG_INDEX_TOKEN are set together or not at all")
 
-    if require_qbit:
-        qbit_url = _require(env, "QBIT_URL")
-        if not qbit_url.startswith(("http://", "https://")):
-            raise ConfigError(f"QBIT_URL must be an http(s) URL, got {qbit_url}")
-        qbit_user = _require(env, "QBIT_USER")
-        qbit_pass = _require(env, "QBIT_PASS")
-    else:
-        qbit_url = env.get("QBIT_URL", "")
-        qbit_user = env.get("QBIT_USER", "")
-        qbit_pass = env.get("QBIT_PASS", "")
-
     return Config(
-        qbit_url=qbit_url,
-        qbit_user=qbit_user,
-        qbit_pass=qbit_pass,
-        qbit_category=env.get("QBIT_CATEGORY", "games").strip() or "games",
         games_root=games_root,
         source_root=source_root,
         path_prefix=path_prefix,

@@ -20,9 +20,7 @@ from . import scan as sc
 from .config import Config
 from .execute import STATUS_ERROR, STATUS_MANUAL, Result, cleanup_staging, execute
 from .planner import plan_source
-from .qbit import TAG_ERROR, TAG_IMPORTED, TAG_MANUAL, QbitError, Queue, Torrent, resolve_payload
 from .rules import Rules
-from .state import State
 
 log = logging.getLogger("gotg-importer")
 
@@ -93,14 +91,6 @@ def process_source(
             entries[result.entry.path] = result.entry
         results.append(result)
     return results
-
-
-def _tag_for(results: list[Result]) -> str:
-    if any(r.status == STATUS_ERROR for r in results):
-        return TAG_ERROR
-    if any(r.status == STATUS_MANUAL for r in results):
-        return TAG_MANUAL
-    return TAG_IMPORTED
 
 
 def discover(root: Path, rules: Rules) -> tuple[list[Path], int]:
@@ -201,76 +191,3 @@ def run_paths(
                     log.error("publish %s: %s", result.op.entry_id or result.op.src, exc)
                     stats.publish_errors += 1
     return stats
-
-
-def run_queue(
-    cfg: Config,
-    rules: Rules,
-    *,
-    dry_run: bool,
-    checksum: bool = True,
-) -> RunStats:
-    """Import every completed torrent in the work queue (--once)."""
-    queue = Queue.connect(cfg)
-    state = State.load(cfg.state_dir)
-    stats = RunStats()
-
-    torrents = [t for t in queue.pending() if t.infohash not in state]
-    log.info("%d torrent(s) to consider in category %r", len(torrents), cfg.qbit_category)
-    if not torrents:
-        return stats
-
-    if not dry_run:
-        cleanup_staging(cfg.games_root)
-    entries = mf.load(cfg.manifest_path)
-    for torrent in torrents:
-        results = _process_torrent(torrent, queue, cfg, rules, entries, state, dry_run=dry_run, checksum=checksum)
-        stats.record(results)
-        if not dry_run:
-            # Durable after every torrent, for the same reason as run_paths.
-            mf.save(cfg.manifest_path, entries)
-            state.save()
-    return stats
-
-
-def _process_torrent(
-    torrent: Torrent,
-    queue: Queue,
-    cfg: Config,
-    rules: Rules,
-    entries: dict[str, mf.Entry],
-    state: State,
-    *,
-    dry_run: bool,
-    checksum: bool,
-) -> list[Result]:
-    try:
-        payload = resolve_payload(torrent, cfg.source_root)
-    except FileNotFoundError as exc:
-        log.error("%s", exc)
-        if not dry_run:
-            queue.tag(torrent, TAG_ERROR)
-        return [Result(pl.Op(pl.ACTION_MANUAL, "", torrent.name, "", ""), STATUS_ERROR, str(exc))]
-
-    if dry_run:
-        ops = plan_source(payload, cfg.games_root, rules)
-        print_plan(ops)
-        return [Result(op, "noop") for op in ops]
-
-    results = process_source(payload, cfg, rules, entries, checksum=checksum)
-    tag = _tag_for(results)
-    queue.tag(torrent, tag)
-    if tag == TAG_IMPORTED:
-        # Recorded locally too, so a lost tag cannot cause a re-import.
-        state.mark(torrent.infohash)
-    return results
-
-
-__all__ = [
-    "QbitError",
-    "RunStats",
-    "print_plan",
-    "process_source",
-    "run_paths",
-    "run_queue",
-]

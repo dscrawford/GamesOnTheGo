@@ -64,17 +64,6 @@ def test_dry_run_prints_a_plan_and_exits_zero(monkeypatch, tmp_path, capsys):
     assert not (tmp_path / "Games").exists(), "a dry run must write nothing"
 
 
-def test_unreachable_qbittorrent_is_a_hard_failure(monkeypatch, tmp_path):
-    # §10: exit non-zero only on hard failure, and an unreachable queue is one.
-    monkeypatch.setenv("GAMES_ROOT", str(tmp_path / "Games"))
-    monkeypatch.setenv("SOURCE_ROOT", str(tmp_path / "Torrents"))
-    monkeypatch.setenv("STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.setenv("QBIT_URL", "http://127.0.0.1:1/")
-    monkeypatch.setenv("QBIT_USER", "u")
-    monkeypatch.setenv("QBIT_PASS", "p")
-    assert main(["--once"]) == EXIT_CONFIG
-
-
 def test_bootstrap_imports_for_real_and_writes_a_manifest(monkeypatch, tmp_path):
     src = tmp_path / "Torrents"
     src.mkdir()

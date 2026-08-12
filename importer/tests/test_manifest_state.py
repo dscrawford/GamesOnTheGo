@@ -1,7 +1,6 @@
-"""Catalog and idempotency-state persistence."""
+"""Catalog persistence."""
 
 from gotg_importer.manifest import Entry, load, save
-from gotg_importer.state import State
 
 
 def entry(path="/Games/n64/usa.zelda.z64", **kw):
@@ -77,24 +76,3 @@ def test_unreadable_rows_are_dropped_not_fatal(tmp_path):
 def test_game_id_strips_the_extension():
     assert entry().game_id == "usa.zelda"
     assert entry(path="/Games/wiiu/usa.zelda", type="dir").game_id == "usa.zelda"
-
-
-def test_state_roundtrip(tmp_path):
-    state = State.load(tmp_path)
-    assert "abc" not in state
-
-    state.mark("abc")
-    state.save()
-
-    assert "abc" in State.load(tmp_path)
-
-
-def test_state_save_is_a_noop_when_unchanged(tmp_path):
-    State.load(tmp_path).save()
-    assert not (tmp_path / "processed.json").exists()
-
-
-def test_corrupt_state_is_ignored(tmp_path):
-    (tmp_path / "processed.json").write_text("not json")
-    state = State.load(tmp_path)
-    assert state.processed == set()
