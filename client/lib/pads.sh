@@ -128,7 +128,7 @@ pads_ares_ensure_block() {
   # What already exists, scoped exactly as the rewrite scopes it — checked
   # before anything is built, because this runs on every launch and the
   # everything-present answer is the common one.
-  local state
+  local state="0000"
   if [[ -f "$file" ]]; then
     # ENVIRON rather than -v: -v values undergo C-escape processing, so a
     # backslash in a table key would become a real newline inside the program.
@@ -144,12 +144,9 @@ pads_ares_ensure_block() {
       END { printf "%d%d%d%d", hc + 0, hi + 0, hb + 0, hp + 0 }
     ' "$file")" || return 1
     [[ "$state" == "1111" ]] && return 0
-  else
-    mkdir -p "$(dirname "$file")"
-    : >"$file"
-    state="0000"
   fi
 
+  # Before any filesystem write, so a refusal leaves nothing behind.
   local keys
   keys="$(pads_ares_skeleton_keys "$bindings")"
   [[ -n "$keys" ]] || return 1
@@ -160,6 +157,12 @@ pads_ares_ensure_block() {
   local payload anchor
   case "$state" in
     0???)
+      mkdir -p "$(dirname "$file")"
+      # A truncated file must not have the console name glued onto its last
+      # line — ares would carry the mangled setting forward forever.
+      if [[ -s "$file" && "$(tail -c1 "$file")" != $'\n' ]]; then
+        printf '\n' >>"$file"
+      fi
       printf '%s\n  Input\n    %s\n      %s\n%s\n' \
         "$console" "$block" "$pad" "$keys" >>"$file"
       return 0

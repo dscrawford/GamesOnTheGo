@@ -375,3 +375,143 @@ BML
   run awk '/^  Hotkeys$/,/^  Input$/' "$file"
   [[ "$output" != *"Gamepad"* ]]
 }
+
+@test "a console with settings but no Input gets one beside them" {
+  local file="$TEST_TMP/settings.bml"
+  cat >"$file" <<'BML'
+GameBoy
+  Video
+    ColorEmulation: true
+Nintendo64
+  Input
+    Controller.Port.1
+      Gamepad
+        Up: ;;
+BML
+  local bindings='{"Up": "NEW;;"}'
+  pads_ares_ensure_block "$file" GameBoy Game.Boy Controls "$bindings"
+  pads_ares_rewrite "$file" GameBoy Game.Boy Controls "$bindings"
+
+  grep -q "ColorEmulation: true" "$file"
+  run awk '/^GameBoy$/,/^Nintendo64$/' "$file"
+  [[ "$output" == *"Up: NEW;;"* ]]
+  run grep -c "Up: NEW;;" "$file"
+  [ "$output" = "1" ]
+  run grep -cx "GameBoy" "$file"
+  [ "$output" = "1" ]
+}
+
+@test "a port that exists without its pad gets one, keeping its siblings" {
+  local file="$TEST_TMP/settings.bml"
+  cat >"$file" <<'BML'
+SuperFamicom
+  Input
+    Controller.Port.1
+      Justifier
+        Trigger: ;;
+BML
+  local bindings='{"Up": "NEW;;"}'
+  pads_ares_ensure_block "$file" SuperFamicom Controller.Port.1 Gamepad "$bindings"
+  pads_ares_rewrite "$file" SuperFamicom Controller.Port.1 Gamepad "$bindings"
+
+  grep -q "Trigger: ;;" "$file"
+  grep -qx "        Up: NEW;;" "$file"
+  run grep -cx "    Controller.Port.1" "$file"
+  [ "$output" = "1" ]
+}
+
+@test "a console whose name prefixes another is told apart, both ways" {
+  local file="$TEST_TMP/settings.bml"
+  cat >"$file" <<'BML'
+FamicomDiskSystem
+  Input
+    Controller.Port.1
+      Gamepad
+        Up: DISK;;
+BML
+  local bindings='{"Up": "NEW;;"}'
+  pads_ares_ensure_block "$file" Famicom Controller.Port.1 Gamepad "$bindings"
+  pads_ares_rewrite "$file" Famicom Controller.Port.1 Gamepad "$bindings"
+
+  run grep -cx "Famicom" "$file"
+  [ "$output" = "1" ]
+  run grep -cx "FamicomDiskSystem" "$file"
+  [ "$output" = "1" ]
+  run awk '$0 == "Famicom",0' "$file"
+  [[ "$output" == *"Up: NEW;;"* ]]
+  [[ "$output" != *"DISK"* ]]
+
+  local other="$TEST_TMP/other.bml"
+  printf 'Famicom\n  Input\n    Controller.Port.1\n      Gamepad\n        Up: FC;;\n' >"$other"
+  pads_ares_ensure_block "$other" FamicomDiskSystem Controller.Port.1 Gamepad "$bindings"
+  run grep -cx "FamicomDiskSystem" "$other"
+  [ "$output" = "1" ]
+  grep -q "Up: FC;;" "$other"
+}
+
+@test "a section ares wrote itself is recognised whole and never reshaped" {
+  # After one run ares heals a skeleton into its full section — more inputs
+  # than any skeleton, sibling pads beside it. Ensuring on top of that must
+  # change nothing, byte for byte, and the rewrite must still land.
+  local file="$TEST_TMP/settings.bml"
+  cat >"$file" <<'BML'
+SuperFamicom
+  Input
+    Controller.Port.1
+      Gamepad
+        Up: OLD;;
+        Down: ;;
+        B: ;;
+        Select: ;;
+        Start: ;;
+      Rumble.Gamepad
+        Up: ;;
+    Controller.Port.2
+      Gamepad
+        Up: ;;
+BML
+  local bindings='{"Up": "NEW;;"}' before
+  before="$(cat "$file")"
+  pads_ares_ensure_block "$file" SuperFamicom Controller.Port.1 Gamepad "$bindings"
+  [ "$(cat "$file")" = "$before" ]
+
+  pads_ares_rewrite "$file" SuperFamicom Controller.Port.1 Gamepad "$bindings"
+  run grep -c "Up: NEW;;" "$file"
+  [ "$output" = "1" ]
+  grep -q "Start: ;;" "$file"
+}
+
+@test "empty bindings refuse to seed a section rather than writing a husk" {
+  local file="$TEST_TMP/none/settings.bml"
+  run pads_ares_ensure_block "$file" GameBoy Game.Boy Controls '{}'
+  [ "$status" -ne 0 ]
+  [ ! -e "$file" ]
+  [ ! -e "$TEST_TMP/none" ]
+}
+
+@test "four controllers seed four ports under one Input" {
+  local file="$TEST_TMP/n64/settings.bml" port bindings
+  for port in 1 2 3 4; do
+    bindings="{\"Up\": \"PAD$port;;\"}"
+    pads_ares_ensure_block "$file" Nintendo64 "Controller.Port.$port" Gamepad "$bindings"
+    pads_ares_rewrite "$file" Nintendo64 "Controller.Port.$port" Gamepad "$bindings"
+  done
+  run grep -cx "Nintendo64" "$file"
+  [ "$output" = "1" ]
+  run grep -cx "  Input" "$file"
+  [ "$output" = "1" ]
+  for port in 1 2 3 4; do
+    grep -qx "    Controller.Port.$port" "$file"
+    grep -q "Up: PAD$port;;" "$file"
+  done
+}
+
+@test "a file whose last line lacks a newline still gets a clean section" {
+  # A truncated or hand-edited settings.bml must not have the console name
+  # glued onto its last line.
+  local file="$TEST_TMP/settings.bml"
+  printf 'Video\n  Driver: OpenGL' >"$file"
+  pads_ares_ensure_block "$file" GameBoy Game.Boy Controls '{"Up": "X;;"}'
+  grep -qx "  Driver: OpenGL" "$file"
+  grep -qx "GameBoy" "$file"
+}
