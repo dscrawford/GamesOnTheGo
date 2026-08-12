@@ -35,7 +35,10 @@ from __future__ import annotations
 
 import hmac
 import json
+import os
+import re
 import sqlite3
+import stat
 import sys
 import threading
 import time
@@ -44,6 +47,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 from .catalog import CatalogStore, Conflict, SweepRefused
 from .saves import SavesStore
@@ -59,6 +63,39 @@ TIMEOUT = 20
 # in memory. nginx caps this too, but the proxy also runs without it — under a
 # port-forward, or if the ingress annotation is ever dropped.
 MAX_BODY = 64 * 1024
+
+# A single byte-range request: bytes=N- or bytes=N-M. Multi-range answers 200
+# with the whole file rather than a multipart body nothing here needs.
+RANGE_RE = re.compile(r"^bytes=([0-9]+)-([0-9]*)$")
+
+# What may be served from the files directory: keys and firmware names.
+# No leading dot by construction (the first class excludes it), no slash by
+# split, and the directory a person curates is the real allowlist.
+FILES_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+
+STREAM_CHUNK = 1 << 20
+
+
+def open_contained(path: Path, root: Path) -> int | None:
+    """An fd for a regular file provably under root, or None.
+
+    The check that counts is on what was actually opened: O_NOFOLLOW refuses a
+    symlink as the final component, and the /proc re-check catches a
+    retargeted directory on the way there — a path checked and then opened is
+    two syscalls with a race between them.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError:
+        return None
+    real = Path(os.path.realpath(f"/proc/self/fd/{fd}"))
+    if not stat.S_ISREG(os.fstat(fd).st_mode) or not real.is_relative_to(
+        Path(os.path.realpath(root))
+    ):
+        os.close(fd)
+        return None
+    return fd
+
 
 # Refresh a token with less than this left. IGDB issues them for about sixty
 # days, so a day of slack costs nothing and removes the race where a token
@@ -198,6 +235,8 @@ class Handler(BaseHTTPRequestHandler):
     tokens: TokenCache
     store: SavesStore | None
     catalog: CatalogStore | None
+    files_dir: Path | None
+    streams: threading.BoundedSemaphore
 
     server_version = USER_AGENT
     protocol_version = "HTTP/1.1"
@@ -450,6 +489,158 @@ class Handler(BaseHTTPRequestHandler):
             print(f"catalog error: {error}", file=sys.stderr)
             self._problem(500, "catalog storage error")
 
+    def _games(self, rest: str) -> None:
+        """`GET /games/<platform>/<id>/<name>` streams one member file.
+
+        Everything about the response is resumable: Accept-Ranges, a single
+        byte range honored with 206, the sha256 as an ETag so If-Range makes a
+        resume against changed bytes restart cleanly instead of splicing two
+        files together.
+        """
+        if self.catalog is None:
+            self._problem(503, "this service holds no catalog")
+            return
+        if self.command not in ("GET", "HEAD"):
+            self._problem(405, f"{self.command} is not something the library answers")
+            return
+
+        parts = urllib.parse.urlsplit("/" + rest)
+        segments = [urllib.parse.unquote(s) for s in parts.path.strip("/").split("/") if s]
+        if len(segments) != 3:
+            self._problem(404, "a file lives at /games/<platform>/<id>/<name>")
+            return
+        platform, game_id, name = segments
+
+        meta = self.catalog.member(platform, game_id, name)
+        fd = self.catalog.open_member(platform, game_id, name) if meta else None
+        if fd is None:
+            if meta is not None:
+                # The row exists and the bytes do not: the index is stale, and
+                # that is server news, not client news.
+                print(f"catalog names a missing file: {platform}/{game_id}/{name}", file=sys.stderr)
+            self._problem(404, f"no such file: {platform}/{game_id}/{name}")
+            return
+        try:
+            self._stream_fd(fd, name, meta.get("sha256") if meta else None)
+        finally:
+            os.close(fd)
+
+    def _files(self, rest: str) -> None:
+        """`GET /files/<platform>/<name>` — keys and firmware, hand-placed.
+
+        The curated directory is the allowlist; this only insists the name is
+        shaped like a file someone would place there, and that what opens is a
+        regular file inside it. 404 for everything absent, so the client's
+        missing-keys path stays a warning.
+        """
+        if self.files_dir is None:
+            self._problem(503, "this service holds no files directory")
+            return
+        if self.command not in ("GET", "HEAD"):
+            self._problem(405, f"{self.command} is not something the files answer")
+            return
+
+        parts = urllib.parse.urlsplit("/" + rest)
+        segments = [urllib.parse.unquote(s) for s in parts.path.strip("/").split("/") if s]
+        if len(segments) != 2:
+            self._problem(404, "a file lives at /files/<platform>/<name>")
+            return
+        platform, name = segments
+        if not re.match(r"^[a-z0-9][a-z0-9_-]{0,15}$", platform) or not FILES_NAME_RE.match(name):
+            self._problem(404, f"no such file: {platform}/{name}")
+            return
+
+        fd = open_contained(self.files_dir / platform / name, self.files_dir)
+        if fd is None:
+            self._problem(404, f"no such file: {platform}/{name}")
+            return
+        try:
+            self._stream_fd(fd, name, None)
+        finally:
+            os.close(fd)
+
+    def _stream_fd(self, fd: int, name: str, sha256: str | None) -> None:
+        size = os.fstat(fd).st_size
+        etag = f'"{sha256}"' if sha256 else None
+
+        start, end, status = 0, size - 1, 200
+        wanted = RANGE_RE.match(self.headers.get("Range", ""))
+        if wanted:
+            # If-Range with a stale validator means the bytes changed since
+            # the client's partial: send the whole file rather than splice.
+            if_range = self.headers.get("If-Range", "")
+            if not if_range or (etag is not None and if_range == etag):
+                start = int(wanted.group(1))
+                if wanted.group(2):
+                    end = min(int(wanted.group(2)), size - 1)
+                if start > end or start >= size:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                status = 206
+
+        streaming = self.command == "GET"
+        # The cap is what keeps the saves and artwork halves answering while
+        # multi-gigabyte pulls are in flight — a thread per TCP connection has
+        # no other limit.
+        if streaming and not self.streams.acquire(blocking=False):
+            self.send_response(503)
+            self.send_header("Retry-After", "5")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        try:
+            count = end - start + 1
+            self.send_response(status)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(count))
+            self.send_header("Accept-Ranges", "bytes")
+            if etag:
+                self.send_header("ETag", etag)
+            if status == 206:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            self.send_header(
+                "Content-Disposition",
+                f"attachment; filename*=UTF-8''{urllib.parse.quote(name)}",
+            )
+            self.end_headers()
+            if streaming:
+                self._send_range(fd, start, count)
+        finally:
+            if streaming:
+                self.streams.release()
+
+    def _send_range(self, fd: int, offset: int, remaining: int) -> None:
+        # sendfile keeps the bytes in the kernel; the buffered response writer
+        # must be flushed first or headers arrive after the body.
+        self.wfile.flush()
+        sock = self.connection.fileno()
+        try:
+            while remaining > 0:
+                sent = os.sendfile(sock, fd, offset, min(remaining, STREAM_CHUNK))
+                if sent == 0:
+                    break
+                offset += sent
+                remaining -= sent
+        except OSError:
+            # Either sendfile is unsupported here (fall back to plain reads)
+            # or the socket died (the reads will find out immediately).
+            try:
+                os.lseek(fd, offset, os.SEEK_SET)
+                while remaining > 0:
+                    chunk = os.read(fd, min(remaining, 64 * 1024))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+            except OSError:
+                pass
+        if remaining > 0:
+            # A short body desynchronizes a kept-alive connection.
+            self.close_connection = True
+
     # --- routing ------------------------------------------------------------
 
     def _handle(self) -> None:
@@ -510,6 +701,10 @@ class Handler(BaseHTTPRequestHandler):
             self._saves(rest, body)
         elif prefix == "catalog":
             self._catalog(rest, body)
+        elif prefix == "games":
+            self._games(rest)
+        elif prefix == "files":
+            self._files(rest)
         else:
             self._problem(404, f"nothing is proxied at /{prefix}")
 
@@ -525,6 +720,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self) -> None:  # noqa: N802
         self._handle()
 
+    def do_HEAD(self) -> None:  # noqa: N802
+        self._handle()
+
 
 def make_server(
     host: str,
@@ -532,11 +730,20 @@ def make_server(
     config: Config,
     store: SavesStore | None = None,
     catalog: CatalogStore | None = None,
+    files_dir: Path | None = None,
+    stream_slots: int = 4,
 ) -> ThreadingHTTPServer:
     """Threading, because one slow upstream must not block every other client."""
     handler = type(
         "BoundHandler",
         (Handler,),
-        {"config": config, "tokens": TokenCache(), "store": store, "catalog": catalog},
+        {
+            "config": config,
+            "tokens": TokenCache(),
+            "store": store,
+            "catalog": catalog,
+            "files_dir": files_dir,
+            "streams": threading.BoundedSemaphore(stream_slots),
+        },
     )
     return ThreadingHTTPServer((host, port), handler)

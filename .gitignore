@@ -15,3 +15,7 @@ __pycache__/
 
 # direnv caches: symlinks into the store, never part of the source
 .direnv/
+
+# Agent tool state, never source
+.swarm/
+ruvector.db

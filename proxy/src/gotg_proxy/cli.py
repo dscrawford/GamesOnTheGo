@@ -73,7 +73,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {error}", file=sys.stderr)
         return 1
 
-    server = make_server("0.0.0.0", port, config, store, catalog)  # noqa: S104 — a container listens on all of its own
+    files_dir = Path(os.environ["GOTG_FILES_DIR"]) if os.environ.get("GOTG_FILES_DIR") else None
+    server = make_server(  # noqa: S104 — a container listens on all of its own
+        "0.0.0.0",
+        port,
+        config,
+        store,
+        catalog,
+        files_dir=files_dir,
+        stream_slots=int(os.environ.get("GOTG_STREAM_SLOTS", "4")),
+    )
     held = [name for name, on in (("steamgriddb", config.steamgriddb_key),
                                   ("igdb", config.igdb_client_id)) if on]
     saves = f"saves under {store.root}" if store else "no saves store"

@@ -367,6 +367,18 @@ class CatalogStore:
             return None
         return Path(os.path.realpath(row["path"]))
 
+    def member(self, platform: str, game_id: str, name: str) -> dict | None:
+        """One member's client-safe metadata — what the response headers need."""
+        if not (PLATFORM_RE.match(platform) and ID_RE.match(game_id) and valid_filename(name)):
+            return None
+        with self._read() as conn:
+            row = conn.execute(
+                "SELECT name, size_bytes, sha256 FROM entry_file"
+                " WHERE platform = ? AND id = ? AND name = ?",
+                (platform, game_id, name),
+            ).fetchone()
+        return dict(row) if row else None
+
     def open_member(self, platform: str, game_id: str, name: str) -> int | None:
         """An open fd for one member file, or None.
 
