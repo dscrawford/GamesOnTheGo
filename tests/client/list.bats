@@ -347,3 +347,44 @@ big_catalog() {
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"a page starts at 1"* ]]
 }
+
+@test "the named flags are exactly equivalent to the positionals" {
+  big_catalog
+  local pair positional named a
+  for pair in \
+    "metroid|--search metroid" \
+    "majora|--search majora" \
+    "2|--page 2"; do
+    positional="${pair%%|*}"
+    named="${pair##*|}"
+    # shellcheck disable=SC2086
+    gotg list $positional
+    a="$output"
+    # shellcheck disable=SC2086
+    gotg list $named
+    [ "$output" = "$a" ] || {
+      echo "list $positional != list $named" >&2
+      false
+    }
+  done
+}
+
+@test "an empty --search is refused, in either spelling" {
+  big_catalog
+  gotg list --search ''
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"--search needs a pattern"* ]]
+  gotg list --search=
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"--search needs a pattern"* ]]
+}
+
+@test "a named flag missing its value does not swallow the next flag" {
+  big_catalog
+  gotg list --search --platform nes
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"--search needs a pattern"* ]]
+  gotg list --page --all
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"--page needs a number"* ]]
+}

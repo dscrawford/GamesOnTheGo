@@ -371,3 +371,44 @@ setup_steam() {
   [[ "$stderr" == *"chmod 600"* ]]
 
 }
+
+@test "every appid spelling files art under the unsigned 32-bit name" {
+  printf '\x89PNG\r\n\x1a\n' >"$TEST_TMP/pic.png"
+  local pair given expected
+  for pair in \
+    "0:0" \
+    "2147483647:2147483647" \
+    "2147483648:2147483648" \
+    "4294967295:4294967295" \
+    "-1:4294967295" \
+    "-1874645127:2420322169"; do
+    given="${pair%%:*}"
+    expected="${pair##*:}"
+    rm -rf "$GRID" && mkdir -p "$GRID"
+    run python3 "$ART" --grid-dir "$GRID" --appid "$given" --name "Some Game" \
+      --from "$TEST_TMP/pic.png" --as tile
+    [ "$status" -eq 0 ] || {
+      echo "appid $given exited $status: $output" >&2
+      false
+    }
+    [ -f "$GRID/${expected}p.png" ] || {
+      echo "appid $given: expected ${expected}p.png, got: $(ls "$GRID")" >&2
+      false
+    }
+  done
+}
+
+@test "a non-numeric appid is refused cleanly, not filed or crashed" {
+  printf '\x89PNG\r\n\x1a\n' >"$TEST_TMP/pic.png"
+  local bad
+  for bad in abc 12.5 0x10; do
+    rm -rf "$GRID" && mkdir -p "$GRID"
+    run python3 "$ART" --grid-dir "$GRID" --appid "$bad" --name "Some Game" \
+      --from "$TEST_TMP/pic.png" --as tile
+    [ "$status" -ne 0 ] || {
+      echo "appid '$bad' was accepted" >&2
+      false
+    }
+    [ -z "$(ls -A "$GRID")" ]
+  done
+}

@@ -206,10 +206,13 @@ cmd_list() {
         limit="${1#--limit=}"
         shift
         ;;
+      # The space forms refuse a value that looks like the next flag: a
+      # missing value would otherwise swallow it and the complaint would
+      # point at the wrong thing. The = spelling takes anything.
       --platform)
         platform="${2:-}"
         shift 2 || die "--platform needs a name"
-        [[ -n "$platform" ]] || die "--platform needs a name"
+        [[ -n "$platform" && "$platform" != -* ]] || die "--platform needs a name"
         ;;
       --platform=*)
         platform="${1#--platform=}"
@@ -217,16 +220,17 @@ cmd_list() {
         shift
         ;;
       --search)
-        [[ -n "${2:-}" ]] || die "--search needs a pattern"
+        [[ -n "${2:-}" && "${2:-}" != --* ]] || die "--search needs a pattern"
         set_pattern "$2"
         shift 2
         ;;
       --search=*)
+        [[ -n "${1#--search=}" ]] || die "--search needs a pattern"
         set_pattern "${1#--search=}"
         shift
         ;;
       --page)
-        [[ -n "${2:-}" ]] || die "--page needs a number"
+        [[ -n "${2:-}" && "${2:-}" != -* ]] || die "--page needs a number"
         set_page "$2"
         shift 2
         ;;
@@ -249,6 +253,9 @@ cmd_list() {
         ;;
     esac
   done
+  # bash has no lexically-scoped functions: these two would otherwise linger in
+  # the global table, closed over locals that no longer exist.
+  unset -f set_pattern set_page
   # No leading zeros: bash arithmetic reads 010 as octal 8, and 08 as an
   # error every (( )) swallows into a false condition. (The page cap that
   # keeps arithmetic clear of 2^63 lives in set_page.)

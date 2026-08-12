@@ -40,10 +40,32 @@ setup() { setup_env; }
   [[ "$output" == *"--page"* ]]
 }
 
-@test "an alias answers help under its canonical name" {
-  gotg ls --help
+@test "each alias answers help under its canonical name" {
+  local pair alias canon
+  for pair in "ls:list" "show:info" "get:download" "launch:play"; do
+    alias="${pair%%:*}"
+    canon="${pair##*:}"
+    gotg "$alias" --help
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"usage: gotg $canon"* ]] || {
+      echo "gotg $alias --help did not map to '$canon': $output" >&2
+      false
+    }
+  done
+}
+
+@test "help is only intercepted in the first position, not after an argument" {
+  # An id can never be --help, so --help after a positional is a plain
+  # unknown option — a clean failure, not a help screen.
+  gotg list zelda --help
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"unknown option for list"* ]]
+}
+
+@test "complete --help is a harmless no-op, not a help screen" {
+  gotg complete --help
   [ "$status" -eq 0 ]
-  [[ "$output" == *"usage: gotg list"* ]]
+  [ -z "$output" ]
 }
 
 @test "the group commands still print their own subcommand help" {
