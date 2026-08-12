@@ -60,7 +60,7 @@ _gotg() {
             if [[ "$prev" == "--platform" ]]; then
                 mapfile -t COMPREPLY < <(compgen -W "$(gotg complete platforms)" -- "$cur")
             elif [[ "$cur" == -* ]]; then
-                mapfile -t COMPREPLY < <(compgen -W "--all --limit --platform" -- "$cur")
+                mapfile -t COMPREPLY < <(compgen -W "--all --limit --platform --search --page" -- "$cur")
             else
                 # A pattern is a regex over ids, titles and platforms. Offering
                 # the ids makes the common case — completing one — work, and

@@ -300,3 +300,50 @@ big_catalog() {
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"00[7]"* ]]
 }
+
+@test "--search and --page are the named spellings of the positionals" {
+  big_catalog
+  gotg list --search metroid
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"world.super_metroid"* ]]
+
+  gotg list --page 2
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"page 2 of 2"* ]]
+}
+
+@test "the three named flags compose in any order" {
+  big_catalog
+  gotg list --page 1 --search filler --platform n64
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"usa.filler_"* ]]
+  [ "$(grep -c "world\." <<<"$output")" -eq 0 ]
+}
+
+@test "a slot named twice, in either spelling, is a mistake" {
+  big_catalog
+  gotg list zelda --search metroid
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"usage: gotg list"* ]]
+  gotg list 2 --page 3
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"usage: gotg list"* ]]
+}
+
+@test "--search finds a game whose name is a number" {
+  add_manifest_entry n64 /Games/n64/usa.turok_1997.z64 file 100 "" "Turok 1997"
+  gotg refresh
+  gotg list --search 1997
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"usa.turok_1997"* ]]
+}
+
+@test "--page rejects a bad value like the positional does" {
+  big_catalog
+  gotg list --page 0
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"a page starts at 1"* ]]
+  gotg list --page x
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"a page starts at 1"* ]]
+}

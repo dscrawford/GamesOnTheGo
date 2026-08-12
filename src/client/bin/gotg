@@ -87,9 +87,47 @@ first time and is far happier in a terminal than under Steam — so running
 EOF
 }
 
+# One usage line per leaf command. The group commands (steam, saves,
+# controllers) print their own, richer, subcommand help and are not here.
+command_help() {
+  case "$1" in
+    login) echo "usage: gotg login    — save the server URL and token, stored mode 600" ;;
+    refresh) echo "usage: gotg refresh  — re-fetch the game catalog from the server" ;;
+    list | ls)
+      cat <<'EOF'
+usage: gotg list [pattern] [page] [--search <re>] [--platform <p>] [--page N] [--all] [--limit N]
+
+  Lists the catalog, marking the games installed here. A bare argument is a
+  pattern (a regex over id, title and platform) or, if it is a number, the
+  page; --search and --page are the named spellings of those two.
+
+    gotg list zelda                       every Zelda, on any platform
+    gotg list --platform nes --page 2     the second page of the NES set
+    gotg list --search zelda --platform nes
+    gotg list --all                       every game, no paging
+EOF
+      ;;
+    info | show) echo "usage: gotg info <id>    — one game's details and its mods" ;;
+    download | get) echo "usage: gotg download <id>    — fetch a game without a launcher" ;;
+    install) echo "usage: gotg install <id>    — fetch it, build its environment, write a Steam launcher" ;;
+    play | launch) echo "usage: gotg play <id> [variant] [emulator args...]    — build whatever is missing, then launch" ;;
+    configure) echo "usage: gotg configure <id> [variant]    — open that environment's own settings screen" ;;
+    sync) echo "usage: gotg sync    — rebuild every already-built environment from the flake" ;;
+  esac
+}
+
 main() {
   local cmd="${1:-}"
   [[ $# -gt 0 ]] && shift || true
+
+  # Every leaf command answers -h/--help. The group commands handle their own.
+  case "$cmd" in
+    login | refresh | list | ls | info | show | download | get | install | play | launch | configure | sync)
+      case "${1:-}" in
+        -h | --help) command_help "$cmd"; return 0 ;;
+      esac
+      ;;
+  esac
 
   case "$cmd" in
     login) cmd_login "$@" ;;

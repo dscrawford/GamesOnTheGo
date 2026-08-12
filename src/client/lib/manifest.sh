@@ -174,7 +174,23 @@ GOTG_LIST_LIMIT=50
 
 cmd_list() {
   local pattern="" limit="$GOTG_LIST_LIMIT" platform="" page=""
-  local usage="usage: gotg list [pattern] [page] [--platform <p>] [--all|--limit N]"
+  local usage="usage: gotg list [pattern] [page] [--search <re>] [--platform <p>] [--page N] [--all|--limit N]"
+
+  # --search and --page are the named spellings of the two positionals, so a
+  # setter is shared: name the same slot twice, whichever way, and it is a
+  # mistake worth catching rather than a silent last-wins.
+  local seen_pattern="" seen_page=""
+  set_pattern() {
+    [[ -z "$seen_pattern" ]] || die "$usage"
+    seen_pattern=1
+    pattern="$1"
+  }
+  set_page() {
+    [[ -z "$seen_page" ]] || die "$usage"
+    [[ "$1" =~ ^[1-9][0-9]{0,8}$ ]] || die "a page starts at 1, not: $1"
+    seen_page=1
+    page="$1"
+  }
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -200,28 +216,43 @@ cmd_list() {
         [[ -n "$platform" ]] || die "--platform needs a name"
         shift
         ;;
+      --search)
+        [[ -n "${2:-}" ]] || die "--search needs a pattern"
+        set_pattern "$2"
+        shift 2
+        ;;
+      --search=*)
+        set_pattern "${1#--search=}"
+        shift
+        ;;
+      --page)
+        [[ -n "${2:-}" ]] || die "--page needs a number"
+        set_page "$2"
+        shift 2
+        ;;
+      --page=*)
+        set_page "${1#--page=}"
+        shift
+        ;;
       -*) die "unknown option for list: $1" ;;
       *)
-        # A bare number is a page, anything else the pattern — so searching
-        # for a literal number needs a regex spelling like '194[2]'.
+        # A bare number is a page, anything else the pattern — so a number
+        # meant as a search wants --search or a regex spelling like '194[2]'.
         if [[ "$1" =~ ^[0-9]+$ ]]; then
-          [[ -z "$page" ]] || die "$usage"
-          page="$1"
+          [[ "$1" =~ ^[1-9][0-9]{0,8}$ ]] || die "a page starts at 1, not: $1
+     To search for a number, use --search or a regex: gotg list '${1:0:-1}[${1: -1}]'"
+          set_page "$1"
         else
-          [[ -z "$pattern" ]] || die "$usage"
-          pattern="$1"
+          set_pattern "$1"
         fi
         shift
         ;;
     esac
   done
   # No leading zeros: bash arithmetic reads 010 as octal 8, and 08 as an
-  # error every (( )) swallows into a false condition. The page cap keeps
-  # the later arithmetic far from 2^63, where it wraps into sed's lap.
+  # error every (( )) swallows into a false condition. (The page cap that
+  # keeps arithmetic clear of 2^63 lives in set_page.)
   [[ "$limit" =~ ^(0|[1-9][0-9]*)$ ]] || die "--limit takes a number, not: $limit"
-  [[ -z "$page" || "$page" =~ ^[1-9][0-9]{0,8}$ ]] ||
-    die "a page starts at 1, not: $page
-     To search for a number, spell it as a regex: gotg list '${page:0:-1}[${page: -1}]'"
   if ((limit == 0)) && [[ -n "$page" ]]; then
     die "--all and a page cannot combine — --all is every page at once"
   fi

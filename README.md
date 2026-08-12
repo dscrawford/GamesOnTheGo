@@ -48,21 +48,24 @@ prints 50 and says what it left out. A pattern is a regex, matched without case
 against the id, the title and the platform:
 
 ```bash
-gotg list majoras_mask      # the obvious one
-gotg list zelda             # every Zelda, on any platform
-gotg list '^world\.'        # anchored — it is a regex, not a substring
-gotg list --platform snes   # exactly one platform, no regex accidents
-gotg list --platform nes 2  # the second page of it
-gotg list snes --all        # a whole platform, uncut
+gotg list majoras_mask                 # the obvious one
+gotg list zelda                        # every Zelda, on any platform
+gotg list '^world\.'                   # anchored — it is a regex, not a substring
+gotg list --platform snes              # exactly one platform, no regex accidents
+gotg list --search zelda --platform nes --page 2   # the named spellings
+gotg list --platform nes 2             # a bare number is the page
+gotg list snes --all                   # a whole platform, uncut
 ```
 
-`--limit N` for some other number, and a bare number is the page — which means
-searching for a literal number takes a regex spelling like `'194[2]'`. A
-truncated list always says so, and names the next page — a silent one reads as
-"that is everything", which is the one thing it must not.
+A bare argument is the pattern, or the page if it is a number; `--search` and
+`--page` are their named spellings, so searching for a literal number is
+`--search 1997` (or a regex like `'194[2]'`). `--limit N` for some other page
+size. A truncated list always says so, and names the next page — a silent one
+reads as "that is everything", which is the one thing it must not.
 
 `gotg info <id>` answers for one game — size, files, whether it is here — and
-lists its mods, each reachable as `gotg play <id> <mod>`.
+lists its mods, each reachable as `gotg play <id> <mod>`. Every command takes
+`--help` (`-h`), which prints its usage and exits without touching the server.
 
 **Tab completion** covers commands, game ids and a game's variants:
 
