@@ -559,7 +559,7 @@ Keys are `id` or `platform/id`:
 | Field | Meaning |
 |---|---|
 | `target` | glob for the file to launch, relative to the installed game |
-| `unzip` | unpack a zipped ROM after download, for emulators that cannot read archives |
+| `unzip` | the game installs as a directory of the unpacked ROM — its environment carries the unzip recipe; this flag is the path shape the CLI needs offline |
 
 ## Why launching is the way it is
 

@@ -137,25 +137,6 @@ _install_file() {
   mv -f "$staged" "$dest"
 }
 
-# A zipped ROM unpacked into its own directory, for emulators that cannot read
-# an archive (the 2s2h port extracts assets from a bare .z64, for instance).
-_install_zipped_rom() {
-  local staged_zip="$1" dest="$2"
-  local stage="$GOTG_PARTIAL_DIR/unzip-$$"
-  rm -rf "$stage"
-  mkdir -p "$stage"
-
-  unzip -q "$staged_zip" -d "$stage" || {
-    rm -rf "$stage"
-    die "could not unzip $(basename "$staged_zip")"
-  }
-
-  mkdir -p "$(dirname "$dest")"
-  rm -rf "$dest"
-  mv "$stage" "$dest"
-  rm -f "$staged_zip"
-}
-
 # Download one game if it is not already here. Returns 0 when the game is ready.
 #
 # An entry is a list of raw member files; each downloads with resume and its
@@ -230,17 +211,20 @@ download_game() {
 
   case "$handler" in
     single_file | no_intro_set)
-      local member
-      member="$staged/$(jq -r '.files[0].name' <<<"$game")"
+      # An `unzip` override means this game's own environment carries the
+      # recipe that unpacks it — the same pipeline every processed source
+      # goes through. Everything else is placement, not processing.
       if [[ "$(override_field "$game" unzip)" == "true" ]]; then
-        # Verified as downloaded, then unpacked: the checksum still covers
-        # what came off the server.
-        _install_zipped_rom "$member" "$dest"
+        _run_recipe "$game" "$handler" "$staged" "$dest"
       else
+        local member
+        member="$staged/$(jq -r '.files[0].name' <<<"$game")"
         _install_file "$member" "$dest"
       fi
       ;;
     wiiu_decrypted)
+      # Placement too: the tree is already what the emulator reads, so no
+      # environment (and no built recipe) is required to put it in place.
       mkdir -p "$(dirname "$dest")"
       rm -rf "$dest"
       mv "$staged" "$dest"

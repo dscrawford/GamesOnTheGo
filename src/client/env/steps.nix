@@ -82,6 +82,33 @@
     '';
   };
 
+  # A zipped ROM, for the ports that read a bare file rather than the archive
+  # it is distributed in.
+  unzip = {
+    name = "unzip";
+    tools.UNZIP = "${pkgs.unzip}/bin/unzip";
+    script = ''
+      zip="$(find "$cur" -maxdepth 1 -name '*.zip' | head -1 || true)"
+      [ -n "$zip" ] || fail "no .zip in $cur"
+      next="$stage/unzip"
+      mkdir -p "$next"
+      "$UNZIP" -q "$zip" -d "$next" || fail "unzip failed"
+      cur="$next"
+    '';
+  };
+
+  # Terminal: the whole tree, placed as the extensionless destination — the
+  # shape overrides.json calls unzip, where the launch target is resolved by
+  # glob inside it.
+  placeTree = {
+    name = "place-tree";
+    script = ''
+      rm -rf "$dest"
+      mv "$cur" "$dest" || fail "could not place $dest"
+      cur="$dest"
+    '';
+  };
+
   # Terminal: the source names the format. Emulators dispatch on the
   # extension, so it has to survive the rename onto the id — but it is an
   # extracted name's to choose, so anything but a plain one is refused rather

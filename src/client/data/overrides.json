@@ -2,17 +2,19 @@
   "_comment": [
     "Per-game local tweaks the CLI has to know before anything is built: where a",
     "game lands on disk, and which file inside it to launch. How a game runs —",
-    "emulator, arguments, settings — lives in client/env instead.",
+    "emulator, arguments, settings — lives in src/client/env instead.",
     "Key by id, or by platform/id when the same id exists on several platforms.",
     "  target:   glob for the file to launch, relative to the installed game",
-    "  unzip:    unpack a zipped ROM into a directory after download, for",
-    "            emulators that cannot read an archive"
+    "  unzip:    the game installs as a directory of the unpacked ROM. The",
+    "            unpacking itself is the game environment's recipe; this flag",
+    "            is the half the CLI needs offline — the shape of the path."
   ],
 
   "_comment_decomp": [
     "The three entries below run on native ports built from the decompilations",
-    "rather than in an emulator — see client/env/games/n64. Each reads a bare",
-    ".z64 once to extract its assets, so the No-Intro zip has to be unpacked."
+    "rather than in an emulator — see src/client/env/games/n64. Each reads a",
+    "bare .z64 once to extract its assets, so the No-Intro zip has to be",
+    "unpacked — harkinianPort carries the matching unzip recipe."
   ],
 
   "n64/usa.legend_of_zelda_majoras_mask": { "unzip": true, "target": "*.z64" },

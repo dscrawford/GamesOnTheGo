@@ -200,6 +200,22 @@ fake_env() {
     >"$dir/share/gotg/saves.json"
 }
 
+# The recipe a built harkinian env carries, on a root fake_env already made:
+# unpack the zipped ROM into the bare destination directory.
+stub_unzip_recipe() {
+  local root="$GOTG_ROOTS_DIR/$1"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    cat <<'SHIM'
+handler="$1"; raw="$2"; dest="$3"
+rm -rf "$dest"; mkdir -p "$dest"
+unzip -q "$raw"/*.zip -d "$dest"
+SHIM
+  } >"$root/bin/gotg-recipe"
+  chmod +x "$root/bin/gotg-recipe"
+  jq -n '{handlers: ["single_file"]}' >"$root/share/gotg/recipe.json"
+}
+
 # A stand-in `nix`, so that building an environment can be tested where there is
 # no nix to run. It records what it was asked to build and then produces the GC
 # root, or — with "fail" — records it and gives up, as a build of a broken

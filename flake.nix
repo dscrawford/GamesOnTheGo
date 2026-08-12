@@ -353,10 +353,16 @@
                         steps.pickLargest
                         steps.keepExtension
                       ];
+                      # The harkinian shape, unstubbed: unzip is small enough
+                      # to run for real.
+                      probe_zip = [
+                        steps.unzip
+                        steps.placeTree
+                      ];
                     };
                 };
           in
-          pkgs.runCommand "check-recipes" { } ''
+          pkgs.runCommand "check-recipes" { nativeBuildInputs = [ pkgs.zip ]; } ''
             export HOME=$TMPDIR
             mkdir -p $TMPDIR/bin
 
@@ -479,6 +485,14 @@
             touch $raw/group.rar
             ${probe}/bin/gotg-recipe probe_scene $raw $TMPDIR/out/two.game
             [ "$(cat $TMPDIR/out/two.game.xci)" = big ]
+
+            # A zipped ROM becomes the unpacked tree at the bare destination —
+            # the harkinian shape, with the real unzip.
+            raw=$TMPDIR/raw-zip && mkdir -p $raw
+            printf 'rom bytes' > "$TMPDIR/Zelda (USA).z64"
+            (cd $TMPDIR && zip -q "$raw/usa.zelda.zip" "Zelda (USA).z64")
+            ${probe}/bin/gotg-recipe probe_zip $raw $TMPDIR/out/usa.zelda
+            [ "$(cat "$TMPDIR/out/usa.zelda/Zelda (USA).z64")" = "rom bytes" ]
 
             # recipe.json is what download.sh consults; a migration must not
             # rename a handler on the wire.

@@ -88,8 +88,8 @@
   #   { scene_archive = [ steps.verifySfv steps.unrar steps.pickLargest steps.keepExtension ]; }
   #
   # The generated script runs as `gotg-recipe <handler> <raw-dir> <dest>` with
-  # each step tool exported under its name — overridable as GOTG_<name> from
-  # the environment, which is what lets tests stub a multi-gigabyte conversion
+  # each step tool bound under its name — overridable as GOTG_<name> from the
+  # environment, which is what lets tests stub a multi-gigabyte conversion
   # into an echo.
   recipes ? { },
 }:
@@ -211,9 +211,11 @@ let
         raw="''${2:?raw member directory required}"
         dest="''${3:?destination required}"
         ${lib.concatLines (
+          # Assigned, never exported: Info-ZIP's unzip reads an UNZIP variable
+          # in its environment as prepended arguments, and other tools have
+          # conventions like it. Only the script itself expands these.
           lib.mapAttrsToList (var: default: ''
             ${var}="''${GOTG_${var}:-${default}}"
-            export ${var}
           '') recipeTools
         )}
         step=dispatch

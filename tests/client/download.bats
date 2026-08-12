@@ -92,6 +92,14 @@ teardown() {
   jq -n '{"n64/usa.zelda": {unzip: true, target: "*.z64"}}' \
     > "$GOTG_CONFIG_DIR/overrides.json"
 
+  # The unpacking is the game environment's own recipe, not the CLI's: stub
+  # the built per-game env root the way stub_recipe_env does for a platform.
+  export GOTG_ENV_DIR="$TEST_TMP/env"
+  mkdir -p "$GOTG_ENV_DIR/games/n64"
+  : >"$GOTG_ENV_DIR/games/n64/usa.zelda.nix"
+  fake_env "env-n64-usa_zelda"
+  stub_unzip_recipe "env-n64-usa_zelda"
+
   gotg refresh
   gotg download usa.zelda
   [ "$status" -eq 0 ]
@@ -99,6 +107,22 @@ teardown() {
   [ -d "$GOTG_GAMES_DIR/n64/usa.zelda" ]
   [ -f "$GOTG_GAMES_DIR/n64/usa.zelda/Zelda (USA).z64" ]
   [ ! -e "$GOTG_GAMES_DIR/n64/usa.zelda.zip" ]
+}
+
+@test "an unzip game without its environment built says how to fix it" {
+  mkdir -p "$TEST_TMP/mkzip2" "$SERVICE_LIBRARY_DIR/n64"
+  printf 'rom bytes' > "$TEST_TMP/mkzip2/Zelda (USA).z64"
+  (cd "$TEST_TMP/mkzip2" && zip -q "$TEST_TMP/usa.zeldab.zip" "Zelda (USA).z64")
+  cp "$TEST_TMP/usa.zeldab.zip" "$SERVICE_LIBRARY_DIR/n64/usa.zeldab.zip"
+  add_game n64 "usa.zeldab.zip" "$(cat "$TEST_TMP/usa.zeldab.zip")" "Zelda B"
+  jq -n '{"n64/usa.zeldab": {unzip: true, target: "*.z64"}}' \
+    > "$GOTG_CONFIG_DIR/overrides.json"
+
+  gotg refresh
+  gotg download usa.zeldab
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"gotg install usa.zeldab"* ]]
+  [ ! -e "$GOTG_GAMES_DIR/n64/usa.zeldab" ]
 }
 
 @test "an interrupted download resumes instead of starting over" {

@@ -439,6 +439,17 @@ in
       # starting them with no arguments starts the game — which `gotg play`
       # already does.
       configurable = false;
+
+      # The ports read a bare .z64, not the No-Intro zip it travels as. The
+      # matching half is data/overrides.json marking the entry `unzip`: where
+      # the unpacked tree lands has to be known without evaluating nix for
+      # `gotg list` to work offline; this is what fills it.
+      recipes = {
+        single_file = [
+          steps.unzip
+          steps.placeTree
+        ];
+      };
       # The archive is derived from the ROM and worth keeping with the game
       # rather than in a shared ~/.local/share, so that removing a game removes
       # everything it made. Saves live here too.

@@ -131,6 +131,7 @@ teardown() {
   mkdir -p "$GOTG_ENV_DIR/games/n64"
   : >"$GOTG_ENV_DIR/games/n64/usa.zelda.nix"
   fake_env env-n64-usa_zelda
+  stub_unzip_recipe env-n64-usa_zelda
 
   gotg refresh
   gotg play usa.zelda
