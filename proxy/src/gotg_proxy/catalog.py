@@ -97,13 +97,23 @@ def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def valid_filename(name: str) -> bool:
+def _valid_segment(segment: str) -> bool:
     return (
-        0 < len(name) <= 255
-        and name.isprintable()
-        and "/" not in name
-        and not name.startswith(".")
+        0 < len(segment) <= 255
+        and segment.isprintable()
+        and not segment.startswith(".")
     )
+
+
+# A member name is a relative path: one segment for almost everything, nested
+# for the trees an emulator reads in place (a WiiU dump's code/content/meta).
+# No segment may start with a dot, which also rules out "..", and the depth
+# cap means a hostile name cannot be a filesystem stress test.
+def valid_filename(name: str) -> bool:
+    if not 0 < len(name) <= 1024:
+        return False
+    segments = name.split("/")
+    return len(segments) <= 8 and all(_valid_segment(s) for s in segments)
 
 
 class CatalogStore:

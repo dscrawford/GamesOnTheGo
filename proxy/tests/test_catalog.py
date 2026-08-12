@@ -161,7 +161,10 @@ def test_a_non_object_entry_is_refused(catalog):
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("name", "a/b.z64"),
+        ("name", "a/../b.z64"),
+        ("name", "a//b.z64"),
+        ("name", "a/.hidden/b.z64"),
+        ("name", "a/b/c/d/e/f/g/h/i.z64"),
         ("name", ".."),
         ("name", ".hidden"),
         ("name", ""),
@@ -636,3 +639,20 @@ def test_catalog_env_vars_come_as_a_pair(tmp_path):
         catalog_from_env({"GOTG_CATALOG_DB": str(tmp_path / "c.db")})
     with pytest.raises(ValueError, match="set together"):
         catalog_from_env({"GOTG_LIBRARY_ROOTS": str(tmp_path)})
+
+
+def test_nested_member_names_carry_a_wiiu_tree(catalog, library):
+    tree = {
+        "handler": "wiiu_decrypted",
+        "title": "Wind Waker HD",
+        "files": [
+            {"name": name, "path": str(library / "rel" / name),
+             "size_bytes": 1, "mtime": 1, "sha256": None}
+            for name in ["code/app.rpx", "content/scene/x.pack", "meta/meta.xml"]
+        ],
+    }
+    catalog.upsert("wiiu", "usa.wind_waker_hd", tree)
+    game = catalog.view()["games"][0]
+    assert [f["name"] for f in game["files"]] == [
+        "code/app.rpx", "content/scene/x.pack", "meta/meta.xml",
+    ]

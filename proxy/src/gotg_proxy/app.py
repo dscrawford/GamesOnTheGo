@@ -517,10 +517,12 @@ class Handler(BaseHTTPRequestHandler):
 
         parts = urllib.parse.urlsplit("/" + rest)
         segments = [urllib.parse.unquote(s) for s in parts.path.strip("/").split("/") if s]
-        if len(segments) != 3:
+        if len(segments) < 3:
             self._problem(404, "a file lives at /games/<platform>/<id>/<name>")
             return
-        platform, game_id, name = segments
+        # A member name may nest — a WiiU dump is fetched as its tree.
+        platform, game_id = segments[0], segments[1]
+        name = "/".join(segments[2:])
 
         found = self.catalog.open_member(platform, game_id, name)
         if found is None:
@@ -621,7 +623,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
             self.send_header(
                 "Content-Disposition",
-                f"attachment; filename*=UTF-8''{urllib.parse.quote(name)}",
+                f"attachment; filename*=UTF-8''{urllib.parse.quote(name.rsplit('/', 1)[-1])}",
             )
             self.end_headers()
             if streaming:

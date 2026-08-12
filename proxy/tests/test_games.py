@@ -511,3 +511,26 @@ def test_files_never_follows_a_symlinked_platform_directory(service, files_dir, 
     base, _ = service
     status, _, _ = fetch(base, "/files/wii/prod.keys")
     assert status == 404
+
+
+def test_a_nested_member_streams_through_its_nested_url(service, library, catalog):
+    release = library / "some-release" / "wiiu-rel"
+    (release / "code").mkdir(parents=True)
+    (release / "code" / "app.rpx").write_bytes(b"rpx!")
+    catalog.upsert(
+        "n64",
+        "usa.tree",
+        {
+            "handler": "wiiu_decrypted",
+            "title": "Tree",
+            "files": [
+                {"name": "code/app.rpx", "path": str(release / "code" / "app.rpx"),
+                 "size_bytes": 4, "mtime": 1, "sha256": None}
+            ],
+        },
+    )
+    base, _ = service
+    status, body, headers = fetch(base, "/games/n64/usa.tree/code/app.rpx")
+    assert (status, body) == (200, b"rpx!")
+    assert "app.rpx" in headers["Content-Disposition"]
+    assert "code" not in headers["Content-Disposition"]
