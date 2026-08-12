@@ -143,6 +143,7 @@ class Publisher:
         self.api = api
         self.allow_unhashed = allow_unhashed
         # (platform, id, name) -> stored file row, for the hash skip.
+        self.published_this_run: set[tuple[str, str]] = set()
         self.known: dict[tuple[str, str, str], dict] = {}
         for game in self.api.full_view().get("games", []):
             for row in game.get("files", []):
@@ -221,6 +222,7 @@ class Publisher:
             op.entry_id,
             {"handler": op.handler, "title": op.title or op.entry_id, "files": files},
         )
+        self.published_this_run.add((op.platform, op.entry_id))
 
     def sweep(self, since: str) -> None:
         report = self.api.sweep(since)
@@ -270,3 +272,46 @@ def diff_catalog(manifest_entries: dict, api: CatalogAPI) -> list[str]:
     for key in sorted(set(catalog) - seen):
         problems.append(f"in catalog but not the manifest: {key[0]}/{key[1]}")
     return problems
+
+
+def publish_games_root(publisher: Publisher, entries: dict, cfg) -> tuple[int, int]:
+    """Publish rows for manifest entries whose bytes now live only in /Games.
+
+    The torrent pass covers what still seeds; everything older survives as the
+    hardlinks the importer made, so the tree itself is the raw source. The
+    manifest gates the walk — keys and firmware never entered it, so they can
+    never become catalog entries here. Returns (published, errors).
+    """
+    published = errors = 0
+    for entry in entries.values():
+        key = (entry.platform, entry.game_id)
+        if key in publisher.published_this_run or entry.type != "file":
+            continue
+        local = cfg.games_root / Path(entry.path).relative_to(cfg.path_prefix)
+        try:
+            st = local.stat()
+            sha = entry.sha256
+            if not sha and not publisher.allow_unhashed:
+                sha = ex.sha256_file(local)
+            publisher.api.put(
+                entry.platform,
+                entry.game_id,
+                {
+                    "handler": "single_file",
+                    "title": entry.title or entry.game_id,
+                    "files": [
+                        {
+                            "name": local.name,
+                            "path": str(local),
+                            "size_bytes": st.st_size,
+                            "mtime": int(st.st_mtime),
+                            "sha256": sha,
+                        }
+                    ],
+                },
+            )
+            published += 1
+        except (OSError, PublishError) as error:
+            log.error("games-root publish %s: %s", entry.game_id, error)
+            errors += 1
+    return published, errors

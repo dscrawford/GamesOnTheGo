@@ -160,9 +160,17 @@ class FakePublisher:
         self.sweep_error = sweep_error
         self.published = []
         self.swept = []
+        self.published_this_run = set()
+        self.allow_unhashed = True
+        self.api = self
+
+    def put(self, platform, game_id, payload):
+        self.published.append(game_id)
+        self.published_this_run.add((platform, game_id))
 
     def publish(self, result, *, checksum=True):
         self.published.append(result.op.entry_id)
+        self.published_this_run.add((result.op.platform, result.op.entry_id))
         if self.publish_error:
             raise self.publish_error
 

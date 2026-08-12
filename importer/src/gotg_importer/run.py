@@ -144,6 +144,14 @@ def run_scan(
     log.info("scanned %s: %d game source(s), %d entry(s) ignored", root, len(paths), ignored)
     stats = run_paths(paths, cfg, rules, dry_run=dry_run, checksum=checksum, publisher=publisher)
 
+    # The games tree is the raw source for everything whose torrent no longer
+    # seeds — most of the library. Published after the torrent pass, so a
+    # living source always wins.
+    if publisher and not dry_run:
+        published, errors = pub.publish_games_root(publisher, mf.load(cfg.manifest_path), cfg)
+        log.info("games-root pass: %d published, %d error(s)", published, errors)
+        stats.publish_errors += errors
+
     # Only a completed full enumeration may sweep: a partial or failed pass
     # would report the whole untouched library as vanished.
     if publisher and not dry_run and not stats.failed and not stats.publish_errors:
