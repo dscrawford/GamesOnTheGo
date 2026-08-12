@@ -74,7 +74,7 @@ def catalog(tmp_path, library):
 def service(catalog, files_dir):
     config = Config(token=CLIENT, index_token=INDEX)
     server = make_server("127.0.0.1", free_port(), config, None, catalog, files_dir=files_dir, stream_slots=2)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     yield f"http://127.0.0.1:{server.server_port}", server
     server.shutdown()
 
@@ -285,7 +285,7 @@ def test_files_never_follows_a_symlink(service, files_dir, tmp_path):
 def test_a_service_without_a_files_dir_says_so(catalog):
     config = Config(token=CLIENT)
     server = make_server("127.0.0.1", free_port(), config, None, catalog)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}"
     try:
         status, body, _ = fetch(base, "/files/switch/prod.keys")

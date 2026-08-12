@@ -40,7 +40,7 @@ def catalog(tmp_path, library):
 def service(catalog):
     config = Config(token=CLIENT, index_token=INDEX)
     server = make_server("127.0.0.1", free_port(), config, None, catalog)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     yield f"http://127.0.0.1:{server.server_port}"
     server.shutdown()
 
@@ -349,7 +349,7 @@ def test_no_token_is_a_401_with_no_route_shape_leaked(service):
 def test_a_service_without_a_catalog_says_so():
     config = Config(token=CLIENT, index_token=INDEX)
     server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     try:
         status, _ = call(f"http://127.0.0.1:{server.server_port}/catalog")
         assert status == 503
@@ -365,7 +365,7 @@ def test_matching_tokens_refuse_to_start():
 def test_an_unset_index_token_makes_the_catalog_read_only(catalog, library):
     config = Config(token=CLIENT)
     server = make_server("127.0.0.1", free_port(), config, None, catalog)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}"
     try:
         status, _ = call(f"{base}/catalog/n64/usa.zelda", method="PUT", token=CLIENT, body=entry(library))

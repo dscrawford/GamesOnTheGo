@@ -8,5 +8,3 @@ and testable off-cluster:
 ``slugify`` and ``plan`` are the validated reference implementation and are kept
 verbatim; see ``Kubernetes/games/IMPORTER_SPEC.md`` for the full contract.
 """
-
-__version__ = "0.1.0"

@@ -52,7 +52,7 @@ from pathlib import Path
 from ..catalog import CatalogStore, Conflict, SweepRefused
 from ..saves import SavesStore
 
-USER_AGENT = "gotg-proxy/0.3.0"
+USER_AGENT = "gotg-proxy/0.4.0"
 
 # Bounded, because a request that never returns holds a thread open and enough
 # of them stop the proxy answering anybody.

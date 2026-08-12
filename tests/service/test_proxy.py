@@ -87,7 +87,7 @@ def free_port() -> int:
 
 def serve(handler) -> tuple[HTTPServer, str]:
     server = HTTPServer(("127.0.0.1", free_port()), handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     return server, f"http://127.0.0.1:{server.server_port}"
 
 
@@ -113,7 +113,7 @@ def proxy(upstream):
         igdb_token_url=f"{upstream}/oauth2/token",
     )
     server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     yield f"http://127.0.0.1:{server.server_port}"
     server.shutdown()
 
@@ -236,7 +236,7 @@ def test_an_unknown_route_is_a_404(proxy):
 def test_an_unconfigured_upstream_says_so(upstream):
     config = Config(token="client-token", steamgriddb_url=upstream)  # no key
     server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     try:
         status, body = call(f"http://127.0.0.1:{server.server_port}/steamgriddb/x")
         assert status == 503
@@ -252,7 +252,7 @@ def test_an_upstream_that_is_down_is_a_gateway_error(upstream):
         steamgriddb_url="http://127.0.0.1:1",
     )
     server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     try:
         status, _ = call(f"http://127.0.0.1:{server.server_port}/steamgriddb/x")
         assert status == 502
@@ -265,7 +265,7 @@ def test_a_token_is_required_even_when_nothing_is_configured():
     # must not be able to tell which upstreams this proxy holds keys for.
     config = Config(token="client-token")
     server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     try:
         status, _ = call(f"http://127.0.0.1:{server.server_port}/igdb/games", token=None)
         assert status == 401
@@ -371,7 +371,7 @@ def test_a_redirect_is_relayed_to_the_client_not_followed(upstream):
     server, url = serve(Redirecting)
     config = Config(token="client-token", steamgriddb_key="k", steamgriddb_url=url)
     proxy_server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=proxy_server.serve_forever, daemon=True).start()
+    threading.Thread(target=lambda: proxy_server.serve_forever(poll_interval=0.05), daemon=True).start()
     try:
         status, _ = call(f"http://127.0.0.1:{proxy_server.server_port}/steamgriddb/x")
         assert status == 302
@@ -441,7 +441,7 @@ def test_a_hostile_content_type_cannot_split_our_response():
         steamgriddb_url=f"http://127.0.0.1:{listener.getsockname()[1]}",
     )
     server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     try:
         request = urllib.request.Request(f"http://127.0.0.1:{server.server_port}/steamgriddb/x")
         request.add_header("Authorization", "Bearer client-token")

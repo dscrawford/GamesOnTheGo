@@ -60,7 +60,18 @@
       pythonSets = forAllSystems (
         pkgs:
         let
-          workspace = uv2nix.lib.workspace.loadWorkspace { workspaceRoot = ./.; };
+          # Only what the wheel actually packages: a docs or client commit must
+          # not rebuild the venvs (and re-run every check downstream of them).
+          workspace = uv2nix.lib.workspace.loadWorkspace {
+            workspaceRoot = nixpkgs.lib.fileset.toSource {
+              root = ./.;
+              fileset = nixpkgs.lib.fileset.unions [
+                ./pyproject.toml
+                ./uv.lock
+                ./src/gotg
+              ];
+            };
+          };
           overlay = workspace.mkPyprojectOverlay { sourcePreference = "wheel"; };
         in
         {
@@ -227,8 +238,8 @@
       checks = forAllSystems (pkgs: {
         importer = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-importer;
 
-        # The proxy runs its own tests in its checkPhase, being an ordinary
-        # buildPythonApplication rather than a uv2nix venv.
+        # Building the wrapper runs no tests (unlike the old
+        # buildPythonApplication checkPhase); python-tests below is the gate.
         proxy = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-proxy;
 
         # buildPythonApplication used to run these through pytestCheckHook; a
@@ -243,9 +254,13 @@
           pkgs.runCommand "check-python-tests" { nativeBuildInputs = [ venv ]; } ''
             mkdir repo && cd repo
             cp -r ${./tests} tests
-            # The contract drift-guard reads the shell client's source, so the
-            # tree it greps has to exist beside the tests.
-            cp -r ${./src} src
+            # The contract drift-guards read the shell client's patterns and the
+            # project version; nothing else of src/client, so a client edit does
+            # not re-run this suite.
+            mkdir -p src/client/lib
+            cp -r ${./src/gotg} src/gotg
+            cp ${./src/client/lib/common.sh} src/client/lib/common.sh
+            cp ${./pyproject.toml} pyproject.toml
             chmod -R u+w tests src
             python -m pytest tests/service tests/indexer -q
             touch $out
@@ -393,8 +408,8 @@
             }
             ''
               cd ${./.}
-              ruff check --no-cache src/gotg tests/service tests/indexer
-              ruff format --no-cache --check src/gotg tests/service tests/indexer
+              ruff check --no-cache src/gotg tests/conftest.py tests/service tests/indexer
+              ruff format --no-cache --check src/gotg tests/conftest.py tests/service tests/indexer
               touch $out
             '';
       });

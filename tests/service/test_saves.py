@@ -32,7 +32,7 @@ def store(tmp_path):
 def service(store):
     config = Config(token="client-token")
     server = make_server("127.0.0.1", free_port(), config, store)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     yield f"http://127.0.0.1:{server.server_port}"
     server.shutdown()
 
@@ -79,7 +79,7 @@ def test_the_store_requires_the_same_token_as_everything_else(service):
 
 def test_a_service_with_no_store_says_so():
     server = make_server("127.0.0.1", free_port(), Config(token="client-token"), None)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     try:
         status, body, _ = call(f"http://127.0.0.1:{server.server_port}/saves/env-n64")
         assert status == 503

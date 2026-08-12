@@ -286,6 +286,8 @@ def publish_games_root(publisher: Publisher, entries: dict, cfg) -> tuple[int, i
             continue
         local = cfg.games_root / Path(entry.path).relative_to(cfg.path_prefix)
         try:
+            if not valid_filename(local.name):
+                raise PublishError(f"member name violates the contract: {local.name!r}")
             st = local.stat()
             sha = entry.sha256
             if not sha and not publisher.allow_unhashed:
