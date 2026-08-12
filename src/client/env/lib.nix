@@ -107,6 +107,35 @@ let
       [ "'\"$target\"'" "'\"$install\"'" "'\"$state\"'" ]
       (lib.escapeShellArg s);
 
+  # The directory each saves glob lives in: segments up to the first wildcard,
+  # or the dirname of an exact path. An emulator told to save somewhere must
+  # find that place existing — ares reports a missing save path as read-only,
+  # and the session's progress is lost with it.
+  savesDirPrefix =
+    glob:
+    let
+      segments = lib.splitString "/" glob;
+      isWild = s: builtins.match ".*[*?[].*" s != null;
+      # take-while, by fold: the pinned nixpkgs has no lib.lists.takeWhile.
+      static =
+        (lib.foldl' (
+          acc: s:
+          if acc.stop || isWild s then
+            acc // { stop = true; }
+          else
+            {
+              stop = false;
+              segs = acc.segs ++ [ s ];
+            }
+        ) { stop = false; segs = [ ]; } segments).segs;
+      dirs = if lib.length static == lib.length segments then lib.init segments else static;
+    in
+    lib.concatStringsSep "/" dirs;
+
+  savesDirs = lib.unique (lib.filter (d: d != "") (map savesDirPrefix saves));
+
+  seedSavesDirs = lib.concatMapStringsSep "\n" (d: ''mkdir -p "$state"/${lib.escapeShellArg d}'') savesDirs;
+
   # Hints every emulator here needs, merged *under* an environment's own env so
   # that a platform can still override one.
   baseEnv = {
@@ -172,6 +201,7 @@ let
 
     state="''${GOTG_ENV_STATE:-''${XDG_STATE_HOME:-$HOME/.local/state}/gotg/env/${name}}"
     mkdir -p "$state"
+    ${seedSavesDirs}
 
     # The player's own configuration directory, captured *before* isolation
     # moves XDG_CONFIG_HOME under {state}. Preferences that belong to the person

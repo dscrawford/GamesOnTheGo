@@ -351,6 +351,12 @@
                   name = "recipe-probe";
                   emulator = pkgs.coreutils;
                   bin = "true";
+                  # One glob of each shape: a directory tree, and a file
+                  # pattern whose wildcard segment must not become a mkdir.
+                  saves = [
+                    "saves/**"
+                    "data/probe/probe*.json"
+                  ];
                   recipes =
                     let
                       steps = import ./src/client/env/steps.nix { inherit pkgs; };
@@ -562,6 +568,14 @@
             # names the invariant.
             raw=$TMPDIR/raw-hygiene && mkdir -p $raw
             ${probe}/bin/gotg-recipe probe_hygiene $raw $TMPDIR/out/hygiene
+
+            # An emulator told where to save must find that place existing —
+            # ares reports a missing save path as read-only and the progress
+            # of the session is lost. The wrapper creates the static prefix
+            # of every declared saves glob, and only the static prefix.
+            grep -qF 'mkdir -p "$state"/saves' ${probe}/bin/gotg-play
+            grep -qF 'mkdir -p "$state"/data/probe' ${probe}/bin/gotg-play
+            ! grep -F 'probe*' ${probe}/bin/gotg-play | grep -q mkdir
 
             # recipe.json is what download.sh consults; a migration must not
             # rename a handler on the wire.
