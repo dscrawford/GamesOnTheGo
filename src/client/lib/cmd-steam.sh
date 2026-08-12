@@ -110,33 +110,40 @@ steam_artwork_helper() {
 steam_grid_dir() { printf '%s/grid' "$(dirname "$(steam_shortcuts_file)")"; }
 
 # The fetched icon's path: grid art is keyed on the unsigned 32-bit appid,
-# whichever way the shortcut spelled it.
+# whichever way the shortcut spelled it. The vdf is another tool's to write
+# too, so what came out of it is validated before bash arithmetic sees it.
 steam_icon_path() {
   local appid="$1"
+  [[ "$appid" =~ ^-?[0-9]+$ ]] || return 0
   ((appid < 0)) && appid=$((appid + 4294967296))
   printf '%s/%s_icon.ico' "$(steam_grid_dir)" "$appid"
 }
 
 # Point the shortcut's own icon field at the fetched icon. Grid art Steam
 # finds by filename; the list icon it reads only off the shortcut — so a
-# downloaded _icon.ico does nothing until this runs. Best-effort: the vdf
-# write needs Steam closed, and artwork must never take the shortcut with it.
+# downloaded _icon.ico does nothing until this runs. Best-effort throughout:
+# the vdf write needs Steam closed, and artwork must never take the shortcut
+# with it. set-icon rather than add, because add recomputes appid and AppName
+# — a rename made inside Steam, or the random appid of an entry Steam itself
+# created, must survive having a picture attached.
 steam_attach_icon() {
-  local launcher="$1" name="$2" icon="$3"
-  [[ -f "$icon" ]] || return 0
+  local launcher="$1" icon="$2"
+  [[ -n "$icon" && -f "$icon" ]] || return 0
 
   local current
   current="$(steam_helper --file "$(steam_shortcuts_file)" list |
-    jq -r --arg e "$launcher" '.[] | select(.exe == $e) | .icon')"
+    jq -r --arg e "$launcher" '.[] | select(.exe == $e) | .icon')" || {
+    warn "could not read the shortcut list — the icon stays unattached"
+    return 0
+  }
   [[ "$current" != "$icon" ]] || return 0
 
   if [[ -z "${GOTG_STEAM_SHORTCUTS:-}" ]] && pgrep -x steam >/dev/null 2>&1; then
     log "the icon is fetched but Steam is running — close it and rerun to attach it"
     return 0
   fi
-  steam_helper --file "$(steam_shortcuts_file)" add --name "$name" \
-    --exe "$launcher" --start-dir "$(dirname "$launcher")" \
-    --icon "$icon" >/dev/null ||
+  steam_helper --file "$(steam_shortcuts_file)" set-icon \
+    --exe "$launcher" --icon "$icon" >/dev/null ||
     warn "could not attach the icon to the shortcut"
 }
 
@@ -312,7 +319,7 @@ steam_art() {
   [[ -n "$appid" ]] || die "$name is not in Steam yet — run: gotg steam add $want${variant:+ $variant}"
 
   steam_fetch_artwork "$name" "$appid" "$game" "${opts[@]}"
-  steam_attach_icon "$launcher" "$name" "$(steam_icon_path "$appid")"
+  steam_attach_icon "$launcher" "$(steam_icon_path "$appid")"
 }
 
 steam_add() {
@@ -349,8 +356,10 @@ steam_add() {
   log "$(jq -r '"\(.action): \(.name)"' <<<"$result")"
   log "  $launcher"
 
-  steam_fetch_artwork "$name" "$(jq -r '.appid' <<<"$result")" "$game"
-  steam_attach_icon "$launcher" "$name" "$(steam_icon_path "$(jq -r '.appid' <<<"$result")")"
+  local new_appid
+  new_appid="$(jq -r '.appid' <<<"$result")"
+  steam_fetch_artwork "$name" "$new_appid" "$game"
+  steam_attach_icon "$launcher" "$(steam_icon_path "$new_appid")"
 
   log ""
   log "Start Steam and it will be in your library."

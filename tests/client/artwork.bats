@@ -314,6 +314,143 @@ EOF
   [[ "$icon" == *"_icon.ico" ]]
 }
 
+@test "art does not rewrite the appid or name of a shortcut it did not create" {
+  # A shortcut added through Steam's own UI: a random appid and the user's own
+  # name. steam_art reads the appid back because the shortcut wins — the icon
+  # attach must not then hand both back to the formula, or the art it just
+  # filed is orphaned and the user's name reverted.
+  setup_steam
+  jq -n '{api_key: "testkey"}' >"$GOTG_STEAMGRIDDB_KEY_FILE"
+  export GOTG_STEAMGRIDDB_URL="$SGDB_URL"
+  local launcher="$GOTG_GAMES_DIR/gamecube/play-usa.super_mario_sunshine.sh"
+  python3 - "$SHORTCUTS" "$launcher" <<'EOF'
+import os, sys, vdf
+path, exe = sys.argv[1], sys.argv[2]
+entry = {"appid": -123456789, "AppName": "The User's Name",
+         "Exe": f'"{exe}"', "StartDir": os.path.dirname(exe) + "/",
+         "icon": "", "LaunchOptions": "", "tags": {}}
+with open(path, "wb") as f:
+    vdf.binary_dump({"shortcuts": {"0": entry}}, f)
+EOF
+
+  gotg steam art usa.super_mario_sunshine
+  [ "$status" -eq 0 ]
+  # unsigned(-123456789) = 4171510507: where the art landed, per the shortcut.
+  [ -f "$(dirname "$SHORTCUTS")/grid/4171510507p.png" ]
+
+  local listing
+  listing="$(python3 "$(dirname "$GOTG_BIN")/../share/gotg/steam/shortcuts.py" \
+    --file "$SHORTCUTS" list)"
+  [ "$(jq -r '.[0].appid' <<<"$listing")" = "-123456789" ]
+  [ "$(jq -r '.[0].name' <<<"$listing")" = "The User's Name" ]
+  [[ "$(jq -r '.[0].icon' <<<"$listing")" == *"/4171510507_icon.ico" ]]
+}
+
+@test "attach-on-art keeps the platform tag" {
+  setup_steam
+  jq -n '{api_key: "testkey"}' >"$GOTG_STEAMGRIDDB_KEY_FILE"
+  export GOTG_STEAMGRIDDB_URL="$SGDB_URL"
+  gotg steam add usa.super_mario_sunshine
+  [ "$status" -eq 0 ]
+
+  python3 - "$SHORTCUTS" <<'EOF'
+import sys, vdf
+with open(sys.argv[1], "rb") as f:
+    data = vdf.binary_load(f)
+for e in data["shortcuts"].values():
+    e["icon"] = ""
+with open(sys.argv[1], "wb") as f:
+    vdf.binary_dump(data, f)
+EOF
+  gotg steam art usa.super_mario_sunshine
+  [ "$status" -eq 0 ]
+
+  local listing
+  listing="$(python3 "$(dirname "$GOTG_BIN")/../share/gotg/steam/shortcuts.py" \
+    --file "$SHORTCUTS" list)"
+  [ "$(jq -r '.[0].tags | join(",")' <<<"$listing")" = "gamecube" ]
+  [[ "$(jq -r '.[0].icon' <<<"$listing")" == *"_icon.ico" ]]
+}
+
+@test "with no icon fetched, nothing is attached and the vdf is not rewritten" {
+  restart_sgdb --no-assets
+  setup_steam
+  jq -n '{api_key: "testkey"}' >"$GOTG_STEAMGRIDDB_KEY_FILE"
+  export GOTG_STEAMGRIDDB_URL="$SGDB_URL"
+  gotg steam add usa.super_mario_sunshine
+  [ "$status" -eq 0 ]
+
+  local listing
+  listing="$(python3 "$(dirname "$GOTG_BIN")/../share/gotg/steam/shortcuts.py" \
+    --file "$SHORTCUTS" list)"
+  [ "$(jq -r '.[0].icon' <<<"$listing")" = "" ]
+  # The add of a fresh file makes no backup; only a second write would. Its
+  # absence is the proof that attach never touched the file.
+  [ ! -e "$(dirname "$SHORTCUTS")/shortcuts.vdf.gotg-bak" ]
+}
+
+@test "a failed icon attach is a warning, not a failed fetch" {
+  setup_steam
+  jq -n '{api_key: "testkey"}' >"$GOTG_STEAMGRIDDB_KEY_FILE"
+  export GOTG_STEAMGRIDDB_URL="$SGDB_URL"
+  gotg steam add usa.super_mario_sunshine
+  [ "$status" -eq 0 ]
+
+  python3 - "$SHORTCUTS" <<'EOF'
+import sys, vdf
+with open(sys.argv[1], "rb") as f:
+    data = vdf.binary_load(f)
+for e in data["shortcuts"].values():
+    e["icon"] = ""
+with open(sys.argv[1], "wb") as f:
+    vdf.binary_dump(data, f)
+EOF
+  chmod 555 "$(dirname "$SHORTCUTS")"
+  gotg steam art usa.super_mario_sunshine
+  chmod 755 "$(dirname "$SHORTCUTS")"
+
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"could not attach the icon"* ]]
+  local listing
+  listing="$(python3 "$(dirname "$GOTG_BIN")/../share/gotg/steam/shortcuts.py" \
+    --file "$SHORTCUTS" list)"
+  [ "$(jq 'length' <<<"$listing")" -eq 1 ]
+  [ "$(jq -r '.[0].icon' <<<"$listing")" = "" ]
+}
+
+@test "a second art run leaves the shortcuts file byte-identical" {
+  setup_steam
+  jq -n '{api_key: "testkey"}' >"$GOTG_STEAMGRIDDB_KEY_FILE"
+  export GOTG_STEAMGRIDDB_URL="$SGDB_URL"
+  gotg steam add usa.super_mario_sunshine
+  [ "$status" -eq 0 ]
+
+  local before after
+  before="$(sha256sum "$SHORTCUTS")"
+  gotg steam art usa.super_mario_sunshine
+  [ "$status" -eq 0 ]
+  after="$(sha256sum "$SHORTCUTS")"
+  [ "$before" = "$after" ]
+}
+
+@test "a variant's icon is attached under the variant's own appid" {
+  setup_steam
+  jq -n '{api_key: "testkey"}' >"$GOTG_STEAMGRIDDB_KEY_FILE"
+  export GOTG_STEAMGRIDDB_URL="$SGDB_URL"
+  gotg steam add usa.super_mario_sunshine bse
+  [ "$status" -eq 0 ]
+
+  local listing appid unsigned
+  listing="$(python3 "$(dirname "$GOTG_BIN")/../share/gotg/steam/shortcuts.py" \
+    --file "$SHORTCUTS" list)"
+  appid="$(jq -r '.[0].appid' <<<"$listing")"
+  unsigned=$((appid < 0 ? appid + 4294967296 : appid))
+  # Exact path, not a suffix: the variant's name feeds the appid, so a mixup
+  # would attach the base game's icon file.
+  [ "$(jq -r '.[0].icon' <<<"$listing")" = "$(dirname "$SHORTCUTS")/grid/${unsigned}_icon.ico" ]
+  [ -f "$(dirname "$SHORTCUTS")/grid/${unsigned}_icon.ico" ]
+}
+
 @test "art refetches for a game already in Steam" {
   setup_steam
   jq -n '{api_key: "testkey"}' >"$GOTG_STEAMGRIDDB_KEY_FILE"

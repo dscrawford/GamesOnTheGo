@@ -153,6 +153,22 @@ def cmd_add(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_set_icon(args: argparse.Namespace) -> int:
+    """Only the icon. `add` recomputes appid and AppName, which must not
+    happen as a side effect of attaching a picture — a shortcut Steam made
+    carries a random appid whose grid art that rewrite would orphan."""
+    path = Path(args.file)
+    shortcuts = load(path)
+    index = find_entry(shortcuts, args.exe)
+    if index is None:
+        print(json.dumps({"action": "absent"}))
+        return 0
+    entry = {**shortcuts[index], "icon": args.icon}
+    save(path, {**shortcuts, index: entry})
+    print(json.dumps({"action": "updated", "name": entry.get("AppName", "")}))
+    return 0
+
+
 def cmd_remove(args: argparse.Namespace) -> int:
     path = Path(args.file)
     shortcuts = load(path)
@@ -206,6 +222,11 @@ def main(argv: list[str] | None = None) -> int:
     remove = sub.add_parser("remove")
     remove.add_argument("--exe", required=True)
     remove.set_defaults(func=cmd_remove)
+
+    set_icon = sub.add_parser("set-icon")
+    set_icon.add_argument("--exe", required=True)
+    set_icon.add_argument("--icon", required=True)
+    set_icon.set_defaults(func=cmd_set_icon)
 
     sub.add_parser("list").set_defaults(func=cmd_list)
 

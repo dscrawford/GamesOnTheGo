@@ -59,6 +59,75 @@ seed_existing() {
   [ "$(jq -r '.[0].icon' <<<"$output")" = "/grid/123_icon.ico" ]
 }
 
+@test "set-icon touches only the icon — name and appid survive" {
+  helper add --name "Steam's Own Name" --exe "/games/play.sh" --start-dir "/games" >/dev/null
+  local before
+  before="$(helper list | jq -r '.[0].appid')"
+
+  helper set-icon --exe "/games/play.sh" --icon "/grid/9_icon.ico" >/dev/null
+  run helper list
+  [ "$(jq -r '.[0].icon' <<<"$output")" = "/grid/9_icon.ico" ]
+  [ "$(jq -r '.[0].name' <<<"$output")" = "Steam's Own Name" ]
+  [ "$(jq -r '.[0].appid' <<<"$output")" = "$before" ]
+}
+
+@test "set-icon on a shortcut that is not there is a no-op" {
+  run helper set-icon --exe "/nope.sh" --icon "/grid/9_icon.ico"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"absent"'* ]]
+}
+
+@test "set-icon rides Steam's own fields through untouched" {
+  helper add --name "Zelda" --exe "/games/play.sh" --start-dir "/games" \
+    --tag n64 >/dev/null
+  python3 - "$SHORTCUTS" <<'EOF'
+import sys, vdf
+with open(sys.argv[1], "rb") as f:
+    data = vdf.binary_load(f)
+for e in data["shortcuts"].values():
+    e["IsHidden"] = 1
+    e["LastPlayTime"] = 1700000000
+with open(sys.argv[1], "wb") as f:
+    vdf.binary_dump(data, f)
+EOF
+
+  helper set-icon --exe "/games/play.sh" --icon "/grid/123_icon.ico" >/dev/null
+  run helper list
+  [ "$(jq -r '.[0].icon' <<<"$output")" = "/grid/123_icon.ico" ]
+  [ "$(jq -r '.[0].tags | join(",")' <<<"$output")" = "n64" ]
+  python3 - "$SHORTCUTS" <<'EOF'
+import sys, vdf
+with open(sys.argv[1], "rb") as f:
+    e = list(vdf.binary_load(f)["shortcuts"].values())[0]
+assert e["IsHidden"] == 1, e
+assert e["LastPlayTime"] == 1700000000, e
+EOF
+}
+
+@test "steam_icon_path files under the unsigned 32-bit appid, whichever spelling" {
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  load_client_libs
+  source "$GOTG_LIB/cmd-steam.sh"
+
+  local pair got want
+  for pair in \
+    "0:0" \
+    "2147483647:2147483647" \
+    "4294967295:4294967295" \
+    "-1:4294967295" \
+    "-1874645127:2420322169"; do
+    got="$(steam_icon_path "${pair%%:*}")"
+    want="$(dirname "$SHORTCUTS")/grid/${pair##*:}_icon.ico"
+    [ "$got" = "$want" ] || {
+      echo "appid ${pair%%:*}: got $got, want $want" >&2
+      false
+    }
+  done
+  # A vdf is another tool's to write too: a non-numeric appid must come back
+  # empty, never reach arithmetic.
+  [ -z "$(steam_icon_path 'x[$(true)]')" ]
+}
+
 @test "adding the same game twice updates rather than duplicating" {
   helper add --name "Old Name" --exe "/games/play.sh" --start-dir "/games" >/dev/null
   helper add --name "New Name" --exe "/games/play.sh" --start-dir "/games" >/dev/null
