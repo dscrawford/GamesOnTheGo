@@ -29,22 +29,12 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-PLATFORM_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,15}$")
-ID_RE = re.compile(r"^[a-z]{3,5}\.[a-z0-9][a-z0-9_]*$")
-SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-
-# The classifier's vocabulary, mirrored from the importer. A handler the
-# client has no recipe for downloads and then stops with a clear message, so
-# an unknown one is refused here where the indexer can see it.
-HANDLERS = frozenset(
-    {
-        "single_file",
-        "no_intro_set",
-        "scene_archive",
-        "single_archive",
-        "wiiu_decrypted",
-        "wiiu_nus",
-    }
+from .contract import ENTRY_ID_RE as ID_RE
+from .contract import (
+    HANDLERS,
+    PLATFORM_RE,
+    SHA256_RE,
+    valid_filename,
 )
 
 # How much of the catalog a sweep may report vanished without an explicit
@@ -95,21 +85,6 @@ class SweepRefused(Exception):
 
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-
-def _valid_segment(segment: str) -> bool:
-    return 0 < len(segment) <= 255 and segment.isprintable() and not segment.startswith(".")
-
-
-# A member name is a relative path: one segment for almost everything, nested
-# for the trees an emulator reads in place (a WiiU dump's code/content/meta).
-# No segment may start with a dot, which also rules out "..", and the depth
-# cap means a hostile name cannot be a filesystem stress test.
-def valid_filename(name: str) -> bool:
-    if not 0 < len(name) <= 1024:
-        return False
-    segments = name.split("/")
-    return len(segments) <= 8 and all(_valid_segment(s) for s in segments)
 
 
 class CatalogStore:

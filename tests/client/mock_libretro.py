@@ -53,21 +53,11 @@ def png(width: int, height: int) -> bytes:
     """A real, valid PNG of the given size — one grey rectangle."""
 
     def chunk(tag: bytes, data: bytes) -> bytes:
-        return (
-            struct.pack(">I", len(data))
-            + tag
-            + data
-            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
-        )
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
 
     ihdr = struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0)
     raw = b"".join(b"\x00" + b"\x80" * width for _ in range(height))
-    return (
-        b"\x89PNG\r\n\x1a\n"
-        + chunk(b"IHDR", ihdr)
-        + chunk(b"IDAT", zlib.compress(raw))
-        + chunk(b"IEND", b"")
-    )
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -104,9 +94,7 @@ class Handler(BaseHTTPRequestHandler):
         if not name:  # the directory index, which is the whole search
             names = [] if self.empty else NAMES
             rows = "".join(
-                '<tr><td><a href="{}.png">{}.png</a></td></tr>'.format(
-                    urllib.parse.quote(n), html.escape(n)
-                )
+                '<tr><td><a href="{}.png">{}.png</a></td></tr>'.format(urllib.parse.quote(n), html.escape(n))
                 for n in names
             )
             body = f"<html><body><table>{rows}</table></body></html>".encode()

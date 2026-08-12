@@ -22,7 +22,7 @@ GOTG_PARTIAL_DIR="$GOTG_GAMES_DIR/.gotg-partial"
 # The entry-id contract, shared with the importer.
 GOTG_ID_RE='^[a-z]{3,5}\.[a-z0-9][a-z0-9_]*$'
 # Platform slugs name a directory under ~/Games, so they are checked too.
-GOTG_PLATFORM_RE='^[a-z0-9][a-z0-9_-]*$'
+GOTG_PLATFORM_RE='^[a-z0-9][a-z0-9_-]{0,15}$'
 # Environment attributes are flake attributes, GC root names, local state
 # directories and remote directories all at once, so they are checked wherever
 # one arrives from somewhere other than env_attr.

@@ -243,7 +243,10 @@
           pkgs.runCommand "check-python-tests" { nativeBuildInputs = [ venv ]; } ''
             mkdir repo && cd repo
             cp -r ${./tests} tests
-            chmod -R u+w tests
+            # The contract drift-guard reads the shell client's source, so the
+            # tree it greps has to exist beside the tests.
+            cp -r ${./src} src
+            chmod -R u+w tests src
             python -m pytest tests/service tests/indexer -q
             touch $out
           '';

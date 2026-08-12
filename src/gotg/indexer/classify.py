@@ -12,15 +12,18 @@ import collections
 import re
 from dataclasses import dataclass
 
+from ..contract import (  # noqa: F401 — re-exported; the wire-legal six live in the contract
+    HANDLER_NO_INTRO_SET,
+    HANDLER_SCENE_ARCHIVE,
+    HANDLER_SINGLE_ARCHIVE,
+    HANDLER_SINGLE_FILE,
+    HANDLER_WIIU_DECRYPTED,
+    HANDLER_WIIU_NUS,
+)
 from .rules import Rules
 from .scan import VOLUME_RE, WIIU_DECRYPTED_DIRS, Source
 
-HANDLER_WIIU_DECRYPTED = "wiiu_decrypted"
-HANDLER_WIIU_NUS = "wiiu_nus"
-HANDLER_SCENE_ARCHIVE = "scene_archive"
-HANDLER_NO_INTRO_SET = "no_intro_set"
-HANDLER_SINGLE_FILE = "single_file"
-HANDLER_SINGLE_ARCHIVE = "single_archive"
+# Internal verdicts only — these never become catalog rows.
 HANDLER_EXCLUDED = "excluded"
 HANDLER_MANUAL = "manual"
 

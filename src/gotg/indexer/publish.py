@@ -16,21 +16,19 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..contract import LINK_HANDLERS, SHA256_RE, valid_filename
 from . import execute as ex
 from . import plan as pl
 
 log = logging.getLogger("gotg.publish")
 
 TIMEOUT = 30
-
-_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -174,7 +172,7 @@ class Publisher:
             try:
                 if sidecar.is_file():
                     text = sidecar.read_text().strip()
-                    if _SHA256_RE.fullmatch(text) and Path(op.dst).stat().st_ino == stat.st_ino:
+                    if SHA256_RE.fullmatch(text) and Path(op.dst).stat().st_ino == stat.st_ino:
                         return text
             except OSError:
                 pass
@@ -195,6 +193,8 @@ class Publisher:
 
         files = []
         for member in members:
+            if not valid_filename(member.name):
+                raise PublishError(f"member name violates the contract: {member.name!r}")
             try:
                 stat = member.path.stat()
             except OSError as error:
@@ -233,9 +233,6 @@ class Publisher:
                 row.get("id"),
                 row.get("seen_at"),
             )
-
-
-LINK_HANDLERS = frozenset({"single_file", "no_intro_set"})
 
 
 def diff_catalog(manifest_entries: dict, api: CatalogAPI) -> list[str]:
