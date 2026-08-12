@@ -6,9 +6,13 @@
 # "system" directory inside that. Confirmed by running it against an empty
 # config home and reading back the tree it created — Logs, sdcard, system, bis,
 # profiles, games.
-{ pkgs, ... }:
+{ pkgs, helpers, ... }:
 {
   emulator = pkgs.ryubing;
+
+  # Switch releases arrive as scene rar sets; the recipe unpacks one into the
+  # XCI/NSP the emulator loads, once, on first install.
+  recipe = helpers.sceneArchiveRecipe;
   bin = "Ryujinx";
   isolate = true;
   args = [ "{target}" ];

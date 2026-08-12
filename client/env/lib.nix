@@ -79,6 +79,19 @@
   #
   #   { into = "config/Ryujinx/bis/system/Contents/registered"; file = "firmware.zip"; }
   firmware ? null,
+  # How this platform turns a raw catalog source into a runnable game — the
+  # client side of the pipeline inversion. The catalog says what a source *is*
+  # (its handler); this says what to do about it, so the tool closures stay
+  # with the platform that needs them. Shape:
+  #
+  #   { handlers = [ "scene_archive" ];
+  #     tools = { UNRAR = "${pkgs.unrar}/bin/unrar"; };
+  #     script = ''case "$1" in ...''; }
+  #
+  # The script runs as `gotg-recipe <handler> <raw-dir> <dest>` with each tool
+  # exported under its name — overridable from the environment, which is what
+  # lets tests stub a multi-gigabyte conversion into an echo.
+  recipe ? null,
 }:
 
 let
@@ -176,6 +189,24 @@ let
     exec ${exe} ${lib.concatMapStringsSep " " render args} "$@"
   '';
   };
+  recipeApp = lib.optionalAttrs (recipe != null) {
+    drv = pkgs.writeShellApplication {
+      name = "gotg-recipe";
+      text = ''
+        # usage: gotg-recipe <handler> <raw-dir> <dest>
+        handler="''${1:?usage: gotg-recipe <handler> <raw-dir> <dest>}"
+        raw="''${2:?raw member directory required}"
+        dest="''${3:?destination required}"
+        ${lib.concatLines (
+          lib.mapAttrsToList (var: default: ''
+            ${var}="''${GOTG_${var}:-${default}}"
+            export ${var}
+          '') (recipe.tools or { })
+        )}
+        ${recipe.script}
+      '';
+    };
+  };
 in
 # writeShellApplication has no postInstall to hang the manifest off, and
 # overrideAttrs cannot reach inside it, so the runnable is wrapped rather than
@@ -198,6 +229,12 @@ pkgs.runCommand "gotg-env-${name}"
       cp ${
         pkgs.writeText "firmware.json" (builtins.toJSON firmware)
       } $out/share/gotg/firmware.json
+    ''}
+    ${lib.optionalString (recipe != null) ''
+      ln -s ${recipeApp.drv}/bin/gotg-recipe $out/bin/gotg-recipe
+      cp ${
+        pkgs.writeText "recipe.json" (builtins.toJSON { handlers = recipe.handlers; })
+      } $out/share/gotg/recipe.json
     ''}
     ${lib.optionalString configurable ''
       cp ${

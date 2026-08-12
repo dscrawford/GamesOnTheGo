@@ -3,7 +3,78 @@
 # one game wants belongs in that game's file.
 { pkgs, lib }:
 
+let
+  # A scene release, client-side: verify the sfv when rhash and one exist,
+  # unrar the volume set, keep the largest extracted file as the game. What
+  # execute.py used to do on the server, now once per machine on first
+  # install. unrar is unfree-redistributable; the flake already allows unfree
+  # for the emulators themselves.
+  sceneArchiveRecipe = {
+    handlers = [ "scene_archive" ];
+    tools = {
+      UNRAR = "${pkgs.unrar}/bin/unrar";
+      RHASH = "${pkgs.rhash}/bin/rhash";
+    };
+    script = ''
+      case "$handler" in
+        scene_archive)
+          sfv="$(find "$raw" -maxdepth 1 -name '*.sfv' | head -1)"
+          if [ -n "$sfv" ]; then
+            (cd "$raw" && "$RHASH" -c "$sfv") ||
+              { echo "gotg-recipe: sfv verification failed" >&2; exit 1; }
+          fi
+          rar="$(find "$raw" -maxdepth 1 -name '*.rar' | head -1)"
+          [ -n "$rar" ] || { echo "gotg-recipe: no .rar in $raw" >&2; exit 1; }
+          stage="$(dirname "$dest")/.gotg-recipe-$$"
+          rm -rf "$stage" && mkdir -p "$stage"
+          "$UNRAR" x -idq "$rar" "$stage/" ||
+            { rm -rf "$stage"; echo "gotg-recipe: unrar failed" >&2; exit 1; }
+          largest="$(find "$stage" -type f -printf '%s %p\n' | sort -rn | head -1 | cut -d' ' -f2-)"
+          [ -n "$largest" ] || { rm -rf "$stage"; echo "gotg-recipe: nothing extracted" >&2; exit 1; }
+          mkdir -p "$(dirname "$dest")"
+          mv "$largest" "$dest"
+          rm -rf "$stage"
+          ;;
+        *) echo "gotg-recipe: no recipe for $handler" >&2; exit 1 ;;
+      esac
+    '';
+  };
+
+  # A disc image that travelled as a 7z: extract, convert to the RVZ the
+  # emulator wants, keep nothing else. Space cost is transient (staging holds
+  # the raw image); the refined artifact is deterministic, so the raw members
+  # are the client's to delete afterwards.
+  discArchiveRecipe = {
+    handlers = [ "single_archive" ];
+    tools = {
+      P7Z = "${pkgs.p7zip}/bin/7z";
+      DOLPHIN_TOOL = "${pkgs.dolphin-emu}/bin/dolphin-tool";
+    };
+    script = ''
+      case "$handler" in
+        single_archive)
+          archive="$(find "$raw" -maxdepth 1 \( -name '*.7z' -o -name '*.rar' \) | head -1)"
+          [ -n "$archive" ] || { echo "gotg-recipe: no archive in $raw" >&2; exit 1; }
+          stage="$(dirname "$dest")/.gotg-recipe-$$"
+          rm -rf "$stage" && mkdir -p "$stage"
+          "$P7Z" x -bd -y -o"$stage" "$archive" >/dev/null ||
+            { rm -rf "$stage"; echo "gotg-recipe: extract failed" >&2; exit 1; }
+          image="$(find "$stage" -type f -printf '%s %p\n' | sort -rn | head -1 | cut -d' ' -f2-)"
+          [ -n "$image" ] || { rm -rf "$stage"; echo "gotg-recipe: nothing extracted" >&2; exit 1; }
+          mkdir -p "$(dirname "$dest")"
+          "$DOLPHIN_TOOL" convert -f rvz -b 131072 -c zstd -l 5 -i "$image" -o "$dest" ||
+            { rm -rf "$stage"; echo "gotg-recipe: conversion failed" >&2; exit 1; }
+          rm -rf "$stage"
+          ;;
+        *) echo "gotg-recipe: no recipe for $handler" >&2; exit 1 ;;
+      esac
+    '';
+  };
+
+in
 {
+  inherit sceneArchiveRecipe discArchiveRecipe;
+
   # ares, for the cartridge platforms that share it.
   #
   # It does not consult XDG for saves. Emulator::locate reads settings.paths.saves,
@@ -124,6 +195,10 @@
       # covered; Wii remotes live in a different file with a different shape,
       # and nothing here pretends to write them.
       padEmulator = "dolphin";
+
+      # Disc images that travelled as archives are extracted and converted to
+      # RVZ here, on first install — the pipeline inversion's client half.
+      recipe = discArchiveRecipe;
 
       args = [
         "-b"

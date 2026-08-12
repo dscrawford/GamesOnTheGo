@@ -288,6 +288,77 @@
               touch $out
             '';
 
+        # The recipe chains, with the heavy tools stubbed: what is asserted is
+        # the plumbing — sfv gate, staging, largest-file selection, conversion
+        # arguments, cleanup — not a real unrar or a real disc conversion.
+        recipes =
+          let
+            switch = self.packages.${pkgs.stdenv.hostPlatform.system}.env-switch;
+            gamecube = self.packages.${pkgs.stdenv.hostPlatform.system}.env-gamecube;
+          in
+          pkgs.runCommand "check-recipes" { } ''
+            export HOME=$TMPDIR
+            mkdir -p $TMPDIR/bin
+
+            cat > $TMPDIR/bin/unrar <<'EOF'
+            #!${pkgs.runtimeShell}
+            # unrar x -idq <rar> <stage/>: drop two "extracted" files, sizes apart.
+            eval "stage=\''${$#}"
+            printf 'big' > "$stage/game.xci"
+            printf 'x' > "$stage/readme.txt"
+            EOF
+            cat > $TMPDIR/bin/rhash <<'EOF'
+            #!${pkgs.runtimeShell}
+            [ "''${GOTG_TEST_SFV_FAILS:-0}" = 1 ] && exit 1
+            exit 0
+            EOF
+            cat > $TMPDIR/bin/7z <<'EOF'
+            #!${pkgs.runtimeShell}
+            for arg in "$@"; do case "$arg" in -o*) stage="''${arg#-o}";; esac; done
+            printf 'iso-bytes' > "$stage/game.iso"
+            EOF
+            cat > $TMPDIR/bin/dolphin-tool <<'EOF'
+            #!${pkgs.runtimeShell}
+            prev=""; in=""; out=""
+            for arg in "$@"; do
+              case "$prev" in -i) in="$arg";; -o) out="$arg";; esac
+              prev="$arg"
+            done
+            [ -f "$in" ] || exit 1
+            printf 'rvz-of:%s' "$(cat "$in")" > "$out"
+            EOF
+            chmod +x $TMPDIR/bin/*
+
+            export GOTG_UNRAR=$TMPDIR/bin/unrar GOTG_RHASH=$TMPDIR/bin/rhash
+            export GOTG_P7Z=$TMPDIR/bin/7z GOTG_DOLPHIN_TOOL=$TMPDIR/bin/dolphin-tool
+
+            # Scene: sfv verified, largest file wins, staging swept.
+            raw=$TMPDIR/raw-scene && mkdir -p $raw
+            touch $raw/group.rar $raw/group.r00 $raw/group.sfv
+            ${switch}/bin/gotg-recipe scene_archive $raw $TMPDIR/out/world.game.xci
+            [ "$(cat $TMPDIR/out/world.game.xci)" = big ]
+            [ -z "$(ls -A $TMPDIR/out | grep gotg-recipe || true)" ]
+
+            # Scene with a failing sfv: refused, nothing installed.
+            if GOTG_TEST_SFV_FAILS=1 ${switch}/bin/gotg-recipe scene_archive $raw $TMPDIR/out2/x.xci; then
+              echo "a failing sfv must fail the recipe" >&2; exit 1
+            fi
+            [ ! -e $TMPDIR/out2/x.xci ]
+
+            # Disc: extract then convert, chained through the stubs.
+            raw=$TMPDIR/raw-disc && mkdir -p $raw
+            touch "$raw/Game (USA).7z"
+            ${gamecube}/bin/gotg-recipe single_archive $raw $TMPDIR/out/usa.game.rvz
+            [ "$(cat $TMPDIR/out/usa.game.rvz)" = "rvz-of:iso-bytes" ]
+
+            # An unknown handler is a refusal, not a guess.
+            if ${switch}/bin/gotg-recipe mystery $raw $TMPDIR/out/y; then
+              echo "an unknown handler must fail" >&2; exit 1
+            fi
+
+            touch $out
+          '';
+
         ruff =
           pkgs.runCommand "check-ruff"
             {
