@@ -3,11 +3,12 @@
 Keep the game library on the server. Download a game to the laptop or the Steam
 Deck the first time you launch it, and play it from Steam like anything else.
 
-Two components share one contract:
+Three components share one contract:
 
 | Component | What it does | Where it runs |
 |---|---|---|
 | **[indexer](src/gotg/indexer/)** | Indexes completed game torrents into the service catalog, and hardlinks them into `/Games` — the archive that outlives pruned torrents | In-cluster CronJob |
+| **[service](src/gotg/service/)** | One endpoint holding the credentials and the saves — fronts the artwork APIs, serves the catalog, and decides save conflicts | In-cluster Deployment |
 | **[client](src/client/)** | `gotg` — fetches a game on demand, builds the environment it runs in, generates a Steam launcher | Desktop, Steam Deck |
 
 ## The entry-id contract
@@ -279,7 +280,7 @@ price of that.
 | Dolphin | GameCube, and a Wii game played with a GameCube controller | `GCPadNew.ini` |
 
 The two halves work differently, because the emulators do. ares binds a raw
-input index, so `client/data/ares-pads.json` maps each console input to a
+input index, so `src/client/data/ares-pads.json` maps each console input to a
 standard gamepad element and SDL is asked what that element is on *this* pad.
 Dolphin names standard elements itself, so there is no table — only the device
 line, which is inert if it names a device Dolphin cannot see.
@@ -336,7 +337,7 @@ firmware through the emulator's dialog seeds the cache without the server
 being asked at all. Missing everywhere is still only a warning: the dialog can
 install from an XCI's own update partition, which the server may not have.
 
-`IMPORTER_SPEC.md` §7a is the contract.
+`Kubernetes/GOTG/IMPORTER_SPEC.md` §7a is the contract.
 
 ### Video
 
@@ -403,7 +404,7 @@ src/client/env/games/snes/world.super_metroid.nix  what Super Metroid changes ab
 ```
 
 Where several platforms share an emulator and the awkward parts of driving it,
-that shape moves into `client/env/helpers.nix` and the platform file names
+that shape moves into `src/client/env/helpers.nix` and the platform file names
 itself and whatever differs:
 
 ```nix
@@ -495,7 +496,7 @@ different package:
 
 These take the ROM once rather than on every launch: the first run extracts it
 into an `.o2r` archive kept with the game's saves, and afterwards the port
-starts with no ROM at all. `client/env/helpers.nix` holds that handshake, since
+starts with no ROM at all. `src/client/env/helpers.nix` holds that handshake, since
 all three share it — the guard matters, because handing these ports a ROM they
 have already extracted stops the launch on a confirmation dialog.
 
@@ -586,8 +587,8 @@ those installed by hand.
 
 ### Per-game tweaks
 
-*How* a game runs lives in `client/env` above. What is left in
-`client/data/overrides.json` is what the CLI has to know before anything is
+*How* a game runs lives in `src/client/env` above. What is left in
+`src/client/data/overrides.json` is what the CLI has to know before anything is
 built, so that `gotg list` still works offline. Copy it to
 `~/.config/gotg/overrides.json` to change it per machine; the local copy wins.
 Keys are `id` or `platform/id`:
@@ -600,7 +601,7 @@ Keys are `id` or `platform/id`:
 ## Why launching is the way it is
 
 Steam is a hostile launch environment, and each of these was learned the hard way
-(see `client/templates/launcher.sh.tpl`):
+(see `src/client/templates/launcher.sh.tpl`):
 
 - It provides a minimal `PATH`, so nix has to be put back on it.
 - It sets SDL variables that suppress controller detection for non-Steam apps,
@@ -619,15 +620,16 @@ nix develop        # gotg on PATH, plus uv, the locked python env, ruff, shellch
 nix flake check    # every test suite and linter
 ```
 
-The `gotg` on PATH in the dev shell runs `client/bin/gotg` from the working
+The `gotg` on PATH in the dev shell runs `src/client/bin/gotg` from the working
 tree, with the packaged wrapper's own dependency list on PATH. Edits apply on
 save — there is nothing to rebuild and no shell to re-enter. `nix run .#gotg`
 gives you the packaged article when that is what you want to test.
 
-`nix flake check` runs 130 importer tests (pytest), 167 client tests (bats,
-against the real GOTG service over real HTTP), ruff and shellcheck.
+`nix flake check` runs 413 python tests (pytest, service and indexer together),
+280 client tests (bats, against the real GOTG service over real HTTP), ruff,
+shellcheck, and the recipe and platform drift checks.
 
-**The importer is a uv project.** Its dependencies are resolved and hashed in
+**The Python side is one uv project.** Its dependencies are resolved and hashed in
 `uv.lock`, and [uv2nix](https://github.com/pyproject-nix/uv2nix) builds
 them straight from it — so `uv lock` and `nix build` agree by construction
 rather than by someone remembering to keep a list of nixpkgs attributes in step
@@ -636,6 +638,6 @@ changes.
 
 The dev shell hands you the same environment the package is built from, so
 `pytest` runs there without a `uv sync` first. The client is not a Python
-project — it is bash with one helper for Steam's binary shortcut file, whose
-single dependency comes from nixpkgs; a second lockfile for one library would
-cost more than it saves.
+project — it is bash with a few small python helpers for Steam's binary
+shortcut file and its artwork, whose single dependency comes from nixpkgs; a
+second lockfile for one library would cost more than it saves.
