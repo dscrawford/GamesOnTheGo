@@ -85,11 +85,15 @@ env_attr() {
 # from the sentence below it because completion wants the names and a person
 # wants the sentence.
 env_variant_names() {
-  local platform="$1" id="$2" file
+  local platform="$1" id="$2" file name
   for file in "$GOTG_ENV_DIR/games/$platform/$id".*.nix; do
     [[ -e "$file" ]] || continue
-    file="$(basename "$file" .nix)"
-    printf '%s\n' "${file#"$id".}"
+    name="$(basename "$file" .nix)"
+    name="${name#"$id".}"
+    # Only what env_attr accepts: a stray second dot in a filename makes a
+    # name play rejects, and advertising it in info or completion is a lie.
+    [[ "$name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || continue
+    printf '%s\n' "$name"
   done
 }
 

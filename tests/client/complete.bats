@@ -29,6 +29,34 @@ teardown() { stop_saves_service; }
   [[ "$output" != *".sfc"* ]]
 }
 
+@test "a poisoned catalog cannot reach the shell through completion" {
+  # The platform list lands in compgen -W, which word-expands: an entry like
+  # x$(cmd) would run cmd in the user's shell on TAB. Only contract-shaped
+  # values may leave the completer.
+  mkdir -p "$GOTG_STATE_DIR" "$TEST_TMP/proof"
+  jq -n '{version: 2, games: [
+    {id: "usa.zelda", platform: "n64", handler: "single_file", title: "Zelda",
+     files: [{name: "usa.zelda.z64", size_bytes: 1, sha256: null}]},
+    {id: "usa.evil", platform: "x$(touch /tmp/completion-pwned)",
+     handler: "single_file", title: "Evil",
+     files: [{name: "usa.evil.z64", size_bytes: 1, sha256: null}]},
+    {id: "usa.evil2$(touch /tmp/completion-pwned)", platform: "n64",
+     handler: "single_file", title: "Evil2",
+     files: [{name: "usa.evil2.z64", size_bytes: 1, sha256: null}]}
+  ]}' >"$GOTG_CACHE_FILE"
+
+  gotg complete platforms
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"n64"* ]]
+  [[ "$output" != *'$(touch'* ]]
+
+  gotg complete ids
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"usa.zelda"* ]]
+  [[ "$output" != *'$(touch'* ]]
+  [ ! -e /tmp/completion-pwned ]
+}
+
 @test "with no catalog it completes nothing, quietly" {
   # The first tab on a fresh machine must not look like a broken install.
   gotg complete ids

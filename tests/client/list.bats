@@ -102,6 +102,117 @@ big_catalog() {
   [[ "$stderr" == *"--all"* ]]
 }
 
+@test "bad list arguments are each rejected with a clear message" {
+  big_catalog
+  local case args msg
+  local -a cases=(
+    "0|a page starts at 1"
+    "007|a page starts at 1"
+    "1 2|usage: gotg list"
+    "--limit x|--limit takes a number"
+    "--limit=|--limit takes a number"
+    "--platform=|--platform needs a name"
+  )
+  for case in "${cases[@]}"; do
+    args="${case%%|*}"
+    msg="${case##*|}"
+    # shellcheck disable=SC2086
+    gotg list $args
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"$msg"* ]] || {
+      echo "gotg list $args: expected *${msg}* in: $stderr" >&2
+      false
+    }
+  done
+}
+
+@test "--platform matches without case, in either spelling" {
+  big_catalog
+  local spelling
+  for spelling in "--platform snes" "--platform SNES" "--platform=snes" "--platform=SNES"; do
+    # shellcheck disable=SC2086
+    gotg list $spelling
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"world.super_metroid"* ]]
+    [ "$(grep -c "usa\." <<<"$output")" -eq 0 ]
+  done
+}
+
+@test "a total exactly divisible by the limit ends cleanly on its last page" {
+  big_catalog
+  gotg list --limit 31 2
+  [ "$status" -eq 0 ]
+  [ "$(grep -c "usa\.\|world\." <<<"$output")" -eq 31 ]
+  [[ "$stderr" == *"showing 32-62 of 62 (page 2 of 2)"* ]]
+  [[ "$stderr" != *"the next page"* ]]
+}
+
+@test "a limit of one pages a row at a time to the exact end" {
+  big_catalog
+  gotg list --limit 1 62
+  [ "$status" -eq 0 ]
+  [ "$(grep -c "usa\.\|world\." <<<"$output")" -eq 1 ]
+  [[ "$stderr" == *"showing 62-62 of 62 (page 62 of 62)"* ]]
+  gotg list --limit 1 63
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"only 62 page"* ]]
+}
+
+@test "a filter that narrows below the requested page says past-the-end" {
+  big_catalog
+  gotg list --platform snes metroid 2
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"only 1 page"* ]]
+}
+
+@test "a pattern that misses on a real platform names both" {
+  big_catalog
+  gotg list --platform snes filler
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"nothing matches filler on snes"* ]]
+}
+
+@test "an unknown platform is unknown in any case" {
+  big_catalog
+  gotg list --platform VECTREX
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"no games on platform 'VECTREX'"* ]]
+  [[ "$stderr" == *"snes"* ]]
+}
+
+@test "a leading-zero limit is rejected, not read as octal" {
+  big_catalog
+  local bad
+  for bad in 08 010; do
+    gotg list --limit "$bad"
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"--limit takes a number"* ]]
+    [[ "$stderr" != *"value too great for base"* ]]
+  done
+}
+
+@test "an astronomically large page does not overflow into sed" {
+  big_catalog
+  gotg list 9223372036854775808
+  [[ "$stderr" != *"sed:"* ]]
+  [[ "$stderr" == *"page"* ]]
+  gotg list 18446744073709551618
+  [[ "$stderr" != *"showing 51-62"* ]]
+}
+
+@test "the next-page hint survives being pasted back" {
+  big_catalog
+  gotg list 'filler [0-9]' --limit 20
+  [ "$status" -eq 0 ]
+  local hint
+  hint="$(grep -F 'the next page' <<<"$stderr")"
+  hint="${hint%%#*}"
+  hint="${hint#*gotg }"
+  eval "gotg $hint"
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"page 2 of 3"* ]]
+}
+
 @test "--all prints every one" {
   big_catalog
   gotg list --all
@@ -181,4 +292,11 @@ big_catalog() {
   gotg list one two
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"usage: gotg list"* ]]
+}
+
+@test "the 007 refusal points at the regex spelling" {
+  big_catalog
+  gotg list 007
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"00[7]"* ]]
 }

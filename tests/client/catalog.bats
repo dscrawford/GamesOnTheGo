@@ -276,3 +276,42 @@ teardown() {
   run validate_filename "ゼルダの伝説.z64"
   [ "$status" -eq 0 ]
 }
+
+@test "a poisoned platform is rejected by info before the mods glob" {
+  mkdir -p "$GOTG_STATE_DIR"
+  jq -n '{version: 2, games: [{id: "usa.evil", platform: "../../VICTIM",
+          handler: "single_file", title: "Evil",
+          files: [{name: "usa.evil.z64", size_bytes: 1, sha256: null}]}]}' \
+    >"$GOTG_CACHE_FILE"
+  gotg info usa.evil
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"invalid platform"* ]]
+}
+
+@test "info's mods are its own — not the base env, not a sibling id's" {
+  add_game gamecube "usa.mario.rvz" "disc" "Mario"
+  add_game gamecube "usa.mario_kart.rvz" "disc" "Mario Kart"
+  export GOTG_ENV_DIR="$TEST_TMP/env"
+  mkdir -p "$GOTG_ENV_DIR/games/gamecube"
+  : >"$GOTG_ENV_DIR/games/gamecube/usa.mario.nix"
+  : >"$GOTG_ENV_DIR/games/gamecube/usa.mario.bse.nix"
+  : >"$GOTG_ENV_DIR/games/gamecube/usa.mario_kart.hd.nix"
+  gotg refresh
+  gotg info usa.mario
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"mods:"*"bse"* ]]
+  [[ "$output" != *"hd"* ]]
+}
+
+@test "info only advertises mods that play accepts" {
+  add_game n64 "usa.zelda.z64" "rom" "Zelda"
+  export GOTG_ENV_DIR="$TEST_TMP/env"
+  mkdir -p "$GOTG_ENV_DIR/games/n64"
+  : >"$GOTG_ENV_DIR/games/n64/usa.zelda.bse.nix"
+  : >"$GOTG_ENV_DIR/games/n64/usa.zelda.60.fps.nix"
+  gotg refresh
+  gotg info usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"mods:"*"bse"* ]]
+  [[ "$output" != *"60.fps"* ]]
+}

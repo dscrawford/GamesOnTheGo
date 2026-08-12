@@ -193,9 +193,11 @@ cmd_list() {
       --platform)
         platform="${2:-}"
         shift 2 || die "--platform needs a name"
+        [[ -n "$platform" ]] || die "--platform needs a name"
         ;;
       --platform=*)
         platform="${1#--platform=}"
+        [[ -n "$platform" ]] || die "--platform needs a name"
         shift
         ;;
       -*) die "unknown option for list: $1" ;;
@@ -213,8 +215,13 @@ cmd_list() {
         ;;
     esac
   done
-  [[ "$limit" =~ ^[0-9]+$ ]] || die "--limit takes a number, not: $limit"
-  [[ -z "$page" || "$page" =~ ^[1-9][0-9]*$ ]] || die "a page starts at 1, not: $page"
+  # No leading zeros: bash arithmetic reads 010 as octal 8, and 08 as an
+  # error every (( )) swallows into a false condition. The page cap keeps
+  # the later arithmetic far from 2^63, where it wraps into sed's lap.
+  [[ "$limit" =~ ^(0|[1-9][0-9]*)$ ]] || die "--limit takes a number, not: $limit"
+  [[ -z "$page" || "$page" =~ ^[1-9][0-9]{0,8}$ ]] ||
+    die "a page starts at 1, not: $page
+     To search for a number, spell it as a regex: gotg list '${page:0:-1}[${page: -1}]'"
   if ((limit == 0)) && [[ -n "$page" ]]; then
     die "--all and a page cannot combine — --all is every page at once"
   fi
@@ -286,9 +293,11 @@ cmd_list() {
 
   # Built before the render loop: its final read clears the loop variables at
   # EOF, and pattern/platform are about to become row fields.
+  # %q, because the hint is made to be pasted back: an unquoted regex like
+  # 'filler [0-9]' would come apart into a pattern and a mystery argument.
   local next_cmd="gotg list"
-  [[ -n "$pattern" ]] && next_cmd+=" $pattern"
-  [[ -n "$platform" ]] && next_cmd+=" --platform $platform"
+  [[ -n "$pattern" ]] && next_cmd+=" $(printf '%q' "$pattern")"
+  [[ -n "$platform" ]] && next_cmd+=" --platform $(printf '%q' "$platform")"
   ((limit > 0 && limit != GOTG_LIST_LIMIT)) && next_cmd+=" --limit $limit"
   next_cmd+=" $((page + 1))"
 

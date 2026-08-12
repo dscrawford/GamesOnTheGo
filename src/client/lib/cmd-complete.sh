@@ -22,14 +22,21 @@ cmd_complete() {
   esac
 }
 
+# Both filtered against the contract before anything leaves this process:
+# the platform list lands in `compgen -W`, which word-expands its list — a
+# poisoned catalog carrying `x$(cmd)` as a platform would otherwise run cmd
+# in the user's shell on TAB. Ids reach only mapfile today, but the same
+# fence keeps a completion refactor from ever reopening this.
 complete_ids() {
   manifest_cached || return 0
-  manifest_games 2>/dev/null | jq -r '.id // empty' 2>/dev/null || true
+  manifest_games 2>/dev/null | jq -r '.id // empty' 2>/dev/null |
+    grep -E "$GOTG_ID_RE" || true
 }
 
 complete_platforms() {
   manifest_cached || return 0
-  jq -r '[.games[].platform] | unique | .[]' "$GOTG_CACHE_FILE" 2>/dev/null || true
+  jq -r '[.games[].platform] | unique | .[]' "$GOTG_CACHE_FILE" 2>/dev/null |
+    grep -E "$GOTG_PLATFORM_RE" || true
 }
 
 # The variants of one game. The id is whatever is on the command line, which may
