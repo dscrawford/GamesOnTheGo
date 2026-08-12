@@ -140,14 +140,14 @@ makes lifecycle real: `seen_at` stamped by every confirming scan, vanished rows 
 rather than auto-deleted — a disappeared torrent is a person's decision, same spirit as the
 importer never guessing a platform.
 
-### 2.8 Keys and firmware need a new home. Verified.
+### 2.8 The hand-placed aux files need a new home. Verified.
 
-`prod.keys`, `title.keys`, `firmware.zip` are hand-placed in `/Games/<platform>/` and
-fetched by hardcoded path. Not catalog material (by construction — `prod.keys` parses as a
-valid entry id). New home: `GOTG_FILES_DIR/<platform>/<name>`, served by a shape-checked
-endpoint (§3.4). The hand-curated directory is the allowlist. These files also feed
-client-side recipes that need them (a Switch NSZ decompress wants `prod.keys`), which the
-client already stages into each environment — nothing new required beyond the endpoint.
+The per-platform aux files (firmware and the like) are hand-placed in
+`/Games/<platform>/` and fetched by hardcoded path. Not catalog material (by construction —
+their names parse as valid entry ids). New home: `GOTG_FILES_DIR/<platform>/<name>`, served
+by a shape-checked endpoint (§3.4). The hand-curated directory is the allowlist. These
+files also feed client-side recipes that need them, which the client already stages into
+each environment — nothing new required beyond the endpoint.
 
 ### 2.9 The deployment is half the refactor. Verified.
 
@@ -165,8 +165,8 @@ say.
 ### 2.10 The spec lives in another repo, with stale pointers. Verified.
 
 `IMPORTER_SPEC.md` is at `Kubernetes/GOTG/IMPORTER_SPEC.md`; the one pointer in this repo
-says `Kubernetes/games/`. `keys.sh:11` cites §11 where the keys contract is §7a. Fix while
-in there.
+says `Kubernetes/games/`. `keys.sh:11` cites §11 where the aux-files contract is §7a. Fix
+while in there.
 
 ---
 
@@ -345,8 +345,8 @@ reviewable in nix where they already are:
 - `wiiu_decrypted` → nothing at all: with per-member downloads the client fetches
   `code/ content/ meta/` directly and Cemu reads the tree — the zip existed only for
   single-file transport, which §2.2 just removed the need for.
-- Chains compose left to right and a recipe can need the platform's aux files — a Switch
-  NSZ decompress uses the `prod.keys` that `keys_ensure` already fetched.
+- Chains compose left to right and a recipe can need the platform's aux files, which
+  `keys_ensure` already fetched.
 
 Mechanics follow `kuriboSunshineDisc` exactly: staging inside the target filesystem,
 interrupted-run debris swept at start (`chmod -R u+w` first — store-sourced inputs arrive
@@ -408,8 +408,8 @@ closes connection, 503 past the cap. Still pure addition.
 
 **Phase 2½ — deploy (the other repo).** api.yaml: the second Deployment (§3.3), read-only
 library mount, fsGroup policy, ingress annotations, tokens; importer.yaml: env + Secret.
-Manual `GOTG_FILES_DIR` population (copy `prod.keys`/`title.keys`/`firmware.zip` — a
-one-time step called out because keys degrade to warnings and a miss would be silent).
+Manual `GOTG_FILES_DIR` population (copy the hand-placed aux files — a one-time step
+called out because they degrade to warnings and a miss would be silent).
 Verify: catalog empty, endpoints answer, saves unaffected.
 
 **Phase 3 — the indexer.** §3.4, with **dual-publish**: the old link-and-transform path and

@@ -302,43 +302,6 @@ Bind the pad once in `gotg configure`, and no settings-screen accident
 survives past the next launch. One limit is inherent: two *identical* pads
 are told apart only by connection order, which Ryujinx cannot make stable.
 
-### Console keys
-
-A Switch game will not decrypt without console keys, and they are not something
-this project can ship: they belong to a console, they are not redistributable,
-and they track firmware rather than any game. They live beside the games on the
-server, placed by hand:
-
-```
-/Games/switch/prod.keys      required
-/Games/switch/title.keys     optional — some dumps need it, most do not
-/Games/switch/firmware.zip   optional — without it, Ryujinx asks on first launch
-```
-
-The first launch of a Switch game fetches them from the service's /files
-endpoint into that environment's own key directory at mode 0600, and never
-again. They are **excluded from save
-bundles** — re-fetchable from the server, and the one thing here worth not
-copying between machines by accident.
-
-A missing key is a warning rather than a refusal: the emulator's own complaint
-about a specific game says more than the client can. They are invisible to
-`gotg list` by construction, since the catalog is built from what the importer
-imported and these are placed by hand — which matters, because `prod.keys`
-would otherwise satisfy the entry-id contract and show up as a game.
-
-**Firmware follows the same rules but not the same shape.** Without it Ryujinx
-stops every launch on an install dialog, and no setting suppresses that — so
-the client installs it first, in exactly the layout the emulator's own
-installer writes, which makes the two indistinguishable. It runs to hundreds
-of megabytes, so it is downloaded once into a per-platform cache and
-hardlinked into each environment; an environment that already installed
-firmware through the emulator's dialog seeds the cache without the server
-being asked at all. Missing everywhere is still only a warning: the dialog can
-install from an XCI's own update partition, which the server may not have.
-
-`Kubernetes/GOTG/IMPORTER_SPEC.md` §7a is the contract.
-
 ### Video
 
 What resolution looks right depends on the screen in front of you, which is not
