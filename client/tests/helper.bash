@@ -43,14 +43,14 @@ EOF
 
 # The GOTG service itself, real rather than mocked: the saves conflict rules
 # live server-side now, and a stand-in would only ever test a copy of them.
-start_saves_service() {
+_start_saves_service_once() {
   export SAVES_DATA_DIR="$TEST_TMP/service-saves"
   export SERVICE_FILES_DIR="$TEST_TMP/service-files"
   export SERVICE_LIBRARY_DIR="$TEST_TMP/library"
   mkdir -p "$SERVICE_FILES_DIR" "$SERVICE_LIBRARY_DIR" "$TEST_TMP/service-state"
   export SERVICE_PORT
   SERVICE_PORT="$(pick_port)"
-  GOTG_PROXY_TOKEN="test-token" GOTG_SAVES_DIR="$SAVES_DATA_DIR" \
+  PYTHONUNBUFFERED=1 GOTG_PROXY_TOKEN="test-token" GOTG_SAVES_DIR="$SAVES_DATA_DIR" \
     GOTG_FILES_DIR="$SERVICE_FILES_DIR" \
     GOTG_LIBRARY_ROOTS="$SERVICE_LIBRARY_DIR" \
     GOTG_CATALOG_DB="$TEST_TMP/service-state/catalog.db" \
@@ -62,10 +62,25 @@ start_saves_service() {
 
   local i
   for i in $(seq 1 50); do
+    # A parallel job can win the port between pick_port and the bind; a dead
+    # pid with a live healthz would be that other job's service.
+    if ! kill -0 "$SERVICE_PID" 2>/dev/null; then
+      return 1
+    fi
     if curl -s -o /dev/null "$GOTG_SERVICE_URL/healthz" 2>/dev/null; then return 0; fi
     sleep 0.1
   done
   echo "the gotg service did not start" >&2
+  return 1
+}
+
+start_saves_service() {
+  local attempt
+  for attempt in 1 2 3; do
+    _start_saves_service_once && return 0
+    stop_saves_service
+  done
+  echo "the gotg service did not start after 3 attempts" >&2
   return 1
 }
 

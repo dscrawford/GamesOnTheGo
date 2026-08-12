@@ -37,6 +37,7 @@ manifest_refresh() {
   }
   local payload
   payload="$(service_curl -fsS --max-time "${GOTG_API_TIMEOUT:-120}" \
+    --max-filesize "${GOTG_CATALOG_MAX_BYTES:-104857600}" \
     "$(service_url)/catalog" 2>&1)" || {
     # The reason is in the captured output: a refused token file, a TLS error.
     [[ -n "$payload" ]] && warn "$payload"
@@ -140,18 +141,25 @@ game_local_path() {
 }
 
 # A refined artifact keeps the id but the recipe picks the extension: resolve
-# what is actually on disk — the base path, or the one id.<ext> beside it.
+# what is actually on disk — the base path, or the one id.<ext> beside it. The
+# glob is only for the recipe handlers whose base *is* the bare id; a
+# single-file game's base already carries its extension, and globbing there
+# would mistake a leftover .sav sidecar for the game itself.
 game_installed_path() {
-  local base
-  base="$(game_local_path "$1")"
+  local game="$1" base handler
+  base="$(game_local_path "$game")"
   if [[ -e "$base" ]]; then
     printf '%s' "$base"
     return 0
   fi
-  local matches=("$base".*)
-  if [[ -e "${matches[0]}" ]]; then
-    printf '%s' "${matches[0]}"
-    return 0
+  handler="$(manifest_field "$game" handler)"
+  if [[ "$handler" != "single_file" && "$handler" != "no_intro_set" &&
+    "$(override_field "$game" unzip)" != "true" ]]; then
+    local matches=("$base".*)
+    if [[ -e "${matches[0]}" ]]; then
+      printf '%s' "${matches[0]}"
+      return 0
+    fi
   fi
   return 1
 }
@@ -200,10 +208,18 @@ cmd_list() {
   # the platform — the three things anyone would type. `any` rather than three
   # `or`s, because a bare `(.id, .title)` emits one result per field and would
   # print a matching game once per field it matched in.
+  # The size is humanized inside jq: one process for the whole catalog, where
+  # a $(human_size) per row is a fork per row — seconds over --all.
   if ! rows="$(manifest_games |
     jq -r --arg p "$pattern" '
+      def human: if . < 1024 then "\(.) B"
+        elif . < 1048576 then "\(. / 1024 * 10 | round / 10) KB"
+        elif . < 1073741824 then "\(. / 1048576 * 10 | round / 10) MB"
+        elif . < 1099511627776 then "\(. / 1073741824 * 10 | round / 10) GB"
+        else "\(. / 1099511627776 * 10 | round / 10) TB" end;
       select($p == "" or ([.id, .title, .platform] | any(test($p; "i"))))
-      | [.platform, .id, ([.files[].size_bytes] | add), .files[0].name, .title] | @tsv
+      | [.platform, .id, (([.files[].size_bytes] | add) | human), .files[0].name,
+         .handler, .title] | @tsv
     ' 2>&1)"; then
     die "not a valid pattern: $pattern
      It is a regex, so a bare . matches any character and ( must be closed."
@@ -228,22 +244,32 @@ cmd_list() {
 
   # The colour goes in its own argument so the width applies to the value and
   # not to the escape bytes, which would silently break every column.
-  local platform id size name title status c_status
+  local platform id size name handler title status c_status installed_glob
   printf '%s%-3s %-9s %-46s %10s  %s%s\n' \
     "$C_HEAD" "" "PLATFORM" "ID" "SIZE" "TITLE" "$C_RESET"
-  while IFS=$'\t' read -r platform id size name title; do
-    if [[ -e "$GOTG_GAMES_DIR/$platform/$name" ]]; then
-      status="[*]"
-      c_status="$C_OK"
-    else
-      status="[ ]"
-      c_status="$C_MUTED"
+  while IFS=$'\t' read -r platform id size name handler title; do
+    status="[ ]"
+    c_status="$C_MUTED"
+    # Cache fields become a path even for this read-only probe. A recipe
+    # installs as id.<ext>, which the member name cannot predict — the same
+    # rule game_installed_path applies, without loading each row's JSON.
+    if [[ "$platform" =~ $GOTG_PLATFORM_RE && "$name" != *..* && "$name" != /* ]]; then
+      if [[ -e "$GOTG_GAMES_DIR/$platform/$name" || -e "$GOTG_GAMES_DIR/$platform/$id" ]]; then
+        status="[*]"
+        c_status="$C_OK"
+      elif [[ "$handler" != "single_file" && "$handler" != "no_intro_set" ]]; then
+        installed_glob=("$GOTG_GAMES_DIR/$platform/$id".*)
+        if [[ -e "${installed_glob[0]}" ]]; then
+          status="[*]"
+          c_status="$C_OK"
+        fi
+      fi
     fi
     printf '%s%-3s%s %s%-9s%s %s%-46s%s %10s  %s\n' \
       "$c_status" "$status" "$C_RESET" \
       "$C_MUTED" "$platform" "$C_RESET" \
       "$C_ID" "$id" "$C_RESET" \
-      "$(human_size "$size")" "$title"
+      "$size" "$title"
   done <<<"$rows"
   log ""
   # Braced: "$C_OK[*]" reads as an array subscript.

@@ -28,16 +28,12 @@ setup() {
   mkdir -p "$GOTG_ENV_DIR"
   : >"$GOTG_ENV_DIR/n64.nix"
 
-  start_saves_service
-  write_api_config
-
   fake_env env-n64 '["saves/**"]' '["saves/*.o2r"]'
   STATE="$GOTG_ENV_STATE_DIR/env-n64"
   mkdir -p "$STATE/saves"
 }
 
 teardown() {
-  stop_saves_service
   stop_saves_service
 }
 
@@ -56,7 +52,6 @@ second_device() {
   export GOTG_ENV_STATE_DIR="$GOTG_STATE_DIR/env"
   export GOTG_SAVES_DIR="$GOTG_STATE_DIR/saves"
   export GOTG_DEVICE_ID=bbbb2222
-  write_api_config
   write_api_config
   fake_env env-n64 '["saves/**"]' '["saves/*.o2r"]'
   STATE="$GOTG_ENV_STATE_DIR/env-n64"

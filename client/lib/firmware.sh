@@ -149,7 +149,7 @@ firmware_fetch() {
   if ! service_curl -fsS \
     --max-time "${GOTG_FIRMWARE_FETCH_SECONDS:-900}" \
     --max-filesize "$(firmware_max_bytes)" \
-    "$(service_url)/files/$platform/$file" >"$zip" 2>/dev/null ||
+    "$(service_url)/files/$platform/$(jq -rn --arg n "$file" '$n | @uri')" >"$zip" 2>/dev/null ||
     [[ ! -s "$zip" ]]; then
     rm -f "$zip"
     return 1

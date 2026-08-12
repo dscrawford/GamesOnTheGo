@@ -106,9 +106,14 @@ cmd_login() {
   [[ "$url" == http://* || "$url" == https://* ]] || die "service must be an http(s) URL: $url"
   token="$(prompt_secret "Token: ")"
   [[ -n "$token" ]] || die "a token is required"
+  # The shape every bearer token has; anything else would also corrupt the
+  # curl config the token is spliced into.
+  [[ "$token" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || die "token contains characters no bearer token uses"
 
-  curl -fsS --connect-timeout 10 --max-time 30 \
-    -H "Authorization: Bearer $token" "$url/catalog" >/dev/null 2>&1 ||
+  # Via curl --config on stdin, never argv: /proc/<pid>/cmdline is
+  # world-readable and this token does not expire.
+  printf 'header = "Authorization: Bearer %s"\n' "$token" |
+    curl --config - -fsS --connect-timeout 10 --max-time 30 "$url/catalog" >/dev/null 2>&1 ||
     die "the service at $url did not accept that token"
 
   local file tmp

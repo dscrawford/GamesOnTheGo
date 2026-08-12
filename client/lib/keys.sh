@@ -29,6 +29,10 @@ keys_ensure() {
 
   into="$(jq -r '.into // empty' "$manifest")"
   [[ -n "$into" ]] || return 0
+  if [[ "$into" == /* || "$into" == *..* ]]; then
+    warn "refusing keys path from $attr: $into"
+    return 0
+  fi
 
   state="$(env_state_dir "$attr")"
   local dir="$state/$into"
@@ -56,8 +60,14 @@ keys_ensure() {
 
     # Written to a temporary name and moved, so an interrupted fetch cannot
     # leave a half a key file looking like a whole one.
+    if [[ "$file" == /* || "$file" == *..* || "$file" == */* ]]; then
+      warn "refusing key file name: $file"
+      missing=$((missing + 1))
+      continue
+    fi
     if service_curl -fsS --max-time "${GOTG_API_TIMEOUT:-120}" \
-      "$(service_url)/files/$platform/$file" >"$dest.part" 2>/dev/null &&
+      "$(service_url)/files/$platform/$(jq -rn --arg n "$file" '$n | @uri')" \
+      >"$dest.part" 2>/dev/null &&
       [[ -s "$dest.part" ]]; then
       chmod 600 "$dest.part"
       mv "$dest.part" "$dest"

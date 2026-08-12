@@ -205,17 +205,28 @@ download_game() {
   log "fetching $title ($(human_size "$total"), $count file(s))"
 
   local name size sha out url encoded
-  while IFS=$'\t' read -r name size sha; do
+  while IFS=$'\t' read -r name size sha encoded; do
     validate_filename "$name"
+    [[ "$sha" == "null" || "$sha" =~ ^[0-9a-f]{64}$ ]] ||
+      die "invalid sha256 in catalog for $name"
     out="$staged/$name"
     mkdir -p "$(dirname "$out")"
-    # Encode each segment; the slashes between them are real separators.
-    encoded="$(jq -rn --arg n "$name" '$n | split("/") | map(@uri) | join("/")')"
     url="$(service_url)/games/$platform/$id/$encoded"
-    _download_with_progress "$url" "$out" "$sha" "$title: $name" "${size:-0}" ||
-      die "download failed for $id (partials kept at $staged; run again to resume)"
+    if ! _download_with_progress "$url" "$out" "$sha" "$title: $name" "${size:-0}"; then
+      # A stale partial whose bytes the server no longer has curl-resumes into
+      # a 200, which curl rejects (exit 33) and would wedge every retry. Drop
+      # the partial and try once from zero before giving up.
+      if [[ -e "$out" ]]; then
+        rm -f "$out"
+        _download_with_progress "$url" "$out" "$sha" "$title: $name" "${size:-0}" ||
+          die "download failed for $id (partials kept at $staged; run again to resume)"
+      else
+        die "download failed for $id (partials kept at $staged; run again to resume)"
+      fi
+    fi
     _verify_checksum "$out" "$sha"
-  done < <(jq -r '.files[] | [.name, .size_bytes, (.sha256 // "null")] | @tsv' <<<"$game")
+  done < <(jq -r '.files[] | [.name, .size_bytes, (.sha256 // "null"),
+    (.name | split("/") | map(@uri) | join("/"))] | @tsv' <<<"$game")
 
   case "$handler" in
     single_file | no_intro_set)
@@ -258,6 +269,7 @@ _run_recipe() {
     "$GOTG_ROOTS_DIR/$attr/share/gotg/recipe.json" >/dev/null 2>&1 ||
     die "$attr declares no recipe for '$handler'"
   log "processing $(manifest_field "$game" id) ($handler)"
+  mkdir -p "$(dirname "$dest")"
   "$recipe" "$handler" "$staged" "$dest" ||
     die "the $handler recipe failed for $(manifest_field "$game" id)"
 }
