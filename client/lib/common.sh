@@ -91,13 +91,15 @@ saves_max_bytes() { printf '%s' "${GOTG_SAVES_MAX_BYTES:-67108864}"; }
 saves_keep() { printf '%s' "${GOTG_SAVES_KEEP:-3}"; }
 
 # A server-controlled string that becomes a local path component. No slash and
-# no dot-names is what rules out traversal; printable-only rules out control
-# characters in terminal output and shell traps downstream.
+# no dot-names is what rules out traversal. Control characters are rejected by
+# name rather than requiring [[:print:]]: under LC_ALL=C that class rejects
+# every multibyte character, and a Japanese dump name is a real member name —
+# the server's own check (Python isprintable) accepts it.
 validate_filename() {
   local name="$1"
   [[ -n "$name" && ${#name} -le 255 ]] || die "invalid file name: $name"
   [[ "$name" != */* && "$name" != .* ]] || die "invalid file name: $name"
-  [[ "$name" =~ ^[[:print:]]+$ ]] || die "invalid file name: $name"
+  [[ "$name" != *[[:cntrl:]]* ]] || die "invalid file name: $name"
 }
 
 # Reject anything that could climb out of the games directory.

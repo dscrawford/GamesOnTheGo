@@ -28,6 +28,11 @@ teardown() {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
   stop_server
+  # The killed port can be re-bound by a parallel bats job whose mock accepts
+  # the same tester/hunter2 — point at port 1, which nothing answers.
+  jq '.server = "http://127.0.0.1:1"' "$GOTG_CONFIG_FILE" >"$GOTG_CONFIG_FILE.tmp"
+  mv "$GOTG_CONFIG_FILE.tmp" "$GOTG_CONFIG_FILE"
+  chmod 600 "$GOTG_CONFIG_FILE"
 
   gotg list
   [ "$status" -eq 0 ]
@@ -161,6 +166,11 @@ teardown() {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
   stop_server
+  # The killed port can be re-bound by a parallel bats job whose mock accepts
+  # the same tester/hunter2 — point at port 1, which nothing answers.
+  jq '.server = "http://127.0.0.1:1"' "$GOTG_CONFIG_FILE" >"$GOTG_CONFIG_FILE.tmp"
+  mv "$GOTG_CONFIG_FILE.tmp" "$GOTG_CONFIG_FILE"
+  chmod 600 "$GOTG_CONFIG_FILE"
 
   # Everything cached is stale, so list has to attempt a refresh — and the
   # refresh failing must degrade to the cache, not kill the command.
@@ -173,6 +183,11 @@ teardown() {
 
 @test "no cache and no server is a plain failure, not a silent one" {
   stop_server
+  # The killed port can be re-bound by a parallel bats job whose mock accepts
+  # the same tester/hunter2 — point at port 1, which nothing answers.
+  jq '.server = "http://127.0.0.1:1"' "$GOTG_CONFIG_FILE" >"$GOTG_CONFIG_FILE.tmp"
+  mv "$GOTG_CONFIG_FILE.tmp" "$GOTG_CONFIG_FILE"
+  chmod 600 "$GOTG_CONFIG_FILE"
   gotg list
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"catalog"* ]]
@@ -180,6 +195,11 @@ teardown() {
 
 @test "an explicit refresh against a dead server fails loudly" {
   stop_server
+  # The killed port can be re-bound by a parallel bats job whose mock accepts
+  # the same tester/hunter2 — point at port 1, which nothing answers.
+  jq '.server = "http://127.0.0.1:1"' "$GOTG_CONFIG_FILE" >"$GOTG_CONFIG_FILE.tmp"
+  mv "$GOTG_CONFIG_FILE.tmp" "$GOTG_CONFIG_FILE"
+  chmod 600 "$GOTG_CONFIG_FILE"
   gotg refresh
   [ "$status" -ne 0 ]
 }
@@ -194,4 +214,62 @@ teardown() {
   for bad in "a/b.z64" ".." "." ".hidden" "" "$(printf 'a\tb')"; do
     run -1 --separate-stderr validate_filename "$bad"
   done
+}
+
+@test "a garbage catalog over a stale cache falls back, and the cache survives" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  local before
+  before="$(cat "$GOTG_CACHE_FILE")"
+  # The server is up but answering nonsense — a proxy error page, say. This is
+  # the failure the server-down tests do not cover: the fetch itself succeeds.
+  echo '<html>502 bad gateway</html>' > "$SERVER_ROOT/Games/.gotg/manifest.json"
+  touch -d '2 days ago' "$GOTG_CACHE_FILE"
+
+  gotg list
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"usa.zelda"* ]]
+  [[ "$stderr" == *"using the cached catalog"* ]]
+  [ "$(cat "$GOTG_CACHE_FILE")" = "$before" ]
+}
+
+@test "an explicit refresh of a garbage catalog fails loudly and keeps the cache" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  local before
+  before="$(cat "$GOTG_CACHE_FILE")"
+  jq -n '{version: 1, games: "not an array"}' > "$SERVER_ROOT/Games/.gotg/manifest.json"
+
+  gotg refresh
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"not valid GOTG JSON"* ]]
+  [ "$(cat "$GOTG_CACHE_FILE")" = "$before" ]
+  [ ! -e "$GOTG_CACHE_FILE.tmp" ]
+}
+
+@test "a cache with a future mtime is fresh, not endlessly re-fetched" {
+  # Clock skew is real: NFS, a resumed laptop. A negative age must read as
+  # fresh rather than tripping an arithmetic surprise.
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  stop_server
+  touch -d '1 hour hence' "$GOTG_CACHE_FILE"
+  gotg list
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"usa.zelda"* ]]
+}
+
+@test "filename length caps at 255" {
+  load_client_libs
+  run validate_filename "$(printf 'a%.0s' {1..255})"
+  [ "$status" -eq 0 ]
+  run -1 --separate-stderr validate_filename "$(printf 'a%.0s' {1..256})"
+}
+
+@test "a unicode filename is valid regardless of locale" {
+  # The server accepts this name unconditionally; the client must not
+  # disagree just because the test sandbox runs under LC_ALL=C.
+  load_client_libs
+  run validate_filename "ゼルダの伝説.z64"
+  [ "$status" -eq 0 ]
 }
