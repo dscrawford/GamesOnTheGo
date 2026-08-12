@@ -271,6 +271,49 @@ setup_steam() {
   [ -f "$(dirname "$SHORTCUTS")/grid/${unsigned}_hero.jpg" ]
 }
 
+@test "the fetched icon is attached to the shortcut, not only filed" {
+  # Grid art Steam finds by filename; the list icon it reads only off the
+  # shortcut's own field.
+  setup_steam
+  jq -n '{api_key: "testkey"}' >"$GOTG_STEAMGRIDDB_KEY_FILE"
+  export GOTG_STEAMGRIDDB_URL="$SGDB_URL"
+  gotg steam add usa.super_mario_sunshine
+  [ "$status" -eq 0 ]
+
+  local icon
+  icon="$(python3 "$(dirname "$GOTG_BIN")/../share/gotg/steam/shortcuts.py" \
+    --file "$SHORTCUTS" list | jq -r '.[0].icon')"
+  [[ "$icon" == *"_icon.ico" ]]
+  [ -f "$icon" ]
+}
+
+@test "art attaches the icon for a shortcut that was missing one" {
+  setup_steam
+  jq -n '{api_key: "testkey"}' >"$GOTG_STEAMGRIDDB_KEY_FILE"
+  export GOTG_STEAMGRIDDB_URL="$SGDB_URL"
+  gotg steam add usa.super_mario_sunshine
+  [ "$status" -eq 0 ]
+
+  # Blank the icon the way a pre-fix shortcut would look, then refetch.
+  python3 - "$SHORTCUTS" <<'EOF'
+import sys, vdf
+path = sys.argv[1]
+with open(path, "rb") as f:
+    data = vdf.binary_load(f)
+for e in data["shortcuts"].values():
+    e["icon"] = ""
+with open(path, "wb") as f:
+    vdf.binary_dump(data, f)
+EOF
+  gotg steam art usa.super_mario_sunshine
+  [ "$status" -eq 0 ]
+
+  local icon
+  icon="$(python3 "$(dirname "$GOTG_BIN")/../share/gotg/steam/shortcuts.py" \
+    --file "$SHORTCUTS" list | jq -r '.[0].icon')"
+  [[ "$icon" == *"_icon.ico" ]]
+}
+
 @test "art refetches for a game already in Steam" {
   setup_steam
   jq -n '{api_key: "testkey"}' >"$GOTG_STEAMGRIDDB_KEY_FILE"

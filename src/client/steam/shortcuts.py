@@ -130,6 +130,8 @@ def cmd_add(args: argparse.Namespace) -> int:
     entry["StartDir"] = start_dir
     if args.launch_options is not None:
         entry["LaunchOptions"] = args.launch_options
+    if args.icon is not None:
+        entry["icon"] = args.icon
     # A tag is a Steam collection. EmuDeck tags everything it adds so the games
     # arrive grouped rather than scattered through the library.
     if args.tag:
@@ -175,6 +177,7 @@ def cmd_list(args: argparse.Namespace) -> int:
                     "exe": e.get("Exe", "").strip('"'),
                     "options": e.get("LaunchOptions", ""),
                     "appid": e.get("appid", 0),
+                    "icon": e.get("icon", ""),
                     "tags": list((e.get("tags") or {}).values()),
                 }
                 for e in shortcuts.values()
@@ -195,6 +198,9 @@ def main(argv: list[str] | None = None) -> int:
     add.add_argument("--start-dir", required=True)
     add.add_argument("--launch-options")
     add.add_argument("--tag", help="Steam collection to file it under")
+    # The list icon is not grid art: Steam reads it off the shortcut itself,
+    # so a fetched _icon.ico does nothing until this field points at it.
+    add.add_argument("--icon", help="path to the icon the shortcut shows")
     add.set_defaults(func=cmd_add)
 
     remove = sub.add_parser("remove")

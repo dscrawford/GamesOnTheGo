@@ -47,6 +47,18 @@ seed_existing() {
   [ "$(jq -r '.[0].exe' <<<"$output")" = "/home/x/Games/n64/play.sh" ]
 }
 
+@test "an icon given to add is stored on the shortcut and survives an update" {
+  helper add --name "Zelda" --exe "/games/play.sh" --start-dir "/games" \
+    --icon "/grid/123_icon.ico" >/dev/null
+  run helper list
+  [ "$(jq -r '.[0].icon' <<<"$output")" = "/grid/123_icon.ico" ]
+
+  # An update that says nothing about the icon must not blank it.
+  helper add --name "Zelda HD" --exe "/games/play.sh" --start-dir "/games" >/dev/null
+  run helper list
+  [ "$(jq -r '.[0].icon' <<<"$output")" = "/grid/123_icon.ico" ]
+}
+
 @test "adding the same game twice updates rather than duplicating" {
   helper add --name "Old Name" --exe "/games/play.sh" --start-dir "/games" >/dev/null
   helper add --name "New Name" --exe "/games/play.sh" --start-dir "/games" >/dev/null

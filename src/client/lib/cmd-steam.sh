@@ -109,6 +109,37 @@ steam_artwork_helper() {
 # the appid the shortcut carries.
 steam_grid_dir() { printf '%s/grid' "$(dirname "$(steam_shortcuts_file)")"; }
 
+# The fetched icon's path: grid art is keyed on the unsigned 32-bit appid,
+# whichever way the shortcut spelled it.
+steam_icon_path() {
+  local appid="$1"
+  ((appid < 0)) && appid=$((appid + 4294967296))
+  printf '%s/%s_icon.ico' "$(steam_grid_dir)" "$appid"
+}
+
+# Point the shortcut's own icon field at the fetched icon. Grid art Steam
+# finds by filename; the list icon it reads only off the shortcut — so a
+# downloaded _icon.ico does nothing until this runs. Best-effort: the vdf
+# write needs Steam closed, and artwork must never take the shortcut with it.
+steam_attach_icon() {
+  local launcher="$1" name="$2" icon="$3"
+  [[ -f "$icon" ]] || return 0
+
+  local current
+  current="$(steam_helper --file "$(steam_shortcuts_file)" list |
+    jq -r --arg e "$launcher" '.[] | select(.exe == $e) | .icon')"
+  [[ "$current" != "$icon" ]] || return 0
+
+  if [[ -z "${GOTG_STEAM_SHORTCUTS:-}" ]] && pgrep -x steam >/dev/null 2>&1; then
+    log "the icon is fetched but Steam is running — close it and rerun to attach it"
+    return 0
+  fi
+  steam_helper --file "$(steam_shortcuts_file)" add --name "$name" \
+    --exe "$launcher" --start-dir "$(dirname "$launcher")" \
+    --icon "$icon" >/dev/null ||
+    warn "could not attach the icon to the shortcut"
+}
+
 # The SteamGridDB key. Its own file, like the controller order: it is a
 # credential, but not the server password, and it is the one part of this that
 # cannot be automated — an unauthenticated request to their API is a 401.
@@ -281,6 +312,7 @@ steam_art() {
   [[ -n "$appid" ]] || die "$name is not in Steam yet — run: gotg steam add $want${variant:+ $variant}"
 
   steam_fetch_artwork "$name" "$appid" "$game" "${opts[@]}"
+  steam_attach_icon "$launcher" "$name" "$(steam_icon_path "$appid")"
 }
 
 steam_add() {
@@ -318,6 +350,7 @@ steam_add() {
   log "  $launcher"
 
   steam_fetch_artwork "$name" "$(jq -r '.appid' <<<"$result")" "$game"
+  steam_attach_icon "$launcher" "$name" "$(steam_icon_path "$(jq -r '.appid' <<<"$result")")"
 
   log ""
   log "Start Steam and it will be in your library."
