@@ -371,7 +371,11 @@ class Artwork:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--grid-dir", required=True)
-    parser.add_argument("--appid", required=True)
+    # shortcuts.vdf carries the appid signed, but Steam keys the grid folder on
+    # the unsigned 32-bit value — file art under the signed name and Steam
+    # never finds it. Normalized here so every {appid} below is the name Steam
+    # looks for, whichever way the shortcut spelled it.
+    parser.add_argument("--appid", required=True, type=lambda s: int(s) & 0xFFFFFFFF)
     parser.add_argument("--name", required=True)
     parser.add_argument("--api-key")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)

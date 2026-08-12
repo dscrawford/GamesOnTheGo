@@ -70,6 +70,26 @@ art() {
   [ -f "$GRID/1234567890_icon.ico" ]
 }
 
+@test "a signed shortcut appid is filed under its unsigned name" {
+  # shortcuts.vdf stores the appid signed; Steam keys the grid folder on the
+  # unsigned 32-bit value. -1874645127 is 2420322169 unsigned.
+  run python3 "$ART" --grid-dir "$GRID" --appid -1874645127 --name "Some Game" \
+    --base-url "$SGDB_URL" --api-key testkey
+  [ "$status" -eq 0 ]
+  [ -f "$GRID/2420322169.jpg" ]
+  [ -f "$GRID/2420322169p.png" ]
+  [ -f "$GRID/2420322169_hero.jpg" ]
+  [ ! -e "$GRID/-1874645127.jpg" ]
+}
+
+@test "a manual picture is filed under the unsigned name too" {
+  printf '\x89PNG\r\n\x1a\n' >"$TEST_TMP/pic.png"
+  run python3 "$ART" --grid-dir "$GRID" --appid -1874645127 --name "Some Game" \
+    --from "$TEST_TMP/pic.png" --as tile
+  [ "$status" -eq 0 ]
+  [ -f "$GRID/2420322169p.png" ]
+}
+
 @test "the top pick is the highest scoring asset, not the first listed" {
   art
   # The mock lists a score-1 asset before a score-99 one.
@@ -240,13 +260,15 @@ setup_steam() {
   [[ "$stderr" == *"artwork: 5 file(s)"* ]]
 
 
-  # Filed under the appid the shortcut carries, beside the shortcuts file —
+  # Filed under the *unsigned* appid, beside the shortcuts file: the shortcut
+  # carries it signed, and Steam keys the grid folder on the unsigned value —
   # which is what makes Steam find it.
-  local appid
+  local appid unsigned
   appid="$(python3 "$(dirname "$GOTG_BIN")/../share/gotg/steam/shortcuts.py" \
     --file "$SHORTCUTS" list | jq -r '.[0].appid')"
-  [ -f "$(dirname "$SHORTCUTS")/grid/${appid}p.png" ]
-  [ -f "$(dirname "$SHORTCUTS")/grid/${appid}_hero.jpg" ]
+  unsigned=$(( appid < 0 ? appid + 4294967296 : appid ))
+  [ -f "$(dirname "$SHORTCUTS")/grid/${unsigned}p.png" ]
+  [ -f "$(dirname "$SHORTCUTS")/grid/${unsigned}_hero.jpg" ]
 }
 
 @test "art refetches for a game already in Steam" {
@@ -304,10 +326,11 @@ setup_steam() {
   [[ "$stderr" == *"from $TEST_TMP/mine.png"* ]]
 
 
-  local appid
+  local appid unsigned
   appid="$(python3 "$(dirname "$GOTG_BIN")/../share/gotg/steam/shortcuts.py" \
     --file "$SHORTCUTS" list | jq -r '.[0].appid')"
-  cmp -s "$TEST_TMP/mine.png" "$(dirname "$SHORTCUTS")/grid/${appid}p.png"
+  unsigned=$(( appid < 0 ? appid + 4294967296 : appid ))
+  cmp -s "$TEST_TMP/mine.png" "$(dirname "$SHORTCUTS")/grid/${unsigned}p.png"
 }
 
 @test "art says so when the picture named cannot be used" {
