@@ -124,24 +124,35 @@ pads_ares_skeleton_keys() {
 # ares' own full section after one run.
 pads_ares_ensure_block() {
   local file="$1" console="$2" block="$3" pad="$4" bindings="$5"
+
+  # What already exists, scoped exactly as the rewrite scopes it — checked
+  # before anything is built, because this runs on every launch and the
+  # everything-present answer is the common one.
+  local state
+  if [[ -f "$file" ]]; then
+    # ENVIRON rather than -v: -v values undergo C-escape processing, so a
+    # backslash in a table key would become a real newline inside the program.
+    # The reset-per-level pattern mirrors the rewrite exactly — a flag that
+    # sticks past a sibling line credits one port with another's pad block.
+    state="$(c="$console" b="    $block" p="      $pad" awk '
+      BEGIN { c = ENVIRON["c"]; b = ENVIRON["b"]; p = ENVIRON["p"] }
+      { indent = match($0, /[^ ]/) - 1 }
+      indent == 0 { inC = ($0 == c); if (inC) hc = 1; inI = 0; inB = 0 }
+      inC && indent == 2 { inI = ($0 == "  Input"); inB = 0; if (inI) hi = 1 }
+      inI && indent == 4 { inB = ($0 == b); if (inB) hb = 1 }
+      inB && indent == 6 && $0 == p { hp = 1 }
+      END { printf "%d%d%d%d", hc + 0, hi + 0, hb + 0, hp + 0 }
+    ' "$file")" || return 1
+    [[ "$state" == "1111" ]] && return 0
+  else
+    mkdir -p "$(dirname "$file")"
+    : >"$file"
+    state="0000"
+  fi
+
   local keys
   keys="$(pads_ares_skeleton_keys "$bindings")"
   [[ -n "$keys" ]] || return 1
-
-  mkdir -p "$(dirname "$file")"
-  [[ -f "$file" ]] || : >"$file"
-
-  # What already exists, scoped exactly as the rewrite scopes it.
-  local state
-  state="$(awk -v c="$console" -v b="    $block" -v p="      $pad" '
-    { indent = match($0, /[^ ]/) - 1 }
-    indent == 0 { inC = ($0 == c); if (inC) hc = 1; inI = 0; inB = 0 }
-    inC && indent == 2 && $0 == "  Input" { inI = 1; hi = 1 }
-    inI && indent == 4 && $0 == b { inB = 1; hb = 1 }
-    inB && indent == 6 && $0 == p { hp = 1 }
-    END { printf "%d%d%d%d", hc + 0, hi + 0, hb + 0, hp + 0 }
-  ' "$file")" || return 1
-  [[ "$state" == "1111" ]] && return 0
 
   # The missing tail, and which existing line it slots in after. Inserting
   # directly after the parent line only reorders siblings, which bml does not
@@ -159,14 +170,20 @@ pads_ares_ensure_block() {
     *) return 1 ;;
   esac
 
-  local tmp="$file.gotg-tmp"
-  awk -v c="$console" -v b="    $block" -v anchor="$anchor" -v payload="$payload" '
+  local tmp
+  tmp="$(mktemp "$file.XXXXXX")" || return 1
+  c="$console" b="    $block" anchor="$anchor" payload="$payload" awk '
+    BEGIN {
+      c = ENVIRON["c"]; b = ENVIRON["b"]
+      anchor = ENVIRON["anchor"]; payload = ENVIRON["payload"]
+    }
     { indent = match($0, /[^ ]/) - 1 }
-    indent == 0 { inC = ($0 == c) }
+    indent == 0 { inC = ($0 == c); inI = 0 }
+    inC && indent == 2 { inI = ($0 == "  Input") }
     { print }
     !done && inC && anchor == "console" && indent == 0 { print payload; done = 1 }
-    !done && inC && anchor == "input" && indent == 2 && $0 == "  Input" { print payload; done = 1 }
-    !done && inC && anchor == "block" && indent == 4 && $0 == b { print payload; done = 1 }
+    !done && inI && anchor == "input" && indent == 2 { print payload; done = 1 }
+    !done && inI && anchor == "block" && indent == 4 && $0 == b { print payload; done = 1 }
   ' "$file" >"$tmp" || {
     rm -f "$tmp"
     return 1

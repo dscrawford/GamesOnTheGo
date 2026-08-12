@@ -327,3 +327,51 @@ BML
   pads_ares_ensure_block "$file" GameBoy Game.Boy Controls "$bindings"
   [ "$(cat "$file")" = "$before" ]
 }
+
+@test "a sibling port's pad block is never credited to an empty container" {
+  # Port 1 has a container line but no pad; port 2 has the pad. A scan whose
+  # scope flags stick past the sibling reads this as "port 1 complete", the
+  # rewrite finds nothing to edit, and the launch claims a pad it never bound.
+  local file="$TEST_TMP/sibling/settings.bml"
+  mkdir -p "$TEST_TMP/sibling"
+  cat >"$file" <<'BML'
+SuperFamicom
+  Input
+    Controller.Port.1
+    Controller.Port.2
+      Gamepad
+        Up: OTHER;;
+BML
+  local bindings='{"Up": "MINE;;"}'
+  pads_ares_ensure_block "$file" SuperFamicom Controller.Port.1 Gamepad "$bindings"
+  pads_ares_rewrite "$file" SuperFamicom Controller.Port.1 Gamepad "$bindings"
+
+  # Port 1 got its own pad and value; port 2 kept its own.
+  run awk '/^    Controller.Port.1$/,/^    Controller.Port.2$/' "$file"
+  [[ "$output" == *"Up: MINE;;"* ]]
+  grep -q "Up: OTHER;;" "$file"
+  run grep -c "Up: MINE;;" "$file"
+  [ "$output" = "1" ]
+}
+
+@test "an Input block in a sibling section is not an anchor" {
+  # The console has a non-Input child whose subtree contains a line shaped
+  # exactly like our block; the insertion must not land there.
+  local file="$TEST_TMP/decoy/settings.bml"
+  mkdir -p "$TEST_TMP/decoy"
+  cat >"$file" <<'BML'
+SuperFamicom
+  Hotkeys
+    Controller.Port.1
+  Input
+BML
+  local bindings='{"Up": "V;;"}'
+  pads_ares_ensure_block "$file" SuperFamicom Controller.Port.1 Gamepad "$bindings"
+
+  # The new block sits under Input, not under Hotkeys.
+  run awk '/^  Input$/,0' "$file"
+  [[ "$output" == *"    Controller.Port.1"* ]]
+  [[ "$output" == *"      Gamepad"* ]]
+  run awk '/^  Hotkeys$/,/^  Input$/' "$file"
+  [[ "$output" != *"Gamepad"* ]]
+}
