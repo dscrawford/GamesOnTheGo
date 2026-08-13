@@ -213,6 +213,23 @@ def test_a_token_that_was_never_minted_never_verifies(store, bogus):
     assert store.verify(bogus) is None
 
 
+@pytest.mark.parametrize(
+    "junk",
+    ["", "x", "gotgi_", "gotgi_short", "gotg_" + "a" * 43, "gotgi_" + "a" * 51, "gotgi_" + "a" * 42 + "!"],
+    ids=["empty", "letter", "prefix-only", "too-short", "token-not-code", "too-long", "bad-charset"],
+)
+def test_a_code_shaped_wrong_is_refused_without_the_write_lock(store, junk):
+    # Held here, so a claim that reached the store at all would block: the
+    # unauthenticated route must not queue behind real work.
+    outcome = []
+    with store._write_lock:
+        worker = threading.Thread(target=lambda: outcome.append(store.claim(junk)))
+        worker.start()
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+    assert outcome == [Absent]
+
+
 def test_a_claim_code_is_not_itself_a_token(store):
     code = store.mint_invite("lena")
     store.claim(code)

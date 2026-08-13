@@ -24,6 +24,7 @@ from pathlib import Path
 TOKEN_PREFIX = "gotg_"
 INVITE_PREFIX = "gotgi_"
 TOKEN_RE = re.compile(r"^gotg_[A-Za-z0-9_-]{40,50}$")
+CODE_RE = re.compile(r"^gotgi_[A-Za-z0-9_-]{40,50}$")
 
 # Names reach JSON listings, logs and the admin CLI; the shape is the
 # platform slug's, sized for a person-and-device ("daniel-deck").
@@ -162,6 +163,10 @@ class TokenStore:
         """Exactly-once: the UPDATE carries the whole predicate, and consuming
         the invite, retiring the name's old token and inserting the new one
         are one transaction — a crash cannot burn a code without minting."""
+        # Shape check before the write lock: claiming is unauthenticated, and
+        # junk that cannot match a code would serialize against real claims.
+        if not CODE_RE.match(code):
+            return Absent
         now = int(time.time())
         code_hash = _hash(code)
         token, display = mint_token()
