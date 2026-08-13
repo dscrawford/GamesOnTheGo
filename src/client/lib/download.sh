@@ -185,6 +185,9 @@ download_game() {
   count="$(jq -r '.files | length' <<<"$game")"
   log "fetching $title ($(human_size "$total"), $count file(s))"
 
+  local files_base
+  files_base="$(manifest_files_url)"
+
   local name size sha out url encoded
   while IFS=$'\t' read -r name size sha encoded; do
     validate_filename "$name"
@@ -192,18 +195,20 @@ download_game() {
       die "invalid sha256 in catalog for $name"
     out="$staged/$name"
     mkdir -p "$(dirname "$out")"
-    url="$(service_url)/games/$platform/$id/$encoded"
+    url="$files_base/games/$platform/$id/$encoded"
     if ! _download_with_progress "$url" "$out" "$sha" "$title: $name" "${size:-0}"; then
       # A stale partial whose bytes the server no longer has curl-resumes into
-      # a 200, which curl rejects (exit 33) and would wedge every retry. Drop
-      # the partial and try once from zero before giving up.
-      if [[ -e "$out" ]]; then
-        rm -f "$out"
-        _download_with_progress "$url" "$out" "$sha" "$title: $name" "${size:-0}" ||
-          die "download failed for $id (partials kept at $staged; run again to resume)"
-      else
+      # a 200, which curl rejects (exit 33) and would wedge every retry — the
+      # partial goes. And the byte host is the catalog's to name, so it can
+      # have moved since the catalog was last read (a VPN-fronted files host
+      # changes address on reconnect): a refresh before the one retry picks
+      # up wherever the bytes live now.
+      rm -f "$out"
+      manifest_refresh || true
+      files_base="$(manifest_files_url)"
+      url="$files_base/games/$platform/$id/$encoded"
+      _download_with_progress "$url" "$out" "$sha" "$title: $name" "${size:-0}" ||
         die "download failed for $id (partials kept at $staged; run again to resume)"
-      fi
     fi
     _verify_checksum "$out" "$sha"
   done < <(jq -r '.files[] | [.name, .size_bytes, (.sha256 // "null"),

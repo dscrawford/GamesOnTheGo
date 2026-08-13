@@ -354,3 +354,37 @@ publish_scene_game() {
   # Encoded on the wire, decoded on disk: no percent-escapes may leak into paths.
   [ ! -e "$GOTG_GAMES_DIR/wiiu/usa.title/content/My%20Game%20(USA)%20%5B!%5D" ]
 }
+
+@test "the catalog's files_url is where the bytes are fetched from" {
+  add_game n64 "usa.zelda.z64" "rom-content"
+  gotg refresh
+  # The service in this suite names no files_url; planting one that points at
+  # the same host proves the client honors it when present.
+  jq --arg u "$GOTG_SERVICE_URL" '. + {files_url: $u}' "$GOTG_CACHE_FILE" >"$GOTG_CACHE_FILE.tmp"
+  mv "$GOTG_CACHE_FILE.tmp" "$GOTG_CACHE_FILE"
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [ -f "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
+}
+
+@test "a files_url that stopped answering costs a catalog refresh, not the download" {
+  # The byte host is the catalog's to name and can move between reads — the
+  # refresh in the retry path must pick up the current one.
+  add_game n64 "usa.zelda.z64" "rom-content"
+  gotg refresh
+  jq '. + {files_url: "http://127.0.0.1:1"}' "$GOTG_CACHE_FILE" >"$GOTG_CACHE_FILE.tmp"
+  mv "$GOTG_CACHE_FILE.tmp" "$GOTG_CACHE_FILE"
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [ -f "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
+}
+
+@test "a files_url that is not a url is ignored rather than fetched" {
+  add_game n64 "usa.zelda.z64" "rom-content"
+  gotg refresh
+  jq '. + {files_url: "ftp://evil.example"}' "$GOTG_CACHE_FILE" >"$GOTG_CACHE_FILE.tmp"
+  mv "$GOTG_CACHE_FILE.tmp" "$GOTG_CACHE_FILE"
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [ -f "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
+}

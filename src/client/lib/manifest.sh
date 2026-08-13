@@ -70,6 +70,16 @@ manifest_ensure() {
   fi
 }
 
+# Where the bytes live. The catalog names its own byte host (files_url) so a
+# deployment can keep /games off the proxied control plane; an older service
+# or cache names none, and the one service url then serves both.
+manifest_files_url() {
+  local base=""
+  manifest_cached && base="$(jq -r '.files_url // empty' "$GOTG_CACHE_FILE" 2>/dev/null)"
+  [[ "$base" == http://* || "$base" == https://* ]] || base=""
+  printf '%s' "${base:-$(service_url)}"
+}
+
 # Every game as {id, platform, handler, title, files: [{name, size_bytes,
 # sha256}]}. The id is on the wire now; nothing derives it from a path.
 manifest_games() {
