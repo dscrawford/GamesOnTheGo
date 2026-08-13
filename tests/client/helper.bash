@@ -55,6 +55,8 @@ _start_saves_service_once() {
     GOTG_LIBRARY_ROOTS="$SERVICE_LIBRARY_DIR" \
     GOTG_CATALOG_DB="$TEST_TMP/service-state/catalog.db" \
     GOTG_INDEX_TOKEN="index-token" \
+    GOTG_ADMIN_TOKEN="admin-token" \
+    GOTG_TOKENS_DB="$TEST_TMP/service-state/tokens.db" \
     PORT="$SERVICE_PORT" \
     "${GOTG_SERVICE_BIN:-gotg-proxy}" >"$TEST_TMP/service.log" 2>&1 &
   export SERVICE_PID=$!

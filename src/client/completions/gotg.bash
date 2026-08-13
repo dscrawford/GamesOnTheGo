@@ -32,7 +32,7 @@ _gotg() {
     sub="${COMP_WORDS[2]:-}"
     COMPREPLY=()
 
-    local commands="login refresh list info download install play configure steam saves controllers sync help"
+    local commands="login refresh list info download install play configure steam saves controllers admin sync help"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
         mapfile -t COMPREPLY < <(compgen -W "$commands" -- "$cur")
@@ -119,6 +119,11 @@ _gotg() {
                         esac
                     fi
                     ;;
+            esac
+            ;;
+        admin)
+            case $COMP_CWORD in
+                2) mapfile -t COMPREPLY < <(compgen -W "invite tokens revoke" -- "$cur") ;;
             esac
             ;;
         controllers)

@@ -78,7 +78,7 @@ store_save() {
       cat "$out"
       return 2
       ;;
-    401) die "the GOTG service refused the token — check $(saves_api_file)" ;;
+    401) die "the GOTG service refused the token — it may be revoked or expired; run: gotg login" ;;
     *) die "the GOTG service answered HTTP $http pushing $attr: $(jq -r '.error // "no detail"' "$out" 2>/dev/null)" ;;
   esac
 }
@@ -105,7 +105,10 @@ store_retrieve() {
       rm -f "$out.part"
       return 1
       ;;
-    401) die "the GOTG service refused the token — check $(saves_api_file)" ;;
+    # Not a die: this function's output is consumed inside $( ), where die
+    # kills only the subshell and rc 1 masquerades as 404. The caller owns
+    # the message.
+    401) return 3 ;;
     *)
       rm -f "$out.part"
       return 2
@@ -135,7 +138,10 @@ store_meta() {
   case "$http" in
     200) cat "$out" ;;
     404) return 1 ;;
-    401) die "the GOTG service refused the token — check $(saves_api_file)" ;;
+    # Not a die: this function's output is consumed inside $( ), where die
+    # kills only the subshell and rc 1 masquerades as 404. The caller owns
+    # the message.
+    401) return 3 ;;
     *) return 2 ;;
   esac
 }

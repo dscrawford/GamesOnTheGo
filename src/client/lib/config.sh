@@ -100,20 +100,49 @@ prompt_line() {
 # carries the whole library. Verified by fetching the catalog before writing,
 # so a typo is caught here rather than at launch time.
 cmd_login() {
-  local url token
-  url="$(prompt_line "GOTG service URL [https://gotg-api.dcraw.net]: " "https://gotg-api.dcraw.net")"
-  url="${url%/}"
-  [[ "$url" == http://* || "$url" == https://* ]] || die "service must be an http(s) URL: $url"
-  token="$(prompt_secret "Token: ")"
-  [[ -n "$token" ]] || die "a token is required"
+  local url token name=""
+  if [[ "${1:-}" == "--claim" ]]; then
+    local claim="${2:-}"
+    [[ -n "$claim" ]] || die "usage: gotg login [--claim <url>]"
+    claim="${claim%/}"
+    [[ "$claim" == http://*/claim/* || "$claim" == https://*/claim/* ]] ||
+      die "not a claim url: $claim"
+    url="${claim%%/claim/*}"
+
+    # One POST, one token: the reply is the only time the plaintext exists
+    # outside the config file about to be written.
+    local reply http
+    reply="$(mktemp)"
+    # Expanded now on purpose: the path is gone by trap time.
+  # shellcheck disable=SC2064
+    trap "rm -f '$reply'" RETURN
+    http="$(curl -sS -o "$reply" -w '%{http_code}' --connect-timeout 10 --max-time 30 \
+      -X POST "$claim")" || die "could not reach $url"
+    if [[ "$http" != 200 ]]; then
+      die "claim failed: $(jq -r '.error // "the service answered '"$http"'"' "$reply" 2>/dev/null)"
+    fi
+    token="$(jq -r '.token // empty' "$reply")"
+    name="$(jq -r '.name // empty' "$reply")"
+    [[ -n "$token" ]] || die "the claim reply carried no token"
+  else
+    url="$(prompt_line "GOTG service URL [https://gotg-api.dcraw.net]: " "https://gotg-api.dcraw.net")"
+    url="${url%/}"
+    [[ "$url" == http://* || "$url" == https://* ]] || die "service must be an http(s) URL: $url"
+    token="$(prompt_secret "Token: ")"
+    [[ -n "$token" ]] || die "a token is required"
+  fi
   # The shape every bearer token has; anything else would also corrupt the
   # curl config the token is spliced into.
   [[ "$token" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || die "token contains characters no bearer token uses"
 
   # Via curl --config on stdin, never argv: /proc/<pid>/cmdline is
-  # world-readable and this token does not expire.
+  # world-readable and this token does not expire. whoami is served by every
+  # pod; /catalog only by the library — and a claimed token deserves a check
+  # of the machinery that minted it.
+  local probe="/catalog"
+  [[ -z "$name" ]] || probe="/auth/whoami"
   printf 'header = "Authorization: Bearer %s"\n' "$token" |
-    curl --config - -fsS --connect-timeout 10 --max-time 30 "$url/catalog" >/dev/null 2>&1 ||
+    curl --config - -fsS --connect-timeout 10 --max-time 30 "$url$probe" >/dev/null 2>&1 ||
     die "the service at $url did not accept that token"
 
   local file tmp
@@ -121,13 +150,15 @@ cmd_login() {
   mkdir -p "$(dirname "$file")"
   tmp="$(mktemp "$file.XXXXXX")"
   if [[ -f "$file" ]]; then
-    jq --arg url "$url" --arg token "$token" '. + {url: $url, token: $token}' "$file" >"$tmp"
+    jq --arg url "$url" --arg token "$token" --arg name "$name" \
+      '. + {url: $url, token: $token} + (if $name != "" then {name: $name} else {} end)' "$file" >"$tmp"
   else
-    jq -n --arg url "$url" --arg token "$token" '{url: $url, token: $token}' >"$tmp"
+    jq -n --arg url "$url" --arg token "$token" --arg name "$name" \
+      '{url: $url, token: $token} + (if $name != "" then {name: $name} else {} end)' >"$tmp"
   fi
   chmod 600 "$tmp"
   mv "$tmp" "$file"
-  log "saved $file (mode 600)"
+  log "saved $file (mode 600)${name:+ — you are $name}"
 
   # The File Browser era left a password behind; a dead credential in a 0600
   # file is still a credential.

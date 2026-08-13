@@ -127,6 +127,7 @@ saves_cmd_setup() {
   local rc=0
   store_meta env-setup-probe >/dev/null || rc=$?
   ((rc == 2)) && die "could not reach the GOTG service at $(saves_api_url)"
+  ((rc == 3)) && die "the GOTG service refused the token — it may be revoked or expired; run: gotg login"
   log "  reachable, and the token is accepted"
   log ""
   log "Ready. Try: gotg saves status --all"
@@ -192,6 +193,9 @@ saves_status_one() {
   latest="$(store_meta "$attr" 2>/dev/null)" || rc=$?
   if ((rc == 1)); then
     printf '  %sremote %s nothing pushed yet\n' "$C_MUTED" "$C_RESET"
+    return 0
+  elif ((rc == 3)); then
+    printf '  %sremote %s token refused — run: gotg login\n' "$C_MUTED" "$C_RESET"
     return 0
   elif ((rc != 0)); then
     printf '  %sremote %s unreachable\n' "$C_MUTED" "$C_RESET"
@@ -367,6 +371,8 @@ saves_pull_one() {
   if ((rc == 1)); then
     log "$attr: nothing has been pushed yet"
     return 0
+  elif ((rc == 3)); then
+    die "the GOTG service refused the token — it may be revoked or expired; run: gotg login"
   elif ((rc != 0)); then
     die "$attr: could not reach the GOTG service at $(saves_api_url)"
   fi
@@ -396,8 +402,11 @@ saves_pull_one() {
   # store_retrieve hands curl the size cap, so an oversized answer is refused
   # in flight rather than measured afterwards.
   log "$attr: fetching generation $rgen ($(human_size "$rsize"))"
-  local got
-  got="$(store_retrieve "$attr" "$tmp/pull.tar.zst")" ||
+  local got fetch_rc=0
+  got="$(store_retrieve "$attr" "$tmp/pull.tar.zst")" || fetch_rc=$?
+  ((fetch_rc == 3)) &&
+    die "the GOTG service refused the token — it may be revoked or expired; run: gotg login"
+  ((fetch_rc != 0)) &&
     die "$attr: could not download the bundle from $(saves_api_url)"
   read -r rgen rhash <<<"$got"
 
