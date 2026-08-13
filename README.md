@@ -421,6 +421,7 @@ gotg play usa.super_mario_sunshine bse    # + BetterSunshineEngine
 gotg play usa.super_mario_sunshine bsmso  # + Better Super Mario Sunshine Online
 gotg play world.luigis_mansion_2_hd 60fps   # Luigi's Mansion 2 HD, unlocked to 60
 gotg play world.luigis_mansion_2_hd 120fps  # the same patch at a 120Hz refresh rate
+gotg play usa.legend_of_zelda_majoras_mask rando   # 2ship's own randomizer, its saves apart
 ```
 
 Not every variant rebuilds a disc. The Switch one installs a `.pchtxt` into the
