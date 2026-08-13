@@ -74,6 +74,10 @@ MAX_BODY = 64 * 1024
 # to five figures of rows.
 CATALOG_MAX_BODY = 8 * 1024 * 1024
 
+# The one body read before anybody is authenticated: {"code": …} around a
+# 49-character code.
+CLAIM_MAX_BODY = 256
+
 # A single byte-range request: bytes=N- or bytes=N-M. Multi-range answers 200
 # with the whole file rather than a multipart body nothing here needs. The
 # digit bound matters: int() on thousands of digits raises, and an absurd
@@ -754,13 +758,16 @@ class Handler(BaseHTTPRequestHandler):
 
         # The other pre-auth route: the claim code IS the credential, and only
         # as a POST — any other verb falls through to the 401 below. Same
-        # close-before-body rule as healthz; a body is never read here, since
-        # its declared length is attacker-controlled and the caps are
-        # post-auth.
+        # close-before-body rule as healthz.
         clean = path.split("?")[0]
-        if self.command == "POST" and clean.startswith("claim/"):
+        if self.command == "POST" and clean.split("/")[0] == "claim":
             self.close_connection = True
-            self._claim(clean[len("claim/") :])
+            if clean == "claim":
+                self._claim_from_body()
+            else:
+                # Kept for clients that predate the body form: it puts a live
+                # credential in the request line, which access logs keep.
+                self._claim(clean[len("claim/") :])
             return
 
         # Checked before the route is looked at, so an unauthenticated caller
@@ -832,6 +839,27 @@ class Handler(BaseHTTPRequestHandler):
             self._problem(404, f"nothing is proxied at /{prefix}")
 
     # --- per-person tokens --------------------------------------------------
+
+    def _claim_from_body(self) -> None:
+        """The code arrives as a body so that no log holds it. Read before
+        authentication, so it carries its own cap rather than the post-auth
+        ones."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self._problem(400, "malformed Content-Length")
+            return
+        if not 0 < length <= CLAIM_MAX_BODY:
+            self._problem(400, 'a claim is {"code": "gotgi_…"}')
+            return
+        try:
+            code = json.loads(self.rfile.read(length)).get("code", "")
+        except (ValueError, AttributeError):
+            code = ""
+        if not isinstance(code, str) or not code:
+            self._problem(400, 'a claim is {"code": "gotgi_…"}')
+            return
+        self._claim(code)
 
     def _claim(self, code: str) -> None:
         """One POST, one token. 410 for a code that existed (reuse means the

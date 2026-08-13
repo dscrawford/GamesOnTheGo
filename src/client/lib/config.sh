@@ -9,6 +9,18 @@
 
 config_exists() { [[ -f "$GOTG_CONFIG_FILE" ]]; }
 
+# A token over cleartext is a token given away, and this one does not expire.
+# Loopback is exempt: no network to read there, and the tests run on it.
+url_is_private_or_tls() {
+  case "$1" in
+    https://*) return 0 ;;
+    http://127.0.0.1 | http://127.0.0.1:* | http://127.0.0.1/*) return 0 ;;
+    http://localhost | http://localhost:* | http://localhost/*) return 0 ;;
+    http://\[::1\] | http://\[::1\]:* | http://\[::1\]/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Refuse to read a secret anyone else can read. Takes a path because the config
 # is no longer the only such file — api.json holds the GOTG service token, which
 # carries both artwork and saves.
@@ -108,16 +120,27 @@ cmd_login() {
     [[ "$claim" == http://*/claim/* || "$claim" == https://*/claim/* ]] ||
       die "not a claim url: $claim"
     url="${claim%%/claim/*}"
+    url_is_private_or_tls "$url" ||
+      die "that claim link is http, which hands the token to the network: $url"
+    local code="${claim##*/claim/}"
+    # A link that has been through a chat client arrives with tracking on it.
+    code="${code%%\?*}"
+    [[ "$code" =~ ^gotgi_[A-Za-z0-9_-]{40,50}$ ]] || die "not a claim url: $claim"
 
     # One POST, one token: the reply is the only time the plaintext exists
     # outside the config file about to be written.
     local reply http
     reply="$(mktemp)"
-    # Expanded now on purpose: the path is gone by trap time.
+    # Expanded now on purpose: the path is gone by trap time. EXIT too, since
+    # `die` exits without returning and would leave the plaintext in /tmp.
   # shellcheck disable=SC2064
-    trap "rm -f '$reply'" RETURN
-    http="$(curl -sS -o "$reply" -w '%{http_code}' --connect-timeout 10 --max-time 30 \
-      -X POST "$claim")" || die "could not reach $url"
+    trap "rm -f '$reply'" RETURN EXIT
+    # The code rides the body, not the URL: every log between here and the
+    # service keeps the request line, and this is live until spent. printf is
+    # a builtin, so unlike jq the code never reaches a world-readable cmdline.
+    http="$(printf '{"code":"%s"}' "$code" |
+      curl -sS -o "$reply" -w '%{http_code}' --connect-timeout 10 --max-time 30 \
+        -X POST --data-binary @- "$url/claim")" || die "could not reach $url"
     if [[ "$http" != 200 ]]; then
       die "claim failed: $(printable "$(jq -r '.error // "the service answered '"$http"'"' "$reply" 2>/dev/null)")"
     fi
@@ -128,6 +151,8 @@ cmd_login() {
     url="$(prompt_line "GOTG service URL [https://gotg-api.dcraw.net]: " "https://gotg-api.dcraw.net")"
     url="${url%/}"
     [[ "$url" == http://* || "$url" == https://* ]] || die "service must be an http(s) URL: $url"
+    url_is_private_or_tls "$url" ||
+      die "that url is http, which sends the token in the clear: $url"
     token="$(prompt_secret "Token: ")"
     [[ -n "$token" ]] || die "a token is required"
   fi

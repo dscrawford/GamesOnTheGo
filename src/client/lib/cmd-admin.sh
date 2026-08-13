@@ -39,9 +39,10 @@ admin_call() {
   local method="$1" path="$2" body="${3:-}" url reply http
   url="$(admin_url)"
   reply="$(mktemp)"
-  # Expanded now on purpose: the path is gone by trap time.
+  # Expanded now on purpose: the path is gone by trap time. EXIT too, since
+  # `die` never returns and an invite reply is a live credential in /tmp.
   # shellcheck disable=SC2064
-  trap "rm -f '$reply'" RETURN
+  trap "rm -f '$reply'" RETURN EXIT
   if [[ -n "$body" ]]; then
     http="$(admin_curl -X "$method" --data-binary "$body" -o "$reply" -w '%{http_code}' "$url$path")" ||
       die "could not reach $url"

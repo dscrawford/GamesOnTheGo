@@ -138,6 +138,36 @@ invite_code() {
   [ "$(jq -r .url "$GOTG_CONFIG_DIR/api.json")" = "$GOTG_SERVICE_URL" ]
 }
 
+@test "a link whose code is not a code is refused before the network" {
+  rm -f "$GOTG_CONFIG_DIR/api.json"
+  gotg login --claim "$GOTG_SERVICE_URL/claim/gotgi_short"
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"not a claim url"* ]]
+  [ ! -e "$GOTG_CONFIG_DIR/api.json" ]
+}
+
+@test "a cleartext claim link is refused before anything is sent" {
+  rm -f "$GOTG_CONFIG_DIR/api.json"
+  gotg login --claim "http://gotg.example.com/claim/gotgi_$(printf 'a%.0s' {1..43})"
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"hands the token to the network"* ]]
+  [ ! -e "$GOTG_CONFIG_DIR/api.json" ]
+}
+
+@test "a failed claim leaves no reply file behind" {
+  # mktemp's own naming, so this counts the client's temp files and not bats'.
+  # The reply holds the minted token, and a `die` must not leave it in /tmp.
+  local pattern="${TMPDIR:-/tmp}/tmp.??????????"
+  local before after
+  # shellcheck disable=SC2086
+  before="$(ls -d $pattern 2>/dev/null | wc -l)"
+  gotg login --claim "$GOTG_SERVICE_URL/claim/gotgi_$(printf 'b%.0s' {1..43})"
+  [ "$status" -ne 0 ]
+  # shellcheck disable=SC2086
+  after="$(ls -d $pattern 2>/dev/null | wc -l)"
+  [ "$after" -eq "$before" ]
+}
+
 @test "admin invite --ttl takes 1-999 whole days and nothing else" {
   local bad
   for bad in 0 -1 abc 1000 1.5 ""; do

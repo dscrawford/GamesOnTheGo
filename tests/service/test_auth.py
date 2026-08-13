@@ -53,6 +53,11 @@ def call(url, method="GET", token=None, body=None):
 
 
 def claim(url, code):
+    return call(f"{url}/claim", method="POST", body=json.dumps({"code": code}).encode())
+
+
+def claim_by_path(url, code):
+    """The pre-body-form shape, still served for clients that predate it."""
     return call(f"{url}/claim/{code}", method="POST")
 
 
@@ -100,6 +105,39 @@ def test_an_unknown_claim_code_is_404(service):
 def test_the_claim_route_survives_url_junk(service, token_store, suffix, expected):
     code = token_store.mint_invite("zoe")
     assert call(f"{service}/claim/" + suffix.format(code=code), method="POST")[0] == expected
+
+
+def test_the_older_path_shape_still_claims(service, token_store):
+    code = token_store.mint_invite("yara")
+    status, body = claim_by_path(service, code)
+    assert status == 200
+    assert json.loads(body)["name"] == "yara"
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (b"", 400),
+        (b"{}", 400),
+        (b"not json", 400),
+        (b'{"code": null}', 400),
+        (b'{"code": 7}', 400),
+        (b'["code"]', 400),
+        (b'{"code": "gotgi_never_minted"}', 404),
+        (b'{"code": "x"}' + b" " * 512, 400),  # over the pre-auth cap, unread
+    ],
+    ids=["empty", "no-code", "junk", "null", "number", "array", "unknown", "oversized"],
+)
+def test_a_claim_body_that_is_not_a_code_is_a_400_not_a_dropped_connection(service, body, expected):
+    assert call(f"{service}/claim", method="POST", body=body)[0] == expected
+
+
+def test_the_claim_code_never_reaches_the_request_line(service, token_store, capsys):
+    code = token_store.mint_invite("xena")
+    assert claim(service, code)[0] == 200
+    # The service's own log is the half we control; the ingress sees only
+    # POST /claim, which is the whole point of the body form.
+    assert code not in capsys.readouterr().out
 
 
 def test_claim_is_post_only(service, token_store):
