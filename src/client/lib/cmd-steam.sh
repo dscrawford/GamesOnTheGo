@@ -249,9 +249,16 @@ steam_fetch_artwork() {
     fi
   fi
 
+  # A mod's own title leads the search; the game it is a mod of stands
+  # behind it, and is always what libretro is asked for.
+  local fallback=()
+  local base_title
+  base_title="$(sanitize_title "$(manifest_field "$game" title)")"
+  [[ "$name" == "$base_title" ]] || fallback=(--fallback-name "$base_title")
+
   local result rc=0
   result="$(steam_artwork_helper --grid-dir "$(steam_grid_dir)" \
-    --appid "$appid" --name "$name" \
+    --appid "$appid" --name "$name" "${fallback[@]}" \
     --id "$(manifest_field "$game" id)" \
     --platform "$(manifest_field "$game" platform)" \
     --playlists "$GOTG_DATA/libretro-playlists.json" \

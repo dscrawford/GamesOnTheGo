@@ -247,10 +247,13 @@ class SteamGridDBSource:
     holding the real one. The API is identical either way, which is the point:
     the service *is* SteamGridDB as far as this class can tell."""
 
-    def __init__(self, base_url: str, api_key: str | None, name: str):
+    def __init__(self, base_url: str, api_key: str | None, names: list[str]):
         self.base_url = base_url
         self.api_key = api_key
-        self.name = name
+        # Tried in order: a mod's own title first, the game it is a mod of
+        # behind it — rando grids when the database has them, the base game's
+        # otherwise.
+        self.names = names
         self._note: dict = {}
         self._game_id: int | None = None
         self._looked = False
@@ -267,20 +270,26 @@ class SteamGridDBSource:
         if not self.api_key:
             self._note = {"skipped": "no api key"}
             return None
-        try:
-            game = find_game(self.base_url, self.api_key, self.name)
-        except urllib.error.HTTPError as error:
-            reason = "the api key was refused" if error.code == 401 else f"http {error.code}"
-            self._note = {"skipped": reason}
-            return None
-        except (urllib.error.URLError, OSError, ValueError) as error:
-            self._note = {"skipped": f"steamgriddb unreachable: {error}"}
-            return None
+        game = None
+        matched = None
+        for name in self.names:
+            try:
+                game = find_game(self.base_url, self.api_key, name)
+            except urllib.error.HTTPError as error:
+                reason = "the api key was refused" if error.code == 401 else f"http {error.code}"
+                self._note = {"skipped": reason}
+                return None
+            except (urllib.error.URLError, OSError, ValueError) as error:
+                self._note = {"skipped": f"steamgriddb unreachable: {error}"}
+                return None
+            if game:
+                matched = name
+                break
 
         if not game:
-            self._note = {"skipped": "no match", "name": self.name}
+            self._note = {"skipped": "no match", "names": self.names}
             return None
-        self._note = {"game": game.get("name"), "game_id": game.get("id")}
+        self._note = {"game": game.get("name"), "game_id": game.get("id"), "matched": matched}
         self._game_id = game.get("id")
         return self._game_id
 
@@ -377,6 +386,10 @@ def main(argv: list[str] | None = None) -> int:
     # looks for, whichever way the shortcut spelled it.
     parser.add_argument("--appid", required=True, type=lambda s: int(s) & 0xFFFFFFFF)
     parser.add_argument("--name", required=True)
+    parser.add_argument(
+        "--fallback-name",
+        help="the base game's title, tried when --name finds nothing",
+    )
     parser.add_argument("--api-key")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     # The second source needs to know which system to look under and which
@@ -410,12 +423,17 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report))
         return code
 
-    sgdb = SteamGridDBSource(args.base_url, args.api_key, args.name)
+    names = [args.name]
+    if args.fallback_name and args.fallback_name != args.name:
+        names.append(args.fallback_name)
+    sgdb = SteamGridDBSource(args.base_url, args.api_key, names)
     lr = LibretroSource(
         args.libretro_url,
         Path(args.playlists) if args.playlists else DEFAULT_PLAYLISTS,
         args.platform,
-        args.name,
+        # libretro is keyed by No-Intro names, which a mod's display title
+        # never matches — the base game's title is always the right key.
+        args.fallback_name or args.name,
         args.id,
         Path(args.cache_dir) if args.cache_dir else None,
     )

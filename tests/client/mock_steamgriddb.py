@@ -15,13 +15,14 @@ Endpoints, matching the v2 shapes:
 Assets come back highest score first, because that ordering is what "the top
 pick" means and a test should not have to know we sort.
 
-Usage: mock_steamgriddb.py <port> [--no-match] [--no-assets] [--reject-key]
+Usage: mock_steamgriddb.py <port> [--no-match] [--no-assets] [--reject-key] [--match-only=<substr>]
 """
 
 from __future__ import annotations
 
 import json
 import sys
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 KINDS = ("grids", "heroes", "logos", "icons")
@@ -31,6 +32,7 @@ class Handler(BaseHTTPRequestHandler):
     no_match = False
     no_assets = False
     reject_key = False
+    match_only = ""
 
     def log_message(self, format, *args):  # noqa: A002 — quiet under bats
         pass
@@ -75,7 +77,9 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/api/v2/search/autocomplete/"):
-            if self.no_match:
+            term = urllib.parse.unquote(path.rsplit("/", 1)[1])
+            missed = self.match_only and self.match_only.lower() not in term.lower()
+            if self.no_match or missed:
                 self._json(200, {"success": True, "data": []})
             else:
                 self._json(
@@ -111,6 +115,9 @@ def main() -> int:
     Handler.no_match = "--no-match" in sys.argv
     Handler.no_assets = "--no-assets" in sys.argv
     Handler.reject_key = "--reject-key" in sys.argv
+    for arg in sys.argv:
+        if arg.startswith("--match-only="):
+            Handler.match_only = arg[len("--match-only=") :]
     HTTPServer(("127.0.0.1", port), Handler).serve_forever()
     return 0
 

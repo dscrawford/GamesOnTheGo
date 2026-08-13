@@ -90,6 +90,31 @@ art() {
   [ -f "$GRID/2420322169p.png" ]
 }
 
+@test "a mod title that misses falls back to the game it is a mod of" {
+  restart_sgdb --match-only="Some Game"
+  run python3 "$ART" --grid-dir "$GRID" --appid 77 --name "Custom Rando Name" \
+    --fallback-name "Some Game" --base-url "$SGDB_URL" --api-key testkey
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.matched' <<<"$output")" = "Some Game" ]
+  [ -f "$GRID/77p.png" ]
+}
+
+@test "the mod's own title wins when the database has it" {
+  run python3 "$ART" --grid-dir "$GRID" --appid 78 --name "Custom Rando Name" \
+    --fallback-name "Some Game" --base-url "$SGDB_URL" --api-key testkey
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.matched' <<<"$output")" = "Custom Rando Name" ]
+}
+
+@test "neither name matching is still only a skip" {
+  restart_sgdb --no-match
+  run python3 "$ART" --grid-dir "$GRID" --appid 79 --name "Custom Rando Name" \
+    --fallback-name "Some Game" --base-url "$SGDB_URL" --api-key testkey
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.skipped' <<<"$output")" = "no match" ]
+  [ "$(jq -r '.names | length' <<<"$output")" -eq 2 ]
+}
+
 @test "the top pick is the highest scoring asset, not the first listed" {
   art
   # The mock lists a score-1 asset before a score-99 one.
@@ -312,6 +337,28 @@ EOF
   icon="$(python3 "$(dirname "$GOTG_BIN")/../share/gotg/steam/shortcuts.py" \
     --file "$SHORTCUTS" list | jq -r '.[0].icon')"
   [[ "$icon" == *"_icon.ico" ]]
+}
+
+@test "a variant with its own title still finds the base game's artwork" {
+  # The mod's title leads the search and misses; the game it is a mod of
+  # stands behind it.
+  restart_sgdb --match-only="Super Mario Sunshine"
+  setup_steam
+  jq -n '{api_key: "testkey"}' >"$GOTG_STEAMGRIDDB_KEY_FILE"
+  export GOTG_STEAMGRIDDB_URL="$SGDB_URL"
+  export GOTG_ENV_DIR="$TEST_TMP/env"
+  mkdir -p "$GOTG_ENV_DIR/games/gamecube"
+  : >"$GOTG_ENV_DIR/games/gamecube/usa.super_mario_sunshine.hd.nix"
+  fake_env env-gamecube-usa_super_mario_sunshine-hd "[]" "[]" "Sunshine HD Remaster"
+
+  gotg steam add usa.super_mario_sunshine hd
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"artwork: 5 file(s)"* ]]
+
+  local listing
+  listing="$(python3 "$(dirname "$GOTG_BIN")/../share/gotg/steam/shortcuts.py" \
+    --file "$SHORTCUTS" list)"
+  [ "$(jq -r '.[0].name' <<<"$listing")" = "Sunshine HD Remaster" ]
 }
 
 @test "art does not rewrite the appid or name of a shortcut it did not create" {
