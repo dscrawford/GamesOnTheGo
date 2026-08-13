@@ -51,7 +51,7 @@ Absent = _Sentinel("Absent")
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tokens (
     id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
     token_hash TEXT NOT NULL UNIQUE,
     display TEXT NOT NULL,
     created_at INTEGER NOT NULL,
@@ -59,8 +59,9 @@ CREATE TABLE IF NOT EXISTS tokens (
     revoked_at INTEGER,
     last_used_at INTEGER
 );
-CREATE INDEX IF NOT EXISTS tokens_hash ON tokens(token_hash);
-
+-- One live token per name; retired rows stay, because "when was the old
+-- token last seen" is the question a rotation exists to answer.
+CREATE UNIQUE INDEX IF NOT EXISTS tokens_live_name ON tokens(name) WHERE revoked_at IS NULL;
 CREATE TABLE IF NOT EXISTS invites (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -95,6 +96,36 @@ class TokenStore:
         self._write = self._connect()
         with self._write_lock, self._write:
             self._write.executescript(_SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        # v1 declared tokens.name UNIQUE, which forced rotation to DELETE the
+        # replaced row. SQLite cannot drop a column constraint in place, so
+        # the one shape change is a rebuild — idempotent, and a no-op on any
+        # store minted since.
+        with self._write_lock, self._write:
+            row = self._write.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tokens'").fetchone()
+            if row is None or "UNIQUE" not in row["sql"]:
+                return
+            self._write.executescript(
+                """
+                ALTER TABLE tokens RENAME TO tokens_v1;
+                CREATE TABLE tokens (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    display TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    expires_at INTEGER,
+                    revoked_at INTEGER,
+                    last_used_at INTEGER
+                );
+                INSERT INTO tokens SELECT * FROM tokens_v1;
+                DROP TABLE tokens_v1;
+                CREATE UNIQUE INDEX IF NOT EXISTS tokens_live_name
+                    ON tokens(name) WHERE revoked_at IS NULL;
+                """
+            )
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db, check_same_thread=False)
@@ -148,7 +179,12 @@ class TokenStore:
             ).fetchone()
             name = invite["name"]
 
-            self._write.execute("DELETE FROM tokens WHERE name = ?", (name,))
+            # Retire, never delete: rotation must not erase the audit trail
+            # of the token it replaces.
+            self._write.execute(
+                "UPDATE tokens SET revoked_at = ? WHERE name = ? AND revoked_at IS NULL",
+                (now, name),
+            )
             expires = None if invite["token_ttl"] is None else int(now + invite["token_ttl"])
             self._write.execute(
                 "INSERT INTO tokens (name, token_hash, display, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
@@ -173,8 +209,13 @@ class TokenStore:
         return row["name"]
 
     def _touch_last_used(self, name: str, now: float) -> None:
+        # The throttle predicate rides the UPDATE: concurrent verifies at a
+        # window boundary would otherwise each pay the write.
         with self._write_lock, self._write:
-            self._write.execute("UPDATE tokens SET last_used_at = ? WHERE name = ?", (int(now), name))
+            self._write.execute(
+                "UPDATE tokens SET last_used_at = ? WHERE name = ? AND (last_used_at IS NULL OR last_used_at <= ?)",
+                (int(now), name, int(now) - LAST_USED_INTERVAL),
+            )
 
     def revoke(self, name: str) -> bool:
         with self._write_lock, self._write:

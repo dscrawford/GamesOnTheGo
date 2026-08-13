@@ -52,7 +52,7 @@ from pathlib import Path
 
 from ..catalog import CatalogStore, Conflict, SweepRefused
 from ..saves import SavesStore
-from ..tokens import Absent, Claimed, TokenStore
+from ..tokens import TOKEN_RE, Absent, Claimed, TokenStore
 
 USER_AGENT = "gotg-proxy/0.5.0"
 
@@ -276,7 +276,14 @@ class Handler(BaseHTTPRequestHandler):
         # things logged. The path is raw attacker input, so control characters
         # are replaced — a crafted request-target must not write live escape
         # sequences into whoever is tailing the pod logs.
-        line = f"{self.command} {self.path.split('?')[0]} {args[1] if len(args) > 1 else ''}".strip()
+        path = self.path.split("?")[0]
+        # A claim code is a live credential riding the URL — a link-preview
+        # GET must not park it in the pod log past its single use. (The
+        # ingress access log still sees the full path; single-use-atomic
+        # claiming is the mitigation there.)
+        if path.startswith("/claim/"):
+            path = f"/claim/…{path[-4:]}"
+        line = f"{self.command} {path} {args[1] if len(args) > 1 else ''}".strip()
         print("".join(c if c.isprintable() else "�" for c in line))
 
     # --- replies ------------------------------------------------------------
@@ -322,6 +329,8 @@ class Handler(BaseHTTPRequestHandler):
         # compare_digest rather than ==: a plain comparison returns early on the
         # first wrong byte, which leaks the secret a character at a time.
         bearer = self._bearer()
+        if not bearer:
+            return None
         if hmac.compare_digest(bearer, self.config.token.encode()):
             return "legacy"
         if self.config.index_token and hmac.compare_digest(bearer, self.config.index_token.encode()):
@@ -332,7 +341,10 @@ class Handler(BaseHTTPRequestHandler):
             name = self.token_store.verify(bearer.decode("latin-1"))
             if name:
                 return name
-        if self.config.auth_url:
+        # Only a plausibly-real personal token earns the network hop: during
+        # an api-pod outage the failure path is uncached, and a 3s stall per
+        # junk bearer would be a library-thread famine.
+        if self.config.auth_url and TOKEN_RE.match(bearer.decode("latin-1")):
             return self._introspect(bearer)
         return None
 
@@ -873,12 +885,17 @@ class Handler(BaseHTTPRequestHandler):
                 asked = json.loads(body or b"{}")
                 name = asked.get("name", "")
                 ttl_days = float(asked.get("ttl_days", 7))
-            except (ValueError, AttributeError):
+            except (ValueError, AttributeError, TypeError):
                 self._problem(400, 'the body is {"name": ..., "ttl_days"?: ...}')
+                return
+            # False for NaN, refuses Infinity: json accepts both, and either
+            # overflows int() further down as an uncaught OverflowError.
+            if not 0 < ttl_days <= 3650:
+                self._problem(400, "ttl_days must be between 0 and 3650")
                 return
             try:
                 code = self.token_store.mint_invite(name, ttl=ttl_days * 86400)
-            except ValueError as error:
+            except (ValueError, TypeError, OverflowError) as error:
                 self._problem(400, str(error))
                 return
             self._send(200, json.dumps({"name": name, "code": code}).encode(), "application/json")

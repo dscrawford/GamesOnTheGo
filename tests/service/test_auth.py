@@ -21,6 +21,7 @@ from gotg.tokens import TokenStore
 
 LEGACY = "legacy-token"
 ADMIN = "admin-token"
+INDEX = "index-token"
 
 
 @pytest.fixture
@@ -32,7 +33,7 @@ def token_store(tmp_path):
 def service(tmp_path, token_store):
     import threading
 
-    config = Config(token=LEGACY, admin_token=ADMIN)
+    config = Config(token=LEGACY, admin_token=ADMIN, index_token=INDEX)
     store = SavesStore(root=tmp_path / "saves", keep=3, max_bytes=100_000)
     server = make_server("127.0.0.1", free_port(), config, store, token_store=token_store)
     threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
@@ -84,6 +85,23 @@ def test_an_unknown_claim_code_is_404(service):
     assert claim(service, "gotgi_never_minted")[0] == 404
 
 
+@pytest.mark.parametrize(
+    ("suffix", "expected"),
+    [
+        ("{code}", 200),
+        ("{code}?utm_source=chat", 200),  # query junk is stripped before hashing
+        ("{code}/", 404),  # a slash is part of no code; the client strips it, the service must not 500
+        ("{code}/extra", 404),
+        ("", 404),
+        ("%2e%2e/admin", 404),
+    ],
+    ids=["plain", "query-junk", "trailing-slash", "slash-extra", "empty-code", "encoded-climb"],
+)
+def test_the_claim_route_survives_url_junk(service, token_store, suffix, expected):
+    code = token_store.mint_invite("zoe")
+    assert call(f"{service}/claim/" + suffix.format(code=code), method="POST")[0] == expected
+
+
 def test_claim_is_post_only(service, token_store):
     code = token_store.mint_invite("carol")
     status, _ = call(f"{service}/claim/{code}")
@@ -125,13 +143,27 @@ def test_a_deployment_without_a_token_store_says_so(tmp_path):
 # --- whoami ------------------------------------------------------------------
 
 
-def test_whoami_names_every_principal(service):
-    status, body = call(f"{service}/auth/whoami", token=LEGACY)
-    assert status == 200
-    assert json.loads(body)["name"] == "legacy"
+@pytest.mark.parametrize(
+    ("token", "status", "name"),
+    [
+        (LEGACY, 200, "legacy"),
+        (INDEX, 200, "indexer"),
+        (None, 401, None),
+        ("gotg_wrong", 401, None),
+    ],
+    ids=["legacy", "indexer", "missing", "wrong"],
+)
+def test_whoami_names_every_principal(service, token, status, name):
+    got_status, body = call(f"{service}/auth/whoami", token=token)
+    assert got_status == status
+    if name:
+        assert json.loads(body)["name"] == name
 
-    status, _ = call(f"{service}/auth/whoami")
-    assert status == 401
+
+def test_whoami_answers_head_with_status_and_no_body(service):
+    status, body = call(f"{service}/auth/whoami", method="HEAD", token=LEGACY)
+    assert status == 200
+    assert body == b""
 
     status, _ = call(f"{service}/auth/whoami", method="POST", token=LEGACY, body=b"{}")
     assert status == 405
@@ -193,15 +225,61 @@ def test_the_admin_token_is_no_good_outside_admin(service):
     assert call(f"{service}/auth/whoami", token=ADMIN)[0] == 401
 
 
-def test_a_bad_invite_name_is_a_400(service):
-    for bad in ["Iris", "", "a b", "legacy"]:
-        status, _ = call(
-            f"{service}/admin/invites",
-            method="POST",
-            token=ADMIN,
-            body=json.dumps({"name": bad}).encode(),
-        )
-        assert status == 400
+@pytest.mark.parametrize(
+    "body",
+    [
+        json.dumps({"name": "Iris"}).encode(),
+        json.dumps({"name": ""}).encode(),
+        json.dumps({"name": "a b"}).encode(),
+        json.dumps({"name": "legacy"}).encode(),
+        json.dumps({"name": "x" * 33}).encode(),
+        b"not json",
+        b"[1, 2]",
+        b'"a string"',
+        b"null",
+        b'{"name": "x", "ttl_days": "much"}',
+        b'{"name": "x", "ttl_days": NaN}',
+        b'{"name": 123}',
+        b'{"name": "x", "ttl_days": null}',
+        b'{"name": "x", "ttl_days": 1e300}',
+        b'{"name": "x", "ttl_days": Infinity}',
+    ],
+    ids=[
+        "upper",
+        "empty",
+        "space",
+        "reserved",
+        "too-long",
+        "not-json",
+        "array",
+        "string",
+        "null",
+        "ttl-word",
+        "ttl-nan",
+        "name-int",
+        "ttl-null",
+        "ttl-huge",
+        "ttl-inf",
+    ],
+)
+def test_a_bad_invite_body_is_a_400_never_a_dropped_connection(service, body):
+    status, _ = call(f"{service}/admin/invites", method="POST", token=ADMIN, body=body)
+    assert status == 400
+
+
+def test_the_longest_allowed_name_mints_over_the_wire(service):
+    status, _ = call(
+        f"{service}/admin/invites",
+        method="POST",
+        token=ADMIN,
+        body=json.dumps({"name": "a" * 32}).encode(),
+    )
+    assert status == 200
+
+
+def test_an_oversized_admin_body_is_413(service):
+    status, _ = call(f"{service}/admin/invites", method="POST", token=ADMIN, body=b"x" * (64 * 1024 + 1))
+    assert status == 413
 
 
 def test_validate_refuses_an_admin_token_that_matches(token_store):
@@ -271,6 +349,7 @@ def test_a_dead_api_pod_fails_personal_tokens_but_not_legacy(two_pods, token_sto
     token = json.loads(body)["token"]
 
     api.shutdown()
+    api.server_close()  # refuse instantly instead of hanging AUTH_TIMEOUT
     # Uncached (never seen): the library cannot vouch for it.
     assert call(f"{library_url}/auth/whoami", token=token)[0] == 401
     # The break-glass path stays open.
@@ -281,3 +360,44 @@ def test_a_wrong_token_is_negative_cached_briefly(two_pods, token_store):
     _, _, library_url = two_pods
     assert call(f"{library_url}/auth/whoami", token="gotg_nope")[0] == 401
     assert call(f"{library_url}/auth/whoami", token="gotg_nope")[0] == 401
+
+
+def test_a_non_ascii_bearer_earns_401_through_introspection_not_a_crash(two_pods):
+    # The header arrives latin-1 decoded; a stray high byte must survive the
+    # round trip into the forwarded Authorization header.
+    _, _, library_url = two_pods
+    host, port = library_url.removeprefix("http://").split(":")
+    with socket.create_connection((host, int(port)), timeout=5) as sock:
+        sock.sendall(
+            b"GET /auth/whoami HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer gotg_\x80\xff\r\nConnection: close\r\n\r\n"
+        )
+        reply = b""
+        while chunk := sock.recv(4096):
+            reply += chunk
+    assert b"401" in reply.split(b"\r\n", 1)[0]
+
+
+def test_the_auth_cache_clears_at_its_bound_instead_of_growing(tmp_path, token_store):
+    import threading
+
+    api = make_server("127.0.0.1", free_port(), Config(token=LEGACY), token_store=token_store)
+    threading.Thread(target=lambda: api.serve_forever(poll_interval=0.05), daemon=True).start()
+    api_url = f"http://127.0.0.1:{api.server_port}"
+    library = make_server("127.0.0.1", free_port(), Config(token=LEGACY, auth_url=api_url))
+    threading.Thread(target=lambda: library.serve_forever(poll_interval=0.05), daemon=True).start()
+    try:
+        # Keys are attacker-supplied hashes; the bound is the whole defence
+        # against a memory-growth denial on the internet-facing pod.
+        handler = library.RequestHandlerClass
+        for i in range(1025):
+            handler.auth_cache[f"stale-{i}"] = (None, 0.0)
+
+        code = token_store.mint_invite("nina")
+        _, body = claim(api_url, code)
+        token = json.loads(body)["token"]
+        status, _ = call(f"http://127.0.0.1:{library.server_port}/auth/whoami", token=token)
+        assert status == 200
+        assert len(handler.auth_cache) == 1
+    finally:
+        library.shutdown()
+        api.shutdown()

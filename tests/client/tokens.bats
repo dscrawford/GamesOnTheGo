@@ -110,3 +110,87 @@ invite_code() {
   [[ "$output" == *"revoke"* ]]
   [[ "$output" == *"tokens"* ]]
 }
+
+@test "login --claim merges into an existing api.json instead of rewriting it" {
+  mkdir -p "$GOTG_CONFIG_DIR"
+  chmod 700 "$GOTG_CONFIG_DIR"
+  jq -n --arg url "$GOTG_SERVICE_URL" \
+    '{url: $url, token: "test-token", steamgriddb_base: "kept-field"}' \
+    >"$GOTG_CONFIG_DIR/api.json"
+  chmod 600 "$GOTG_CONFIG_DIR/api.json"
+
+  local code
+  code="$(invite_code erin-deck)"
+  gotg login --claim "$GOTG_SERVICE_URL/claim/$code"
+  [ "$status" -eq 0 ]
+
+  [ "$(jq -r .steamgriddb_base "$GOTG_CONFIG_DIR/api.json")" = "kept-field" ]
+  [ "$(jq -r .name "$GOTG_CONFIG_DIR/api.json")" = "erin-deck" ]
+  [[ "$(jq -r .token "$GOTG_CONFIG_DIR/api.json")" == gotg_* ]]
+  [ "$(stat -c '%a' "$GOTG_CONFIG_DIR/api.json")" = "600" ]
+}
+
+@test "a claim url with query junk still claims and derives the base url" {
+  local code
+  code="$(invite_code hank)"
+  gotg login --claim "$GOTG_SERVICE_URL/claim/$code?utm_source=chat"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .url "$GOTG_CONFIG_DIR/api.json")" = "$GOTG_SERVICE_URL" ]
+}
+
+@test "admin invite --ttl takes 1-999 whole days and nothing else" {
+  local bad
+  for bad in 0 -1 abc 1000 1.5 ""; do
+    admin invite kate --ttl "$bad"
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"1-999"* ]]
+  done
+  admin invite kate --ttl
+  [ "$status" -ne 0 ]
+
+  admin invite kate --ttl 30
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/claim/gotgi_"* ]]
+  [[ "$stderr" == *"30 day(s)"* ]]
+}
+
+@test "admin reaches the url in api.json before GOTG_SERVICE_URL" {
+  write_api_config
+  run --separate-stderr env GOTG_ADMIN_TOKEN="admin-token" \
+    GOTG_SERVICE_URL="http://127.0.0.1:1" "$GOTG_BIN" admin tokens
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NAME"* ]]
+}
+
+@test "saves status reports a refused token as a fact, not a failure" {
+  fake_env env-snes '["saves/**"]'
+  write_api_config "gotg_bogus"
+  gotg saves status --all
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"token refused"* ]]
+  [[ "$output" == *"gotg login"* ]]
+}
+
+@test "setup's probe catches a token revoked since login" {
+  local code
+  code="$(invite_code eve)"
+  gotg login --claim "$GOTG_SERVICE_URL/claim/$code"
+  [ "$status" -eq 0 ]
+  admin revoke eve
+  [ "$status" -eq 0 ]
+
+  gotg saves setup
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"revoked or expired"* ]]
+}
+
+@test "a refused token cannot stop a launch: the pre-play pull shrugs" {
+  load_client_libs
+  # shellcheck source=/dev/null
+  source "$GOTG_LIB/cmd-saves.sh"
+  saves_tmp_init
+  fake_env env-snes '["saves/**"]'
+  write_api_config "gotg_bogus"
+  run saves_pull_auto env-snes
+  [ "$status" -eq 0 ]
+}

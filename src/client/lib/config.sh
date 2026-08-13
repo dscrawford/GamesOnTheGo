@@ -119,10 +119,10 @@ cmd_login() {
     http="$(curl -sS -o "$reply" -w '%{http_code}' --connect-timeout 10 --max-time 30 \
       -X POST "$claim")" || die "could not reach $url"
     if [[ "$http" != 200 ]]; then
-      die "claim failed: $(jq -r '.error // "the service answered '"$http"'"' "$reply" 2>/dev/null)"
+      die "claim failed: $(printable "$(jq -r '.error // "the service answered '"$http"'"' "$reply" 2>/dev/null)")"
     fi
     token="$(jq -r '.token // empty' "$reply")"
-    name="$(jq -r '.name // empty' "$reply")"
+    name="$(printable "$(jq -r '.name // empty' "$reply")")"
     [[ -n "$token" ]] || die "the claim reply carried no token"
   else
     url="$(prompt_line "GOTG service URL [https://gotg-api.dcraw.net]: " "https://gotg-api.dcraw.net")"

@@ -7,6 +7,7 @@ out on this side.
 """
 
 import re
+import sqlite3
 import threading
 import time
 
@@ -24,6 +25,10 @@ from gotg.tokens import (
 @pytest.fixture
 def store(tmp_path):
     return TokenStore(db=tmp_path / "state" / "tokens.db")
+
+
+def live(store):
+    return [r for r in store.tokens() if r["revoked_at"] is None]
 
 
 def test_a_minted_token_has_the_prefix_and_the_charset():
@@ -47,19 +52,46 @@ def test_an_invite_claims_into_a_working_token(store):
     assert store.verify(token) == "alice-deck"
 
 
-def test_a_claim_code_works_exactly_once(store):
-    code = store.mint_invite("bob")
+def _never_minted(store):
+    return "gotgi_never_minted"
+
+
+def _empty(store):
+    return ""
+
+
+def _near_miss(store):
+    return store.mint_invite("kim")[:-1]
+
+
+def _expired(store):
+    return store.mint_invite("kim", ttl=-1)
+
+
+def _expiring_this_instant(store):
+    return store.mint_invite("kim", ttl=0)
+
+
+def _already_claimed(store):
+    code = store.mint_invite("kim")
     store.claim(code)
-    assert store.claim(code) is Claimed
+    return code
 
 
-def test_an_unknown_code_is_absent_not_claimed(store):
-    assert store.claim("gotgi_nonsense") is Absent
-
-
-def test_an_expired_invite_is_claimed_never_a_token(store):
-    code = store.mint_invite("carol", ttl=-1)
-    assert store.claim(code) is Claimed
+@pytest.mark.parametrize(
+    ("arrange", "expected"),
+    [
+        (_never_minted, Absent),
+        (_empty, Absent),
+        (_near_miss, Absent),
+        (_expired, Claimed),
+        (_expiring_this_instant, Claimed),
+        (_already_claimed, Claimed),
+    ],
+    ids=lambda p: getattr(p, "__name__", repr(p)).lstrip("_"),
+)
+def test_a_code_that_cannot_claim_says_whether_it_ever_existed(store, arrange, expected):
+    assert store.claim(arrange(store)) is expected
 
 
 def test_concurrent_claims_yield_exactly_one_token(store):
@@ -91,6 +123,28 @@ def test_claiming_again_rotates_rather_than_erroring(store):
 
     assert store.verify(second_token) == "erin"
     assert store.verify(first_token) is None
+    # Retired, not erased: the replaced token's history survives the rotation.
+    rows = [r for r in store.tokens() if r["name"] == "erin"]
+    assert len(rows) == 2
+    assert sorted(r["revoked_at"] is None for r in rows) == [False, True]
+
+
+def test_two_outstanding_invites_the_later_claim_wins_regardless_of_mint_order(store):
+    first = store.mint_invite("erin")
+    second = store.mint_invite("erin")
+    _, from_first = store.claim(first)
+    _, from_second = store.claim(second)
+    assert store.verify(from_first) is None
+    assert store.verify(from_second) == "erin"
+    assert [r["name"] for r in live(store)] == ["erin"]
+
+    third = store.mint_invite("erin")
+    fourth = store.mint_invite("erin")
+    _, from_fourth = store.claim(fourth)
+    _, from_third = store.claim(third)
+    assert store.verify(from_fourth) is None
+    assert store.verify(from_third) == "erin"
+    assert len(live(store)) == 1
 
 
 def test_revocation_is_immediate(store):
@@ -102,10 +156,41 @@ def test_revocation_is_immediate(store):
     assert store.revoke("frank") is False
 
 
-def test_an_expired_token_stops_verifying(store):
-    code = store.mint_invite("grace", token_ttl=-1)
+@pytest.mark.parametrize(
+    ("token_ttl", "advance", "verifies"),
+    [
+        (None, 0, True),
+        (None, 10**9, True),
+        (100, 99, True),
+        (100, 100, False),  # the bound is closed: exactly expires_at refuses
+        (100, 101, False),
+        (0, 0, False),
+        (-1, 0, False),
+    ],
+    ids=["no-ttl-now", "no-ttl-forever", "before", "at-the-second", "after", "zero-ttl", "negative-ttl"],
+)
+def test_token_expiry_is_a_closed_bound_at_the_second(store, monkeypatch, token_ttl, advance, verifies):
+    now = time.time()
+    monkeypatch.setattr(time, "time", lambda: now)
+    code = store.mint_invite("kate", token_ttl=token_ttl)
     _, token = store.claim(code)
-    assert store.verify(token) is None
+    monkeypatch.setattr(time, "time", lambda: now + advance)
+    assert (store.verify(token) == "kate") is verifies
+
+
+@pytest.mark.parametrize(
+    "bogus",
+    ["", "gotg_wrong", "Bearer gotg_x", "gotg_\xff\x80"],
+    ids=["empty", "wrong", "with-scheme", "non-ascii"],
+)
+def test_a_token_that_was_never_minted_never_verifies(store, bogus):
+    assert store.verify(bogus) is None
+
+
+def test_a_claim_code_is_not_itself_a_token(store):
+    code = store.mint_invite("lena")
+    store.claim(code)
+    assert store.verify(code) is None
 
 
 def test_the_plaintext_token_never_touches_the_disk(store, tmp_path):
@@ -132,10 +217,37 @@ def test_the_listing_shows_display_never_the_hash_material(store):
     assert token not in str(row)
 
 
-def test_a_bad_name_is_refused_at_invite_time(store):
-    for bad in ["", "Iris", "a b", "../x", "legacy", "indexer", "admin", "x" * 33]:
-        with pytest.raises(ValueError):
-            store.mint_invite(bad)
+@pytest.mark.parametrize(
+    "bad",
+    ["", "Iris", "a b", "../x", "-lead", "_lead", ".dot", "a\nb", "café", "x" * 33, "legacy", "indexer", "admin"],
+    ids=[
+        "empty",
+        "upper",
+        "space",
+        "traversal",
+        "dash-lead",
+        "under-lead",
+        "dot-lead",
+        "newline",
+        "unicode",
+        "33-chars",
+        "legacy",
+        "indexer",
+        "admin",
+    ],
+)
+def test_a_bad_name_is_refused_at_invite_time(store, bad):
+    with pytest.raises(ValueError):
+        store.mint_invite(bad)
+
+
+@pytest.mark.parametrize(
+    "good",
+    ["a", "9lives", "alice-deck", "a_b", "trailing-", "a" * 32],
+    ids=["one-char", "digit-lead", "person-device", "underscore", "trailing-dash", "32-chars"],
+)
+def test_a_usable_name_mints(store, good):
+    assert store.mint_invite(good).startswith("gotgi_")
 
 
 def test_last_used_writes_are_throttled(store, monkeypatch):
@@ -160,3 +272,65 @@ def test_last_used_writes_are_throttled(store, monkeypatch):
     monkeypatch.setattr(time, "time", lambda: now + 120)
     assert store.verify(token) == "judy"
     assert len(writes) <= 2
+
+
+def test_reads_interleave_with_rotations_without_busy_errors(store):
+    # WAL smoke: fresh read connections racing the single write connection
+    # must be absorbed by busy_timeout, never surfaced.
+    codes = [store.mint_invite(f"user-{i}") for i in range(4)]
+    tokens = [store.claim(c)[1] for c in codes]
+    errors: list[Exception] = []
+    stop = threading.Event()
+
+    def hammer(token):
+        while not stop.is_set():
+            try:
+                store.verify(token)
+            except Exception as error:  # noqa: BLE001 — "no exception" is the assertion
+                errors.append(error)
+                return
+
+    readers = [threading.Thread(target=hammer, args=(t,)) for t in tokens]
+    for r in readers:
+        r.start()
+    try:
+        for _ in range(10):
+            for i in range(4):
+                store.claim(store.mint_invite(f"user-{i}"))
+    finally:
+        stop.set()
+        for r in readers:
+            r.join()
+    assert errors == []
+
+
+def test_a_v1_store_migrates_without_losing_rows(tmp_path):
+    db = tmp_path / "state" / "tokens.db"
+    db.parent.mkdir(parents=True)
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE tokens (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            token_hash TEXT NOT NULL UNIQUE,
+            display TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER,
+            revoked_at INTEGER,
+            last_used_at INTEGER
+        );
+        INSERT INTO tokens (name, token_hash, display, created_at)
+        VALUES ('old-timer', 'abc123', 'gotg_…1234', 1700000000);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = TokenStore(db=db)
+    rows = store.tokens()
+    assert [r["name"] for r in rows] == ["old-timer"]
+    # And the rebuilt shape rotates without erasing.
+    code = store.mint_invite("old-timer")
+    store.claim(code)
+    assert len([r for r in store.tokens() if r["name"] == "old-timer"]) == 2

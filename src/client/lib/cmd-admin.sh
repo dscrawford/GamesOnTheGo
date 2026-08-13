@@ -49,7 +49,7 @@ admin_call() {
       die "could not reach $url"
   fi
   if [[ "$http" != 200 ]]; then
-    die "the service answered $http: $(jq -r '.error // "no detail"' "$reply" 2>/dev/null)"
+    die "the service answered $http: $(printable "$(jq -r '.error // "no detail"' "$reply" 2>/dev/null)")"
   fi
   cat "$reply"
 }
@@ -76,6 +76,7 @@ admin_invite() {
   printf '%s/claim/%s\n' "$(admin_url)" "$code"
   log ""
   log "they run: gotg login --claim <that url>"
+  log "a claim that fails as already-used means someone else got there — revoke and re-invite"
 }
 
 admin_tokens() {

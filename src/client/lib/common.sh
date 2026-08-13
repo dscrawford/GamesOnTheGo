@@ -32,6 +32,9 @@ GOTG_ATTR_RE='^env-[a-z0-9][a-z0-9_-]*$'
 # exception is the same as nothing being one. The label is coloured rather than
 # the message, so the text stays readable when it is quoted or grepped.
 log() { printf '%s\n' "$*" >&2; }
+# For strings a server chose: a hostile endpoint must not write live escape
+# sequences into the terminal through an error message or a name.
+printable() { tr -cd '[:print:]' <<<"$*"; }
 warn() { printf '%swarning:%s %s\n' "$C_WARN" "$C_RESET" "$*" >&2; }
 success() { printf '%s%s%s\n' "$C_OK" "$*" "$C_RESET" >&2; }
 
