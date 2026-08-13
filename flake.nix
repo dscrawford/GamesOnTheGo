@@ -218,16 +218,25 @@
             shellcheck
             bats
             git
+            bash-completion
           ]);
 
           # Pin the checkout at shell entry, so `gotg` keeps meaning this tree
           # even from a subdirectory.
           shellHook = ''
             export GOTG_DEV_ROOT="$PWD"
-            # The completion out of the checkout, so a change to it applies on
-            # save like everything else here. Guarded because the builtins it
-            # uses exist only where bash was built with programmable completion.
+            # Completion for a `nix develop` session: the machinery first, so
+            # every tool in this shell completes, then gotg's own out of the
+            # checkout, so a change to it applies on save like everything else
+            # here. Guarded because the builtins they use exist only where
+            # bash was built with programmable completion.
+            #
+            # None of this can reach a shell that entered through direnv —
+            # direnv carries environment variables, not `complete`
+            # registrations. There, one line in your own bashrc is the answer:
+            #   source ~/.local/state/gotg/app/share/bash-completion/completions/gotg
             if [ -n "''${BASH_VERSION:-}" ] && type -t complete >/dev/null 2>&1; then
+              . ${pkgs.bash-completion}/etc/profile.d/bash_completion.sh
               . "$PWD/src/client/completions/gotg.bash"
             fi
           '';
