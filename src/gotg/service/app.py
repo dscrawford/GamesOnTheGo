@@ -33,6 +33,7 @@ has.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import os
@@ -51,12 +52,17 @@ from pathlib import Path
 
 from ..catalog import CatalogStore, Conflict, SweepRefused
 from ..saves import SavesStore
+from ..tokens import Absent, Claimed, TokenStore
 
 USER_AGENT = "gotg-proxy/0.4.0"
 
 # Bounded, because a request that never returns holds a thread open and enough
 # of them stop the proxy answering anybody.
 TIMEOUT = 20
+
+# Introspection is an in-cluster hop on every cache miss; a wedged api pod
+# must not pin library threads for the full upstream TIMEOUT.
+AUTH_TIMEOUT = 3
 
 # The largest request body worth accepting. An IGDB query is a line or two; a
 # caller claiming megabytes is broken or trying to make the proxy hold it all
@@ -169,6 +175,12 @@ class Config:
     # the client token lives on every laptop; catalog writes without it answer
     # 503 rather than ever falling back to the client token.
     index_token: str = ""
+    # Mints and revokes per-person tokens, valid only under /admin — an admin
+    # token that could also read saves would be one more shared secret.
+    admin_token: str = ""
+    # The library pod's pointer at the pod holding the token store: a bearer
+    # no local check recognizes is asked about at {auth_url}/auth/whoami.
+    auth_url: str = ""
 
     def validate(self) -> Config:
         if not self.token:
@@ -181,6 +193,11 @@ class Config:
             raise ValueError(
                 "the index token equals the client token. Refusing to start: "
                 "that would let every client rewrite the catalog."
+            )
+        if self.admin_token and self.admin_token in (self.token, self.index_token):
+            raise ValueError(
+                "the admin token equals another credential. Refusing to start: "
+                "minting tokens must need more than holding one."
             )
         return self
 
@@ -241,6 +258,11 @@ class Handler(BaseHTTPRequestHandler):
     catalog: CatalogStore | None
     files_dir: Path | None
     streams: threading.BoundedSemaphore
+    token_store: TokenStore | None
+    auth_cache: dict
+    auth_cache_lock: threading.Lock
+    auth_cache_ttl: float
+    auth_neg_ttl: float
 
     server_version = USER_AGENT
     # A stalled stream must not hold a slot forever: without this the socket
@@ -290,12 +312,62 @@ class Handler(BaseHTTPRequestHandler):
         return token.encode("latin-1", "replace")
 
     def _authenticated(self) -> bool:
+        return self._principal() is not None
+
+    def _principal(self) -> str | None:
+        """Who this bearer is: "legacy" (the shared env token), "indexer",
+        "admin", a per-person token's name, or None. The names the store can
+        mint exclude the three sentinels by NAME_RE, so they cannot collide.
+        """
         # compare_digest rather than ==: a plain comparison returns early on the
         # first wrong byte, which leaks the secret a character at a time.
         bearer = self._bearer()
         if hmac.compare_digest(bearer, self.config.token.encode()):
-            return True
-        return bool(self.config.index_token) and hmac.compare_digest(bearer, self.config.index_token.encode())
+            return "legacy"
+        if self.config.index_token and hmac.compare_digest(bearer, self.config.index_token.encode()):
+            return "indexer"
+        if self.config.admin_token and hmac.compare_digest(bearer, self.config.admin_token.encode()):
+            return "admin"
+        if self.token_store is not None:
+            name = self.token_store.verify(bearer.decode("latin-1"))
+            if name:
+                return name
+        if self.config.auth_url:
+            return self._introspect(bearer)
+        return None
+
+    def _introspect(self, bearer: bytes) -> str | None:
+        """Ask the pod that holds the token store. Cached by token hash — a
+        revocation lands here one positive TTL late, which is the accepted
+        cost of not building cross-pod invalidation. Network failure is
+        unauthenticated and uncached, so the break-glass legacy token (checked
+        before this) keeps working through an api-pod outage."""
+        key = hashlib.sha256(bearer).hexdigest()
+        now = time.monotonic()
+        with self.auth_cache_lock:
+            hit = self.auth_cache.get(key)
+            if hit is not None and hit[1] > now:
+                return hit[0]
+
+        request = urllib.request.Request(f"{self.config.auth_url}/auth/whoami")
+        request.add_header("Authorization", f"Bearer {bearer.decode('latin-1')}")
+        try:
+            with urllib.request.urlopen(request, timeout=AUTH_TIMEOUT) as response:
+                name = json.loads(response.read()).get("name")
+        except urllib.error.HTTPError as error:
+            error.close()
+            name = None
+        except (urllib.error.URLError, OSError, ValueError):
+            return None
+
+        ttl = self.auth_cache_ttl if name else self.auth_neg_ttl
+        with self.auth_cache_lock:
+            # Keys are attacker-supplied hashes; a bound beats reasoning about
+            # growth under the ingress rate limit.
+            if len(self.auth_cache) > 1024:
+                self.auth_cache.clear()
+            self.auth_cache[key] = (name, time.monotonic() + ttl)
+        return name
 
     def _is_index(self) -> bool:
         return bool(self.config.index_token) and hmac.compare_digest(self._bearer(), self.config.index_token.encode())
@@ -668,10 +740,22 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, b'{"ok":true}', "application/json")
             return
 
+        # The other pre-auth route: the claim code IS the credential, and only
+        # as a POST — any other verb falls through to the 401 below. Same
+        # close-before-body rule as healthz; a body is never read here, since
+        # its declared length is attacker-controlled and the caps are
+        # post-auth.
+        clean = path.split("?")[0]
+        if self.command == "POST" and clean.startswith("claim/"):
+            self.close_connection = True
+            self._claim(clean[len("claim/") :])
+            return
+
         # Checked before the route is looked at, so an unauthenticated caller
         # cannot learn which upstreams this proxy holds keys for by watching
         # which paths answer 404 and which answer 503.
-        if not self._authenticated():
+        principal = self._principal()
+        if principal is None:
             self._problem(401, "a bearer token is required", close=True)
             return
 
@@ -681,6 +765,13 @@ class Handler(BaseHTTPRequestHandler):
         if "?" in prefix:
             prefix, _, query = prefix.partition("?")
             rest = f"?{query}"
+
+        # The admin token opens /admin and nothing else: outside its prefix it
+        # is indistinguishable from a wrong token, so it cannot be used to
+        # read saves — and nobody else reaches /admin (the 403 lives there).
+        if principal == "admin" and prefix != "admin":
+            self._problem(401, "a bearer token is required", close=True)
+            return
 
         # A save bundle and a catalog entry are the two bodies allowed to be
         # big — a retail WiiU tree runs to ~10k file rows at ~350 bytes each.
@@ -721,8 +812,96 @@ class Handler(BaseHTTPRequestHandler):
             self._games(rest)
         elif prefix == "files":
             self._files(rest)
+        elif prefix == "auth":
+            self._auth(rest, principal)
+        elif prefix == "admin":
+            self._admin(rest, body, principal)
         else:
             self._problem(404, f"nothing is proxied at /{prefix}")
+
+    # --- per-person tokens --------------------------------------------------
+
+    def _claim(self, code: str) -> None:
+        """One POST, one token. 410 for a code that existed (reuse means the
+        real holder should hear about it — logged), 404 for one that never
+        did; the split leaks only to whoever already holds the code."""
+        if self.token_store is None:
+            self._problem(503, "this deployment holds no token store")
+            return
+        outcome = self.token_store.claim(code)
+        if outcome is Absent:
+            self._problem(404, "no such claim code")
+            return
+        if outcome is Claimed:
+            print(f"claim code reused or expired: …{code[-4:]}", file=sys.stderr)
+            self._problem(410, "this claim code was already used or has expired")
+            return
+        name, token = outcome
+        self._send(200, json.dumps({"name": name, "token": token}).encode(), "application/json")
+
+    def _auth(self, rest: str, principal: str) -> None:
+        if rest.split("?")[0] != "whoami":
+            self._problem(404, "nothing lives at /auth but whoami")
+            return
+        if self.command not in ("GET", "HEAD"):
+            self._problem(405, "whoami is a GET")
+            return
+        self._send(200, json.dumps({"name": principal}).encode(), "application/json")
+
+    def _needs_admin(self, principal: str) -> bool:
+        if not self.config.admin_token:
+            self._problem(503, "no admin token is configured; token administration is off")
+            return True
+        if principal != "admin":
+            self._problem(403, "token administration needs the admin token")
+            return True
+        if self.token_store is None:
+            self._problem(503, "this deployment holds no token store")
+            return True
+        return False
+
+    def _admin(self, rest: str, body: bytes | None, principal: str) -> None:
+        if self._needs_admin(principal):
+            return
+        segments = rest.split("?")[0].strip("/").split("/")
+
+        if segments == ["invites"]:
+            if self.command != "POST":
+                self._problem(405, "minting an invite is a POST")
+                return
+            try:
+                asked = json.loads(body or b"{}")
+                name = asked.get("name", "")
+                ttl_days = float(asked.get("ttl_days", 7))
+            except (ValueError, AttributeError):
+                self._problem(400, 'the body is {"name": ..., "ttl_days"?: ...}')
+                return
+            try:
+                code = self.token_store.mint_invite(name, ttl=ttl_days * 86400)
+            except ValueError as error:
+                self._problem(400, str(error))
+                return
+            self._send(200, json.dumps({"name": name, "code": code}).encode(), "application/json")
+            return
+
+        if segments == ["tokens"]:
+            if self.command not in ("GET", "HEAD"):
+                self._problem(405, "the token list is a GET")
+                return
+            self._send(200, json.dumps({"tokens": self.token_store.tokens()}).encode(), "application/json")
+            return
+
+        if len(segments) == 2 and segments[0] == "tokens":
+            if self.command != "DELETE":
+                self._problem(405, "revoking is a DELETE")
+                return
+            if self.token_store.revoke(segments[1]):
+                self._send(200, json.dumps({"revoked": segments[1]}).encode(), "application/json")
+            else:
+                self._problem(404, f"no live token named {segments[1]!r}")
+            return
+
+        self._problem(404, "nothing lives at /admin but invites and tokens")
 
     def do_GET(self) -> None:  # noqa: N802
         self._handle()
@@ -748,6 +927,9 @@ def make_server(
     catalog: CatalogStore | None = None,
     files_dir: Path | None = None,
     stream_slots: int = 4,
+    token_store: TokenStore | None = None,
+    auth_cache_ttl: float = 60.0,
+    auth_neg_ttl: float = 5.0,
 ) -> ThreadingHTTPServer:
     """Threading, because one slow upstream must not block every other client."""
     handler = type(
@@ -760,6 +942,11 @@ def make_server(
             "catalog": catalog,
             "files_dir": files_dir,
             "streams": threading.BoundedSemaphore(stream_slots),
+            "token_store": token_store,
+            "auth_cache": {},
+            "auth_cache_lock": threading.Lock(),
+            "auth_cache_ttl": auth_cache_ttl,
+            "auth_neg_ttl": auth_neg_ttl,
         },
     )
     return ThreadingHTTPServer((host, port), handler)

@@ -122,10 +122,8 @@ class TokenStore:
         # default — revocation is the control — but an invite can carry one.
         with self._write_lock, self._write:
             self._write.execute(
-                "INSERT INTO invites (name, code_hash, created_at, expires_at, token_ttl)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (name, _hash(code), int(now), int(now + ttl),
-                 None if token_ttl is None else int(token_ttl)),
+                "INSERT INTO invites (name, code_hash, created_at, expires_at, token_ttl) VALUES (?, ?, ?, ?, ?)",
+                (name, _hash(code), int(now), int(now + ttl), None if token_ttl is None else int(token_ttl)),
             )
         return code
 
@@ -142,9 +140,7 @@ class TokenStore:
                 (now, code_hash, now),
             )
             if consumed.rowcount == 0:
-                row = self._write.execute(
-                    "SELECT 1 FROM invites WHERE code_hash = ?", (code_hash,)
-                ).fetchone()
+                row = self._write.execute("SELECT 1 FROM invites WHERE code_hash = ?", (code_hash,)).fetchone()
                 return Claimed if row else Absent
 
             invite = self._write.execute(
@@ -178,9 +174,7 @@ class TokenStore:
 
     def _touch_last_used(self, name: str, now: float) -> None:
         with self._write_lock, self._write:
-            self._write.execute(
-                "UPDATE tokens SET last_used_at = ? WHERE name = ?", (int(now), name)
-            )
+            self._write.execute("UPDATE tokens SET last_used_at = ? WHERE name = ?", (int(now), name))
 
     def revoke(self, name: str) -> bool:
         with self._write_lock, self._write:
@@ -193,7 +187,6 @@ class TokenStore:
     def tokens(self) -> list[dict]:
         with self._read() as conn:
             rows = conn.execute(
-                "SELECT name, display, created_at, expires_at, revoked_at, last_used_at"
-                " FROM tokens ORDER BY name"
+                "SELECT name, display, created_at, expires_at, revoked_at, last_used_at FROM tokens ORDER BY name"
             ).fetchall()
         return [dict(r) for r in rows]

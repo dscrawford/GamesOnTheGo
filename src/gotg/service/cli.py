@@ -14,6 +14,7 @@ from pathlib import Path
 
 from ..catalog import CatalogStore
 from ..saves import DEFAULT_KEEP, DEFAULT_MAX_BYTES, SavesStore
+from ..tokens import TokenStore
 from .app import Config, make_server
 
 
@@ -25,7 +26,15 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
         igdb_client_id=env.get("IGDB_CLIENT_ID", ""),
         igdb_client_secret=env.get("IGDB_CLIENT_SECRET", ""),
         index_token=env.get("GOTG_INDEX_TOKEN", ""),
+        admin_token=env.get("GOTG_ADMIN_TOKEN", ""),
+        auth_url=env.get("GOTG_AUTH_URL", "").rstrip("/"),
     ).validate()
+
+
+def token_store_from_env(env: Mapping[str, str] | None = None) -> TokenStore | None:
+    env = os.environ if env is None else env
+    db = env.get("GOTG_TOKENS_DB", "")
+    return TokenStore(db=Path(db)) if db else None
 
 
 def catalog_from_env(env: Mapping[str, str] | None = None) -> CatalogStore | None:
@@ -62,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         config = config_from_env()
         catalog = catalog_from_env()
         store = store_from_env()
+        token_store = token_store_from_env()
         # A catalog row grants read on its path, so the library must not be
         # able to name what the service itself writes.
         if store and catalog:
@@ -89,12 +99,19 @@ def main(argv: list[str] | None = None) -> int:
         catalog,
         files_dir=files_dir,
         stream_slots=stream_slots,
+        token_store=token_store,
     )
     held = [name for name, on in (("steamgriddb", config.steamgriddb_key), ("igdb", config.igdb_client_id)) if on]
     saves = f"saves under {store.root}" if store else "no saves store"
     games = f"catalog at {catalog.db}" if catalog else "no catalog"
     creds = ", ".join(held) or "nothing"
-    print(f"gotg service on :{port}, holding credentials for: {creds}; {saves}; {games}")
+    if token_store:
+        tokens = f"tokens at {token_store.db}"
+    elif config.auth_url:
+        tokens = f"tokens asked of {config.auth_url}"
+    else:
+        tokens = "legacy token only"
+    print(f"gotg service on :{port}, holding credentials for: {creds}; {saves}; {games}; {tokens}")
     server.serve_forever()
     return 0
 
