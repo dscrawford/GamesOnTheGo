@@ -7,11 +7,11 @@
   venv,
 }:
 
-runCommand "gotg-proxy-0.5.1"
+runCommand "gotg-proxy-0.5.2"
   {
     nativeBuildInputs = [ makeWrapper ];
     inherit venv;
-    passthru.version = "0.5.1";
+    passthru.version = "0.5.2";
     meta = {
       description = "The GOTG service: catalog, streams, saves, and the artwork credentials";
       mainProgram = "gotg-proxy";

@@ -387,6 +387,55 @@ def test_a_files_url_that_is_not_a_url_refuses_to_start():
         Config(token=CLIENT, files_url="files.example").validate()
 
 
+def _serve(config, catalog):
+    server = make_server("127.0.0.1", free_port(), config, None, catalog)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    return server
+
+
+@pytest.mark.parametrize(
+    ("content", "expect"),
+    [
+        ("41234", "https://files.example:41234"),
+        ("41234\n", "https://files.example:41234"),
+        (None, None),  # no file: the tunnel is down
+        ("", None),
+        ("not-a-port", None),
+        ("0", None),
+        ("70000", None),
+    ],
+    ids=["port", "newline", "absent", "empty", "junk", "zero", "oversized"],
+)
+def test_a_port_file_rides_the_files_url_and_a_bad_one_withholds_it(catalog, tmp_path, content, expect):
+    # A VPN-fronted byte host has no fixed port; advertising one the tunnel
+    # cannot answer would turn every download into a hang.
+    port_file = tmp_path / "forwarded_port"
+    if content is not None:
+        port_file.write_text(content)
+    config = Config(token=CLIENT, files_url="https://files.example", files_port_file=str(port_file))
+    server = _serve(config, catalog)
+    try:
+        status, view = call(f"http://127.0.0.1:{server.server_port}/catalog")
+        assert status == 200
+        assert view.get("files_url") == expect
+    finally:
+        server.shutdown()
+
+
+def test_the_port_is_read_per_request_so_a_reconnect_is_picked_up(catalog, tmp_path):
+    port_file = tmp_path / "forwarded_port"
+    port_file.write_text("41234")
+    config = Config(token=CLIENT, files_url="https://files.example", files_port_file=str(port_file))
+    server = _serve(config, catalog)
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        assert call(f"{base}/catalog")[1]["files_url"] == "https://files.example:41234"
+        port_file.write_text("50001")
+        assert call(f"{base}/catalog")[1]["files_url"] == "https://files.example:50001"
+    finally:
+        server.shutdown()
+
+
 def test_an_unset_index_token_makes_the_catalog_read_only(catalog, library):
     config = Config(token=CLIENT)
     server = make_server("127.0.0.1", free_port(), config, None, catalog)

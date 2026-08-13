@@ -54,7 +54,7 @@ from ..catalog import CatalogStore, Conflict, SweepRefused
 from ..saves import SavesStore
 from ..tokens import TOKEN_RE, Absent, Claimed, TokenStore
 
-USER_AGENT = "gotg-proxy/0.5.1"
+USER_AGENT = "gotg-proxy/0.5.2"
 
 # Bounded, because a request that never returns holds a thread open and enough
 # of them stop the proxy answering anybody.
@@ -189,6 +189,11 @@ class Config:
     # catalog reply. Set when the control plane sits behind a proxy the byte
     # streams must bypass; empty means bytes come from the same url.
     files_url: str = ""
+    # A VPN-fronted byte host has no fixed port: the tunnel's NAT-PMP lease
+    # assigns one and reassigns it on reconnect. gluetun writes the current
+    # port here, and it is read per catalog GET — never cached — so a client's
+    # re-read after a failed download gets wherever the bytes live now.
+    files_port_file: str = ""
 
     def validate(self) -> Config:
         if self.files_url and not self.files_url.startswith(("http://", "https://")):
@@ -503,6 +508,27 @@ class Handler(BaseHTTPRequestHandler):
         except OSError as error:
             self._problem(500, str(error))
 
+    def _files_url(self) -> str:
+        """The byte host as it stands right now, or "" for none.
+
+        With a port file configured, an unreadable or nonsense port means the
+        tunnel is down — advertising a byte host that cannot answer would turn
+        every download into a hang, so none is advertised and the client says
+        which host it could not reach.
+        """
+        base = self.config.files_url
+        if not base or not self.config.files_port_file:
+            return base
+        try:
+            port = int(Path(self.config.files_port_file).read_text().strip())
+        except (OSError, ValueError):
+            print(f"files_url withheld: no forwarded port at {self.config.files_port_file}", file=sys.stderr)
+            return ""
+        if not 0 < port < 65536:
+            print(f"files_url withheld: nonsense forwarded port {port}", file=sys.stderr)
+            return ""
+        return f"{base}:{port}"
+
     def _catalog(self, rest: str, body: bytes | None) -> None:
         """`/catalog` reads for everyone; writes for the index principal only.
 
@@ -539,8 +565,9 @@ class Handler(BaseHTTPRequestHandler):
                 # The catalog names its own byte host, so clients need no
                 # files configuration — and a moving host (a VPN-fronted one
                 # changes address on reconnect) costs a re-read, not a rewrite.
-                if self.config.files_url:
-                    view["files_url"] = self.config.files_url
+                files_url = self._files_url()
+                if files_url:
+                    view["files_url"] = files_url
                 self._send(200, json.dumps(view).encode(), "application/json")
             elif self.command == "PUT" and len(segments) == 2:
                 if not needs_index():

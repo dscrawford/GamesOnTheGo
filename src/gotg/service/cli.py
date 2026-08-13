@@ -29,6 +29,7 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
         admin_token=env.get("GOTG_ADMIN_TOKEN", ""),
         auth_url=env.get("GOTG_AUTH_URL", "").rstrip("/"),
         files_url=env.get("GOTG_FILES_URL", "").rstrip("/"),
+        files_port_file=env.get("GOTG_FILES_PORT_FILE", ""),
     ).validate()
 
 
