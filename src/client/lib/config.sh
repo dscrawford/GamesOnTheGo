@@ -148,7 +148,7 @@ cmd_login() {
     name="$(printable "$(jq -r '.name // empty' "$reply")")"
     [[ -n "$token" ]] || die "the claim reply carried no token"
   else
-    url="$(prompt_line "GOTG service URL [https://gotg-api.dcraw.net]: " "https://gotg-api.dcraw.net")"
+    url="$(prompt_line "GOTG service URL [https://gotg.dcraw.net]: " "https://gotg.dcraw.net")"
     url="${url%/}"
     [[ "$url" == http://* || "$url" == https://* ]] || die "service must be an http(s) URL: $url"
     url_is_private_or_tls "$url" ||

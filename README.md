@@ -164,9 +164,9 @@ saves store (below), so a machine pointed at it needs no SteamGridDB key of its
 own, only a token for our own service — one url and one token for everything:
 
 ```bash
-echo '{"url": "https://gotg-api.dcraw.net", "token": "..."}' > ~/.config/gotg/api.json
+echo '{"url": "https://gotg.dcraw.net", "token": "..."}' > ~/.config/gotg/api.json
 chmod 600 ~/.config/gotg/api.json
-# or, the same thing with a prompt: gotg saves setup https://gotg-api.dcraw.net
+# or, the same thing with a prompt: gotg saves setup https://gotg.dcraw.net
 ```
 
 It is a reverse proxy rather than a forward one: nothing configures it as a
@@ -175,6 +175,16 @@ proxy and reaches arbitrary destinations through it — to the client it simply
 for the fetching itself, only for choosing the base URL: it sends its own token
 and the proxy swaps in the real key on the way out. Rotating that key is one
 `kubectl` command rather than a tour of the house.
+
+**One url in the config, two hosts on the wire.** `gotg.dcraw.net` sits behind
+the Cloudflare proxy, which is the right place for everything above — small
+JSON, token endpoints, the things a WAF and edge rate limiting exist for. Game
+downloads are the exception: Cloudflare cuts a proxied request at about 100
+seconds, and no multi-gigabyte image survives that, so the catalog reply names
+a separate byte host (`files_url`, `gotg-files.dcraw.net`, DNS-only) and the
+client downloads from there. Nothing to configure: a catalog that names no
+`files_url` — an older service, an old cache — downloads from the one url as
+before.
 
 Which Steam name a box art becomes is decided by its shape, not its platform: a
 cartridge box is landscape and belongs in the wide capsule, a disc case is
@@ -493,7 +503,7 @@ is save and retrieve; deciding which side wins is the service's job, because
 it is the one place that decision can be made atomically.
 
 ```bash
-gotg saves setup https://gotg-api.dcraw.net  # point at the service, prove it answers
+gotg saves setup https://gotg.dcraw.net  # point at the service, prove it answers
 gotg saves status --all                      # what each side has; writes nothing
 gotg saves push usa.zelda                    # send this machine's saves
 gotg saves pull --all                        # take the service's

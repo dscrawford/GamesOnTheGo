@@ -303,7 +303,7 @@ steam_fetch_artwork() {
     log "No SteamGridDB key. libretro-thumbnails needs none and was used instead;"
     log "for Switch games, which it has none of, either point at the cluster"
     log "proxy, which holds the key for every machine:"
-    log "  echo '{\"url\": \"https://gotg-api.dcraw.net\", \"token\": \"...\"}' > $(steam_api_file)"
+    log "  echo '{\"url\": \"https://gotg.dcraw.net\", \"token\": \"...\"}' > $(steam_api_file)"
     log "or give this machine its own key:"
     log "  https://www.steamgriddb.com/profile/preferences/api"
     log "  echo '{\"api_key\": \"...\"}' > $GOTG_CONFIG_DIR/steamgriddb.json"
