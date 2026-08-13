@@ -199,6 +199,24 @@ def test_admin_mints_an_invite_and_lists_and_revokes(service):
     assert status == 404
 
 
+def test_revoking_over_the_wire_kills_an_outstanding_invite_too(service):
+    def invite(name):
+        _, body = call(
+            f"{service}/admin/invites",
+            method="POST",
+            token=ADMIN,
+            body=json.dumps({"name": name}).encode(),
+        )
+        return json.loads(body)["code"]
+
+    token = json.loads(claim(service, invite("frank"))[1])["token"]
+    leaked = invite("frank")
+
+    assert call(f"{service}/admin/tokens/frank", method="DELETE", token=ADMIN)[0] == 200
+    assert claim(service, leaked)[0] == 410
+    assert call(f"{service}/auth/whoami", token=token)[0] == 401
+
+
 def test_admin_routes_refuse_the_client_token(service):
     status, _ = call(f"{service}/admin/invites", method="POST", token=LEGACY, body=b'{"name": "x"}')
     assert status == 403

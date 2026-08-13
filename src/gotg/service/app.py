@@ -915,7 +915,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.token_store.revoke(segments[1]):
                 self._send(200, json.dumps({"revoked": segments[1]}).encode(), "application/json")
             else:
-                self._problem(404, f"no live token named {segments[1]!r}")
+                self._problem(404, f"nothing live to revoke for {segments[1]!r}")
             return
 
         self._problem(404, "nothing lives at /admin but invites and tokens")

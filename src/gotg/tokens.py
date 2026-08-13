@@ -218,12 +218,20 @@ class TokenStore:
             )
 
     def revoke(self, name: str) -> bool:
+        """Closes outstanding invites too: an unclaimed invite mints a
+        replacement and retires the live token as it does it, so leaving one
+        open would let a leaked link outlive the revocation that answered it."""
+        now = int(time.time())
         with self._write_lock, self._write:
-            hit = self._write.execute(
+            tokens = self._write.execute(
                 "UPDATE tokens SET revoked_at = ? WHERE name = ? AND revoked_at IS NULL",
-                (int(time.time()), name),
+                (now, name),
             )
-            return hit.rowcount > 0
+            invites = self._write.execute(
+                "UPDATE invites SET claimed_at = ? WHERE name = ? AND claimed_at IS NULL AND expires_at > ?",
+                (now, name, now),
+            )
+            return tokens.rowcount > 0 or invites.rowcount > 0
 
     def tokens(self) -> list[dict]:
         with self._read() as conn:

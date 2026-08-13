@@ -11,7 +11,8 @@ usage: gotg admin <command> [args]
   invite <name> [--ttl <days>]  mint a single-use claim link for a person
                                 and device — "alice-deck" — valid 7 days
   tokens                        every token: name, display, last use
-  revoke <name>                 end one token now; the person re-claims
+  revoke <name>                 end one token now, and cancel any invite
+                                still outstanding for it; the person re-claims
 
 The admin token comes from GOTG_ADMIN_TOKEN:
   export GOTG_ADMIN_TOKEN="$(kubectl get secret gotg-api -o jsonpath='{.data.admin-token}' | base64 -d)"

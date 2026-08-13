@@ -156,6 +156,32 @@ def test_revocation_is_immediate(store):
     assert store.revoke("frank") is False
 
 
+def test_revoking_closes_the_invite_that_would_mint_a_replacement(store):
+    # A claim link goes astray: revoking must not leave it able to mint a new
+    # token — which would retire the legitimate holder's as it went.
+    code = store.mint_invite("frank")
+    _, token = store.claim(code)
+    leaked = store.mint_invite("frank")
+
+    assert store.revoke("frank") is True
+    assert store.claim(leaked) is Claimed
+    assert store.verify(token) is None
+    assert live(store) == []
+
+
+def test_revoking_a_name_with_only_an_invite_still_closes_it(store):
+    leaked = store.mint_invite("grace")
+    assert store.revoke("grace") is True
+    assert store.claim(leaked) is Claimed
+    assert store.revoke("grace") is False
+
+
+def test_revoking_one_name_leaves_another_name_s_invite_alone(store):
+    mine = store.mint_invite("heidi")
+    store.revoke("frank")
+    assert store.claim(mine)[0] == "heidi"
+
+
 @pytest.mark.parametrize(
     ("token_ttl", "advance", "verifies"),
     [

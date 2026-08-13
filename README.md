@@ -566,7 +566,11 @@ gotg admin revoke alice-deck        # ends it now — alice re-claims, nobody ro
 ```
 
 Tokens are `gotg_`-prefixed, 256 bits from the system CSPRNG, and the service
-stores only their SHA-256 — a leaked database verifies nothing. The admin
+stores only their SHA-256 — a leaked database verifies nothing. Revoking closes
+any invite still outstanding for that name as well as the token itself: a claim
+link mints a replacement *and* retires the live token as it does it, so a
+revocation that left one open would hand the name to whoever had the link and
+put its holder out at the same time. The admin
 credential (`GOTG_ADMIN_TOKEN`, from the cluster secret) opens `/admin` and
 nothing else. The original shared token still works as break-glass during the
 transition and is slated for removal.
