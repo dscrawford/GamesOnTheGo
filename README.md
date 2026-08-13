@@ -466,6 +466,12 @@ joining are not available.
 builds it from the flake if it is not here yet, and execs it. Adding a platform
 is one file; a new emulator is a one-line change to the file that wants it.
 
+Which flake it builds from: `GOTG_FLAKE`, then the `flake` key in the config,
+then a checkout at `~/Documents/GOTG` — and with none of those, the repo
+itself over SSH, using the same key that fetched the client. A machine that
+has only ever run `nix build` — a Steam Deck — plays out of the box; a dev
+machine keeps building from its working tree.
+
 ### Games that are not emulated
 
 Three games run on native ports built from their decompilations rather than in

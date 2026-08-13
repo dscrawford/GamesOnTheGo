@@ -11,14 +11,24 @@
 # `info` and a launch of anything already built working offline, and confines nix
 # to the one case that genuinely needs it — an environment that is not here yet.
 
-# The flake the environments are built from. Without a checkout there is nothing
-# to build, so this is where the error points when one is missing.
+# Where environments build from when no checkout is configured: the repo
+# itself, over the same SSH access that fetched the client. What makes `gotg
+# play` work out of the box on a machine that has only ever run `nix build`.
+GOTG_REMOTE_FLAKE="${GOTG_REMOTE_FLAKE:-git+ssh://git@github.com/dscrawford/GamesOnTheGo?shallow=1}"
+
+# The flake the environments are built from: explicit env, then the config
+# key, then a checkout in the usual place, then the repo over the network.
 gotg_flake() {
   local candidate="${GOTG_FLAKE:-}"
   [[ -z "$candidate" ]] && candidate="$(config_get flake 2>/dev/null || true)"
-  [[ -z "$candidate" ]] && candidate="$HOME/Documents/GOTG"
+  [[ -z "$candidate" && -f "$HOME/Documents/GOTG/flake.nix" ]] && candidate="$HOME/Documents/GOTG"
+  [[ -z "$candidate" ]] && candidate="$GOTG_REMOTE_FLAKE"
   printf '%s' "$candidate"
 }
+
+# A path is checked for a flake.nix before nix is asked; a URL cannot be, and
+# nix's own error is the right one when it is unreachable.
+flake_is_path() { [[ "$1" != *://* && "$1" != github:* && "$1" != flake:* ]]; }
 
 # A seam for the tests, which run where there is no nix.
 nix_bin() { printf '%s' "${GOTG_NIX:-nix}"; }
@@ -181,9 +191,12 @@ _env_build_failed() {
 env_build() {
   local attr="$1" flake ref root
   flake="$(gotg_flake)"
-  [[ -f "$flake/flake.nix" ]] ||
-    die "no flake at $flake, so there is nothing to build $attr from.
-     Point at your checkout with GOTG_FLAKE, or the 'flake' key in $GOTG_CONFIG_FILE."
+  if flake_is_path "$flake"; then
+    [[ -f "$flake/flake.nix" ]] ||
+      die "no flake at $flake, so there is nothing to build $attr from.
+     Point at your checkout with GOTG_FLAKE or the 'flake' key in $GOTG_CONFIG_FILE,
+     or unset both to build straight from the repo over SSH."
+  fi
 
   ref="$flake#$attr"
   root="$(env_root "$attr")"

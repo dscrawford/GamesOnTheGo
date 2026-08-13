@@ -322,3 +322,31 @@ teardown() {
   [[ "$output" == *"env-n64 launched with:"* ]]
   [[ "$output" == *"--fullscreen"* ]]
 }
+
+@test "no checkout anywhere means environments build from the repo over ssh" {
+  load_client_libs
+  local out
+  out="$(HOME="$TEST_TMP/nohome" GOTG_FLAKE="" gotg_flake)"
+  [[ "$out" == "git+ssh://git@github.com/dscrawford/GamesOnTheGo"* ]]
+}
+
+@test "a checkout in the usual place still wins over the network" {
+  load_client_libs
+  mkdir -p "$TEST_TMP/home/Documents/GOTG"
+  : >"$TEST_TMP/home/Documents/GOTG/flake.nix"
+  local out
+  out="$(HOME="$TEST_TMP/home" GOTG_FLAKE="" gotg_flake)"
+  [ "$out" = "$TEST_TMP/home/Documents/GOTG" ]
+}
+
+@test "a url flake goes to nix without a local flake.nix check" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  gotg download usa.zelda
+  rm -rf "$GOTG_ROOTS_DIR/env-n64"
+  stub_nix
+  export GOTG_FLAKE="git+ssh://git@example.com/repo?shallow=1"
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  grep -q "build git+ssh://git@example.com/repo?shallow=1#env-n64" "$NIX_LOG"
+}
