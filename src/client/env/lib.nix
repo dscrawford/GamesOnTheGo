@@ -10,6 +10,11 @@
 {
   # Attribute name of this environment, and the name of its state directory.
   name,
+  # Display name, for the Steam entry and its artwork search. Null falls back
+  # to the catalog title — with the variant in parentheses when there is one —
+  # so only an environment that wants a better name states one:
+  # "Majora's Mask Randomizer" over "Majora's Mask (rando)".
+  title ? null,
   # The package the emulator lives in, and which binary inside it to run.
   emulator,
   bin ? null,
@@ -177,7 +182,8 @@ let
       ;
     excludes = saveExcludes;
     legacy = legacyPaths;
-  };
+  }
+  // lib.optionalAttrs (title != null) { inherit title; };
 
   app = pkgs.writeShellApplication {
     name = "gotg-play";

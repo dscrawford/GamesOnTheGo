@@ -22,6 +22,7 @@
 
 base
 // {
+  title = "Luigi's Mansion 2 HD 60fps";
   preLaunch =
     (base.preLaunch or "")
     + (helpers.ryujinxMod {

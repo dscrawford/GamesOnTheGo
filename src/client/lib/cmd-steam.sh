@@ -109,6 +109,30 @@ steam_artwork_helper() {
 # the appid the shortcut carries.
 steam_grid_dir() { printf '%s/grid' "$(dirname "$(steam_shortcuts_file)")"; }
 
+# What the Steam entry is called, which also feeds the artwork search. A
+# variant environment may carry its own title in its built manifest —
+# "Majora's Mask Randomizer" — read off the GC root like everything else on
+# this path, never a nix evaluation. Without one, the catalog title with the
+# variant in parentheses.
+steam_display_name() {
+  local game="$1" variant="${2:-}" name
+  name="$(sanitize_title "$(manifest_field "$game" title)")"
+  if [[ -z "$variant" ]]; then
+    printf '%s' "$name"
+    return 0
+  fi
+  local root title=""
+  root="$GOTG_ROOTS_DIR/$(env_attr "$game" "$variant")"
+  if [[ -f "$root/share/gotg/saves.json" ]]; then
+    title="$(jq -r '.title // empty' "$root/share/gotg/saves.json")"
+  fi
+  if [[ -n "$title" ]]; then
+    printf '%s' "$(sanitize_title "$title")"
+  else
+    printf '%s (%s)' "$name" "$variant"
+  fi
+}
+
 # The fetched icon's path: grid art is keyed on the unsigned 32-bit appid,
 # whichever way the shortcut spelled it. The vdf is another tool's to write
 # too, so what came out of it is validated before bash arithmetic sees it.
@@ -309,8 +333,7 @@ steam_art() {
   local game launcher name appid
   game="$(manifest_find "$want")"
   launcher="$(launcher_path "$game" "$variant")"
-  name="$(sanitize_title "$(manifest_field "$game" title)")"
-  [[ -z "$variant" ]] || name="$name ($variant)"
+  name="$(steam_display_name "$game" "$variant")"
 
   # The id Steam files artwork under is the one on the shortcut, so it is read
   # back rather than recomputed — if the two ever disagree, the shortcut wins.
@@ -344,8 +367,7 @@ steam_add() {
   [[ -f "$launcher" ]] || launcher="$(launcher_write "$game" "$variant")"
 
   local name
-  name="$(sanitize_title "$(manifest_field "$game" title)")"
-  [[ -z "$variant" ]] || name="$name ($variant)"
+  name="$(steam_display_name "$game" "$variant")"
 
   local result
   result="$(steam_helper --file "$(steam_shortcuts_file)" add \

@@ -3,4 +3,6 @@
 # rather than a different way to launch — rando seeds and saves apart from
 # the vanilla file slots.
 { ... }:
-{ }
+{
+  title = "Majora's Mask Randomizer";
+}

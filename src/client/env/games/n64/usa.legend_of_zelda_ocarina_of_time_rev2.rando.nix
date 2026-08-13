@@ -4,4 +4,6 @@
 # own: enable the randomizer in its settings once, and its seeds and saves
 # live apart from the vanilla playthrough next door.
 { ... }:
-{ }
+{
+  title = "Ocarina of Time Randomizer";
+}

@@ -221,6 +221,32 @@ EOF
   [ "$(jq 'length' <<<"$output")" -eq 2 ]
 }
 
+@test "a variant environment's own title names the Steam entry" {
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  export GOTG_ENV_DIR="$TEST_TMP/env"
+  mkdir -p "$GOTG_ENV_DIR/games/gamecube"
+  : >"$GOTG_ENV_DIR/games/gamecube/usa.super_mario_sunshine.hd.nix"
+  fake_env env-gamecube-usa_super_mario_sunshine-hd "[]" "[]" "Sunshine HD Remaster"
+
+  gotg steam add usa.super_mario_sunshine hd
+  [ "$status" -eq 0 ]
+  run helper list
+  [ "$(jq -r '.[0].name' <<<"$output")" = "Sunshine HD Remaster" ]
+}
+
+@test "a variant without a title of its own keeps the parenthesised default" {
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  export GOTG_ENV_DIR="$TEST_TMP/env"
+  mkdir -p "$GOTG_ENV_DIR/games/gamecube"
+  : >"$GOTG_ENV_DIR/games/gamecube/usa.super_mario_sunshine.hd.nix"
+  fake_env env-gamecube-usa_super_mario_sunshine-hd
+
+  gotg steam add usa.super_mario_sunshine hd
+  [ "$status" -eq 0 ]
+  run helper list
+  [ "$(jq -r '.[0].name' <<<"$output")" = "Super Mario Sunshine (hd)" ]
+}
+
 @test "a variant that does not exist is refused before Steam is touched" {
   export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
   gotg steam add usa.super_mario_sunshine nosuchvariant

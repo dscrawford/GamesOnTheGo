@@ -224,7 +224,7 @@ fake_env() {
   local attr="$1"
   # A second word in the same `local` would expand $attr before it is assigned.
   local dir="$GOTG_ROOTS_DIR/$attr"
-  local saves="${2:-[]}" excludes="${3:-[]}"
+  local saves="${2:-[]}" excludes="${3:-[]}" title="${4:-}"
   mkdir -p "$dir/bin" "$dir/share/gotg"
   {
     printf '#!%s\n' "$(command -v bash)"
@@ -235,8 +235,10 @@ fake_env() {
   # The real derivation emits this beside the runnable; the saves commands read
   # it from the GC root rather than evaluating nix.
   jq -n --arg name "$attr" --argjson saves "$saves" --argjson excludes "$excludes" \
+    --arg title "$title" \
     '{version: 1, name: $name, saves: $saves, excludes: $excludes,
-      legacy: [], saveStates: false}' \
+      legacy: [], saveStates: false}
+     + (if $title != "" then {title: $title} else {} end)' \
     >"$dir/share/gotg/saves.json"
 }
 
