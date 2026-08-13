@@ -362,6 +362,31 @@ def test_matching_tokens_refuse_to_start():
         Config(token="same", index_token="same").validate()
 
 
+def test_the_catalog_names_the_byte_host_when_one_is_configured(catalog):
+    # files_url is how a deployment keeps /games off a proxied control plane;
+    # clients read it from the catalog rather than being configured.
+    config = Config(token=CLIENT, index_token=INDEX, files_url="https://files.example")
+    server = make_server("127.0.0.1", free_port(), config, None, catalog)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    try:
+        status, view = call(f"http://127.0.0.1:{server.server_port}/catalog")
+        assert status == 200
+        assert view["files_url"] == "https://files.example"
+    finally:
+        server.shutdown()
+
+
+def test_no_files_url_configured_means_none_in_the_catalog(service):
+    status, view = call(f"{service}/catalog")
+    assert status == 200
+    assert "files_url" not in view
+
+
+def test_a_files_url_that_is_not_a_url_refuses_to_start():
+    with pytest.raises(ValueError, match="GOTG_FILES_URL"):
+        Config(token=CLIENT, files_url="files.example").validate()
+
+
 def test_an_unset_index_token_makes_the_catalog_read_only(catalog, library):
     config = Config(token=CLIENT)
     server = make_server("127.0.0.1", free_port(), config, None, catalog)

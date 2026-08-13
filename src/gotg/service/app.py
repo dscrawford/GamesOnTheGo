@@ -185,8 +185,14 @@ class Config:
     # The library pod's pointer at the pod holding the token store: a bearer
     # no local check recognizes is asked about at {auth_url}/auth/whoami.
     auth_url: str = ""
+    # Where clients should fetch /games and /files from, reported in the
+    # catalog reply. Set when the control plane sits behind a proxy the byte
+    # streams must bypass; empty means bytes come from the same url.
+    files_url: str = ""
 
     def validate(self) -> Config:
+        if self.files_url and not self.files_url.startswith(("http://", "https://")):
+            raise ValueError(f"GOTG_FILES_URL is not an http(s) url: {self.files_url!r}")
         if not self.token:
             raise ValueError(
                 "no client token set. Refusing to start: an empty token "
@@ -530,6 +536,11 @@ class Handler(BaseHTTPRequestHandler):
                     self._problem(403, "the full catalog view needs the index token")
                     return
                 view = self.catalog.view(full=full)
+                # The catalog names its own byte host, so clients need no
+                # files configuration — and a moving host (a VPN-fronted one
+                # changes address on reconnect) costs a re-read, not a rewrite.
+                if self.config.files_url:
+                    view["files_url"] = self.config.files_url
                 self._send(200, json.dumps(view).encode(), "application/json")
             elif self.command == "PUT" and len(segments) == 2:
                 if not needs_index():
