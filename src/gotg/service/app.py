@@ -54,7 +54,7 @@ from ..catalog import CatalogStore, Conflict, SweepRefused
 from ..saves import SavesStore
 from ..tokens import TOKEN_RE, Absent, Claimed, TokenStore, default_user
 
-USER_AGENT = "gotg-proxy/0.5.2"
+USER_AGENT = "gotg-proxy/0.5.3"
 
 # Bounded, because a request that never returns holds a thread open and enough
 # of them stop the proxy answering anybody.
