@@ -553,6 +553,24 @@ refuses the whole bundle with the local tree untouched.
 Saves are **not encrypted**: anyone holding a token for the service can read
 them.
 
+### Who holds a token
+
+Access is per person and per device, not one shared secret. An invite is a
+single-use claim link, minted by name and dead after one use or seven days:
+
+```bash
+gotg admin invite alice-deck        # prints a claim url to send to alice
+gotg login --claim <that url>       # alice runs this once; nobody ever types the token
+gotg admin tokens                   # who has one, and when it was last used
+gotg admin revoke alice-deck        # ends it now — alice re-claims, nobody rotates
+```
+
+Tokens are `gotg_`-prefixed, 256 bits from the system CSPRNG, and the service
+stores only their SHA-256 — a leaked database verifies nothing. The admin
+credential (`GOTG_ADMIN_TOKEN`, from the cluster secret) opens `/admin` and
+nothing else. The original shared token still works as break-glass during the
+transition and is slated for removal.
+
 **Saves only.** A pull restores what you played, not what you installed. Cemu's
 `mlc01/usr/title` — installed updates and DLC — is deliberately excluded: it is
 not a save, it can run to gigabytes, and it is not reconstructible from the ROM,

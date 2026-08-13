@@ -14,11 +14,11 @@
   coreutils,
 }:
 
-runCommand "gotg-importer-0.4.0"
+runCommand "gotg-importer-0.5.0"
   {
     nativeBuildInputs = [ makeWrapper ];
     inherit venv;
-    passthru.version = "0.4.0";
+    passthru.version = "0.5.0";
     meta = {
       description = "Indexes completed game torrents into the GOTG catalog and /Games";
       mainProgram = "gotg-importer";
