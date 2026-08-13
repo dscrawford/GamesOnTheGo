@@ -230,6 +230,57 @@ def test_a_code_shaped_wrong_is_refused_without_the_write_lock(store, junk):
     assert outcome == [Absent]
 
 
+def test_a_token_belongs_to_the_person_half_of_its_name(store):
+    store.claim(store.mint_invite("daniel-desktop"))
+    store.claim(store.mint_invite("daniel-deck"))
+    store.claim(store.mint_invite("solo"))
+    assert store.user_for("daniel-desktop") == "daniel"
+    assert store.user_for("daniel-deck") == "daniel"
+    assert store.user_for("solo") == "solo"
+    assert store.user_for("never-minted") is None
+
+
+def test_an_invite_can_name_its_user_explicitly(store):
+    # "mary-jane-deck" would otherwise land in user "mary".
+    store.claim(store.mint_invite("mary-jane-deck", user="mary-jane"))
+    assert store.user_for("mary-jane-deck") == "mary-jane"
+
+
+@pytest.mark.parametrize("bad", ["admin", "legacy", "indexer", "UPPER", "a" * 33, "-lead"])
+def test_a_reserved_or_misshapen_user_is_refused(store, bad):
+    with pytest.raises(ValueError):
+        store.mint_invite("kim-deck", user=bad)
+
+
+def test_a_pre_user_store_backfills_users_from_names(tmp_path):
+    db = tmp_path / "tokens.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE tokens (
+            id INTEGER PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+            display TEXT NOT NULL, created_at INTEGER NOT NULL,
+            expires_at INTEGER, revoked_at INTEGER, last_used_at INTEGER
+        );
+        CREATE UNIQUE INDEX tokens_live_name ON tokens(name) WHERE revoked_at IS NULL;
+        CREATE TABLE invites (
+            id INTEGER PRIMARY KEY, name TEXT NOT NULL, code_hash TEXT NOT NULL UNIQUE,
+            created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+            token_ttl INTEGER, claimed_at INTEGER
+        );
+        INSERT INTO tokens (name, token_hash, display, created_at)
+            VALUES ('daniel-desktop', 'aaaa', 'gotg_…aaaa', 1);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = TokenStore(db=db)
+    assert store.user_for("daniel-desktop") == "daniel"
+    rows = {r["name"]: r["user"] for r in store.tokens()}
+    assert rows["daniel-desktop"] == "daniel"
+
+
 def test_a_claim_code_is_not_itself_a_token(store):
     code = store.mint_invite("lena")
     store.claim(code)

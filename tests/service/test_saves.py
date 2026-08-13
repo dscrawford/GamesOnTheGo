@@ -21,6 +21,7 @@ from test_proxy import free_port
 
 from gotg.saves import SavesStore
 from gotg.service.app import Config, make_server
+from gotg.tokens import TokenStore
 
 
 @pytest.fixture
@@ -129,7 +130,7 @@ def test_pushing_the_same_bytes_twice_changes_nothing(service, store):
     # A success, not a conflict: the store already holds exactly this.
     assert status == 200
     assert json.loads(meta)["generation"] == 1
-    assert len(list((store.root / "env-n64" / "gen").iterdir())) == 1
+    assert len(list((store.root / "legacy" / "env-n64" / "gen").iterdir())) == 1
 
 
 # --- which side wins --------------------------------------------------------
@@ -145,7 +146,7 @@ def test_a_push_from_a_stale_parent_is_refused_with_the_head(service, store):
     # needs to explain the choice to a person.
     assert json.loads(body)["hash"] == head
     # And nothing was written.
-    assert len(list((store.root / "env-n64" / "gen").iterdir())) == 1
+    assert len(list((store.root / "legacy" / "env-n64" / "gen").iterdir())) == 1
 
 
 def test_a_push_from_the_head_advances_it(service):
@@ -163,7 +164,7 @@ def test_a_forced_push_wins_and_the_loser_stays_on_disk(service, store):
     assert status == 200
     assert json.loads(meta)["generation"] == 2
     # Both generations are there: the loser waits for retention, not deletion.
-    assert len(list((store.root / "env-n64" / "gen").iterdir())) == 2
+    assert len(list((store.root / "legacy" / "env-n64" / "gen").iterdir())) == 2
 
 
 # --- retention --------------------------------------------------------------
@@ -175,7 +176,7 @@ def test_only_the_newest_three_generations_survive(service, store):
         _, meta, _ = push(service, f"save {n}".encode(), parent=parent)
         parent = json.loads(meta)["hash"]
 
-    names = sorted(p.name for p in (store.root / "env-n64" / "gen").iterdir())
+    names = sorted(p.name for p in (store.root / "legacy" / "env-n64" / "gen").iterdir())
     assert len(names) == 3
     assert names[0].startswith("000003-")
     # The pointer names the newest, which is untouched.
@@ -207,7 +208,7 @@ def test_a_push_with_no_body_is_refused(service):
 def test_a_tampered_pointer_cannot_read_outside_the_store(service, store):
     # What an edited disk would mean: a pointer naming a path instead of a
     # generation. The store must refuse to follow it anywhere.
-    attr_dir = store.root / "env-n64"
+    attr_dir = store.root / "legacy" / "env-n64"
     attr_dir.mkdir(parents=True)
     (attr_dir / "current.json").write_text(
         json.dumps({"version": 1, "generation": 1, "hash": "x", "bundle": "../../../etc/passwd"})
@@ -232,3 +233,67 @@ def test_the_device_name_is_made_printable_and_short(service):
     assert "\t" not in device
     assert "\x7f" not in device
     assert len(device) <= 32
+
+
+def test_saves_are_namespaced_by_user_not_shared(tmp_path, store):
+    # Two people, one attr: each sees only their own head. The user comes
+    # from the token, never the path, so isolation needs no client change.
+    tokens = TokenStore(db=tmp_path / "tokens.db")
+    daniel = tokens.claim(tokens.mint_invite("daniel-desktop"))[1]
+    john = tokens.claim(tokens.mint_invite("john-deck"))[1]
+    config = Config(token="client-token")
+    server = make_server("127.0.0.1", free_port(), config, store, token_store=tokens)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        headers = {"X-Gotg-Parent": ""}
+        assert (
+            call(f"{base}/saves/env-n64", method="PUT", body=b"daniel bytes", token=daniel, headers=headers)[0] == 200
+        )
+        assert call(f"{base}/saves/env-n64/meta", token=john)[0] == 404
+        assert call(f"{base}/saves/env-n64", method="PUT", body=b"john bytes", token=john, headers=headers)[0] == 200
+        assert call(f"{base}/saves/env-n64", token=daniel)[1] == b"daniel bytes"
+        assert call(f"{base}/saves/env-n64", token=john)[1] == b"john bytes"
+        assert (store.root / "daniel" / "env-n64" / "current.json").exists()
+        assert (store.root / "john" / "env-n64" / "current.json").exists()
+    finally:
+        server.shutdown()
+
+
+def test_two_devices_of_one_user_share_their_saves(tmp_path, store):
+    tokens = TokenStore(db=tmp_path / "tokens.db")
+    desktop = tokens.claim(tokens.mint_invite("daniel-desktop"))[1]
+    deck = tokens.claim(tokens.mint_invite("daniel-deck"))[1]
+    config = Config(token="client-token")
+    server = make_server("127.0.0.1", free_port(), config, store, token_store=tokens)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        assert (
+            call(
+                f"{base}/saves/env-n64",
+                method="PUT",
+                body=b"from the desktop",
+                token=desktop,
+                headers={"X-Gotg-Parent": ""},
+            )[0]
+            == 200
+        )
+        assert call(f"{base}/saves/env-n64", token=deck)[1] == b"from the desktop"
+    finally:
+        server.shutdown()
+
+
+def test_the_legacy_token_lands_in_the_configured_user(tmp_path):
+    # GOTG_LEGACY_USER=daniel maps break-glass pushes into the saves that
+    # were daniel's all along, instead of a parallel "legacy" copy.
+    store = SavesStore(root=tmp_path / "saves", keep=3, max_bytes=100_000)
+    config = Config(token="client-token", legacy_user="daniel")
+    server = make_server("127.0.0.1", free_port(), config, store)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        assert call(f"{base}/saves/env-n64", method="PUT", body=b"b", headers={"X-Gotg-Parent": ""})[0] == 200
+        assert (store.root / "daniel" / "env-n64" / "current.json").exists()
+    finally:
+        server.shutdown()

@@ -560,12 +560,19 @@ and every member must be a plain file on a relative path that the environment
 itself declares as a save — a symlink, a device, an absolute path or a `..`
 refuses the whole bundle with the local tree untouched.
 
-Saves are **not encrypted**: anyone holding a token for the service can read
-them.
+Saves are **not encrypted**, but they are **per user**: the store keeps them
+under `<user>/<env>/…`, and the user comes from the token that made the
+request — never from the request itself, so no client can name another user's
+saves at all. Every device of one user shares them: `daniel-desktop` and
+`daniel-deck` are two tokens, one user, one set of saves.
 
 ### Who holds a token
 
-Access is per person and per device, not one shared secret. An invite is a
+Access is per person and per device, not one shared secret. A token's *name*
+is a device — `alice-deck` — and its *user* is the person, taken from the part
+before the first hyphen unless the invite says otherwise (`--user` for names
+like `mary-jane-deck`). Devices get their own tokens so one lost Deck is one
+revocation; the user is what their saves are shared at. An invite is a
 single-use claim link, minted by name and dead after one use or seven days:
 
 ```bash

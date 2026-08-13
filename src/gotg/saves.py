@@ -14,10 +14,12 @@ to an environment's state directory — no path from any machine — but the
 server never opens it: verification and extraction belong to the machine whose
 disk it lands on. The store knows sizes, hashes, generations and nothing else.
 
-Layout, under one data directory:
+Layout, under one data directory, namespaced by the user the token belongs
+to — the user arrives from authentication, never from the request path, so no
+client can name another user's saves at all:
 
-    <root>/env-n64/current.json
-    <root>/env-n64/gen/000042-3f9a1c2b4d5e.tar.zst
+    <root>/daniel/env-n64/current.json
+    <root>/daniel/env-n64/gen/000042-3f9a1c2b4d5e.tar.zst
 
 The newest few generations are kept and the rest pruned — retention is the
 server's job now, so every client stops needing delete rights on anything.
@@ -36,6 +38,10 @@ from pathlib import Path
 # The same shapes the client validates. An attr becomes a directory name and a
 # bundle name becomes a file name, so nothing that does not match is touched.
 ATTR_RE = re.compile(r"^env-[a-z0-9][a-z0-9_-]*$")
+# The token store's name shape. A user becomes a directory beside other
+# users' directories, so nothing looser may pass; the leading class also
+# keeps it from ever colliding with the dot-prefixed .tokens dir.
+USER_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 GEN_RE = re.compile(r"^\d{6}-[0-9a-f]{12}\.tar\.zst$")
 
 DEFAULT_KEEP = 3
@@ -67,14 +73,16 @@ class SavesStore:
 
     # --- reading -------------------------------------------------------------
 
-    def _attr_dir(self, attr: str) -> Path:
+    def _attr_dir(self, user: str, attr: str) -> Path:
+        if not USER_RE.match(user):
+            raise ValueError(f"invalid user name: {user}")
         if not ATTR_RE.match(attr):
             raise ValueError(f"invalid environment name: {attr}")
-        return self.root / attr
+        return self.root / user / attr
 
-    def meta(self, attr: str) -> dict | None:
+    def meta(self, user: str, attr: str) -> dict | None:
         """The current pointer, or None when nothing has been pushed."""
-        path = self._attr_dir(attr) / "current.json"
+        path = self._attr_dir(user, attr) / "current.json"
         try:
             loaded = json.loads(path.read_text())
         except FileNotFoundError:
@@ -89,17 +97,17 @@ class SavesStore:
             raise OSError(f"the pointer for {attr} names a bundle it should not: {bundle!r}")
         return loaded
 
-    def bundle_path(self, attr: str) -> Path | None:
+    def bundle_path(self, user: str, attr: str) -> Path | None:
         """Where the current bundle's bytes are, or None when there are none."""
-        meta = self.meta(attr)
+        meta = self.meta(user, attr)
         if meta is None:
             return None
-        path = self._attr_dir(attr) / meta["bundle"]
+        path = self._attr_dir(user, attr) / meta["bundle"]
         return path if path.is_file() else None
 
     # --- writing -------------------------------------------------------------
 
-    def save(self, attr: str, body: bytes, parent: str, device: str, *, force: bool = False) -> Publish:
+    def save(self, user: str, attr: str, body: bytes, parent: str, device: str, *, force: bool = False) -> Publish:
         """Advance the head, or refuse with what is there.
 
         The rules, in the order they are applied:
@@ -112,7 +120,7 @@ class SavesStore:
             worst an interruption can leave behind is an orphan file.
         """
         with self._lock:
-            current = self.meta(attr)
+            current = self.meta(user, attr)
             digest = hashlib.sha256(body).hexdigest()
 
             if current is not None and digest == current["hash"]:
@@ -122,7 +130,7 @@ class SavesStore:
 
             generation = (current["generation"] if current is not None else 0) + 1
             name = f"{generation:06d}-{digest[:12]}.tar.zst"
-            gen_dir = self._attr_dir(attr) / "gen"
+            gen_dir = self._attr_dir(user, attr) / "gen"
             gen_dir.mkdir(parents=True, exist_ok=True)
 
             bundle = gen_dir / name
@@ -141,22 +149,22 @@ class SavesStore:
                 "device": device,
                 "written_at": _utc_now(),
             }
-            pointer = self._attr_dir(attr) / "current.json"
+            pointer = self._attr_dir(user, attr) / "current.json"
             tmp = pointer.with_suffix(".part")
             tmp.write_text(json.dumps(meta))
             tmp.replace(pointer)
 
-            self._prune(attr, keep_name=name)
+            self._prune(user, attr, keep_name=name)
             return Publish(200, meta)
 
-    def _prune(self, attr: str, keep_name: str) -> None:
+    def _prune(self, user: str, attr: str, keep_name: str) -> None:
         """Drop all but the newest few generations.
 
         The one the pointer names is never deleted whatever the arithmetic
         says, and a file not shaped like a generation is not ours to delete.
         Zero-padded names make lexical order age order.
         """
-        gen_dir = self._attr_dir(attr) / "gen"
+        gen_dir = self._attr_dir(user, attr) / "gen"
         names = sorted(p.name for p in gen_dir.iterdir() if GEN_RE.match(p.name))
         for name in names[: max(0, len(names) - self.keep)]:
             if name != keep_name:

@@ -52,7 +52,7 @@ from pathlib import Path
 
 from ..catalog import CatalogStore, Conflict, SweepRefused
 from ..saves import SavesStore
-from ..tokens import TOKEN_RE, Absent, Claimed, TokenStore
+from ..tokens import TOKEN_RE, Absent, Claimed, TokenStore, default_user
 
 USER_AGENT = "gotg-proxy/0.5.2"
 
@@ -185,6 +185,10 @@ class Config:
     # The library pod's pointer at the pod holding the token store: a bearer
     # no local check recognizes is asked about at {auth_url}/auth/whoami.
     auth_url: str = ""
+    # Which user's saves the break-glass legacy token reads and writes. On a
+    # deployment whose history predates users it is the person whose saves
+    # those already were; unset, legacy gets a namespace of its own.
+    legacy_user: str = "legacy"
     # Where clients should fetch /games and /files from, reported in the
     # catalog reply. Set when the control plane sits behind a proxy the byte
     # streams must bypass; empty means bytes come from the same url.
@@ -448,7 +452,28 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- the saves store ----------------------------------------------------
 
-    def _saves(self, rest: str, body: bytes | None) -> None:
+    def _saves_user(self, principal: str) -> str:
+        """The namespace a principal's saves live in.
+
+        From authentication, never from the path: /saves/<attr> stays the
+        whole wire surface, so no request can name another user's saves.
+        Multiple devices — daniel-desktop, daniel-deck — share one user, which
+        is the whole point of the column.
+        """
+        if principal == "legacy":
+            return self.config.legacy_user
+        if principal == "indexer":
+            return "indexer"
+        if self.token_store is not None:
+            user = self.token_store.user_for(principal)
+            if user:
+                return user
+        # An introspected principal on a storeless pod never reaches here:
+        # saves 503 without a store. The remaining case is a token revoked
+        # between authentication and now; its own namespace beats a guess.
+        return default_user(principal)
+
+    def _saves(self, rest: str, body: bytes | None, user: str) -> None:
         """`/saves/<attr>` is the whole surface: PUT is `.save()`, GET is
         `.retrieve()`, and `/saves/<attr>/meta` says what is current without
         moving the bytes. Conflicts are answered here — a PUT carries the hash
@@ -468,14 +493,14 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             if self.command == "GET" and want_meta:
-                meta = self.store.meta(attr)
+                meta = self.store.meta(user, attr)
                 if meta is None:
                     self._problem(404, f"nothing has been pushed for {attr}")
                     return
                 self._send(200, json.dumps(meta).encode(), "application/json")
             elif self.command == "GET":
-                meta = self.store.meta(attr)
-                path = self.store.bundle_path(attr)
+                meta = self.store.meta(user, attr)
+                path = self.store.bundle_path(user, attr)
                 if meta is None or path is None:
                     self._problem(404, f"nothing has been pushed for {attr}")
                     return
@@ -492,6 +517,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._problem(400, "a save must arrive with its bundle as the body")
                     return
                 published = self.store.save(
+                    user,
                     attr,
                     body,
                     parent=self.headers.get("X-Gotg-Parent", ""),
@@ -862,7 +888,7 @@ class Handler(BaseHTTPRequestHandler):
         elif prefix == "igdb":
             self._igdb(rest, body)
         elif prefix == "saves":
-            self._saves(rest, body)
+            self._saves(rest, body, self._saves_user(principal))
         elif prefix == "catalog":
             self._catalog(rest, body)
         elif prefix == "games":
@@ -924,7 +950,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.command not in ("GET", "HEAD"):
             self._problem(405, "whoami is a GET")
             return
-        self._send(200, json.dumps({"name": principal}).encode(), "application/json")
+        reply: dict = {"name": principal}
+        if self.token_store is not None:
+            user = self.token_store.user_for(principal)
+            if user:
+                reply["user"] = user
+        self._send(200, json.dumps(reply).encode(), "application/json")
 
     def _needs_admin(self, principal: str) -> bool:
         if not self.config.admin_token:
@@ -950,9 +981,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 asked = json.loads(body or b"{}")
                 name = asked.get("name", "")
+                user = asked.get("user") or None
                 ttl_days = float(asked.get("ttl_days", 7))
             except (ValueError, AttributeError, TypeError):
-                self._problem(400, 'the body is {"name": ..., "ttl_days"?: ...}')
+                self._problem(400, 'the body is {"name": ..., "user"?: ..., "ttl_days"?: ...}')
                 return
             # False for NaN, refuses Infinity: json accepts both, and either
             # overflows int() further down as an uncaught OverflowError.
@@ -960,7 +992,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._problem(400, "ttl_days must be between 0 and 3650")
                 return
             try:
-                code = self.token_store.mint_invite(name, ttl=ttl_days * 86400)
+                code = self.token_store.mint_invite(name, ttl=ttl_days * 86400, user=user)
             except (ValueError, TypeError, OverflowError) as error:
                 self._problem(400, str(error))
                 return

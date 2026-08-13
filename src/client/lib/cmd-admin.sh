@@ -8,8 +8,12 @@ admin_usage() {
   cat <<'EOF'
 usage: gotg admin <command> [args]
 
-  invite <name> [--ttl <days>]  mint a single-use claim link for a person
-                                and device — "alice-deck" — valid 7 days
+  invite <name> [--ttl <days>] [--user <user>]
+                                mint a single-use claim link for a person and
+                                device — "alice-deck" — valid 7 days. The user
+                                (default: the part before the first hyphen) is
+                                whose saves the token reads and writes; every
+                                device of one user shares them.
   tokens                        every token: name, display, last use
   revoke <name>                 end one token now, and cancel any invite
                                 still outstanding for it; the person re-claims
@@ -57,8 +61,8 @@ admin_call() {
 }
 
 admin_invite() {
-  local name="${1:-}" ttl=7
-  [[ -n "$name" ]] || die "usage: gotg admin invite <name> [--ttl <days>]"
+  local name="${1:-}" ttl=7 user=""
+  [[ -n "$name" ]] || die "usage: gotg admin invite <name> [--ttl <days>] [--user <user>]"
   shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -66,13 +70,17 @@ admin_invite() {
         ttl="${2:-}"
         shift 2 || die "--ttl needs a number of days"
         ;;
+      --user)
+        user="${2:-}"
+        shift 2 || die "--user needs a name"
+        ;;
       *) die "unknown option for invite: $1" ;;
     esac
   done
   [[ "$ttl" =~ ^[1-9][0-9]{0,2}$ ]] || die "--ttl takes days, 1-999"
 
   local reply code
-  reply="$(admin_call POST /admin/invites "$(jq -n --arg n "$name" --argjson t "$ttl" '{name: $n, ttl_days: $t}')")"
+  reply="$(admin_call POST /admin/invites "$(jq -n --arg n "$name" --arg u "$user" --argjson t "$ttl"     '{name: $n, ttl_days: $t} + (if $u != "" then {user: $u} else {} end)')")"
   code="$(jq -r '.code' <<<"$reply")"
   log "one claim, $ttl day(s), then it is gone:"
   printf '%s/claim/%s\n' "$(admin_url)" "$code"
@@ -86,16 +94,16 @@ admin_tokens() {
   reply="$(admin_call GET /admin/tokens)"
   # printf, not column: column escapes the display's ellipsis byte-by-byte
   # under the C locale.
-  local fmt='%-20s %-12s %-21s %-21s %s\n'
+  local fmt='%-20s %-12s %-12s %-21s %-21s %s\n'
   # shellcheck disable=SC2059
-  printf "$fmt" "NAME" "TOKEN" "CREATED" "LAST USED" "REVOKED"
+  printf "$fmt" "NAME" "USER" "TOKEN" "CREATED" "LAST USED" "REVOKED"
   jq -r '
     def when: if . == null then "-" else (. | todate) end;
-    .tokens[] | [.name, .display, (.created_at | when), (.last_used_at | when), (.revoked_at | when)]
+    .tokens[] | [.name, (.user // "-"), .display, (.created_at | when), (.last_used_at | when), (.revoked_at | when)]
     | @tsv' <<<"$reply" |
-    while IFS=$'\t' read -r name display created used revoked; do
+    while IFS=$'\t' read -r name user display created used revoked; do
       # shellcheck disable=SC2059
-      printf "$fmt" "$name" "$display" "$created" "$used" "$revoked"
+      printf "$fmt" "$name" "$user" "$display" "$created" "$used" "$revoked"
     done
 }
 

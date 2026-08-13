@@ -53,6 +53,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tokens (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
+    user TEXT NOT NULL DEFAULT '',
     token_hash TEXT NOT NULL UNIQUE,
     display TEXT NOT NULL,
     created_at INTEGER NOT NULL,
@@ -61,11 +62,14 @@ CREATE TABLE IF NOT EXISTS tokens (
     last_used_at INTEGER
 );
 -- One live token per name; retired rows stay, because "when was the old
--- token last seen" is the question a rotation exists to answer.
+-- token last seen" is the question a rotation exists to answer. A *user*
+-- spans names: daniel-desktop and daniel-deck both belong to daniel, which
+-- is the grain saves are shared at.
 CREATE UNIQUE INDEX IF NOT EXISTS tokens_live_name ON tokens(name) WHERE revoked_at IS NULL;
 CREATE TABLE IF NOT EXISTS invites (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
+    user TEXT NOT NULL DEFAULT '',
     code_hash TEXT NOT NULL UNIQUE,
     created_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL,
@@ -73,6 +77,11 @@ CREATE TABLE IF NOT EXISTS invites (
     claimed_at INTEGER
 );
 """
+
+
+def default_user(name: str) -> str:
+    """The person half of a person-device name: daniel-desktop -> daniel."""
+    return name.split("-", 1)[0]
 
 
 def _hash(value: str) -> str:
@@ -98,6 +107,7 @@ class TokenStore:
         with self._write_lock, self._write:
             self._write.executescript(_SCHEMA)
         self._migrate()
+        self._migrate_users()
 
     def _migrate(self) -> None:
         # v1 declared tokens.name UNIQUE, which forced rotation to DELETE the
@@ -106,7 +116,9 @@ class TokenStore:
         # store minted since.
         with self._write_lock, self._write:
             row = self._write.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tokens'").fetchone()
-            if row is None or "UNIQUE" not in row["sql"]:
+            # v1's tell is the constraint on *name*; token_hash is UNIQUE in
+            # every version, so matching bare "UNIQUE" would rebuild always.
+            if row is None or "name TEXT NOT NULL UNIQUE" not in row["sql"]:
                 return
             self._write.executescript(
                 """
@@ -114,6 +126,7 @@ class TokenStore:
                 CREATE TABLE tokens (
                     id INTEGER PRIMARY KEY,
                     name TEXT NOT NULL,
+                    user TEXT NOT NULL DEFAULT '',
                     token_hash TEXT NOT NULL UNIQUE,
                     display TEXT NOT NULL,
                     created_at INTEGER NOT NULL,
@@ -121,12 +134,31 @@ class TokenStore:
                     revoked_at INTEGER,
                     last_used_at INTEGER
                 );
-                INSERT INTO tokens SELECT * FROM tokens_v1;
+                INSERT INTO tokens (id, name, token_hash, display, created_at, expires_at, revoked_at, last_used_at)
+                    SELECT * FROM tokens_v1;
                 DROP TABLE tokens_v1;
                 CREATE UNIQUE INDEX IF NOT EXISTS tokens_live_name
                     ON tokens(name) WHERE revoked_at IS NULL;
                 """
             )
+
+    def _migrate_users(self) -> None:
+        # Rows minted before users existed carry '': backfilled from the
+        # person-device naming convention the names already follow, so
+        # daniel-desktop's saves land where daniel-deck's do.
+        with self._write_lock, self._write:
+            cols = {r["name"] for r in self._write.execute("PRAGMA table_info(tokens)")}
+            if "user" not in cols:
+                self._write.executescript(
+                    "ALTER TABLE tokens ADD COLUMN user TEXT NOT NULL DEFAULT '';"
+                    "ALTER TABLE invites ADD COLUMN user TEXT NOT NULL DEFAULT '';"
+                )
+            for table in ("tokens", "invites"):
+                for row in self._write.execute(f"SELECT id, name FROM {table} WHERE user = ''").fetchall():  # noqa: S608
+                    self._write.execute(
+                        f"UPDATE {table} SET user = ? WHERE id = ?",  # noqa: S608
+                        (default_user(row["name"]), row["id"]),
+                    )
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db, check_same_thread=False)
@@ -145,17 +177,23 @@ class TokenStore:
         finally:
             conn.close()
 
-    def mint_invite(self, name: str, ttl: float = INVITE_TTL, token_ttl: float | None = None) -> str:
+    def mint_invite(
+        self, name: str, ttl: float = INVITE_TTL, token_ttl: float | None = None, user: str | None = None
+    ) -> str:
         if not NAME_RE.match(name) or name in RESERVED_NAMES:
             raise ValueError(f"not a usable token name: {name!r}")
+        user = default_user(name) if user is None else user
+        if not NAME_RE.match(user) or user in RESERVED_NAMES:
+            raise ValueError(f"not a usable user name: {user!r}")
         code = mint_code()
         now = time.time()
         # token_ttl rides the invite row: people get non-expiring tokens by
         # default — revocation is the control — but an invite can carry one.
         with self._write_lock, self._write:
             self._write.execute(
-                "INSERT INTO invites (name, code_hash, created_at, expires_at, token_ttl) VALUES (?, ?, ?, ?, ?)",
-                (name, _hash(code), int(now), int(now + ttl), None if token_ttl is None else int(token_ttl)),
+                "INSERT INTO invites (name, user, code_hash, created_at, expires_at, token_ttl)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (name, user, _hash(code), int(now), int(now + ttl), None if token_ttl is None else int(token_ttl)),
             )
         return code
 
@@ -180,7 +218,7 @@ class TokenStore:
                 return Claimed if row else Absent
 
             invite = self._write.execute(
-                "SELECT name, token_ttl FROM invites WHERE code_hash = ?", (code_hash,)
+                "SELECT name, user, token_ttl FROM invites WHERE code_hash = ?", (code_hash,)
             ).fetchone()
             name = invite["name"]
 
@@ -192,8 +230,9 @@ class TokenStore:
             )
             expires = None if invite["token_ttl"] is None else int(now + invite["token_ttl"])
             self._write.execute(
-                "INSERT INTO tokens (name, token_hash, display, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
-                (name, _hash(token), display, now, expires),
+                "INSERT INTO tokens (name, user, token_hash, display, created_at, expires_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (name, invite["user"], _hash(token), display, now, expires),
             )
         return name, token
 
@@ -238,9 +277,15 @@ class TokenStore:
             )
             return tokens.rowcount > 0 or invites.rowcount > 0
 
+    def user_for(self, name: str) -> str | None:
+        """The user a live token's name belongs to — the saves namespace."""
+        with self._read() as conn:
+            row = conn.execute("SELECT user FROM tokens WHERE name = ? AND revoked_at IS NULL", (name,)).fetchone()
+        return row["user"] if row else None
+
     def tokens(self) -> list[dict]:
         with self._read() as conn:
             rows = conn.execute(
-                "SELECT name, display, created_at, expires_at, revoked_at, last_used_at FROM tokens ORDER BY name"
+                "SELECT name, user, display, created_at, expires_at, revoked_at, last_used_at FROM tokens ORDER BY name"
             ).fetchall()
         return [dict(r) for r in rows]

@@ -221,3 +221,29 @@ invite_code() {
   run saves_pull_auto env-snes
   [ "$status" -eq 0 ]
 }
+
+@test "two devices of one user share saves; another user sees none" {
+  local c1 c2 c3
+  c1="$(invite_code walt-desktop)"
+  c2="$(invite_code walt-deck)"
+  c3="$(invite_code skyler-deck)"
+
+  # Push as walt's desktop.
+  gotg login --claim "$GOTG_SERVICE_URL/claim/$c1"
+  fake_env env-snes '["saves/**"]'
+  mkdir -p "$GOTG_STATE_DIR/env/env-snes/saves"
+  printf 'walt progress' >"$GOTG_STATE_DIR/env/env-snes/saves/game.srm"
+  gotg saves push env-snes
+  [ "$status" -eq 0 ]
+
+  # Walt's deck sees the head; skyler does not.
+  gotg login --claim "$GOTG_SERVICE_URL/claim/$c2"
+  gotg saves status env-snes
+  [ "$status" -eq 0 ]
+  [[ "$output$stderr" != *"nothing has been pushed"* ]]
+
+  gotg login --claim "$GOTG_SERVICE_URL/claim/$c3"
+  gotg saves status env-snes
+  [ "$status" -eq 0 ]
+  [[ "$output$stderr" == *"nothing"* ]]
+}
