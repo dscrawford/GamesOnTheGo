@@ -155,17 +155,14 @@ invite_code() {
 }
 
 @test "a failed claim leaves no reply file behind" {
-  # mktemp's own naming, so this counts the client's temp files and not bats'.
-  # The reply holds the minted token, and a `die` must not leave it in /tmp.
-  local pattern="${TMPDIR:-/tmp}/tmp.??????????"
-  local before after
-  # shellcheck disable=SC2086
-  before="$(ls -d $pattern 2>/dev/null | wc -l)"
-  gotg login --claim "$GOTG_SERVICE_URL/claim/gotgi_$(printf 'b%.0s' {1..43})"
+  # A private TMPDIR: the suite runs in parallel, and a shared one counts
+  # other tests' files. The reply holds the minted token, and a `die` must
+  # not leave it in /tmp.
+  local scratch="$BATS_TEST_TMPDIR/claim-scratch"
+  mkdir -p "$scratch"
+  TMPDIR="$scratch" gotg login --claim "$GOTG_SERVICE_URL/claim/gotgi_$(printf 'b%.0s' {1..43})"
   [ "$status" -ne 0 ]
-  # shellcheck disable=SC2086
-  after="$(ls -d $pattern 2>/dev/null | wc -l)"
-  [ "$after" -eq "$before" ]
+  [ -z "$(ls -A "$scratch")" ]
 }
 
 @test "admin invite --ttl takes 1-999 whole days and nothing else" {
