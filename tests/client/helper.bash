@@ -87,7 +87,10 @@ start_saves_service() {
 }
 
 stop_saves_service() {
-  [[ -n "${SERVICE_PID:-}" ]] && kill "$SERVICE_PID" 2>/dev/null
+  # `|| true` on the kill as well: a service that lost the port race is
+  # already dead, and under bats' errexit a failing kill here aborts the
+  # caller — which turned start_saves_service's retry loop into a single try.
+  [[ -n "${SERVICE_PID:-}" ]] && kill "$SERVICE_PID" 2>/dev/null || true
   wait "${SERVICE_PID:-}" 2>/dev/null || true
 }
 

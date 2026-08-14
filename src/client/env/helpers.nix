@@ -503,11 +503,20 @@ in
         if ${lib.concatMapStringsSep " && " (a: ''[ ! -e "$harkinian_data/${a}" ]'') archives}; then
           echo "first run: extracting game assets from $target" >&2
           mkdir -p "$harkinian_data"
-          # Hand the process over rather than coming back here. Given a ROM the
-          # port extracts it and then offers to start the game, so returning
-          # would launch a second copy the moment the player quit the first.
-          exec ${port}/bin/${bin} "$target"
+          # The ports take no ROM argument: they scan their working directory
+          # and data directory for one and offer to extract it. Learned on the
+          # Deck — every desktop had adopted a hand-made archive through
+          # legacyPaths, so the first-run path had never actually run. A copy
+          # rather than a symlink: the scan follows neither.
+          cp -f "$target" "$harkinian_data/gotg-extract.z64"
+          cd "$harkinian_data"
+          # Hand the process over rather than coming back here: after
+          # extracting, the port offers to start the game, so returning would
+          # launch a second copy the moment the player quit the first.
+          exec ${port}/bin/${bin}
         fi
+        # The staged copy is only needed until the archive exists.
+        rm -f "$harkinian_data/gotg-extract.z64"
       '';
     };
 }
