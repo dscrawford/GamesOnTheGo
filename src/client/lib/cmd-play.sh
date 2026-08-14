@@ -120,11 +120,18 @@ cmd_play() {
 cmd_sync() {
   local flake
   flake="$(gotg_flake)"
-  [[ -f "$flake/flake.nix" ]] || die "no flake at $flake (set GOTG_FLAKE or the 'flake' key in $GOTG_CONFIG_FILE)"
+  # A URL ref answers from nix's fetch cache for up to an hour; sync exists
+  # to pick up what just changed, so it pays for a fresh look at the head.
+  local -a refresh=()
+  if flake_is_path "$flake"; then
+    [[ -f "$flake/flake.nix" ]] || die "no flake at $flake (set GOTG_FLAKE or the 'flake' key in $GOTG_CONFIG_FILE)"
+  else
+    refresh=(--refresh)
+  fi
 
   mkdir -p "$GOTG_STATE_DIR"
   log "building gotg -> $GOTG_APP_ROOT"
-  "$(nix_bin)" build "$flake#gotg" -o "$GOTG_APP_ROOT" || die "could not build gotg from $flake"
+  "$(nix_bin)" build "$flake#gotg" -o "$GOTG_APP_ROOT" "${refresh[@]}" || die "could not build gotg from $flake"
 
   # Only rebuild the environments that are already in use here.
   local root name before after changed=0

@@ -145,6 +145,7 @@ env_pads_manifest() {
 # minutes reads as a crash, so pulse a dialog for as long as the build runs.
 _env_build_zenity() {
   local ref="$1" root="$2" attr="$3"
+  shift 3
   local pipedir pipe build_pid zen_pid status=0
   pipedir="$(mktemp -d)"
   pipe="$pipedir/progress"
@@ -155,7 +156,7 @@ _env_build_zenity() {
   zen_pid=$!
   exec 6>"$pipe"
 
-  "$(nix_bin)" build "$ref" -o "$root" &
+  "$(nix_bin)" build "$ref" -o "$root" "$@" &
   build_pid=$!
 
   while kill -0 "$build_pid" 2>/dev/null; do
@@ -202,11 +203,16 @@ env_build() {
   root="$(env_root "$attr")"
   mkdir -p "$GOTG_ROOTS_DIR"
 
+  # A branch ref answers from nix's fetch cache for up to an hour, so a
+  # rebuild meant to pick up a change could quietly rebuild the old head.
+  local -a refresh=()
+  flake_is_path "$flake" || refresh=(--refresh)
+
   log "building $attr from $ref — the first launch on a platform compiles its emulator"
   if ! is_tty && has_display && command -v zenity >/dev/null 2>&1; then
-    _env_build_zenity "$ref" "$root" "$attr" || _env_build_failed "$attr" "$ref"
+    _env_build_zenity "$ref" "$root" "$attr" "${refresh[@]}" || _env_build_failed "$attr" "$ref"
   else
-    "$(nix_bin)" build "$ref" -o "$root" || _env_build_failed "$attr" "$ref"
+    "$(nix_bin)" build "$ref" -o "$root" "${refresh[@]}" || _env_build_failed "$attr" "$ref"
   fi
 
   env_is_built "$attr" ||

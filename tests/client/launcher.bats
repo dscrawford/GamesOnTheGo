@@ -350,3 +350,11 @@ teardown() {
   [ "$status" -eq 0 ]
   grep -q "build git+ssh://git@example.com/repo?shallow=1#env-n64" "$NIX_LOG"
 }
+
+@test "sync with a url flake refreshes rather than dying on a missing checkout" {
+  stub_nix
+  export GOTG_FLAKE="git+ssh://git@example.com/repo?shallow=1"
+  gotg sync
+  [ "$status" -eq 0 ]
+  grep -q -- "build git+ssh://git@example.com/repo?shallow=1#gotg .* --refresh" "$NIX_LOG"
+}
