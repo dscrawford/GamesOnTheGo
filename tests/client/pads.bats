@@ -521,7 +521,7 @@ BML
 # the cause was fixed. Healed on the way into every launch.
 
 heal_fixture() {
-  local driver="$1" audio="${2:-SDL}"
+  local driver="$1" audio="${2:-SDL}" latency="${3:-60}"
   mkdir -p "$GOTG_STATE_DIR/env/env-n64/data/ares"
   cat >"$GOTG_STATE_DIR/env/env-n64/data/ares/settings.bml" <<BML
 Video
@@ -529,7 +529,7 @@ Video
   Monitor: Primary
 Audio
   Driver: $audio
-  Latency: 60
+  Latency: $latency
 BML
   printf '%s/env/env-n64/data/ares/settings.bml' "$GOTG_STATE_DIR"
 }
@@ -564,4 +564,32 @@ BML
   run ares_heal_video env-n64
   [ "$status" -eq 0 ]
   [ ! -e "$GOTG_STATE_DIR/env/env-n64/data/ares/settings.bml" ]
+}
+
+@test "ares' default SDL audio migrates to the measured-good PulseAudio pair" {
+  local file
+  file="$(heal_fixture "OpenGL 3.2" SDL 20)"
+  run ares_heal_audio env-n64
+  [ "$status" -eq 0 ]
+  grep -q "^  Driver: PulseAudio$" "$file"
+  grep -q "^  Latency: 60$" "$file"
+  [[ "$output" == *"PulseAudio"* ]]
+}
+
+@test "an audio driver chosen by hand is not migrated" {
+  local file before
+  file="$(heal_fixture "OpenGL 3.2" OpenAL)"
+  before="$(stat -c '%i' "$file")"
+  run ares_heal_audio env-n64
+  [ "$status" -eq 0 ]
+  [ "$(stat -c '%i' "$file")" = "$before" ]
+}
+
+@test "the video and audio heals compose on one scarred file" {
+  local file
+  file="$(heal_fixture None SDL)"
+  ares_heal_video env-n64
+  ares_heal_audio env-n64
+  grep -q "^  Driver: OpenGL 3.2$" "$file"
+  grep -q "^  Driver: PulseAudio$" "$file"
 }

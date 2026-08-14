@@ -351,6 +351,7 @@ pads_configure() {
   case "$emulator" in
     ares)
       ares_heal_video "$attr"
+      ares_heal_audio "$attr"
       pads_ares_configure "$attr"
       ;;
     dolphin) pads_dolphin_configure "$attr" ;;
@@ -383,6 +384,32 @@ ares_heal_video() {
   if ! cmp -s "$file" "$file.gotg-tmp"; then
     mv "$file.gotg-tmp" "$file"
     log "ares had no video driver set — restored OpenGL 3.2"
+  else
+    rm -f "$file.gotg-tmp"
+  fi
+}
+
+# ares defaults its audio to SDL, which crackles under PipeWire on the Deck —
+# measured there: SDL popped at 20ms and still at 60ms, PulseAudio at 60ms is
+# clean, on both real PulseAudio and pipewire-pulse. SDL is the one value
+# nobody chose (it is what ares writes on first run), so exactly it migrates
+# to the measured-good pair; OpenAL, ALSA or anything else set by hand stays.
+ares_heal_audio() {
+  local attr="$1" file
+  file="$(env_state_dir "$attr")/data/ares/settings.bml"
+  [[ -f "$file" ]] || return 0
+  awk '
+    /^[A-Za-z]/ { block = $1 }
+    block == "Audio" && $0 == "  Driver: SDL" { sdl = 1; print "  Driver: PulseAudio"; next }
+    sdl && block == "Audio" && $0 ~ /^  Latency: / { print "  Latency: 60"; next }
+    { print }
+  ' "$file" >"$file.gotg-tmp" || {
+    rm -f "$file.gotg-tmp"
+    return 0
+  }
+  if ! cmp -s "$file" "$file.gotg-tmp"; then
+    mv "$file.gotg-tmp" "$file"
+    log "ares audio moved off the SDL driver — PulseAudio at 60ms"
   else
     rm -f "$file.gotg-tmp"
   fi
