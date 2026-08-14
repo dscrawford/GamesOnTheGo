@@ -349,11 +349,43 @@ pads_configure() {
   emulator="$(jq -r '.emulator // "ares"' "$manifest")"
 
   case "$emulator" in
-    ares) pads_ares_configure "$attr" ;;
+    ares)
+      ares_heal_video "$attr"
+      pads_ares_configure "$attr"
+      ;;
     dolphin) pads_dolphin_configure "$attr" ;;
     ryujinx) pads_ryujinx_configure "$attr" ;;
     *) return 0 ;;
   esac
+}
+
+# ares remembers a video driver that failed: one launch where GL cannot
+# initialize — a GPU userspace missing on a foreign distro, a broken session —
+# and it saves "Driver: None", which is a black screen on every launch after
+# the cause is gone. The scar outlives the wound, so it is healed on the way
+# in; a person who chose None on purpose loses that choice at the next
+# launch, which is the same trade the Ryujinx binding restore makes.
+ares_heal_video() {
+  local attr="$1" file
+  file="$(env_state_dir "$attr")/data/ares/settings.bml"
+  [[ -f "$file" ]] || return 0
+  grep -q "^  Driver: None$" "$file" || return 0
+  # Only inside the Video block: Audio has a Driver line of its own, and an
+  # audio driver deliberately set to None is not ours to overrule.
+  awk '
+    /^[A-Za-z]/ { block = $1 }
+    block == "Video" && $0 == "  Driver: None" { print "  Driver: OpenGL 3.2"; next }
+    { print }
+  ' "$file" >"$file.gotg-tmp" || {
+    rm -f "$file.gotg-tmp"
+    return 0
+  }
+  if ! cmp -s "$file" "$file.gotg-tmp"; then
+    mv "$file.gotg-tmp" "$file"
+    log "ares had no video driver set — restored OpenGL 3.2"
+  else
+    rm -f "$file.gotg-tmp"
+  fi
 }
 
 # Bind each attached controller to the ares console port of the same number.

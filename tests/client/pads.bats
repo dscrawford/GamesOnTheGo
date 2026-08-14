@@ -515,3 +515,53 @@ BML
   grep -qx "  Driver: OpenGL" "$file"
   grep -qx "GameBoy" "$file"
 }
+
+# The scar that blacked out N64 on the Deck: one launch where GL could not
+# initialize and ares saved "Driver: None", keeping the screen black after
+# the cause was fixed. Healed on the way into every launch.
+
+heal_fixture() {
+  local driver="$1" audio="${2:-SDL}"
+  mkdir -p "$GOTG_STATE_DIR/env/env-n64/data/ares"
+  cat >"$GOTG_STATE_DIR/env/env-n64/data/ares/settings.bml" <<BML
+Video
+  Driver: $driver
+  Monitor: Primary
+Audio
+  Driver: $audio
+  Latency: 60
+BML
+  printf '%s/env/env-n64/data/ares/settings.bml' "$GOTG_STATE_DIR"
+}
+
+@test "a saved video driver of None is healed to OpenGL at launch" {
+  local file
+  file="$(heal_fixture None)"
+  run ares_heal_video env-n64
+  [ "$status" -eq 0 ]
+  grep -q "^  Driver: OpenGL 3.2$" "$file"
+  [[ "$output" == *"restored"* ]]
+}
+
+@test "healing the video driver leaves an audio driver of None alone" {
+  local file
+  file="$(heal_fixture None None)"
+  ares_heal_video env-n64
+  [ "$(sed -n '/^Audio/,$p' "$file" | grep '  Driver:')" = "  Driver: None" ]
+}
+
+@test "a working video driver is not rewritten" {
+  local file before
+  file="$(heal_fixture "OpenGL 3.2")"
+  before="$(stat -c '%i' "$file")"
+  run ares_heal_video env-n64
+  [ "$status" -eq 0 ]
+  [ "$(stat -c '%i' "$file")" = "$before" ]
+  [ -z "$output" ]
+}
+
+@test "no settings file — a first launch — is left alone" {
+  run ares_heal_video env-n64
+  [ "$status" -eq 0 ]
+  [ ! -e "$GOTG_STATE_DIR/env/env-n64/data/ares/settings.bml" ]
+}
