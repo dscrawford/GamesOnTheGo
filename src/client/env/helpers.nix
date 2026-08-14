@@ -76,6 +76,9 @@ in
       isolate = true;
       padConsole = console;
       args = [
+        # A launch from the sofa goes straight to the game; the windowed UI is
+        # one Esc away when wanted.
+        "--fullscreen"
         "--setting"
         "Paths/Saves={state}/saves/"
         "{target}"
@@ -208,6 +211,10 @@ in
         if [ "''${XDG_CONFIG_HOME:-}" = "$state/config" ]; then
           gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini" \
             Input BackgroundInput True
+
+          # Straight to the game, full screen; -b already skips the UI.
+          gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini" \
+            Display Fullscreen True
 
           # Internal resolution, from the player's own preference rather than
           # this flake: what looks right depends on the screen in front of you,
