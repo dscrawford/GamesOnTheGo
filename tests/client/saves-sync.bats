@@ -76,12 +76,12 @@ publish_raw() {
   local bundle="$1" hash size
   hash="$(sha256sum "$bundle" | cut -d' ' -f1)"
   size="$(stat -c '%s' "$bundle")"
-  mkdir -p "$SAVES_DATA_DIR/env-n64/gen"
-  cp "$bundle" "$SAVES_DATA_DIR/env-n64/gen/000001-${hash:0:12}.tar.zst"
+  mkdir -p "$SAVES_DATA_DIR/legacy/env-n64/gen"
+  cp "$bundle" "$SAVES_DATA_DIR/legacy/env-n64/gen/000001-${hash:0:12}.tar.zst"
   jq -n --arg hash "$hash" --arg bundle "gen/000001-${hash:0:12}.tar.zst" \
     --argjson size "$size" \
     '{version: 1, attr: "env-n64", generation: 1, hash: $hash,
-      bundle: $bundle, size: $size}' >"$SAVES_DATA_DIR/env-n64/current.json"
+      bundle: $bundle, size: $size}' >"$SAVES_DATA_DIR/legacy/env-n64/current.json"
 }
 
 # --- what the service holds -------------------------------------------------
@@ -91,9 +91,9 @@ publish_raw() {
   gotg saves push env-n64
   [ "$status" -eq 0 ]
 
-  [ -f "$SAVES_DATA_DIR/env-n64/current.json" ]
+  [ -f "$SAVES_DATA_DIR/legacy/env-n64/current.json" ]
   local bundle
-  bundle="$(find "$SAVES_DATA_DIR/env-n64/gen" -name '*.tar.zst' | head -1)"
+  bundle="$(find "$SAVES_DATA_DIR/legacy/env-n64/gen" -name '*.tar.zst' | head -1)"
   [ -n "$bundle" ]
 
   # Members are relative to the state directory — nothing about this machine.
@@ -111,10 +111,10 @@ publish_raw() {
     [ "$status" -eq 0 ]
   done
 
-  run -0 bash -c "ls $SAVES_DATA_DIR/env-n64/gen | wc -l"
+  run -0 bash -c "ls $SAVES_DATA_DIR/legacy/env-n64/gen | wc -l"
   [ "$output" -eq 3 ]
   # The oldest is the one that went; generations still count upward.
-  run -0 bash -c "ls $SAVES_DATA_DIR/env-n64/gen | sort | head -1"
+  run -0 bash -c "ls $SAVES_DATA_DIR/legacy/env-n64/gen | sort | head -1"
   [[ "$output" == 000002-* ]]
 }
 
@@ -253,7 +253,7 @@ publish_raw() {
   # Neither side lost anything: machine b still has its own work, and the
   # service still has machine a's.
   [ "$(cat "$STATE/saves/zelda.ram")" = "from machine b" ]
-  run -0 bash -c "ls $SAVES_DATA_DIR/env-n64/gen | wc -l"
+  run -0 bash -c "ls $SAVES_DATA_DIR/legacy/env-n64/gen | wc -l"
   [ "$output" -eq 1 ]
 }
 
@@ -266,7 +266,7 @@ publish_raw() {
   gotg saves push --force env-n64
   [ "$status" -eq 0 ]
   # Both generations are there: the loser waits for retention, not deletion.
-  run -0 bash -c "ls $SAVES_DATA_DIR/env-n64/gen | wc -l"
+  run -0 bash -c "ls $SAVES_DATA_DIR/legacy/env-n64/gen | wc -l"
   [ "$output" -eq 2 ]
 
   first_device
@@ -320,7 +320,7 @@ publish_raw() {
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"huge.ram"* ]]
   # Refused before anything was uploaded.
-  [ ! -d "$SAVES_DATA_DIR/env-n64" ]
+  [ ! -d "$SAVES_DATA_DIR/legacy/env-n64" ]
 }
 
 @test "a bundle that does not match its claimed hash is refused whole" {
@@ -329,7 +329,7 @@ publish_raw() {
 
   # What a tampered store would serve: the pointer's bundle, different bytes.
   local bundle
-  bundle="$(find "$SAVES_DATA_DIR/env-n64/gen" -name '*.tar.zst')"
+  bundle="$(find "$SAVES_DATA_DIR/legacy/env-n64/gen" -name '*.tar.zst')"
   head -c 100 /dev/urandom >"$bundle"
 
   second_device
