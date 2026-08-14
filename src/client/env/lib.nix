@@ -160,6 +160,21 @@ let
     lib.mapAttrsToList (k: v: "export ${k}=${render (toString v)}") (baseEnv // env)
   );
 
+  # On NixOS, /run/opengl-driver carries the GPU userspace and nix-built
+  # emulators just work. On a foreign distro — SteamOS — that path does not
+  # exist and the host's mesa is unloadable from our glibc, so Vulkan and GL
+  # both come up empty ("No RDP rendering support" is ares saying exactly
+  # that). Ship our own nixpkgs mesa and point the loaders at it, only when
+  # the host provides nothing: the nixGL trick, inlined.
+  foreignGl = ''
+    if [ ! -e /run/opengl-driver ]; then
+      export LIBGL_DRIVERS_PATH=${pkgs.mesa}/lib/dri
+      export __EGL_VENDOR_LIBRARY_FILENAMES=${pkgs.mesa}/share/glvnd/egl_vendor.d/50_mesa.json
+      export VK_DRIVER_FILES=${pkgs.mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/intel_icd.x86_64.json
+      export LD_LIBRARY_PATH=${pkgs.mesa}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+    fi
+  '';
+
   sourceOf = v: if lib.isDerivation v || lib.isPath v then v else pkgs.writeText "gotg-config" v;
 
   seedConfig = lib.concatLines (
@@ -221,6 +236,7 @@ let
     ''}
     ${seedConfig}
     ${exports}
+    ${foreignGl}
     ${preLaunch}
     exec ${exe} ${lib.concatMapStringsSep " " render args} "$@"
   '';
