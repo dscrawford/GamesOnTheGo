@@ -313,7 +313,10 @@ publish_scene_game() {
   [ ! -e "$GOTG_GAMES_DIR/n64/usa.bad.z64" ]
 }
 
-@test "a complete but corrupt staged member is caught, deleted, and refetched" {
+@test "a complete but corrupt staged member heals in one run" {
+  # This used to take two runs — die on the mismatch, refetch on the next
+  # try. The retry ladder folds the second run in: mismatch, delete, fresh
+  # fetch, verified, installed.
   add_game n64 "usa.zelda.z64" "the real bytes"
   gotg refresh
 
@@ -321,14 +324,30 @@ publish_scene_game() {
   printf 'wrong bytes!!!' >"$GOTG_PARTIAL_DIR/usa.zelda/usa.zelda.z64"
 
   gotg download usa.zelda
-  [ "$status" -ne 0 ]
-  [[ "$stderr" == *"checksum mismatch"* ]]
-  [ ! -e "$GOTG_PARTIAL_DIR/usa.zelda/usa.zelda.z64" ]
-
-  gotg download usa.zelda
   [ "$status" -eq 0 ]
+  [[ "$stderr" == *"checksum mismatch"* ]]
+  [[ "$stderr" == *"retrying"* ]]
   run diff "$SERVICE_LIBRARY_DIR/n64/usa.zelda.z64" "$GOTG_GAMES_DIR/n64/usa.zelda.z64"
   [ "$status" -eq 0 ]
+}
+
+@test "bytes that can never verify still die after the retries run out" {
+  # The server itself serving wrong bytes must not loop or install: three
+  # attempts, then a refusal that keeps nothing.
+  local file="$SERVICE_LIBRARY_DIR/n64/usa.zelda.z64"
+  mkdir -p "$SERVICE_LIBRARY_DIR/n64"
+  printf 'rom-content' >"$file"
+  jq -n --arg p "$file" \
+    '{handler: "single_file", title: "Zelda",
+      files: [{name: "usa.zelda.z64", path: $p, size_bytes: 11,
+               mtime: 1, sha256: ("ab" * 32)}]}' |
+    curl -sS -X PUT -H "Authorization: Bearer index-token" --data-binary @- \
+      "$GOTG_SERVICE_URL/catalog/n64/usa.zelda" >/dev/null
+  gotg refresh
+  gotg download usa.zelda
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"download failed"* ]]
+  [ ! -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
 }
 
 @test "nested member names with spaces and parentheses survive the trip" {
@@ -387,4 +406,29 @@ publish_scene_game() {
   gotg download usa.zelda
   [ "$status" -eq 0 ]
   [ -f "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
+}
+
+@test "an interrupted partial resumes instead of restarting from zero" {
+  add_game n64 "usa.zelda.z64" "the full rom content for resume"
+  gotg refresh
+  # Half the bytes already here, as a reset mid-transfer leaves them.
+  mkdir -p "$GOTG_PARTIAL_DIR/usa.zelda"
+  printf 'the full rom con' >"$GOTG_PARTIAL_DIR/usa.zelda/usa.zelda.z64"
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  run diff "$SERVICE_LIBRARY_DIR/n64/usa.zelda.z64" "$GOTG_GAMES_DIR/n64/usa.zelda.z64"
+  [ "$status" -eq 0 ]
+}
+
+@test "a partial the server cannot resume is dropped and refetched" {
+  add_game n64 "usa.zelda.z64" "short"
+  gotg refresh
+  # Longer than the remote file: a resume offset past the end, which the
+  # service answers with the whole file and curl refuses as exit 33.
+  mkdir -p "$GOTG_PARTIAL_DIR/usa.zelda"
+  printf 'this partial is much longer than the real file' \
+    >"$GOTG_PARTIAL_DIR/usa.zelda/usa.zelda.z64"
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [ "$(cat "$GOTG_GAMES_DIR/n64/usa.zelda.z64")" = "short" ]
 }

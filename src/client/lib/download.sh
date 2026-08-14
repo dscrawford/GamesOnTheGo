@@ -196,21 +196,37 @@ download_game() {
     out="$staged/$name"
     mkdir -p "$(dirname "$out")"
     url="$files_base/games/$platform/$id/$encoded"
-    if ! _download_with_progress "$url" "$out" "$sha" "$title: $name" "${size:-0}"; then
-      # A stale partial whose bytes the server no longer has curl-resumes into
-      # a 200, which curl rejects (exit 33) and would wedge every retry — the
-      # partial goes. And the byte host is the catalog's to name, so it can
-      # have moved since the catalog was last read (a VPN-fronted files host
-      # changes address on reconnect): a refresh before the one retry picks
-      # up wherever the bytes live now.
-      rm -f "$out"
+    local fetched="" dl_status attempt
+    for attempt in 1 2 3; do
+      if _download_with_progress "$url" "$out" "$sha" "$title: $name" "${size:-0}"; then
+        # Verified inside the loop, in a subshell so its die ends the attempt
+        # rather than the command: a poisoned partial resumes into a file
+        # that hashes wrong — curl even calls a 416 on an oversized offset
+        # success — and verify already deletes it, which is exactly the reset
+        # the next attempt needs.
+        if (_verify_checksum "$out" "$sha"); then
+          fetched=1
+          break
+        fi
+      else
+        dl_status=$?
+        # Exit 33: the server refused to resume these bytes; keeping them
+        # would wedge every retry. Everything else — a reset mid-transfer, a
+        # timeout — keeps the partial and resumes from where it stopped,
+        # which is the difference between finishing the last megabyte and
+        # paying for the whole file again.
+        [[ "$dl_status" -eq 33 ]] && rm -f "$out"
+      fi
+      # The byte host is the catalog's to name and can move between reads —
+      # a VPN-fronted files host changes address and port on reconnect, which
+      # is also the likeliest source of the reset being retried here.
       manifest_refresh || true
       files_base="$(manifest_files_url)"
       url="$files_base/games/$platform/$id/$encoded"
-      _download_with_progress "$url" "$out" "$sha" "$title: $name" "${size:-0}" ||
-        die "download failed for $id (partials kept at $staged; run again to resume)"
-    fi
-    _verify_checksum "$out" "$sha"
+      [[ "$attempt" -lt 3 ]] && warn "download interrupted — retrying (attempt $((attempt + 1)) of 3)"
+    done
+    [[ -n "$fetched" ]] ||
+      die "download failed for $id (partials kept at $staged; run again to resume)"
   done < <(jq -r '.files[] | [.name, .size_bytes, (.sha256 // "null"),
     (.name | split("/") | map(@uri) | join("/"))] | @tsv' <<<"$game")
 
