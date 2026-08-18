@@ -217,7 +217,7 @@ load_client_libs() {
 
   # shellcheck source=/dev/null
   local lib
-  for lib in color common config manifest download env launcher pads pads-dolphin pads-ryujinx keys firmware remote saves; do
+  for lib in color common config manifest download env launcher pads pads-dolphin pads-ryujinx pads-cemu keys firmware remote saves; do
     source "$GOTG_LIB/$lib.sh"
   done
 }

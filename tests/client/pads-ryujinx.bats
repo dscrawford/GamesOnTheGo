@@ -173,3 +173,125 @@ BOUND='[{"id": "0-00000005-045e-0000-8e02-000030110000", "name": "Xbox 360 Contr
   [ "$(stat -c '%i' "$(snap_path)")" = "$before" ]
   [ ! -e "$(snap_path).part" ]
 }
+
+# --- motion -----------------------------------------------------------------
+#
+# Ryujinx keeps motion in each player's own entry, off by default, so a pad
+# with a gyro is silent in a game that wants one until somebody finds the
+# settings page. These check that the entry is filled in for the pad that has
+# the hardware, and only for that one.
+
+# A stand-in gotg-pads. Nothing above this point sets one, which is why the
+# tests before it see no controller and leave motion entirely alone.
+fake_pads() {
+  export GOTG_PADS="$TEST_TMP/bin/gotg-pads"
+  mkdir -p "$TEST_TMP/bin"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'cat "$GOTG_PADS_FIXTURE"\n'
+  } >"$GOTG_PADS"
+  chmod +x "$GOTG_PADS"
+  export GOTG_PADS_FIXTURE="$TEST_TMP/pads.json"
+  printf '%s' "$1" >"$GOTG_PADS_FIXTURE"
+}
+
+GYRO_PAD='[{"name": "Steam Controller", "guid": "03002854de2800000413000002006800",
+            "slot": 0, "gamepad": true, "motion": true}]'
+FLAT_PAD='[{"name": "Xbox 360 Controller", "guid": "030000005e0400008e02000010010000",
+            "slot": 0, "gamepad": true, "motion": false}]'
+
+@test "a pad with a gyro gets a motion block Ryujinx will use" {
+  fake_ryujinx_env
+  fake_pads "$GYRO_PAD"
+  write_ryujinx_config \
+    '[{"id": "0-0000", "name": "Steam Controller (0)", "backend": "GamepadSDL2"}]'
+  run pads_configure env-switch
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.input_config[0].motion.motion_backend' "$(config_path)")" = "GamepadDriver" ]
+  [ "$(jq -r '.input_config[0].motion.enable_motion' "$(config_path)")" = "true" ]
+  # Ryujinx's own defaults, so the numbers match what its settings page offers.
+  [ "$(jq -r '.input_config[0].motion.sensitivity' "$(config_path)")" = "100" ]
+  [ "$(jq -r '.input_config[0].motion.gyro_deadzone' "$(config_path)")" = "1" ]
+  [[ "$output" == *"motion controls enabled"* ]]
+}
+
+@test "a pad without sensors is left without a motion block" {
+  fake_ryujinx_env
+  fake_pads "$FLAT_PAD"
+  write_ryujinx_config \
+    '[{"id": "0-0000", "name": "Xbox 360 Controller (0)", "backend": "GamepadSDL2"}]'
+  run pads_configure env-switch
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.input_config[0].motion // "none"' "$(config_path)")" = "none" ]
+}
+
+@test "only the entry belonging to the gyro pad is touched" {
+  fake_ryujinx_env
+  fake_pads "$GYRO_PAD"
+  write_ryujinx_config \
+    '[{"id": "0-0000", "name": "Xbox 360 Controller (0)", "backend": "GamepadSDL2"},
+      {"id": "1-0000", "name": "Steam Controller (1)", "backend": "GamepadSDL2"}]'
+  pads_configure env-switch
+  [ "$(jq -r '.input_config[0].motion // "none"' "$(config_path)")" = "none" ]
+  [ "$(jq -r '.input_config[1].motion.enable_motion' "$(config_path)")" = "true" ]
+}
+
+@test "a name Ryujinx truncated still matches its pad" {
+  # Ryujinx stores at most 50 characters and marks the cut with an ellipsis.
+  fake_ryujinx_env
+  fake_pads '[{"name": "Some Extremely Verbose Controller Name That Runs Past Fifty",
+               "guid": "0300", "slot": 0, "gamepad": true, "motion": true}]'
+  write_ryujinx_config \
+    '[{"id": "0-0000", "name": "Some Extremely Verbose Controller Name That Run... (0)",
+       "backend": "GamepadSDL2"}]'
+  pads_configure env-switch
+  [ "$(jq -r '.input_config[0].motion.enable_motion' "$(config_path)")" = "true" ]
+}
+
+@test "a DSU server somebody configured is left alone" {
+  fake_ryujinx_env
+  fake_pads "$GYRO_PAD"
+  write_ryujinx_config \
+    '[{"id": "0-0000", "name": "Steam Controller (0)", "backend": "GamepadSDL2",
+       "motion": {"motion_backend": "CemuHook", "enable_motion": true,
+                  "dsu_server_host": "127.0.0.1", "dsu_server_port": 26760}}]'
+  run pads_configure env-switch
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.input_config[0].motion.motion_backend' "$(config_path)")" = "CemuHook" ]
+  [ "$(jq -r '.input_config[0].motion.dsu_server_port' "$(config_path)")" = "26760" ]
+}
+
+@test "a keyboard entry is not a gamepad and gets no motion" {
+  fake_ryujinx_env
+  fake_pads "$GYRO_PAD"
+  write_ryujinx_config \
+    '[{"id": "0", "name": "Steam Controller (0)", "backend": "WindowKeyboard"}]'
+  pads_configure env-switch
+  [ "$(jq -r '.input_config[0].motion // "none"' "$(config_path)")" = "none" ]
+}
+
+@test "motion is written once, not on every launch" {
+  fake_ryujinx_env
+  fake_pads "$GYRO_PAD"
+  write_ryujinx_config \
+    '[{"id": "0-0000", "name": "Steam Controller (0)", "backend": "GamepadSDL2"}]'
+  pads_configure env-switch
+  local before
+  before="$(stat -c '%i' "$(config_path)")"
+  run pads_configure env-switch
+  [ "$(stat -c '%i' "$(config_path)")" = "$before" ]
+  [[ "$output" != *"motion controls enabled"* ]]
+  [ ! -e "$(config_path).part" ]
+}
+
+@test "the settings-screen restore brings the motion block back with it" {
+  fake_ryujinx_env
+  fake_pads "$GYRO_PAD"
+  write_ryujinx_config \
+    '[{"id": "0-0000", "name": "Steam Controller (0)", "backend": "GamepadSDL2"}]'
+  pads_configure env-switch
+  write_ryujinx_config '[]'
+  run pads_configure env-switch
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.input_config[0].motion.enable_motion' "$(config_path)")" = "true" ]
+}

@@ -351,7 +351,14 @@ pkgs.runCommand "gotg-env-${name}"
       cp ${
         pkgs.writeText "pads.json" (
           builtins.toJSON (
-            { emulator = padEmulator; }
+            {
+              emulator = padEmulator;
+              # Which configuration directory the writer should be editing.
+              # Cemu's lives under XDG_CONFIG_HOME, which isolation moves — and
+              # on a first launch neither location exists yet, so this cannot be
+              # settled by looking.
+              inherit isolate;
+            }
             // lib.optionalAttrs (padConsole != null) { console = padConsole; }
           )
         )

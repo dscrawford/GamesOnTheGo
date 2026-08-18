@@ -26,6 +26,21 @@ pads_ryujinx_config() { printf '%s/config/Ryujinx/Config.json' "$(env_state_dir 
 pads_ryujinx_snapshot() { printf '%s/input-config.json' "$(env_state_dir "$1")"; }
 
 pads_ryujinx_configure() {
+  local attr="$1"
+  pads_ryujinx_keep "$attr"
+  # Twice around the keep, so the snapshot carries the motion block from this
+  # launch rather than from the next one: a config restored a launch later
+  # would otherwise arrive with motion off and turn it on again, which reads in
+  # the log as something flapping.
+  if pads_ryujinx_motion "$attr"; then
+    pads_ryujinx_keep "$attr"
+  fi
+  # Never fatal, like every other binding writer: no pad attached, or one SDL
+  # cannot read, is a launch without motion rather than no launch.
+  return 0
+}
+
+pads_ryujinx_keep() {
   local attr="$1" config snap bound
   config="$(pads_ryujinx_config "$attr")"
   snap="$(pads_ryujinx_snapshot "$attr")"
@@ -56,4 +71,86 @@ pads_ryujinx_configure() {
   else
     rm -f "$config.part"
   fi
+}
+
+# Ryujinx's own defaults for the two numbers a motion block needs, so a player
+# who has never opened the motion page gets what that page would have offered.
+# From GamepadInputConfig: sensitivity 100, gyro deadzone 1.
+GOTG_RYUJINX_GYRO_SENSITIVITY=100
+GOTG_RYUJINX_GYRO_DEADZONE=1
+
+# Turn the gyro on for a pad that has one.
+#
+# Motion is off in a fresh Ryujinx config and there is no global switch for it:
+# it is four keys inside each player's own entry, and a pad bound before those
+# keys existed has none of them. So a Switch game that wants motion — Skyward
+# Sword's flying, Splatoon's aiming — is unplayable with a controller that has
+# the hardware, until somebody finds the motion page.
+#
+# The pad decides, not the config: `motion_backend: GamepadDriver` is Ryujinx
+# reading SDL's own sensors, and SDL only reports them for a controller that
+# has both. The current Steam Controller does — SDL3's hidapi driver for it
+# (SDL_hidapi_steam_triton.c) registers gyro and accelerometer at 248Hz — which
+# is the whole reason this is reachable without a DSU server in between.
+#
+# Returns non-zero when nothing changed, so the caller can skip re-snapshotting.
+pads_ryujinx_motion() {
+  local attr="$1" config pads names updated
+  config="$(pads_ryujinx_config "$attr")"
+  [[ -f "$config" ]] || return 1
+
+  pads="$("$(pads_bin)" 2>/dev/null)" || return 1
+  names="$(jq -c '[.[] | select(.motion) | .name | select(. != null)]' <<<"$pads")" || return 1
+  [[ "$names" != "[]" ]] || return 1
+
+  # Matched on the name because the id cannot be reproduced safely — see the
+  # note at the top of this file. Ryujinx stores "<SDL name> (<n>)", truncated
+  # to 50 characters with an ellipsis, so the stored name is turned back into
+  # its prefix and the SDL name is asked whether it starts with it.
+  updated="$(
+    jq --argjson names "$names" '
+      def base: sub(" \\([0-9]+\\)$"; "") | sub("\\.\\.\\.$"; "");
+      def wants_motion:
+        (.name // "") as $stored
+        | ($stored | base) as $prefix
+        | $prefix != "" and any($names[]; startswith($prefix));
+      .input_config = [
+        .input_config[]
+        | if .backend == "GamepadSDL2"
+             and wants_motion
+             # A player who set up a DSU server chose a different source for
+             # the same thing; that choice is theirs and is left alone.
+             and (.motion.motion_backend // "") != "CemuHook"
+          then
+            .motion = ((.motion // {}) + {
+              motion_backend: "GamepadDriver",
+              enable_motion: true,
+              sensitivity: (.motion.sensitivity // '"$GOTG_RYUJINX_GYRO_SENSITIVITY"'),
+              gyro_deadzone: (.motion.gyro_deadzone // '"$GOTG_RYUJINX_GYRO_DEADZONE"')
+            })
+          else . end
+      ]
+    ' "$config" 2>/dev/null
+  )" || return 1
+  [[ -n "$updated" ]] || return 1
+
+  # Which entries actually moved, compared on the parsed value rather than on
+  # the text: this runs on every launch, and jq's own formatting differs from
+  # Ryujinx's, so comparing the files would rewrite a config that already says
+  # what it should and report it as a change every time.
+  local before changed
+  before="$(jq -c '.input_config' "$config")" || return 1
+  changed="$(
+    jq -r --argjson before "$before" '
+      [ .input_config | to_entries[]
+        | select(.value.motion != ($before[.key].motion // null))
+        | .value.name // "a controller" ]
+      | join(", ")
+    ' <<<"$updated"
+  )" || return 1
+  [[ -n "$changed" ]] || return 1
+
+  printf '%s\n' "$updated" >"$config.part" || return 1
+  mv "$config.part" "$config" || return 1
+  log "motion controls enabled for $changed"
 }

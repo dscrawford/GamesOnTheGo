@@ -75,7 +75,8 @@ controllers_list() {
     "\($h)\(.name)\($r)\n" +
     "  \($m)binds as  \($r) \(.identity)/\(.slot)\n" +
     "  \($m)reached by\($r) \(if .evdev then .evdev else (.path // "?") + " (raw HID, no evdev node)" end)\n" +
-    "  \($m)mapping   \($r) \(if .map == null then "\($w)none — SDL does not recognise this pad, so nothing can be generated for it\($r)" else "\(.map | length) elements" end)"
+    "  \($m)mapping   \($r) \(if .map == null then "\($w)none — SDL does not recognise this pad, so nothing can be generated for it\($r)" else "\(.map | length) elements" end)\n" +
+    "  \($m)motion    \($r) \(if .motion then "gyro and accelerometer — used by Ryujinx and Cemu" else "none" end)"
   ' <<<"$pads" >&2
 }
 

@@ -152,6 +152,69 @@ Treat it as **one input source among several**, in a late optional phase: when
 Steam Virtual Gamepads are present, map player *N* to virtual slot *N* and
 honour Steam's reorder UI; otherwise ignore it entirely.
 
+### 1.5a Motion: the Steam Controller has a gyro, and both consoles can read it
+
+Verified on 2026-08-17 against the sources in `/nix/store`, not from
+documentation. The chain has three links and every one of them holds:
+
+**SDL reports the sensors.** `sdl3` ships
+`src/joystick/hidapi/SDL_hidapi_steam_triton.c` — the driver for the `0x1304`
+puck — and it calls `SDL_PrivateJoystickAddSensor` for `SDL_SENSOR_GYRO` *and*
+`SDL_SENSOR_ACCEL` at `1000000/4032` Hz ≈ 248 Hz, feeding both from the input
+report. So the sensors arrive by the same route as the buttons: hidapi, no
+evdev node, no kernel driver, nothing to install.
+
+**Both emulators read motion from SDL directly.** Neither needs a DSU
+(`cemuhook`) server, which is the usual answer to this question and is a second
+process to run and keep running:
+
+| Emulator | Reads sensors via | Requires |
+|---|---|---|
+| Ryujinx (Ryubing) | `SDL_GameControllerGetSensorData`, `motion_backend: GamepadDriver` | `SDL_GameControllerHasSensor` true for **accel and gyro** — `SDL2Gamepad.GetFeaturesFlag` sets `GamepadFeaturesFlag.Motion` only for the pair, and only then enables reporting |
+| Cemu 2.6 | `SDL_GameControllerGetSensorData` in `SDLController` | `has_motion()` is `m_has_gyro && m_has_accel`; it enables both sensors in the constructor |
+
+Requiring the pair is why `gotg-pads` reports `motion` only when SDL has both:
+promising motion on a gyro-only device would be promising something the
+emulator then declines to offer.
+
+Cemu links `sdl2-compat` (SDL2 ABI over SDL3), so it sees the puck at all —
+`ldd` on `.Cemu-wrapped` resolves `libSDL2-2.0.so.0` into the sdl2-compat store
+path, which links SDL3. Ryujinx bundles genuine SDL2 2.30.0 and is already
+`LD_PRELOAD`ed onto the same sdl2-compat by `client/env/switch.nix`, for the
+same reason it needed to be to see the pad at all.
+
+**Neither turns it on by itself, and neither has one switch for it.**
+
+- Ryujinx keeps `motion` inside each `input_config[]` entry —
+  `{motion_backend, enable_motion, sensitivity, gyro_deadzone}`, snake_cased by
+  `JsonHelper`'s naming policy, the two enums serialized as their names via
+  `TypedStringEnumConverter`. There is no global default: an entry bound before
+  those keys existed simply has none.
+- Cemu keeps `<motion>` in the controller profile, read by
+  `InputManager.cpp:168` and written back only when `controller->has_motion()`.
+  `use_motion()` is `has_motion() && m_settings.motion`, so the flag is
+  necessary and the hardware decides the rest.
+
+**Where the gyro goes once it is on.** Cemu's `VPADController::update_motion`
+fills the GamePad's motion fields; `ProController` has no motion path at all,
+because the real Wii U Pro Controller has none. So a Pro profile with the flag
+set is a gyro that reaches nothing — `<type>Wii U GamePad</type>` is what
+carries it. Ryujinx has no equivalent trap: the Switch's own controllers all
+have motion.
+
+Matching a pad to a config entry differs per emulator, and neither is by the id
+you would reach for first:
+
+- **Ryujinx** stores `"<index>-<.NET GUID with its first four hex digits
+  zeroed>"` (`SDL2GamepadDriver.GenerateGamepadId`), which is the same
+  reproduction hazard the bindings avoid — so the match is on `name`, stored as
+  `"<SDL name> (<n>)"` truncated to 50 characters with an ellipsis
+  (`InputViewModel.GetShortGamepadName`).
+- **Cemu** stores `"<guid_index>_<SDL GUID>"` (`SDLController`'s constructor),
+  where `guid_index` counts the earlier controllers sharing that GUID — the
+  same number `gotg-pads` already reports as `slot`. That one is matched
+  directly.
+
 ### 1.6 Levers, all of which are plain environment variables
 
 | Lever | Effect |
@@ -501,6 +564,15 @@ Verified locally (strongest evidence):
   `src/joystick/hidapi/SDL_hidapijoystick_c.h`
 - `ares` 148 source: `desktop-ui/input/input.cpp`, `ruby/input/joypad/sdl.cpp`
 - `dolphin-emu` 2606 source: `Source/Core/Core/HW/SI/SI_Device.h`
+- `ryubing` source (motion, 2026-08-17): `Ryujinx.Input.SDL2/SDL2Gamepad.cs`,
+  `Ryujinx.Input.SDL2/SDL2GamepadDriver.cs`,
+  `Ryujinx.Common/Configuration/Hid/Controller/Motion/*.cs`,
+  `Ryujinx.Common/Utilities/JsonHelper.cs`,
+  `Ryujinx/UI/ViewModels/Input/InputViewModel.cs`
+- `cemu` 2.6 source (motion, 2026-08-17): `src/input/api/SDL/SDLController.cpp`
+  and `.h`, `src/input/api/Controller.h`, `src/input/InputManager.cpp`,
+  `src/input/emulated/EmulatedController.cpp`, `VPADController.cpp`,
+  `ProController.cpp`; and `ldd` on the packaged `.Cemu-wrapped`
 - `systemd` 261 source: `70-uaccess.rules`, `70-joystick.rules`,
   `60-persistent-hidraw.rules`
 - `steam-devices-udev-rules` 1.0.0.61 package output

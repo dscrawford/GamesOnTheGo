@@ -309,6 +309,8 @@ price of that.
 |---|---|---|
 | ares | SNES, NES, N64, Game Boy, Game Boy Color, Game Boy Advance | `settings.bml` |
 | Dolphin | GameCube, and a Wii game played with a GameCube controller | `GCPadNew.ini` |
+| Ryujinx | Switch — bindings kept, gyro switched on | `Config.json` |
+| Cemu | Wii U — gyro switched on, bindings left as you made them | `controllerProfiles/*.xml` |
 
 The two halves work differently, because the emulators do. ares binds a raw
 input index, so `src/client/data/ares-pads.json` maps each console input to a
@@ -332,6 +334,38 @@ and a config that has lost its bindings gets them back before the launch.
 Bind the pad once in `gotg configure`, and no settings-screen accident
 survives past the next launch. One limit is inherent: two *identical* pads
 are told apart only by connection order, which Ryujinx cannot make stable.
+
+**The gyro is switched on for you**, on Switch and Wii U, for any pad SDL says
+has one. That includes the current Steam Controller: SDL3's driver for it
+(`SDL_hidapi_steam_triton.c`) reports a gyroscope and an accelerometer at
+248 Hz, and both emulators read motion straight from SDL — so Skyward Sword's
+flying and Splatoon's aiming need no DSU server, no `cemuhook`, no second
+process at all.
+
+It has to be switched on because neither emulator does it by default, and
+neither offers one switch for it:
+
+- **Ryujinx** keeps motion in *each player's own* `input_config` entry, off,
+  with no global default — so a pad bound before anyone visited the motion page
+  has no motion keys at all. The client fills them in (`motion_backend:
+  GamepadDriver`, Ryujinx's own sensitivity and deadzone defaults) for the entry
+  whose pad reports both sensors, and leaves an entry alone if it names a DSU
+  server, since that is somebody choosing a different source for the same thing.
+- **Cemu** keeps it as `<motion>` in the controller profile, which is `false` in
+  every profile made before the pad had a gyro. The client sets it for the
+  profile bound to that pad, editing the one line rather than rewriting the
+  file. Cemu's own rule is `has_motion() && the flag`, so setting it for a pad
+  without sensors would change nothing — which is why the pad decides.
+
+`gotg controllers list` reports which pads have sensors, so the answer is
+visible before a game is launched rather than after one fails to respond.
+
+One thing the client will not do is change which controller a game thinks it
+has. Cemu delivers motion through the **Wii U GamePad**; a Wii U Pro Controller
+profile has the flag set and no gyro reaching the game, because the real Pro
+Controller has no motion hardware and Cemu's emulation of it accordingly never
+reads a sample. Which emulated controller a game gets is a choice per game, so
+that one is said out loud and left to you.
 
 ### Video
 

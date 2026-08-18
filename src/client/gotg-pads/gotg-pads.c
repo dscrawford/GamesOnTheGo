@@ -67,8 +67,7 @@ static void ares_identity(SDL_JoystickID id, char *out, size_t n) {
 // two only line up per controller model. SDL already knows the correspondence
 // for anything in its mapping database, so ask it rather than asking the user
 // to press every button in an emulator's settings screen.
-static void print_gamepad_map(SDL_JoystickID id) {
-    SDL_Gamepad *pad = SDL_OpenGamepad(id);
+static void print_gamepad_map(SDL_Gamepad *pad) {
     if (!pad) {
         fputs("null", stdout);
         return;
@@ -78,7 +77,6 @@ static void print_gamepad_map(SDL_JoystickID id) {
     SDL_GamepadBinding **binds = SDL_GetGamepadBindings(pad, &n);
     if (!binds) {
         fputs("null", stdout);
-        SDL_CloseGamepad(pad);
         return;
     }
 
@@ -121,7 +119,19 @@ static void print_gamepad_map(SDL_JoystickID id) {
     fputs(written ? "\n  }" : "}", stdout);
 
     SDL_free(binds);
-    SDL_CloseGamepad(pad);
+}
+
+// Whether this pad can drive an emulator's motion controls.
+//
+// Both sensors, not just the gyro: Ryujinx and Cemu each require the pair
+// before they will offer motion at all — Ryujinx sets its Motion feature flag
+// only when SDL reports accelerometer *and* gyroscope, and Cemu's
+// SDLController::has_motion() is `m_has_gyro && m_has_accel`. Asking the same
+// question they ask is what keeps this from promising motion that the emulator
+// then declines to use.
+static bool gamepad_has_motion(SDL_Gamepad *pad) {
+    return pad && SDL_GamepadHasSensor(pad, SDL_SENSOR_GYRO) &&
+           SDL_GamepadHasSensor(pad, SDL_SENSOR_ACCEL);
 }
 
 int main(void) {
@@ -210,9 +220,17 @@ int main(void) {
         if (steam_slot >= 0) printf(", \"steamSlot\": %d", steam_slot);
         else fputs(", \"steamSlot\": null", stdout);
 
+        // Opened once for both answers: a hidapi pad's open is a device
+        // transaction, and doing it twice per pad raced the background thread
+        // that brings those devices up.
+        SDL_Gamepad *pad = SDL_IsGamepad(id) ? SDL_OpenGamepad(id) : NULL;
+
+        printf(", \"motion\": %s", gamepad_has_motion(pad) ? "true" : "false");
+
         fputs(", \"map\": ", stdout);
-        if (SDL_IsGamepad(id)) print_gamepad_map(id);
-        else fputs("null", stdout);
+        print_gamepad_map(pad);
+
+        if (pad) SDL_CloseGamepad(pad);
 
         fputs("}", stdout);
     }

@@ -45,7 +45,8 @@ gotg sync                   rebuild the GC roots after a git pull
 | `lib/cmd-saves.sh` | `saves setup`, `status`, `push`, `pull`, `adopt` |
 | `lib/pads.sh` | generating emulator bindings from what SDL reports |
 | `lib/pads-dolphin.sh` | the same for Dolphin, which needs no table |
-| `lib/pads-ryujinx.sh` | Ryujinx bindings kept and healed, rather than generated |
+| `lib/pads-ryujinx.sh` | Ryujinx bindings kept and healed, rather than generated; motion switched on |
+| `lib/pads-cemu.sh` | Cemu's `<motion>` flag, for a profile whose pad has a gyro |
 | `lib/cmd-controllers.sh` | `controllers list`, `controllers apply` |
 | `env/<platform>.nix` | the emulator, arguments and settings for a platform |
 | `env/games/<platform>/<id>.nix` | what one game changes about that |
