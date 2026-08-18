@@ -67,6 +67,11 @@ reads as "that is everything", which is the one thing it must not.
 lists its mods, each reachable as `gotg play <id> <mod>`. Every command takes
 `--help` (`-h`), which prints its usage and exits without touching the server.
 
+![gotg list zelda prints every Zelda across five platforms, marking the three installed here, and gotg info on Majora's Mask reports its size, its local path and its rando mod](docs/demos/gotg-find.gif)
+
+*`gotg list zelda`, then `gotg info` on one of the results.* Recorded from
+`docs/demos/gotg-find.tape`; re-record it with `docs/demos/render.sh`.
+
 **Tab completion** covers commands, game ids and a game's variants:
 
 ```
@@ -74,6 +79,12 @@ gotg play world.legend_of_zelda<TAB>   → world.legend_of_zelda_skyward_sword_h
 gotg play usa.super_mario_sunshine <TAB>  → bse  bsmso
 gotg steam add metroid<TAB>            → world.super_metroid
 ```
+
+![Tab completes a partial id to world.legend_of_zelda_skyward_sword_hd, offers bse and bsmso as the variants of Super Mario Sunshine, and answers metroid with usa.metroid, world.metroid_ii_return_of_samus and world.super_metroid](docs/demos/gotg-complete.gif)
+
+*The same three completions, live — the last one showing that `metroid` matches
+anywhere in an id.* From `docs/demos/gotg-complete.tape`; re-record it with
+`docs/demos/render.sh`.
 
 **Ids match on any part**, not just the front. They begin with a region nobody
 remembers — `usa.`, `world.`, `jpn.`, `eur.` — which also means the full set
