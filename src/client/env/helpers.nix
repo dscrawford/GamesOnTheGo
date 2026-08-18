@@ -216,6 +216,21 @@ in
           gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini" \
             Display Fullscreen True
 
+          # Vulkan rather than Dolphin's OpenGL default: the Mesa/RDNA2
+          # handhelds this targets run markedly faster on it.
+          gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini" \
+            Core GFXBackend Vulkan
+
+          # What reads as "a little slow" is usually shader compilation, not
+          # throughput. Mode 2 (hybrid ubershaders) draws through the
+          # ubershader while the specialized shader compiles in the
+          # background, and the warm-up compile clears the cached backlog
+          # before the game starts instead of as stutter inside it.
+          gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/GFX.ini" \
+            Settings ShaderCompilationMode 2
+          gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/GFX.ini" \
+            Settings WaitForShadersBeforeStarting True
+
           # Internal resolution, from the player's own preference rather than
           # this flake: what looks right depends on the screen in front of you,
           # which is not something a derivation can know.
