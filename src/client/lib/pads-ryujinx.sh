@@ -114,20 +114,29 @@ pads_ryujinx_motion() {
         (.name // "") as $stored
         | ($stored | base) as $prefix
         | $prefix != "" and any($names[]; startswith($prefix));
+      # A player who set up a DSU server chose a different source for the
+      # same thing; that choice is theirs and is left alone. But only a
+      # CemuHook block that names a server is a choice: the settings page
+      # saves the checkbox with an empty host field too, and that is motion
+      # polling a null address forever — Ryujinx warns "Unable to register
+      # motion client" every five seconds — while a working gyro sits idle.
+      def chose_dsu:
+        (.motion.motion_backend // "") == "CemuHook"
+        and (.motion.dsu_server_host // "") != "";
       .input_config = [
         .input_config[]
         | if .backend == "GamepadSDL2"
              and wants_motion
-             # A player who set up a DSU server chose a different source for
-             # the same thing; that choice is theirs and is left alone.
-             and (.motion.motion_backend // "") != "CemuHook"
+             and (chose_dsu | not)
           then
-            .motion = ((.motion // {}) + {
+            # Built fresh rather than merged, so healing a serverless CemuHook
+            # block sheds its DSU fields instead of carrying them along.
+            .motion = {
               motion_backend: "GamepadDriver",
               enable_motion: true,
               sensitivity: (.motion.sensitivity // '"$GOTG_RYUJINX_GYRO_SENSITIVITY"'),
               gyro_deadzone: (.motion.gyro_deadzone // '"$GOTG_RYUJINX_GYRO_DEADZONE"')
-            })
+            }
           else . end
       ]
     ' "$config" 2>/dev/null

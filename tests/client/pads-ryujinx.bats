@@ -261,6 +261,29 @@ FLAT_PAD='[{"name": "Xbox 360 Controller", "guid": "030000005e0400008e0200001001
   [ "$(jq -r '.input_config[0].motion.dsu_server_port' "$(config_path)")" = "26760" ]
 }
 
+@test "a CemuHook block naming no server is healed to the gamepad" {
+  # The settings page saves "use CemuHook" with whatever is in the host field,
+  # including nothing: motion then polls a null server forever while a pad with
+  # a working gyro sits in hand. That is a misfire, not a choice.
+  fake_ryujinx_env
+  fake_pads "$GYRO_PAD"
+  write_ryujinx_config \
+    '[{"id": "0-0000", "name": "Steam Controller (0)", "backend": "GamepadSDL2",
+       "motion": {"motion_backend": "CemuHook", "enable_motion": true,
+                  "slot": 0, "alt_slot": 0, "mirror_input": true,
+                  "dsu_server_host": null, "dsu_server_port": 0,
+                  "sensitivity": 80, "gyro_deadzone": 2}}]'
+  run pads_configure env-switch
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.input_config[0].motion.motion_backend' "$(config_path)")" = "GamepadDriver" ]
+  [ "$(jq -r '.input_config[0].motion.enable_motion' "$(config_path)")" = "true" ]
+  # The numbers the player did set survive the heal; the DSU fields do not.
+  [ "$(jq -r '.input_config[0].motion.sensitivity' "$(config_path)")" = "80" ]
+  [ "$(jq -r '.input_config[0].motion.gyro_deadzone' "$(config_path)")" = "2" ]
+  [ "$(jq -r '.input_config[0].motion | has("dsu_server_host")' "$(config_path)")" = "false" ]
+  [[ "$output" == *"motion controls enabled"* ]]
+}
+
 @test "a keyboard entry is not a gamepad and gets no motion" {
   fake_ryujinx_env
   fake_pads "$GYRO_PAD"
