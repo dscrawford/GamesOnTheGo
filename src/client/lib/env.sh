@@ -12,9 +12,18 @@
 # to the one case that genuinely needs it — an environment that is not here yet.
 
 # Where environments build from when no checkout is configured: the repo
-# itself, over the same SSH access that fetched the client. What makes `gotg
-# play` work out of the box on a machine that has only ever run `nix build`.
-GOTG_REMOTE_FLAKE="${GOTG_REMOTE_FLAKE:-git+ssh://git@github.com/dscrawford/GamesOnTheGo?shallow=1}"
+# itself, reached the same way the client itself was. What makes `gotg play`
+# work out of the box on a machine that has only ever run `nix run`.
+#
+# `github:` rather than git+ssh or git+https, because it is the one form nix
+# can authenticate on its own. Its access-tokens setting applies to github:
+# refs only — the git+https fetcher shells out to git and asks for a username,
+# so it needs a credential helper configured, and git+ssh needs a key on the
+# repo. Someone handed a read-only token has neither, and this is the whole
+# path that makes them unnecessary:
+#
+#   NIX_CONFIG="extra-access-tokens = github.com=<token>" gotg play <id>
+GOTG_REMOTE_FLAKE="${GOTG_REMOTE_FLAKE:-github:dscrawford/GamesOnTheGo}"
 
 # The flake the environments are built from: explicit env, then the config
 # key, then a checkout in the usual place, then the repo over the network.

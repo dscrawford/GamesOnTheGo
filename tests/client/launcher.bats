@@ -323,11 +323,25 @@ teardown() {
   [[ "$output" == *"--fullscreen"* ]]
 }
 
-@test "no checkout anywhere means environments build from the repo over ssh" {
+@test "no checkout anywhere means environments build from the repo itself" {
   load_client_libs
   local out
   out="$(HOME="$TEST_TMP/nohome" GOTG_FLAKE="" gotg_flake)"
-  [[ "$out" == "git+ssh://git@github.com/dscrawford/GamesOnTheGo"* ]]
+  [[ "$out" == "github:dscrawford/GamesOnTheGo"* ]]
+}
+
+@test "the default flake is the one form nix can authenticate by itself" {
+  # Not git+ssh (needs a key on the repo) and not git+https (shells out to
+  # git, which asks for a username): nix's access-tokens setting applies to
+  # github: refs only, and a read-only token is the whole point of the
+  # default. Measured, not assumed — git+https with a token set fails with
+  # "could not read Username for 'https://github.com'".
+  load_client_libs
+  local out
+  out="$(HOME="$TEST_TMP/nohome" GOTG_FLAKE="" gotg_flake)"
+  [[ "$out" == github:* ]]
+  [[ "$out" != *ssh* ]]
+  [[ "$out" != git+https* ]]
 }
 
 @test "a checkout in the usual place still wins over the network" {

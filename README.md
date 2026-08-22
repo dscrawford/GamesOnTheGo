@@ -512,10 +512,20 @@ builds it from the flake if it is not here yet, and execs it. Adding a platform
 is one file; a new emulator is a one-line change to the file that wants it.
 
 Which flake it builds from: `GOTG_FLAKE`, then the `flake` key in the config,
-then a checkout at `~/Documents/GOTG` — and with none of those, the repo
-itself over SSH, using the same key that fetched the client. A machine that
-has only ever run `nix build` — a Steam Deck — plays out of the box; a dev
-machine keeps building from its working tree.
+then a checkout at `~/Documents/GOTG` — and with none of those,
+`github:dscrawford/GamesOnTheGo`, the repo itself. A machine that has only
+ever run `nix run` — a Steam Deck, or somebody else's laptop — plays out of
+the box; a dev machine keeps building from its working tree.
+
+The `github:` form is deliberate: it is the only flake reference nix can
+authenticate on its own, through its `access-tokens` setting. `git+https`
+shells out to git and asks for a username, so it needs a credential helper,
+and `git+ssh` needs a key on the repo. Someone handed a read-only token has
+neither, and this is what lets them play anyway:
+
+```bash
+NIX_CONFIG="extra-access-tokens = github.com=github_pat_…" gotg play <id>
+```
 
 ### Games that are not emulated
 
