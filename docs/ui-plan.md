@@ -115,4 +115,4 @@ immediately and a worker fills it in.
 3. Art: cache reads, then the fetcher, then the negative cache. *Done, with
    one correction: the plan said `grids_portrait` and a cartridge box is
    landscape, so libretro files it as `grids`. Both are asked for.*
-4. Platform filter and search.
+4. Platform filter and search. *Done — in the grid, and on the command line.*

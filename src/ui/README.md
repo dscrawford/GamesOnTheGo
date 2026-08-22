@@ -18,6 +18,8 @@ nix run .#gotg-ui -- --platform snes --refresh # forget cached art and look agai
 | d-pad / arrows | move; off either side turns the page |
 | shoulders / PgUp PgDn | previous and next page |
 | A / Enter | play it — this process becomes the game |
+| Y / Tab | next platform (shift-Tab back) |
+| X / `/` | search — Enter applies, Escape cancels |
 | B / Escape / Q | quit |
 
 ## Layout
@@ -27,13 +29,14 @@ nix run .#gotg-ui -- --platform snes --refresh # forget cached art and look agai
 | `catalog.py` | reading the cached catalog, filtering, paging | no |
 | `layout.py` | where the ten tiles go | no |
 | `grid.py` | where the cursor is, and on which page | no |
+| `browser.py` | the platform filter, the search, and the cursor | no |
 | `art.py` | the picture cache, misses included | no |
 | `fetch.py` | asking the client's own art sources, off the frame loop | no |
 | `launch.py` | the handoff to `gotg play` | no |
 | `app.py` | drawing, and reading a controller | yes |
 | `__main__.py` | arguments, and the one error worth printing | no |
 
-Six of the eight never import pygame, which is the point: a short last page, a
+Seven of the nine never import pygame, which is the point: a short last page, a
 filter that emptied the screen and a stick held against the right-hand column
 are all cases a screenshot will not show you, and all of them are covered in
 `tests/ui/` without a display.
@@ -79,7 +82,15 @@ and a cartridge box is landscape — asking only for `grids_portrait` finds
 nothing for most of a cartridge library. Tiles fit the picture rather than
 stretching it, since art arrives in both shapes.
 
+## Narrowing it
+
+Ten tiles over 5674 games is 568 pages, so the filter is not a nicety. Y cycles
+the platform and X opens a search; both reset the cursor to the first page
+rather than clamping it, because a filter is a new question and keeping page
+300 across one that has three is how a grid ends up blank with nothing on
+screen explaining why. `snes` + `mario` is 23 games in 3 pages.
+
 ## State
 
-Milestones one to three. What is left is the platform filter and search in the
-grid itself; both already exist on the command line.
+All four milestones. `--platform` and `--search` still work from the command
+line and mean the same thing.

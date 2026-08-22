@@ -13,6 +13,7 @@ from __future__ import annotations
 import pygame
 
 from .art import ArtStore
+from .browser import Browser
 from .catalog import Game, Library
 from .fetch import Loader
 from .grid import Grid
@@ -43,7 +44,7 @@ def _fit(font_at, text: str, width: int, size: int):
     return font_at(8)
 
 
-def draw(screen, state: Grid, font_at, art=None) -> None:
+def draw(screen, state: Grid, font_at, art=None, status: str = "", typing: str | None = None) -> None:
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
     page = state.page
@@ -83,11 +84,17 @@ def draw(screen, state: Grid, font_at, art=None) -> None:
         if selected:
             pygame.draw.rect(screen, TEXT, tile.rect, width=3, border_radius=8)
 
-    if state.library.pages:
-        status = f"page {state.page_index + 1} of {state.library.pages}  ·  {len(state.library)} games"
-    else:
-        status = "no games in the catalog"
-    label = font_at(18).render(status, True, TEXT_DIM)
+    if not status:
+        status = (
+            f"page {state.page_index + 1} of {state.library.pages}  ·  {len(state.library)} games"
+            if state.library.pages
+            else "no games in the catalog"
+        )
+    # While typing, the search box replaces the status: it is the thing being
+    # edited, and two lines competing for the same corner reads as neither.
+    if typing is not None:
+        status = f"search: {typing}_"
+    label = font_at(18).render(status, True, TEXT if typing is not None else TEXT_DIM)
     screen.blit(label, (label.get_height(), height - label.get_height() * 2))
 
 
@@ -114,7 +121,7 @@ def run(library: Library) -> Game | None:
             fonts[size] = pygame.font.Font(None, size)
         return fonts[size]
 
-    state = Grid(library)
+    browser = Browser(library)
     store = ArtStore()
     loader = Loader(store)
     # Decoded surfaces, keyed by (platform, id). Decoding is not free and the
@@ -138,14 +145,38 @@ def run(library: Library) -> Game | None:
         return art[game.key]
 
     chosen: Game | None = None
+    typing: str | None = None
     running = True
     while running:
+        state = browser.grid
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif event.type == pygame.KEYDOWN:
+                continue
+
+            # While typing, every key is text. Nothing below runs, or the
+            # letters of a search would also be moving the cursor.
+            if typing is not None:
+                if event.type != pygame.KEYDOWN:
+                    continue
+                if event.key == pygame.K_ESCAPE:
+                    typing = None
+                elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                    browser.set_search(typing)
+                    typing = None
+                elif event.key == pygame.K_BACKSPACE:
+                    typing = typing[:-1]
+                elif event.unicode and event.unicode.isprintable():
+                    typing += event.unicode
+                continue
+
+            if event.type == pygame.KEYDOWN:
                 if event.key in (pygame.K_ESCAPE, pygame.K_q):
                     running = False
+                elif event.key in (pygame.K_SLASH, pygame.K_f):
+                    typing = browser.search
+                elif event.key == pygame.K_TAB:
+                    browser.cycle_platform(-1 if event.mod & pygame.KMOD_SHIFT else 1)
                 elif event.key == pygame.K_LEFT:
                     state.move(-1, 0)
                 elif event.key == pygame.K_RIGHT:
@@ -176,6 +207,13 @@ def run(library: Library) -> Game | None:
                     state.turn(-1)
                 elif event.button == 5:
                     state.turn(1)
+                elif event.button == 3:
+                    # Y: the next platform. Six of them, so cycling beats a
+                    # menu nobody can reach without a pointer.
+                    browser.cycle_platform(1)
+                elif event.button == 2:
+                    # X: search. A Deck raises the Steam keyboard over this.
+                    typing = browser.search
 
         # Whatever the workers finished since the last frame stops being a
         # placeholder now. Only the page on screen is ever asked for.
@@ -184,7 +222,7 @@ def run(library: Library) -> Game | None:
         for game in state.page:
             surface_for(game)
 
-        draw(screen, state, font_at, art)
+        draw(screen, state, font_at, art, browser.status, typing)
         pygame.display.flip()
         clock.tick(60)
 
