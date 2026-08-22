@@ -547,8 +547,18 @@ port. They earn their exceptions differently. sm64coopdx bakes the ROM's
 assets in at compile time, so there is no binary to ship without shipping
 Nintendo's assets — the first launch compiles it here instead. ReCut is
 published for Windows only: it is already statically recompiled, so nothing
-builds, but it renders through D3D12 and needs vkd3d-proton in the prefix to
-have a D3D12 at all.
+builds, and it renders through D3D12, which wine staging provides itself.
+
+**What ReCut is for**, from upstream's feature list rather than from the
+coverage of it: an RT64 renderer with a live graphics menu on `F1`, and a
+texture pipeline — dump the game's own textures, edit them in the bundled
+Paper Atlas Tool, drop the results in `user/textures/replacements/`, toggle
+them live with `F2`. It ships **no** high-resolution texture pack, only the
+tooling to make one. No frame rate above the console's is claimed, and the
+only resolution claim on the page is that widescreen does not work yet. It is
+a modding platform for Paper Mario rather than a remaster of it, and that
+menu is keyboard-only — reachable on a desktop, and on a Deck only through a
+Steam layout that maps a button to `F1`.
 
 ReCut is a pre-release and upstream says so — widescreen is broken and left
 off, and its save states are an early snapshot format, so those are excluded

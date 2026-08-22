@@ -1,8 +1,16 @@
-# Paper Mario — ReCut, a static recompilation on the N64Recomp/RT64 stack:
-# higher internal resolution and a frame rate off the console's 30, driven by
-# this ROM. The same family as the Zelda ports beside it, with one difference
-# that shapes everything here: **it is published for Windows only**, so this
-# runs it under Wine.
+# Paper Mario — ReCut, a static recompilation on the N64Recomp/RT64 stack,
+# driven by this ROM. The same family as the Zelda ports beside it, with one
+# difference that shapes everything here: **it is published for Windows
+# only**, so this runs it under Wine.
+#
+# What it is for, from upstream's own feature list rather than from the
+# coverage of it: an RT64 renderer with a live graphics menu (F1), and a
+# texture pipeline — dump the game's textures, edit them in the bundled Paper
+# Atlas Tool, drop them in user/textures/replacements/, toggle them live with
+# F2. It ships **no** high-resolution texture pack; it ships the tooling to
+# make one. Nothing upstream claims a frame rate above the console's, and the
+# only resolution claim on the page is that widescreen does not work yet. So
+# this is a modding platform for Paper Mario, not a remaster of it.
 #
 # That is affordable because of what the release actually is. It is already
 # statically recompiled — "the app is already built, and the launcher asks for
