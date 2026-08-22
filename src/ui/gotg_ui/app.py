@@ -18,6 +18,7 @@ from .catalog import Game, Library
 from .fetch import Loader
 from .grid import Grid
 from .layout import grid, tile_at
+from .prepare import Preparer, is_ready
 
 BACKGROUND = (18, 18, 20)
 TILE = (38, 38, 44)
@@ -74,9 +75,12 @@ def draw(screen, state: Grid, font_at, art=None, status: str = "", typing: str |
             # No picture — the title *is* the tile, which is also what a game
             # with no art anywhere falls back to for good.
             inner = tile.width - 16
-            title = font_at(20).render(game.title, True, TEXT)
+            # Bounded: titles have no server-side length cap, and font.render
+            # on a pathological one allocates a surface megapixels wide.
+            text = game.title[:120]
+            title = font_at(20).render(text, True, TEXT)
             if title.get_width() > inner:
-                title = _fit(font_at, game.title, inner, 20).render(game.title, True, TEXT)
+                title = _fit(font_at, text, inner, 20).render(text, True, TEXT)
             screen.blit(title, (tile.x + 8, tile.y + tile.height // 2 - title.get_height() // 2))
             platform = font_at(14).render(game.platform, True, TEXT_DIM)
             screen.blit(platform, (tile.x + 8, tile.y + tile.height - platform.get_height() - 8))
@@ -96,6 +100,38 @@ def draw(screen, state: Grid, font_at, art=None, status: str = "", typing: str |
         status = f"search: {typing}_"
     label = font_at(18).render(status, True, TEXT if typing is not None else TEXT_DIM)
     screen.blit(label, (label.get_height(), height - label.get_height() * 2))
+
+
+def draw_prepare(screen, font_at, game: Game, lines: list[str], failed: bool) -> None:
+    """The loader screen: heading, `gotg install`'s output verbatim, the way out.
+
+    Verbatim so a build failure reads on the TV, not only in a log file.
+    """
+    width, height = screen.get_size()
+    screen.fill(BACKGROUND)
+    margin = height // 16
+
+    if failed:
+        heading = f"could not prepare {game.title[:80]}"
+        hint = "B / Escape — back to the grid   ·   full log: gotg install " + f"{game.platform}/{game.id}"
+        colour = (224, 96, 96)
+    else:
+        heading = f"preparing {game.title[:80]} — a first launch builds its emulator"
+        hint = "B / Escape — cancel and go back"
+        colour = TEXT
+
+    screen.blit(font_at(30).render(heading, True, colour), (margin, margin))
+
+    y = margin + font_at(30).get_height() + margin // 2
+    line_font = font_at(16)
+    for line in lines:
+        if y > height - margin * 2:
+            break
+        screen.blit(line_font.render(line[:180], True, TEXT_DIM), (margin, y))
+        y += line_font.get_height() + 2
+
+    label = font_at(18).render(hint, True, TEXT_DIM)
+    screen.blit(label, (margin, height - margin - label.get_height()))
 
 
 def run(library: Library) -> Game | None:
@@ -146,106 +182,151 @@ def run(library: Library) -> Game | None:
 
     chosen: Game | None = None
     typing: str | None = None
+    # The loader phase: a pick that needs work spawns `gotg install` and the
+    # grid gives way to its output until it finishes, fails, or is cancelled.
+    preparer: Preparer | None = None
+    prepare_failed = False
     running = True
-    while running:
-        state = browser.grid
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-                continue
 
-            # While typing, every key is text. Nothing below runs, or the
-            # letters of a search would also be moving the cursor.
-            if typing is not None:
-                if event.type != pygame.KEYDOWN:
+    def pick(game: Game | None) -> None:
+        nonlocal chosen, running, preparer
+        if game is None:
+            return
+        if is_ready(game):
+            chosen = game
+            running = False
+        else:
+            preparer = Preparer(game)
+
+    try:
+        while running:
+            state = browser.grid
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    if preparer is not None:
+                        preparer.cancel()
+                    running = False
                     continue
-                if event.key == pygame.K_ESCAPE:
-                    typing = None
-                elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-                    browser.set_search(typing)
-                    typing = None
-                elif event.key == pygame.K_BACKSPACE:
-                    typing = typing[:-1]
-                elif event.unicode and event.unicode.isprintable():
-                    typing += event.unicode
-                continue
 
-            if event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_ESCAPE, pygame.K_q):
-                    running = False
-                elif event.key in (pygame.K_SLASH, pygame.K_f):
-                    typing = browser.search
-                elif event.key == pygame.K_TAB:
-                    browser.cycle_platform(-1 if event.mod & pygame.KMOD_SHIFT else 1)
-                elif event.key == pygame.K_LEFT:
-                    state.move(-1, 0)
-                elif event.key == pygame.K_RIGHT:
-                    state.move(1, 0)
-                elif event.key == pygame.K_UP:
-                    state.move(0, -1)
-                elif event.key == pygame.K_DOWN:
-                    state.move(0, 1)
-                elif event.key == pygame.K_PAGEDOWN:
-                    state.turn(1)
-                elif event.key == pygame.K_PAGEUP:
-                    state.turn(-1)
-                elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-                    chosen = state.game
-                    running = chosen is None
-            elif event.type == pygame.MOUSEMOTION:
-                # Hover moves the cursor, so the pointer and the stick drive
-                # one selection rather than two competing highlights. A gap
-                # leaves it where it was.
-                over = tile_at(*event.pos, *screen.get_size())
-                if over is not None:
-                    state.select(over)
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1:
+                # On the loader, the only input is the way out. Everything else
+                # would be the grid moving invisibly behind the build.
+                if preparer is not None:
+                    back = (event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_b)) or (
+                        event.type == pygame.JOYBUTTONDOWN and event.button == 1
+                    )
+                    if back:
+                        if not prepare_failed:
+                            preparer.cancel()
+                        preparer = None
+                        prepare_failed = False
+                    continue
+
+                # While typing, every key is text. Nothing below runs, or the
+                # letters of a search would also be moving the cursor.
+                if typing is not None:
+                    if event.type != pygame.KEYDOWN:
+                        continue
+                    if event.key == pygame.K_ESCAPE:
+                        typing = None
+                    elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                        browser.set_search(typing)
+                        typing = None
+                    elif event.key == pygame.K_BACKSPACE:
+                        typing = typing[:-1]
+                    elif event.unicode and event.unicode.isprintable():
+                        typing += event.unicode
+                    continue
+
+                if event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_ESCAPE, pygame.K_q):
+                        running = False
+                    elif event.key in (pygame.K_SLASH, pygame.K_f):
+                        typing = browser.search
+                    elif event.key == pygame.K_TAB:
+                        browser.cycle_platform(-1 if event.mod & pygame.KMOD_SHIFT else 1)
+                    elif event.key == pygame.K_LEFT:
+                        state.move(-1, 0)
+                    elif event.key == pygame.K_RIGHT:
+                        state.move(1, 0)
+                    elif event.key == pygame.K_UP:
+                        state.move(0, -1)
+                    elif event.key == pygame.K_DOWN:
+                        state.move(0, 1)
+                    elif event.key == pygame.K_PAGEDOWN:
+                        state.turn(1)
+                    elif event.key == pygame.K_PAGEUP:
+                        state.turn(-1)
+                    elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                        pick(state.game)
+                elif event.type == pygame.MOUSEMOTION:
+                    # Hover moves the cursor, so the pointer and the stick drive
+                    # one selection rather than two competing highlights. A gap
+                    # leaves it where it was.
                     over = tile_at(*event.pos, *screen.get_size())
-                    # Only ever the tile actually under the pointer: hover has
-                    # already put the cursor there, so this cannot launch
-                    # something the click was not on.
-                    if over is not None and state.select(over):
-                        chosen = state.game
-                        running = chosen is None
-                # No button 4/5 here: SDL2 reports a wheel as MOUSEWHEEL *and*
-                # as those two for compatibility, so handling both turns the
-                # page twice for one scroll.
-            elif event.type == pygame.MOUSEWHEEL:
-                browser.grid.turn(-1 if event.y > 0 else 1)
-            elif event.type == pygame.JOYHATMOTION:
-                dx, dy = event.value
-                state.move(dx, -dy)  # SDL's hat is y-up, the grid is y-down
-            elif event.type == pygame.JOYBUTTONDOWN:
-                # SDL's own mapping, which is why gotg-pads exists: A is 0,
-                # B is 1, and 4 and 5 are the shoulders.
-                if event.button == 0:
-                    chosen = state.game
-                    running = chosen is None
-                elif event.button == 1:
-                    running = False
-                elif event.button == 4:
-                    state.turn(-1)
-                elif event.button == 5:
-                    state.turn(1)
-                elif event.button == 3:
-                    # Y: the next platform. Six of them, so cycling beats a
-                    # menu nobody can reach without a pointer.
-                    browser.cycle_platform(1)
-                elif event.button == 2:
-                    # X: search. A Deck raises the Steam keyboard over this.
-                    typing = browser.search
+                    if over is not None:
+                        state.select(over)
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1:
+                        over = tile_at(*event.pos, *screen.get_size())
+                        # Only ever the tile actually under the pointer: hover has
+                        # already put the cursor there, so this cannot launch
+                        # something the click was not on.
+                        if over is not None and state.select(over):
+                            pick(state.game)
+                    # No button 4/5 here: SDL2 reports a wheel as MOUSEWHEEL *and*
+                    # as those two for compatibility, so handling both turns the
+                    # page twice for one scroll.
+                elif event.type == pygame.MOUSEWHEEL:
+                    browser.grid.turn(-1 if event.y > 0 else 1)
+                elif event.type == pygame.JOYHATMOTION:
+                    dx, dy = event.value
+                    state.move(dx, -dy)  # SDL's hat is y-up, the grid is y-down
+                elif event.type == pygame.JOYBUTTONDOWN:
+                    # SDL's own mapping, which is why gotg-pads exists: A is 0,
+                    # B is 1, and 4 and 5 are the shoulders.
+                    if event.button == 0:
+                        pick(state.game)
+                    elif event.button == 1:
+                        running = False
+                    elif event.button == 4:
+                        state.turn(-1)
+                    elif event.button == 5:
+                        state.turn(1)
+                    elif event.button == 3:
+                        # Y: the next platform. Six of them, so cycling beats a
+                        # menu nobody can reach without a pointer.
+                        browser.cycle_platform(1)
+                    elif event.button == 2:
+                        # X: search. A Deck raises the Steam keyboard over this.
+                        typing = browser.search
 
-        # Whatever the workers finished since the last frame stops being a
-        # placeholder now. Only the page on screen is ever asked for.
-        for game in loader.done():
-            art.pop(game.key, None)
-        for game in state.page:
-            surface_for(game)
+            if preparer is not None:
+                if not prepare_failed and not preparer.running:
+                    if preparer.ok:
+                        chosen = preparer.game
+                        running = False
+                    else:
+                        prepare_failed = True
+                draw_prepare(screen, font_at, preparer.game, preparer.tail(28), prepare_failed)
+            else:
+                # Whatever the workers finished since the last frame stops being a
+                # placeholder now. Only the page on screen is ever asked for.
+                for game in loader.done():
+                    art.pop(game.key, None)
+                for game in state.page:
+                    surface_for(game)
+                draw(screen, state, font_at, art, browser.status, typing)
+            pygame.display.flip()
+            # The loader only mirrors streamed text; 30fps halves the redundant
+            # re-render of a mostly-unchanged tail across a minutes-long build.
+            clock.tick(30 if preparer is not None else 60)
 
-        draw(screen, state, font_at, art, browser.status, typing)
-        pygame.display.flip()
-        clock.tick(60)
+    finally:
+        # However the loop ends — quit, exec handoff, Ctrl-C, a crash — the
+        # install must not be orphaned: its process group is detached from the
+        # terminal, so nothing else will ever stop it.
+        if preparer is not None and (chosen is None or preparer.game != chosen):
+            preparer.cancel()
 
     # Before the caller execs: the emulator must not inherit a window and a
     # grabbed GPU from a process that is about to stop existing.

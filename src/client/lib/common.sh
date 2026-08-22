@@ -46,8 +46,15 @@ die() {
 # True when there is a person watching a terminal, false under Steam or cron.
 is_tty() { [[ -t 1 && -t 2 ]]; }
 
-# True when a graphical progress dialog can be shown.
-has_display() { [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]; }
+# True when a graphical progress dialog can be shown — and wanted.
+# GOTG_NO_DIALOG is for a caller that owns the screen already: the UI streams
+# build output into its own loader view, and a zenity raised beside it would at
+# best double-report and at worst never composite (gamescope in game mode shows
+# only the game window). One choke point, so no call site can forget.
+has_display() {
+  [[ -z "${GOTG_NO_DIALOG:-}" ]] || return 1
+  [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]
+}
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"

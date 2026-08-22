@@ -18,6 +18,7 @@ cmd_complete() {
     ids) complete_ids ;;
     variants) complete_variants "${2:-}" ;;
     platforms) complete_platforms ;;
+    ready) complete_ready "${2:-}" "${3:-}" ;;
     *) return 0 ;;
   esac
 }
@@ -37,6 +38,44 @@ complete_platforms() {
   manifest_cached || return 0
   jq -r '[.games[].platform] | unique | .[]' "$GOTG_CACHE_FILE" 2>/dev/null |
     grep -E "$GOTG_PLATFORM_RE" || true
+}
+
+# Whether one game would launch without building or downloading anything:
+# the environment root is built and the game's bytes are here. Pure filesystem
+# — same rules as everything else in this file — so the UI can ask it per
+# selection without a nix evaluation or a network round trip. Exit 0 is ready;
+# 1 is "preparing would do work"; the distinction IS the answer, so unlike the
+# rest of this file the exit code is meaningful.
+complete_ready() {
+  local want="$1" variant="${2:-}" platform="" id game attr
+  [[ -n "$want" ]] || return 1
+  [[ -s "$GOTG_CACHE_FILE" ]] || return 1
+
+  # The UI always qualifies (222 ids are on more than one platform); a bare id
+  # is accepted for a person poking at it, first match wins as in completion.
+  if [[ "$want" == */* ]]; then
+    platform="${want%%/*}"
+    id="${want#*/}"
+  else
+    id="$want"
+  fi
+  # One jq pass, version check folded in — not manifest_cached + manifest_games,
+  # which each parse the whole 2MB manifest again. This runs synchronously on
+  # every confirm press in the UI, and the three-parse version measured ~270ms
+  # a pick on a desktop; call it a second on a Deck, frozen under the button.
+  game="$(jq -c --arg i "$id" --arg p "$platform" \
+    'if .version != 2 then empty else
+       (.games[] | select(.id == $i and ($p == "" or .platform == $p)))
+     end' "$GOTG_CACHE_FILE" 2>/dev/null | head -1 || true)"
+  [[ -n "$game" ]] || return 1
+
+  attr="$(env_attr "$game" "$variant" 2>/dev/null)" || return 1
+  env_is_built "$attr" || return 1
+  game_is_installed "$game" || return 1
+  # A positive token, not just exit 0: a client too old to know `ready` falls
+  # through this file's catch-all `*) return 0` and would read as ready — the
+  # UI requires the word as well as the code.
+  printf 'ready\n'
 }
 
 # The variants of one game. The id is whatever is on the command line, which may

@@ -104,6 +104,11 @@ prompt_line() {
     read -r -p "$prompt" value </dev/tty
   elif has_display && command -v zenity >/dev/null 2>&1; then
     value="$(zenity --entry --title="GOTG" --text="$prompt" 2>/dev/null)" || true
+  else
+    # As prompt_secret already does. Nowhere to ask means the answer is not
+    # known — silently taking the default would point a headless login at a
+    # server nobody chose.
+    die "no terminal or display to prompt for: $prompt"
   fi
   printf '%s' "${value:-$default}"
 }

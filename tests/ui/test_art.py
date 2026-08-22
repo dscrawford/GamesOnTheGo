@@ -9,6 +9,7 @@ that draws and a grid that hangs.
 from __future__ import annotations
 
 import pytest
+
 from gotg_ui.art import PNG, ArtStore, extension_for
 from gotg_ui.catalog import Game
 
