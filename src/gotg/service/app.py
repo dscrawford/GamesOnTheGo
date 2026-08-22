@@ -54,7 +54,7 @@ from ..catalog import CatalogStore, Conflict, SweepRefused
 from ..saves import SavesStore
 from ..tokens import TOKEN_RE, Absent, Claimed, TokenStore, default_user
 
-USER_AGENT = "gotg-proxy/0.5.3"
+USER_AGENT = "gotg-proxy/0.5.4"
 
 # Bounded, because a request that never returns holds a thread open and enough
 # of them stop the proxy answering anybody.
@@ -277,6 +277,7 @@ class Handler(BaseHTTPRequestHandler):
     catalog: CatalogStore | None
     files_dir: Path | None
     streams: threading.BoundedSemaphore
+    scans: threading.BoundedSemaphore
     token_store: TokenStore | None
     auth_cache: dict
     auth_cache_lock: threading.Lock
@@ -568,7 +569,14 @@ class Handler(BaseHTTPRequestHandler):
             self._problem(503, "this service holds no catalog")
             return
 
-        parts = urllib.parse.urlsplit("/" + rest)
+        try:
+            parts = urllib.parse.urlsplit("/" + rest)
+        except ValueError:
+            # urlsplit raises on an unbalanced "[" — /catalog//[x reaches this
+            # with any token, and an uncaught raise here kills the thread and
+            # drops the connection with no status.
+            self._problem(400, "malformed request path")
+            return
         segments = [s for s in parts.path.strip("/").split("/") if s]
         query = parts.query.split("&")
 
@@ -959,20 +967,78 @@ class Handler(BaseHTTPRequestHandler):
 
     def _needs_admin(self, principal: str) -> bool:
         if not self.config.admin_token:
-            self._problem(503, "no admin token is configured; token administration is off")
+            self._problem(503, "no admin token is configured; administration is off")
             return True
-        if principal != "admin":
-            self._problem(403, "token administration needs the admin token")
-            return True
-        if self.token_store is None:
-            self._problem(503, "this deployment holds no token store")
+        # The bearer, not the name — what _is_index does, and for the same
+        # reason. A principal is "admin" either because the token matched here
+        # or because {auth_url}/auth/whoami said so, and that reply is parsed
+        # unvalidated. Nothing can currently make a peer say "admin", but the
+        # gate on the credential store should not rest on that staying true.
+        if not hmac.compare_digest(self._bearer(), self.config.admin_token.encode()):
+            self._problem(403, "administration needs the admin token")
             return True
         return False
+
+    def _admin_scan(self, query: str) -> None:
+        """`GET /admin/scan` — what the library gained, and what has gone from it.
+
+        The missing half stats every member file, which is most of why this
+        sits behind the admin token: it is not a thing a client may ask for.
+        The added half is only as current as the indexer's last pass, since
+        nothing else turns a payload into a titled entry.
+        """
+        if self.catalog is None:
+            self._problem(503, "this service holds no catalog")
+            return
+        if self.command not in ("GET", "HEAD"):
+            self._problem(405, "a scan is a GET")
+            return
+        since = urllib.parse.parse_qs(query).get("since", [""])[0] or None
+        # One sweep at a time. It is thousands of blocking stats against a
+        # network mount, and a person who thinks it has hung will retry —
+        # which buys nothing and parks a second thread that a hung mount will
+        # not give back. The same discipline as the streaming semaphore.
+        if not self.scans.acquire(blocking=False):
+            self._problem(503, "a scan is already running; try again in a moment")
+            return
+        try:
+            report = self.catalog.scan(since=since)
+        except ValueError as error:
+            self._problem(400, str(error))
+            return
+        # As in _catalog: the message itself never reaches the client, because
+        # a storage error string typically embeds server paths.
+        except sqlite3.Error as error:
+            print(f"catalog scan storage error: {error}", file=sys.stderr)
+            self._problem(500, "catalog storage error")
+            return
+        except OSError as error:
+            print(f"catalog scan error: {error}", file=sys.stderr)
+            self._problem(500, "catalog storage error")
+            return
+        finally:
+            self.scans.release()
+        self._send(200, json.dumps(report).encode(), "application/json")
 
     def _admin(self, rest: str, body: bytes | None, principal: str) -> None:
         if self._needs_admin(principal):
             return
-        segments = rest.split("?")[0].strip("/").split("/")
+        # partition, not urlsplit: on a doubled slash urlsplit reads the next
+        # segment as a netloc and drops it, so /admin//anything/tokens would
+        # reach the token routes that /admin/<one segment>/tokens must not.
+        # It also strips a #fragment, and raises on an unbalanced [ .
+        path, _, query = rest.partition("?")
+        segments = path.strip("/").split("/")
+
+        # The library half of /admin, and the only part that needs no token
+        # store: a deployment can hold a catalog without holding one.
+        if segments == ["scan"]:
+            self._admin_scan(query)
+            return
+
+        if self.token_store is None:
+            self._problem(503, "this deployment holds no token store")
+            return
 
         if segments == ["invites"]:
             if self.command != "POST":
@@ -1016,7 +1082,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._problem(404, f"nothing live to revoke for {segments[1]!r}")
             return
 
-        self._problem(404, "nothing lives at /admin but invites and tokens")
+        self._problem(404, "nothing lives at /admin but invites, tokens and scan")
 
     def do_GET(self) -> None:  # noqa: N802
         self._handle()
@@ -1057,6 +1123,7 @@ def make_server(
             "catalog": catalog,
             "files_dir": files_dir,
             "streams": threading.BoundedSemaphore(stream_slots),
+            "scans": threading.BoundedSemaphore(1),
             "token_store": token_store,
             "auth_cache": {},
             "auth_cache_lock": threading.Lock(),

@@ -643,6 +643,37 @@ credential (`GOTG_ADMIN_TOKEN`, from the cluster secret) opens `/admin` and
 nothing else. The original shared token still works as break-glass during the
 transition and is slated for removal.
 
+### What arrived, and what went away
+
+The indexer runs on its own every few minutes, so nobody has to start an
+import. What nobody had was a way to *see* one land — or to notice a game
+quietly leaving, which is what a pruned torrent or an unlinked payload does to
+a catalog row. `gotg admin scan` answers both:
+
+```console
+$ gotg admin scan
++ gba      usa.mother_3                         Mother 3
++ gb       usa.super_mario_land                 Super Mario Land
++ ps2      usa.star_wars_battlefront_ii         Star Wars: Battlefront II
+- snes     usa.chrono_trigger                   Chrono Trigger (1 of 1 file(s) gone)
+3 added, 1 missing since 2026-08-14T09:11:02Z — 2431 in the catalog
+```
+
+The `+` half is a query — the catalog stamps each entry the first time it
+appears, and a bare run means "since I last looked", remembered in
+`~/.local/state/gotg/admin-scan.json`. The `-` half is the scan proper: the
+service stats every member file of every entry, so the answer is about the
+bytes now rather than about what the indexer last believed. It reports and
+never deletes; a row with no file behind it is a person's decision to make.
+
+The first run has no mark to work from, so it reports only what is missing and
+sets the mark rather than declaring a library of thousands newly arrived.
+`--since 7d` (or `12h`, `2w`, or a full stamp) asks about a window without
+moving the mark, `--all` counts the whole catalog as new, and `--json` gives
+the raw report. If more than a fifth of the catalog turns up missing the
+report says so out loud, because a library volume that failed to mount looks
+exactly like every game vanishing at once.
+
 **Saves only.** A pull restores what you played, not what you installed. Cemu's
 `mlc01/usr/title` — installed updates and DLC — is deliberately excluded: it is
 not a save, it can run to gigabytes, and it is not reconstructible from the ROM,

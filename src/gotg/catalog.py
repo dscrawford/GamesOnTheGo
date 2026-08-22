@@ -24,6 +24,7 @@ import os
 import os.path
 import re
 import sqlite3
+import stat
 import threading
 import time
 from contextlib import contextmanager
@@ -41,6 +42,13 @@ from .contract import (
 # confirm. The failure this guards is a half-run indexer reporting the whole
 # untouched library gone — which trains people to ignore the report.
 SWEEP_LIMIT = 0.2
+
+# [0-9], not \d: \d matches Unicode digits, which collate above ASCII and turn
+# the lexicographic seen_at/imported_at comparisons into nonsense. Matched with
+# fullmatch, never $: "$" also matches before a trailing newline, and
+# "…00:00:00Z\n" sorts above every real stamp — so ?since=…Z%0A would pass the
+# shape check and then silently skip the whole second it names.
+_ISO_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS entry (
@@ -92,6 +100,10 @@ class CatalogStore:
         if not roots:
             raise ValueError("a catalog needs at least one library root")
         self.roots = [Path(os.path.realpath(r)) for r in roots]
+        # String prefixes for the scan's hot loop: Path.is_relative_to is a
+        # pure-Python path parse that measured as half the cost of sweeping a
+        # whole library, against roots that are already resolved here.
+        self._prefixes = tuple((str(r), os.path.join(str(r), "")) for r in self.roots)
         self.db = Path(db)
 
         # A row grants read on its path, so the database must not be able to
@@ -238,9 +250,7 @@ class CatalogStore:
             return cursor.rowcount > 0
 
     def sweep(self, since: str, *, confirm: bool = False) -> dict:
-        # [0-9], not \d: \d matches Unicode digits, which collate above ASCII
-        # and turn the lexicographic seen_at comparison into nonsense.
-        if not re.match(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$", since):
+        if not _ISO_RE.fullmatch(since):
             raise ValueError(f"since must be an ISO UTC timestamp, got {since!r}")
         with self._read() as conn:
             total = conn.execute("SELECT COUNT(*) FROM entry").fetchone()[0]
@@ -255,7 +265,126 @@ class CatalogStore:
             "vanished": [dict(row) for row in rows],
         }
 
+    def scan(self, *, since: str | None = None) -> dict:
+        """What the library gained since ``since``, and what it has quietly lost.
+
+        The added half is a query: the first upsert of a row stamps
+        ``imported_at`` and no later one moves it. The missing half is the
+        actual scan — one stat per member file — and the reason this exists:
+        a pruned torrent or an unlinked payload leaves the row behind, and
+        nothing notices until somebody tries to play the game.
+
+        The added window is half-open, ``[since, scanned_at)``. ``imported_at``
+        has one-second resolution, so an entry stamped during the second this
+        runs may have siblings still landing after the read; deferring that
+        whole second to the next call is the only cut that neither reports it
+        twice nor loses what arrived late in it. ``since`` of None keeps the
+        open top and means "everything before now".
+
+        That cut assumes a clock that only moves forwards. A ``since`` above
+        ``scanned_at`` is a window that ends before it begins, which nothing
+        but a stepped-back clock can produce, and entries stamped in the
+        replayed stretch fall below every window that follows — so it is
+        reported rather than left to look like a quiet library.
+
+        Reporting only: nothing here deletes a row or a file.
+        """
+        if since is not None and not _ISO_RE.fullmatch(since):
+            raise ValueError(f"since must be an ISO UTC timestamp, got {since!r}")
+        scanned_at = _now()
+
+        # One snapshot across both queries, as in view(): an upsert landing
+        # between them would otherwise report an entry whose files are not
+        # there yet as an entry whose files have gone.
+        with self._read() as conn:
+            conn.execute("BEGIN")
+            try:
+                entries = conn.execute("SELECT * FROM entry ORDER BY platform, id").fetchall()
+                files = conn.execute(
+                    "SELECT platform, id, name, path, size_bytes FROM entry_file ORDER BY platform, id, name"
+                ).fetchall()
+            finally:
+                conn.execute("COMMIT")
+
+        counts: dict[tuple[str, str], int] = {}
+        sizes: dict[tuple[str, str], int] = {}
+        gone: dict[tuple[str, str], list[str]] = {}
+        parents: dict[str, str] = {}
+        for row in files:
+            key = (row["platform"], row["id"])
+            counts[key] = counts.get(key, 0) + 1
+            sizes[key] = sizes.get(key, 0) + row["size_bytes"]
+            if not self._present(row["path"], parents):
+                gone.setdefault(key, []).append(row["name"])
+
+        added: list[dict] = []
+        missing: list[dict] = []
+        for row in entries:
+            key = (row["platform"], row["id"])
+            named = {"platform": row["platform"], "id": row["id"], "title": row["title"]}
+            if row["imported_at"] < scanned_at and (since is None or row["imported_at"] >= since):
+                added.append(
+                    {
+                        **named,
+                        "handler": row["handler"],
+                        "imported_at": row["imported_at"],
+                        "size_bytes": sizes.get(key, 0),
+                    }
+                )
+            if key in gone:
+                missing.append(
+                    {
+                        **named,
+                        "seen_at": row["seen_at"],
+                        "files": counts.get(key, 0),
+                        "missing_files": len(gone[key]),
+                        "missing": gone[key],
+                    }
+                )
+
+        return {
+            "scanned_at": scanned_at,
+            "since": since,
+            "total": len(entries),
+            "added": added,
+            "missing": missing,
+            # The same rail sweep() guards, reported rather than enforced: the
+            # evidence is a stat, not a half-finished indexer run, so the
+            # honest answer is the list plus the doubt.
+            "suspect": bool(entries) and len(missing) / len(entries) > SWEEP_LIMIT,
+            "clock_stepped_back": since is not None and since > scanned_at,
+        }
+
     # --- reads --------------------------------------------------------------
+
+    def _present(self, path: str, parents: dict[str, str]) -> bool:
+        """Whether one member's bytes are still readable through the catalog.
+
+        "Present" has to mean exactly what open_member will do, or the scan
+        is a monitoring tool that misses the thing it was built to catch. So
+        the final component is lstat'd rather than stat'd, because
+        open_member opens with O_NOFOLLOW: a member replaced by a symlink is
+        unfetchable even when its target is a real file inside a root, and
+        resolving it here would report a library healthy while every download
+        of that game fails. A path symlinked out of the roots is gone for the
+        same reason, and so is a member that is no longer a regular file.
+
+        ``parents`` memoizes the resolve per directory for the life of one
+        scan: realpath lstats every component, and a WiiU tree's ten thousand
+        members share one parent. It dies with the call, so a directory
+        retargeted between scans is never served from a stale entry.
+        """
+        parent, _, base = path.rpartition("/")
+        real_parent = parents.get(parent)
+        if real_parent is None:
+            real_parent = parents[parent] = os.path.realpath(parent)
+        real = os.path.join(real_parent, base)
+        if not any(real == root or real.startswith(prefix) for root, prefix in self._prefixes):
+            return False
+        try:
+            return stat.S_ISREG(os.lstat(real).st_mode)
+        except OSError:
+            return False
 
     def _entry(self, conn: sqlite3.Connection, platform: str, game_id: str, *, full: bool) -> dict | None:
         row = conn.execute("SELECT * FROM entry WHERE platform = ? AND id = ?", (platform, game_id)).fetchone()

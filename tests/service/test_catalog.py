@@ -9,9 +9,11 @@ is a grant to read that path.
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 from test_proxy import free_port
@@ -769,3 +771,485 @@ def test_nested_member_names_carry_a_wiiu_tree(catalog, library):
         "content/scene/x.pack",
         "meta/meta.xml",
     ]
+
+
+# --- the admin scan -----------------------------------------------------------
+
+
+def real_entry(library, name="usa.zelda.z64", *, present=True, **overrides):
+    """An entry whose file is actually on disk, which the plain one is not."""
+    payload = entry(library, name=name, **overrides)
+    for member in payload["files"]:
+        path = Path(member["path"])
+        if present:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"rom!")
+    return payload
+
+
+def test_scan_reports_what_arrived_and_never_the_rest(catalog, library, monkeypatch):
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2020-01-01T00:00:00Z")
+    catalog.upsert("n64", "usa.old", real_entry(library, name="usa.old.z64"))
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2026-01-01T00:00:00Z")
+    catalog.upsert("gba", "usa.mother_3", real_entry(library, name="usa.mother_3.gba", title="Mother 3"))
+
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2026-01-01T00:00:01Z")
+    report = catalog.scan(since="2025-01-01T00:00:00Z")
+    assert [(a["platform"], a["id"], a["title"]) for a in report["added"]] == [("gba", "usa.mother_3", "Mother 3")]
+    assert report["missing"] == []
+    assert report["total"] == 2
+    assert report["suspect"] is False
+
+
+def test_scan_without_a_since_calls_the_whole_catalog_new(catalog, library, monkeypatch):
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2026-01-01T00:00:00Z")
+    catalog.upsert("n64", "usa.zelda", real_entry(library))
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2026-01-01T00:00:01Z")
+    report = catalog.scan()
+    assert report["since"] is None
+    assert len(report["added"]) == 1
+    assert report["added"][0]["size_bytes"] == 4
+
+
+def test_seeing_a_game_again_does_not_report_it_twice(catalog, library, monkeypatch):
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2020-01-01T00:00:00Z")
+    catalog.upsert("n64", "usa.zelda", real_entry(library))
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2026-01-01T00:00:00Z")
+    catalog.upsert("n64", "usa.zelda", real_entry(library))  # the indexer's next pass
+
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2026-01-01T00:00:01Z")
+    report = catalog.scan(since="2025-01-01T00:00:00Z")
+    assert report["added"] == [], "imported_at is when it arrived, not when it was last seen"
+
+
+def test_successive_scans_report_an_entry_exactly_once(catalog, library, monkeypatch):
+    """The window is [since, scanned_at), and the open top is why this holds.
+
+    imported_at is a whole second, so a run that reported everything up to and
+    including its own second — and then marked the caller at that second —
+    would report that whole second again on the next call. Caught by hand
+    before it was caught by a test: a scan taken in the same second as an
+    import listed five games and then listed three of them again.
+    """
+    clock = ["2026-01-01T00:00:00Z"]
+    monkeypatch.setattr(catalog_module, "_now", lambda: clock[0])
+
+    seen: list[str] = []
+    mark: str | None = None
+    for tick, arriving in enumerate([["a", "b"], [], ["c"], ["d", "e"]]):
+        clock[0] = f"2026-01-01T00:00:{tick:02}Z"
+        for name in arriving:
+            catalog.upsert("n64", f"usa.{name}", real_entry(library, name=f"usa.{name}.z64"))
+        report = catalog.scan(since=mark)
+        seen.extend(a["id"] for a in report["added"])
+        mark = report["scanned_at"]
+
+    # Nothing twice, and — one more tick past the last arrival — nothing lost.
+    clock[0] = "2026-01-01T00:00:09Z"
+    seen.extend(a["id"] for a in catalog.scan(since=mark)["added"])
+    assert sorted(seen) == ["usa.a", "usa.b", "usa.c", "usa.d", "usa.e"]
+    assert len(seen) == len(set(seen)), f"reported more than once: {seen}"
+
+
+def test_the_second_a_scan_runs_in_is_left_for_the_next_scan(catalog, library, monkeypatch):
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2026-01-01T00:00:00Z")
+    catalog.upsert("n64", "usa.zelda", real_entry(library))
+
+    # Same second as the import: deferred, because more of that second may
+    # still be arriving behind this read.
+    assert catalog.scan()["added"] == []
+
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2026-01-01T00:00:01Z")
+    assert [a["id"] for a in catalog.scan(since="2026-01-01T00:00:00Z")["added"]] == ["usa.zelda"]
+
+
+def test_scan_finds_the_bytes_gone_from_under_a_row(catalog, library):
+    payload = real_entry(library)
+    catalog.upsert("n64", "usa.zelda", payload)
+    assert catalog.scan()["missing"] == []
+
+    Path(payload["files"][0]["path"]).unlink()
+    report = catalog.scan()
+    assert [(m["id"], m["missing_files"], m["files"]) for m in report["missing"]] == [("usa.zelda", 1, 1)]
+    assert report["missing"][0]["missing"] == ["usa.zelda.z64"]
+    assert catalog.view()["games"], "a scan reports and never deletes"
+
+
+def test_a_partly_gone_entry_names_only_the_files_that_went(catalog, library):
+    payload = real_entry(library)
+    payload["files"].append(
+        {
+            "name": "usa.zelda.cue",
+            "path": str(library / "some-release" / "usa.zelda.cue"),
+            "size_bytes": 4,
+            "mtime": 1,
+            "sha256": None,
+        }
+    )
+    Path(payload["files"][1]["path"]).write_bytes(b"cue!")
+    catalog.upsert("n64", "usa.zelda", payload)
+    Path(payload["files"][1]["path"]).unlink()
+
+    missing = catalog.scan()["missing"]
+    assert missing[0]["missing"] == ["usa.zelda.cue"]
+    assert (missing[0]["missing_files"], missing[0]["files"]) == (1, 2)
+
+
+def test_a_file_symlinked_out_of_the_library_counts_as_gone(catalog, tmp_path, library):
+    outside = tmp_path / "elsewhere.z64"
+    outside.write_bytes(b"rom!")
+    payload = real_entry(library, present=False)
+    Path(payload["files"][0]["path"]).parent.mkdir(parents=True, exist_ok=True)
+    catalog.upsert("n64", "usa.zelda", payload)
+    Path(payload["files"][0]["path"]).symlink_to(outside)
+
+    # The bytes exist; the streaming endpoint still refuses them, so a scan
+    # that called this present would report on a file nobody can fetch.
+    assert [m["id"] for m in catalog.scan()["missing"]] == ["usa.zelda"]
+
+
+def test_the_mass_vanish_rail_flags_rather_than_refuses(catalog, library):
+    for i in range(10):
+        catalog.upsert("n64", f"usa.game_{i}", real_entry(library, name=f"usa.game_{i}.z64"))
+    assert catalog.scan()["suspect"] is False
+
+    for i in range(3):
+        (library / "some-release" / f"usa.game_{i}.z64").unlink()
+    report = catalog.scan()
+    assert report["suspect"] is True
+    assert len(report["missing"]) == 3, "flagged, and still reported in full"
+
+
+def test_an_empty_catalog_scans_clean(catalog):
+    report = catalog.scan()
+    assert (report["total"], report["added"], report["missing"], report["suspect"]) == (0, [], [], False)
+
+
+@pytest.mark.parametrize("since", ["", "yesterday", "2026-01-01", "٢٠٢٦-٠١-٠١T٠٠:٠٠:٠٠Z"])
+def test_scan_since_must_be_ascii_iso_utc(catalog, since):
+    with pytest.raises(ValueError):
+        catalog.scan(since=since)
+
+
+# --- the admin scan, over the wire --------------------------------------------
+
+ADMIN = "admin-token"
+
+
+@pytest.fixture
+def admin_service(catalog):
+    config = Config(token=CLIENT, index_token=INDEX, admin_token=ADMIN)
+    server = make_server("127.0.0.1", free_port(), config, None, catalog)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+def test_the_scan_is_the_admin_token_and_nobody_else(admin_service, catalog, library, monkeypatch):
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2026-01-01T00:00:00Z")
+    catalog.upsert("n64", "usa.zelda", real_entry(library))
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2026-01-01T00:00:01Z")
+
+    # A catalog read is a client's business; a scan of the bytes behind it is
+    # not — it costs a stat per member file of every entry in the library.
+    for token in (CLIENT, INDEX):
+        status, _ = call(f"{admin_service}/admin/scan", token=token)
+        assert status == 403, "the scan is no more open than the token routes"
+    status, _ = call(f"{admin_service}/admin/scan", token=None)
+    assert status == 401
+
+    status, report = call(f"{admin_service}/admin/scan", token=ADMIN)
+    assert status == 200
+    assert [a["id"] for a in report["added"]] == ["usa.zelda"]
+
+
+def test_the_wire_scan_windows_on_since(admin_service, catalog, library, monkeypatch):
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2020-01-01T00:00:00Z")
+    catalog.upsert("n64", "usa.old", real_entry(library, name="usa.old.z64"))
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2026-01-01T00:00:00Z")
+    catalog.upsert("n64", "usa.new", real_entry(library, name="usa.new.z64"))
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2026-01-01T00:00:01Z")
+
+    status, report = call(f"{admin_service}/admin/scan?since=2025-01-01T00:00:00Z", token=ADMIN)
+    assert status == 200
+    assert [a["id"] for a in report["added"]] == ["usa.new"]
+    assert report["since"] == "2025-01-01T00:00:00Z"
+
+
+def test_a_malformed_since_is_a_400_not_a_whole_catalog_answer(admin_service, catalog, library):
+    catalog.upsert("n64", "usa.zelda", real_entry(library))
+    status, problem = call(f"{admin_service}/admin/scan?since=yesterday", token=ADMIN)
+    assert status == 400
+    assert "ISO" in problem["error"]
+
+
+def test_a_scan_is_a_get(admin_service):
+    status, _ = call(f"{admin_service}/admin/scan", method="POST", token=ADMIN, body={})
+    assert status == 405
+
+
+def test_the_scan_needs_no_token_store_but_does_need_a_catalog():
+    config = Config(token=CLIENT, admin_token=ADMIN)
+    server = make_server("127.0.0.1", free_port(), config, None, None)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        status, _ = call(f"{url}/admin/scan", token=ADMIN)
+        assert status == 503
+        # …and the token routes still say what they are missing.
+        status, _ = call(f"{url}/admin/tokens", token=ADMIN)
+        assert status == 503
+    finally:
+        server.shutdown()
+
+
+# --- what the review pass found -----------------------------------------------
+
+
+def test_a_since_with_a_trailing_newline_is_refused(catalog):
+    # "$" in a Python regex also matches before a trailing newline, so "…Z\n"
+    # passed a shape check that "…z" does not — and then sorts above every real
+    # stamp, silently skipping the whole second it names. It arrives that way
+    # as ?since=2026-01-01T00%3A00%3A00Z%0A, so it is wire-reachable.
+    with pytest.raises(ValueError):
+        catalog.scan(since="2026-01-01T00:00:00Z\n")
+    with pytest.raises(ValueError):
+        catalog.sweep("2026-01-01T00:00:00Z\n", confirm=True)
+
+
+def test_a_member_replaced_by_a_symlink_is_gone_because_the_endpoint_says_so(catalog, tmp_path, library):
+    """Present here has to mean fetchable there, or this misses what it is for.
+
+    open_member opens with O_NOFOLLOW, so a member swapped for a symlink is
+    unfetchable even when the target is a real file inside a root. Resolving
+    it here reported the library healthy while every download of that game
+    failed — a blind spot in the tool built to catch exactly this.
+    """
+    release = library / "some-release"
+    release.mkdir(parents=True, exist_ok=True)
+    (release / ".usa.zelda.z64.tmp").write_bytes(b"rom!")
+    (release / "usa.zelda.z64").symlink_to(release / ".usa.zelda.z64.tmp")
+    catalog.upsert("n64", "usa.zelda", entry(library))
+
+    assert catalog.open_member("n64", "usa.zelda", "usa.zelda.z64")[1] is None
+    assert [m["id"] for m in catalog.scan()["missing"]] == ["usa.zelda"]
+
+
+def test_a_member_that_is_now_a_directory_is_gone(catalog, library):
+    (library / "some-release" / "usa.zelda.z64").mkdir(parents=True)
+    catalog.upsert("n64", "usa.zelda", entry(library))
+    assert [m["id"] for m in catalog.scan()["missing"]] == ["usa.zelda"]
+
+
+def test_a_window_that_ends_before_it_begins_says_the_clock_moved(catalog, library, monkeypatch):
+    """The one way a game is reported zero times, made loud instead of silent.
+
+    ntp steps the host back; the indexer imports during the replayed stretch;
+    that entry is below the old mark and below every mark after it. The scan
+    cannot recover it — only a re-run with an explicit --since can — so the
+    least it can do is not read like a quiet library.
+    """
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2026-01-01T00:05:00Z")
+    catalog.upsert("n64", "usa.zelda", real_entry(library))
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2026-01-01T00:05:01Z")
+
+    stepped = catalog.scan(since="2026-01-01T00:10:00Z")
+    assert stepped["added"] == []
+    assert stepped["clock_stepped_back"] is True
+
+    ordinary = catalog.scan(since="2026-01-01T00:00:00Z")
+    assert ordinary["clock_stepped_back"] is False
+    assert catalog.scan()["clock_stepped_back"] is False, "no since is not a stepped clock"
+
+
+@pytest.mark.parametrize(
+    ("total", "gone", "suspect"),
+    [(1, 0, False), (1, 1, True), (5, 1, False), (5, 2, True), (10, 2, False), (10, 3, True), (100, 20, False)],
+)
+def test_the_scan_rail_is_strictly_more_than_a_fifth(catalog, library, total, gone, suspect):
+    for i in range(total):
+        catalog.upsert("n64", f"usa.game_{i:03}", real_entry(library, name=f"usa.game_{i:03}.z64"))
+    for i in range(gone):
+        (library / "some-release" / f"usa.game_{i:03}.z64").unlink()
+
+    report = catalog.scan()
+    assert report["suspect"] is suspect
+    assert len(report["missing"]) == gone, "flagged or not, the list is the same list"
+
+
+def test_only_the_members_that_went_are_named_in_a_wiiu_tree(catalog, library):
+    # The parent-directory memo in _present is per-scan and shared across a
+    # tree's members; a bug in it would show up as a whole tree reading gone.
+    names = ["meta/meta.xml", "code/app.rpx", "content/scene/x.pack"]
+    files = []
+    for name in names:
+        path = library / "rel" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+        files.append({"name": name, "path": str(path), "size_bytes": 1, "mtime": 1, "sha256": None})
+    catalog.upsert("wiiu", "usa.wind_waker_hd", {"handler": "wiiu_decrypted", "title": "WW", "files": files})
+    assert catalog.scan()["missing"] == []
+
+    (library / "rel" / "code" / "app.rpx").unlink()
+    gone = catalog.scan()["missing"][0]
+    assert gone["missing"] == ["code/app.rpx"]
+    assert (gone["missing_files"], gone["files"]) == (1, 3)
+
+
+def test_a_game_that_arrived_and_vanished_in_one_window_is_in_both_halves(catalog, library, monkeypatch):
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2026-01-01T00:00:00Z")
+    catalog.upsert("n64", "usa.zelda", real_entry(library))
+    payload = real_entry(library, name="usa.ghost.z64", title="Ghost")
+    catalog.upsert("ps2", "usa.ghost", payload)
+    Path(payload["files"][0]["path"]).unlink()
+
+    monkeypatch.setattr(catalog_module, "_now", lambda: "2026-01-01T00:00:01Z")
+    report = catalog.scan(since="2025-01-01T00:00:00Z")
+    assert [a["id"] for a in report["added"]] == ["usa.zelda", "usa.ghost"]
+    assert [m["id"] for m in report["missing"]] == ["usa.ghost"]
+
+
+def test_scan_during_concurrent_upserts(catalog, library):
+    # The sweep's neighbour. A row landing between the entry read and the file
+    # read must never read as a game that went away: the bytes are written
+    # before the row is, so a false vanish here is a false alarm about a
+    # library that is fine.
+    errors: list[Exception] = []
+    false_alarms: list[list[str]] = []
+
+    def writer():
+        try:
+            for i in range(30):
+                catalog.upsert("n64", f"usa.game_{i}", real_entry(library, name=f"usa.game_{i}.z64"))
+        except Exception as error:  # noqa: BLE001
+            errors.append(error)
+
+    def scanner():
+        try:
+            for _ in range(60):
+                report = catalog.scan()
+                if report["missing"]:
+                    false_alarms.append([m["id"] for m in report["missing"]])
+        except Exception as error:  # noqa: BLE001
+            errors.append(error)
+
+    threads = [threading.Thread(target=writer)] + [threading.Thread(target=scanner) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not errors
+    assert false_alarms == [], "a row landing mid-scan is not a game that went away"
+    assert catalog.scan()["total"] == 30
+
+
+# --- the /admin routes, after the parsing change ------------------------------
+
+
+@pytest.fixture
+def admin_tokens_service(catalog, tmp_path):
+    from gotg.tokens import TokenStore
+
+    config = Config(token=CLIENT, index_token=INDEX, admin_token=ADMIN)
+    store = TokenStore(tmp_path / "state" / "tokens.db")
+    server = make_server("127.0.0.1", free_port(), config, None, catalog, token_store=store)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/admin//evil.com/tokens", "/admin//anything/scan", "/admin/x/scan", "/admin/scan/extra", "/admin//[x"],
+)
+def test_a_doubled_slash_does_not_alias_its_way_onto_an_admin_route(admin_tokens_service, path):
+    """urlsplit reads the segment after a doubled slash as a netloc and drops it.
+
+    Nothing escalates — it is all behind the admin token — but /admin is the
+    one prefix an ingress rule, a NetworkPolicy or an audit grep is keyed on,
+    and a request that reaches the token handler without the literal string in
+    its path is invisible to every one of them. The "[" case used to raise
+    ValueError out of urlsplit and kill the thread instead of answering.
+    """
+    status, _ = call(f"{admin_tokens_service}{path}", token=ADMIN)
+    assert status == 404
+
+
+def test_the_admin_routes_still_answer_at_their_real_paths(admin_tokens_service):
+    assert call(f"{admin_tokens_service}/admin/tokens", token=ADMIN)[0] == 200
+    assert call(f"{admin_tokens_service}/admin/scan", token=ADMIN)[0] == 200
+    assert call(f"{admin_tokens_service}/admin/scan?since=2020-01-01T00:00:00Z", token=ADMIN)[0] == 200
+
+
+def test_a_catalog_path_that_urlsplit_refuses_is_a_400_not_a_dropped_thread(service):
+    # Pre-existing, and reachable with a plain client token: urlsplit raises
+    # ValueError on an unbalanced "[", which left the caller with no status at
+    # all and a traceback in the pod log.
+    status, _ = call(f"{service}/catalog//[x", token=CLIENT)
+    assert status == 400
+
+
+def test_the_admin_gate_checks_the_bearer_and_not_the_principal_name(catalog, monkeypatch):
+    """The admin gate now verifies the credential, as the index gate does.
+
+    A principal is "admin" either because the token matched or because
+    {auth_url}/auth/whoami said so, and that reply is parsed unvalidated.
+    Nothing can currently make a peer say it — but the gate on the credential
+    store should not be the thing resting on that.
+    """
+    import gotg.service.app as app_module
+
+    config = Config(token=CLIENT, admin_token=ADMIN)
+    server = make_server("127.0.0.1", free_port(), config, None, catalog)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_port}"
+    # A peer that vouches for any bearer as "admin".
+    monkeypatch.setattr(app_module.Handler, "_principal", lambda self: "admin")
+    try:
+        status, _ = call(f"{url}/admin/scan", token="not-the-admin-token")
+        assert status == 403, "the name says admin; the bearer does not"
+        assert call(f"{url}/admin/scan", token=ADMIN)[0] == 200
+    finally:
+        server.shutdown()
+
+
+def test_a_scan_that_cannot_read_the_catalog_is_a_500_that_names_no_path(admin_service, catalog, monkeypatch):
+    # As in _catalog: a storage error string typically embeds server paths, so
+    # it goes to stderr and the caller gets a bare 500 — rather than an
+    # uncaught raise, which drops the connection with no status at all and
+    # makes the client report a failing disk as a network problem.
+    def boom(*_args, **_kwargs):
+        raise sqlite3.OperationalError("unable to open database file: /srv/secret/catalog.db")
+
+    monkeypatch.setattr(type(catalog), "scan", boom)
+    status, problem = call(f"{admin_service}/admin/scan", token=ADMIN)
+    assert status == 500
+    assert problem["error"] == "catalog storage error"
+    assert "/srv/secret" not in json.dumps(problem)
+
+
+def test_one_scan_at_a_time(admin_service, catalog, monkeypatch):
+    # Thousands of blocking stats against a network mount, and a person who
+    # thinks it hung will retry. The second caller is told to come back rather
+    # than parking a thread the mount may never give back.
+    started, release = threading.Event(), threading.Event()
+    real = type(catalog).scan
+
+    def slow(self, **kwargs):
+        started.set()
+        release.wait(10)
+        return real(self, **kwargs)
+
+    monkeypatch.setattr(type(catalog), "scan", slow)
+    first: list = []
+    thread = threading.Thread(target=lambda: first.append(call(f"{admin_service}/admin/scan", token=ADMIN)))
+    thread.start()
+    assert started.wait(5)
+    try:
+        assert call(f"{admin_service}/admin/scan", token=ADMIN)[0] == 503
+    finally:
+        release.set()
+        thread.join()
+    assert first[0][0] == 200
+    # The slot is released, so the next caller is served normally.
+    assert call(f"{admin_service}/admin/scan", token=ADMIN)[0] == 200

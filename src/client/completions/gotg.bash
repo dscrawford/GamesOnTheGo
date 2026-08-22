@@ -123,7 +123,13 @@ _gotg() {
             ;;
         admin)
             case $COMP_CWORD in
-                2) mapfile -t COMPREPLY < <(compgen -W "invite tokens revoke" -- "$cur") ;;
+                2) mapfile -t COMPREPLY < <(compgen -W "invite tokens revoke scan" -- "$cur") ;;
+                *)
+                    case "$sub" in
+                        invite) mapfile -t COMPREPLY < <(compgen -W "--ttl --user" -- "$cur") ;;
+                        scan) mapfile -t COMPREPLY < <(compgen -W "--since --all --json" -- "$cur") ;;
+                    esac
+                    ;;
             esac
             ;;
         controllers)

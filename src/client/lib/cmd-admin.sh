@@ -1,8 +1,14 @@
 # shellcheck shell=bash
-# Token administration: invites minted, tokens listed and revoked, by name.
+# Administration: invites minted, tokens listed and revoked, and the library
+# scanned for what has arrived and what has gone.
 #
 # The admin token is deliberately not in api.json — it opens /admin and
 # nothing else, and it belongs to whoever can already reach the cluster.
+
+# Where the last scan's timestamp is remembered, so a bare `admin scan` means
+# "since I last looked". State rather than config: losing it costs one noisy
+# run, and it must never end up beside the credentials in api.json.
+GOTG_ADMIN_MARK="${GOTG_ADMIN_MARK:-$GOTG_STATE_DIR/admin-scan.json}"
 
 admin_usage() {
   cat <<'EOF'
@@ -17,6 +23,14 @@ usage: gotg admin <command> [args]
   tokens                        every token: name, display, last use
   revoke <name>                 end one token now, and cancel any invite
                                 still outstanding for it; the person re-claims
+  scan [--since <when>] [--all] [--json]
+                                what the library has gained since you last ran
+                                this (+), and which games the bytes have gone
+                                from under (-). <when> is 7d, 12h, 2w or a full
+                                2026-08-01T00:00:00Z; --all counts the whole
+                                catalog as new. Neither moves the mark, so a
+                                plain run still reports everything since the
+                                last one.
 
 The admin token comes from GOTG_ADMIN_TOKEN:
   export GOTG_ADMIN_TOKEN="$(kubectl get secret gotg-api -o jsonpath='{.data.admin-token}' | base64 -d)"
@@ -114,6 +128,159 @@ admin_revoke() {
   log "revoked: $name takes effect everywhere within a minute"
 }
 
+# The shape of a scan timestamp, in one place: what admin_when accepts, what a
+# remembered mark must look like before it is trusted back into a URL, and what
+# the service must have answered with before it is written down as one.
+GOTG_STAMP_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+
+# Anything but an ISO stamp or a 7d/12h/2w offset is a typo, and a typo that
+# reached the service as an empty --since would silently mean "the whole
+# catalog is new".
+admin_when() {
+  local raw="$1" unit
+  if [[ "$raw" =~ $GOTG_STAMP_RE ]]; then
+    printf '%s' "$raw"
+    return
+  fi
+  [[ "$raw" =~ ^([0-9]{1,4})([hdw])$ ]] ||
+    die "--since takes 12h, 7d, 2w, or a stamp like 2026-08-01T00:00:00Z"
+  case "${BASH_REMATCH[2]}" in
+    h) unit=hours ;;
+    d) unit=days ;;
+    w) unit=weeks ;;
+  esac
+  date -u -d "${BASH_REMATCH[1]} $unit ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null ||
+    die "could not work out when $raw was"
+}
+
+# Strip what a terminal would act on rather than print. @tsv escapes the tab
+# and newline that could forge a row, but it passes ESC straight through, and
+# the service's own isprintable() check is the *honest* server's — the endpoint
+# this has to survive is a compromised one, which is the same reason `printable`
+# exists in common.sh. Not `printable` here, though: `tr -cd '[:print:]'` under
+# the C locale eats every multibyte character, and a Japanese dump title is a
+# real title.
+#
+# Codepoints rather than a regex class, because jq's regex engine does not read
+# \u escapes — "[\\u0000-\\u001f]" silently becomes [u0000-u001f] and eats
+# letters and digits instead. C0, DEL, C1, and the bidi overrides that can
+# reverse a name on screen.
+GOTG_JQ_CLEAN='def clean: tostring | explode | map(select(
+      . > 31 and . != 127
+      and (. < 128 or . > 159)
+      and (. < 8206 or . > 8207)
+      and (. < 8234 or . > 8238)
+      and (. < 8294 or . > 8297))) | implode;'
+
+admin_scan_rows() {
+  local reply="$1" only="${2:-}"
+  if [[ "$only" != "missing-only" ]]; then
+    jq -r "$GOTG_JQ_CLEAN"' .added[] | [(.platform|clean), (.id|clean), (.title|clean)] | @tsv' <<<"$reply" |
+      while IFS=$'\t' read -r platform id title; do
+        printf '%s+%s %-8s %-36s %s\n' "$C_OK" "$C_RESET" "$platform" "$id" "$title"
+      done
+  fi
+  jq -r "$GOTG_JQ_CLEAN"' .missing[]
+      | [(.platform|clean), (.id|clean), (.title|clean), (.missing_files|clean), (.files|clean)]
+      | @tsv' <<<"$reply" |
+    while IFS=$'\t' read -r platform id title gone of; do
+      printf '%s-%s %-8s %-36s %s %s(%s of %s file(s) gone)%s\n' \
+        "$C_ERROR" "$C_RESET" "$platform" "$id" "$title" "$C_MUTED" "$gone" "$of" "$C_RESET"
+    done
+}
+
+admin_scan() {
+  local since="" asked=0 as_json=0 all=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --since)
+        [[ -n "${2:-}" ]] || die "--since needs a time"
+        since="$(admin_when "$2")"
+        asked=1
+        shift 2
+        ;;
+      --all)
+        all=1
+        asked=1
+        shift
+        ;;
+      --json)
+        as_json=1
+        shift
+        ;;
+      *) die "unknown option for scan: $1" ;;
+    esac
+  done
+  # Both name a window, and --since would quietly win the assignment below.
+  # Two answers to one question is a typo somebody is about to trust.
+  ((all && ${#since})) && die "--all and --since name different windows; pass one"
+
+  local mark=""
+  if ((!asked)) && [[ -f "$GOTG_ADMIN_MARK" ]]; then
+    mark="$(jq -r '.scanned_at // empty' "$GOTG_ADMIN_MARK" 2>/dev/null || true)"
+    # Checked coming in as well as going out. A mark this command cannot have
+    # written is a corrupt or hand-edited file, and passing it on unchecked
+    # sends the service a --since nobody validated — which then fails on every
+    # run afterwards, with nothing naming the file to delete.
+    # The file is there, so a mark that will not read is a truncated write or
+    # a hand edit — not the same thing as never having looked, and the run
+    # that follows silently skips whatever arrived since the real mark.
+    if [[ ! "$mark" =~ $GOTG_STAMP_RE ]]; then
+      warn "the last-scan mark is unreadable, so this run cannot say what it missed: $GOTG_ADMIN_MARK"
+      mark=""
+    fi
+  fi
+  ((all)) || since="${since:-$mark}"
+
+  local path="/admin/scan" reply
+  [[ -n "$since" ]] && path+="?since=$since"
+  reply="$(admin_call GET "$path")"
+
+  # Without a mark and without a window, every game in the catalog is "new" —
+  # true, and useless as a first impression of a library of thousands. So the
+  # first run reports only what is missing and leaves the mark behind it.
+  local first=0
+  ((asked)) || [[ -n "$mark" ]] || first=1
+
+  if ((as_json)); then
+    printf '%s\n' "$reply"
+  else
+    local total added missing
+    total="$(jq -r '.total' <<<"$reply")"
+    added="$(jq -r '.added | length' <<<"$reply")"
+    missing="$(jq -r '.missing | length' <<<"$reply")"
+    if ((first)); then
+      admin_scan_rows "$reply" missing-only
+      log "first scan: $total game(s) in the catalog, $missing missing — run this again for what arrives next"
+    else
+      admin_scan_rows "$reply"
+      log "$added added, $missing missing since ${since:-the beginning} — $total in the catalog"
+    fi
+    if [[ "$(jq -r '.suspect' <<<"$reply")" == "true" ]]; then
+      warn "over a fifth of the catalog is missing — a library volume that failed to mount looks exactly like this"
+    fi
+    # A window that ends before it begins. Nothing but a clock that moved
+    # backwards makes one, and anything imported in the stretch it replayed
+    # sits below every window after it — so say so, because the summary line
+    # above this reads exactly like a quiet library.
+    if [[ "$(jq -r '.clock_stepped_back' <<<"$reply")" == "true" ]]; then
+      warn "the service's clock has gone backwards since the last scan: games imported in between
+     will not appear on their own. Re-check with: gotg admin scan --since <before the step>"
+    fi
+  fi
+
+  # The mark moves only on a plain run. An explicit window is a question, and
+  # one that moved the mark would eat the next run's news to answer it.
+  if ((!asked)); then
+    local stamp
+    stamp="$(jq -r '.scanned_at // empty' <<<"$reply")"
+    [[ "$stamp" =~ $GOTG_STAMP_RE ]] ||
+      die "the service returned a scan time it cannot have made: $(printable "$stamp")"
+    mkdir -p "$(dirname "$GOTG_ADMIN_MARK")"
+    jq -n --arg t "$stamp" '{scanned_at: $t}' >"$GOTG_ADMIN_MARK"
+  fi
+}
+
 cmd_admin() {
   local sub="${1:-}"
   [[ $# -gt 0 ]] && shift
@@ -121,6 +288,7 @@ cmd_admin() {
     invite) admin_invite "$@" ;;
     tokens | list | ls) admin_tokens "$@" ;;
     revoke) admin_revoke "$@" ;;
+    scan) admin_scan "$@" ;;
     help | --help | -h | "") admin_usage ;;
     *)
       printf 'error: unknown admin command: %s\n\n' "$sub" >&2
