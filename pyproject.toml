@@ -47,7 +47,7 @@ select = ["E", "F", "I", "W", "B", "UP"]
 "src/gotg/indexer/plan.py" = ["B007"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["gotg"]
+known-first-party = ["gotg", "gotg_ui"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests/service", "tests/indexer"]
+testpaths = ["tests/service", "tests/indexer", "tests/ui"]

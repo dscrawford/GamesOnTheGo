@@ -99,6 +99,13 @@
         envs
         // rec {
           gotg = pkgs.callPackage ./src/client { inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg-pads; };
+
+          # The picker. Takes the client rather than reimplementing it: what
+          # makes a game run is already in src/client/lib and already tested,
+          # and the copy nobody runs from a terminal is the one that rots.
+          gotg-ui = pkgs.callPackage ./src/ui {
+            inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg;
+          };
           # Both roles come from the one workspace: the indexer venv carries
           # the yaml extra, the service venv carries nothing at all.
           gotg-importer = pkgs.callPackage ./nix/gotg-importer.nix {
@@ -261,10 +268,14 @@
             # not re-run this suite.
             mkdir -p src/client/lib
             cp -r ${./src/gotg} src/gotg
+            # The picker's model half — catalog, paging, cursor — holds no
+            # pygame on purpose, so it runs in this venv like anything else.
+            # Its drawing does not, and is not tested here.
+            cp -r ${./src/ui} src/ui
             cp ${./src/client/lib/common.sh} src/client/lib/common.sh
             cp ${./pyproject.toml} pyproject.toml
             chmod -R u+w tests src
-            python -m pytest tests/service tests/indexer -q
+            python -m pytest tests/service tests/indexer tests/ui -q
             touch $out
           '';
         client = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg;
