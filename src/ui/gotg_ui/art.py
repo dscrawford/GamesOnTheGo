@@ -21,8 +21,16 @@ from .catalog import Game
 
 # Ids and platforms arrive from the wire and become path components that later
 # meet unlink(). The service checks them on the way in; this does not rely on
-# that having happened.
-SAFE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+# that having happened. The patterns are the entry-id contract's own
+# (common.sh: GOTG_ID_RE, GOTG_PLATFORM_RE) — a stricter invention here is not
+# safety, it is a crash: the first draft capped names at 64 characters, and
+# 127 real games (longest: 142) took the grid down on scroll-into-view.
+ID_RE = re.compile(r"^[a-z]{3,5}\.[a-z0-9][a-z0-9_]*$")
+PLATFORM_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,15}$")
+
+# The contract puts no ceiling on an id; the filesystem does. 255 bytes per
+# name on ext4, minus the longest suffix written here (".webp.part").
+MAX_ID = 240
 
 PNG = b"\x89PNG\r\n\x1a\n"
 JPEG = b"\xff\xd8\xff"
@@ -65,7 +73,7 @@ class ArtStore:
         self.root = Path(root) if root is not None else default_root()
 
     def _dir(self, game: Game) -> Path:
-        if not SAFE.match(game.platform) or not SAFE.match(game.id):
+        if not PLATFORM_RE.match(game.platform) or not ID_RE.match(game.id) or len(game.id) > MAX_ID:
             raise ValueError(f"unsafe name for a cache path: {game.platform}/{game.id}")
         return self.root / game.platform
 

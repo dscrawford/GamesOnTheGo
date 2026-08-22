@@ -147,3 +147,37 @@ def test_a_name_that_could_leave_the_cache_is_refused(store, bad):
 
 def test_the_png_signature_is_what_it_claims():
     assert PNG_BYTES.startswith(PNG)
+
+
+# --- names the contract allows, at their real sizes ---------------------------
+
+# The longest id actually in the library today — 142 characters. The cache's
+# first fence invented a 64-character cap the entry-id contract does not have,
+# and 127 real games crashed the grid the moment they scrolled into view.
+LONGEST_REAL_ID = (
+    "world.mani_4_in_1_genki_bakuhatsu_gambaruger_zettai_muteki_raijin_oh_"
+    "zoids_densetsu_miracle_adventure_of_esparks_ushinawareta_seiseki_perivron"
+)
+
+
+def test_a_long_id_from_the_real_catalog_is_a_name_not_an_attack(store):
+    g = Game(id=LONGEST_REAL_ID, platform="gba", title="t", handler="single_file")
+    path = store.put(g, PNG_BYTES)
+    assert path.exists()
+    assert store.get(g) == path
+    store.put_miss(g)  # the sidecar name fits the filesystem too
+
+
+def test_the_length_ceiling_is_the_filesystem_not_the_contract(store):
+    # ext4 caps a filename at 255 bytes; id + ".webp.part" must fit. The
+    # contract itself has no cap, so the fence's is set by where the bytes go.
+    over = Game(id="usa." + "a" * 250, platform="gba", title="t", handler="single_file")
+    with pytest.raises(ValueError):
+        store.path_for(over)
+
+
+def test_an_id_shaped_like_the_contract_but_hostile_is_still_refused(store):
+    # The contract requires ^[a-z]{3,5}\. — these never match it.
+    for bad in ["usa.../escape", "x.y", "USA.zelda", "usa.zel da", "world..dots"]:
+        with pytest.raises(ValueError):
+            store.path_for(Game(id=bad, platform="gba", title="t", handler="single_file"))

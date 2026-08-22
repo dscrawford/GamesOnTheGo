@@ -127,7 +127,14 @@ class Loader:
         Returns immediately either way. A game already asked about — cached,
         missed, or in flight — is never asked about twice.
         """
-        cached = self.store.get(game)
+        try:
+            cached = self.store.get(game)
+        except ValueError:
+            # The cache's name fence refused it: no path was built, which is
+            # the fence doing its job — but one row the fence dislikes must
+            # cost one tile its picture, never the grid its life. It rode up
+            # from here through the frame loop exactly once.
+            return None
         if cached is not None:
             return cached
         with self._lock:
