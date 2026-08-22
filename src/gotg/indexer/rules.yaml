@@ -1,6 +1,11 @@
-# Classification rules for the GOTG importer (mounted as a ConfigMap in-cluster).
-# These entries extend/override the built-in defaults in plan.py — adding a
-# platform here needs no code change or new image.
+# Classification rules for the GOTG importer. These entries extend/override the
+# built-in defaults in plan.py.
+#
+# It ships *inside the image*, beside the module (rules.py: DEFAULT_RULES_FILE =
+# Path(__file__).with_name("rules.yaml")), and the deployed CronJob mounts no
+# ConfigMap — only /data and /state. So a change here needs an image build, a
+# push, and a CronJob image update before the cluster sees it. Editing this file
+# alone changes nothing that is running.
 version: 1
 
 # How many mapped ROM files make a directory a "set" rather than a loose game.
@@ -25,6 +30,11 @@ dat_dirs:
     handler: no_intro_set
   "Nintendo - Game Boy":
     platform: gb
+    handler: no_intro_set
+  # 3500 games sat behind the "unmapped" warning until the 2026-08-21 import was
+  # read. env/gba.nix already existed, so this was only ever the missing name.
+  "Nintendo - Game Boy Advance":
+    platform: gba
     handler: no_intro_set
   # The retail set. Matched by exact name, so the (Aftermarket) set below —
   # homebrew and unlicensed carts — stays excluded on its own line.

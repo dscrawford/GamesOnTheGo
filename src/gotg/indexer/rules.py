@@ -1,8 +1,13 @@
-"""Classification rules, overridable without a code change.
+"""Classification rules, kept out of the code that uses them.
 
-Defaults are the maps in ``plan.py`` (the validated reference implementation). A
-``rules.yaml`` — mounted as a ConfigMap in-cluster — extends or overrides them, so
-adding a platform is a config edit rather than a release.
+Defaults are the maps in ``plan.py`` (the validated reference implementation).
+A ``rules.yaml`` extends or overrides them, so adding a platform is a data edit
+rather than a change to the classifier.
+
+It is *not* a live knob, whatever the file used to claim: it ships beside this
+module (DEFAULT_RULES_FILE below), and the deployed CronJob mounts no ConfigMap.
+Changing it reaches the cluster through an image build and a CronJob update,
+like any other code change.
 """
 
 from __future__ import annotations

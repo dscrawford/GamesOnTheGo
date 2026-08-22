@@ -680,10 +680,11 @@ transition and is slated for removal.
 
 ### What arrived, and what went away
 
-The indexer runs on its own every few minutes, so nobody has to start an
-import. What nobody had was a way to *see* one land — or to notice a game
-quietly leaving, which is what a pruned torrent or an unlinked payload does to
-a catalog row. `gotg admin scan` answers both:
+The indexer runs on its own — weekly, `0 4 * * 0` — so nobody has to start an
+import, but a week is long enough that "what turned up?" is a real question.
+What nobody had was a way to *see* one land, or to notice a game quietly
+leaving, which is what a pruned torrent or an unlinked payload does to a
+catalog row. `gotg admin scan` answers both:
 
 ```console
 $ gotg admin scan
