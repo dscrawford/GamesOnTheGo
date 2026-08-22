@@ -680,8 +680,14 @@ transition and is slated for removal.
 
 ### What arrived, and what went away
 
-The indexer runs on its own — weekly, `0 4 * * 0` — so nobody has to start an
-import, but a week is long enough that "what turned up?" is a real question.
+The indexer runs on its own — weekly, `0 4 * * 0` — and `gotg admin import`
+runs it now: a one-off Job cloned from the CronJob, same image and mounts as
+the Sunday run, reported back as the lines a person acts on rather than the
+thousands of noops. It talks to the cluster through kubectl rather than to the
+service — there is deliberately no run-a-job endpoint, since a service holding
+cluster credentials would be a far bigger grant than anything it fronts.
+
+A week is long enough that "what turned up?" is a real question.
 What nobody had was a way to *see* one land, or to notice a game quietly
 leaving, which is what a pruned torrent or an unlinked payload does to a
 catalog row. `gotg admin scan` answers both:

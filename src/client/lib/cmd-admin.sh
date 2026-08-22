@@ -23,6 +23,12 @@ usage: gotg admin <command> [args]
   tokens                        every token: name, display, last use
   revoke <name>                 end one token now, and cancel any invite
                                 still outstanding for it; the person re-claims
+  import [--follow] [--timeout <seconds>]
+                                run the importer now instead of waiting for
+                                Sunday: a one-off Job cloned from the CronJob,
+                                same image, same mounts. Needs kubectl and the
+                                cluster, not the admin token. Prints what the
+                                run flagged and its summary line
   scan [--since <when>] [--all] [--json]
                                 what the library has gained since you last ran
                                 this (+), and which games the bytes have gone
@@ -281,6 +287,78 @@ admin_scan() {
   fi
 }
 
+# The importer runs weekly (0 4 * * 0), which is long enough that "what turned
+# up?" has a stale answer most of the week. This runs it now: a one-off Job
+# cloned from the CronJob, so the manual run is byte-for-byte the same pod spec
+# the Sunday run gets — same image digest, same mounts, same env. The clone
+# snapshots the template at creation, so a CronJob image update must land
+# before this is invoked, never after.
+#
+# The one admin command on the cluster plane rather than the service's: there
+# is deliberately no run-a-job endpoint, because the service holding cluster
+# credentials would be a far bigger grant than the scan it fronts. Whoever can
+# run an import can already reach the cluster — the same assumption the admin
+# token's own setup line makes.
+kubectl_bin() { printf '%s' "${GOTG_KUBECTL:-kubectl}"; }
+
+admin_import() {
+  local follow=0 timeout=1800
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --follow)
+        follow=1
+        shift
+        ;;
+      --timeout)
+        [[ "${2:-}" =~ ^[1-9][0-9]*$ ]] || die "--timeout takes seconds"
+        timeout="$2"
+        shift 2
+        ;;
+      *) die "unknown option for import: $1" ;;
+    esac
+  done
+  command -v "$(kubectl_bin)" >/dev/null 2>&1 || die "required command not found: kubectl"
+
+  local cron="${GOTG_IMPORT_CRONJOB:-gotg-import}" job
+  # Seconds in the name: Job names are unique per cluster and finished Jobs
+  # linger, so two runs in one minute must not collide.
+  job="gotg-import-manual-$(date -u +%Y%m%d-%H%M%S)"
+
+  "$(kubectl_bin)" create job "$job" --from="cronjob/$cron" >/dev/null ||
+    die "could not create a job from cronjob/$cron — is kubectl pointed at the cluster?"
+  log "import running as job/$job"
+
+  if ((follow)); then
+    # Streams everything, thousands of noop lines included. The pod takes a
+    # moment to exist, so logs is retried rather than raced.
+    local tries=0
+    until "$(kubectl_bin)" logs -f "job/$job" 2>/dev/null; do
+      tries=$((tries + 1))
+      ((tries < 60)) || break
+      sleep 2
+    done
+  fi
+
+  if ! "$(kubectl_bin)" wait --for=condition=complete "job/$job" --timeout="${timeout}s" >/dev/null 2>&1; then
+    # Timed out, or the job failed. Which one decides the message.
+    if [[ "$("$(kubectl_bin)" get "job/$job" -o jsonpath='{.status.failed}' 2>/dev/null)" =~ ^[1-9] ]]; then
+      die "the import failed — read: kubectl logs job/$job"
+    fi
+    die "the import is still running after ${timeout}s — watch it: kubectl logs -f job/$job"
+  fi
+
+  # The lines a person acts on, not the thousands of noops: what was flagged,
+  # then the one-line run summary. The full log stays a kubectl away. These
+  # lines come off our own importer over kubectl — the cluster plane, not a
+  # network endpoint — so they are not laundered through `printable`, which
+  # would also eat the newlines between warnings.
+  local logs
+  logs="$("$(kubectl_bin)" logs "job/$job" 2>/dev/null)" || logs=""
+  grep -E "WARNING|ERROR" <<<"$logs" | sed 's/^/  /' >&2 || true
+  grep -E "^INFO (hardlink=|games-root pass)" <<<"$logs" | sed 's/^INFO //'
+  log "done — gotg refresh picks up whatever arrived; gotg admin scan says what that was"
+}
+
 cmd_admin() {
   local sub="${1:-}"
   [[ $# -gt 0 ]] && shift
@@ -288,6 +366,7 @@ cmd_admin() {
     invite) admin_invite "$@" ;;
     tokens | list | ls) admin_tokens "$@" ;;
     revoke) admin_revoke "$@" ;;
+    import) admin_import "$@" ;;
     scan) admin_scan "$@" ;;
     help | --help | -h | "") admin_usage ;;
     *)
