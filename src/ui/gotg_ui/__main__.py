@@ -90,15 +90,15 @@ def main(argv: list[str] | None = None) -> int:
     chosen = run(library)
     if chosen is None:
         return 0
-    return _play(chosen)
+    return _play(*chosen)
 
 
-def _play(game) -> int:
+def _play(game, verb: str = "play") -> int:
     """Hand off, and only come back if the client could not be started."""
     from .launch import LaunchError, play
 
     try:
-        play(game)
+        play(game, verb)
     except LaunchError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

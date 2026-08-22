@@ -30,20 +30,21 @@ def gotg_bin() -> str:
     return os.environ.get("GOTG_BIN") or "gotg"
 
 
-def command_for(game: Game) -> list[str]:
-    """`gotg play <platform>/<id>`.
+def command_for(game: Game, verb: str = "play") -> list[str]:
+    """`gotg <verb> <platform>/<id>`.
 
     Qualified, always. Ids are unique per platform and not globally — the
     README's own example is snes/usa.bugs_life — and the grid is the one thing
     that knows which of them you were looking at when you pressed A. Passing a
     bare id throws that away and asks the client to guess.
     """
-    return [gotg_bin(), "play", f"{game.platform}/{game.id}"]
+    return [gotg_bin(), verb, f"{game.platform}/{game.id}"]
 
 
-def play(game: Game) -> None:
-    """Replace this process with the game. Returns only on failure."""
-    command = command_for(game)
+def play(game: Game, verb: str = "play") -> None:
+    """Replace this process with the client's verb — the game, or its
+    emulator's settings screen. Returns only on failure."""
+    command = command_for(game, verb)
     try:
         os.execvp(command[0], command)
     except OSError as error:

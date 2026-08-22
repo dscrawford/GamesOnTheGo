@@ -18,6 +18,7 @@ from .catalog import Game, Library
 from .fetch import Loader
 from .grid import Grid
 from .layout import grid, tile_at
+from .menu import ACTIONS, Menu
 from .prepare import Preparer, is_ready
 
 BACKGROUND = (18, 18, 20)
@@ -45,11 +46,17 @@ def _fit(font_at, text: str, width: int, size: int):
     return font_at(8)
 
 
-def draw(screen, state: Grid, font_at, art=None, status: str = "", typing: str | None = None) -> None:
+def draw(screen, state: Grid, font_at, art=None, status: str = "", typing: str | None = None, menu=None) -> None:
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
     page = state.page
     tiles = grid(width, height)
+    # One translucent wash per tile size, cached: while the menu is open every
+    # other tile drops to ~90% so the chosen one reads as chosen.
+    dim = None
+    if menu is not None:
+        dim = pygame.Surface((tiles[0].width, tiles[0].height), pygame.SRCALPHA)
+        dim.fill((*BACKGROUND, 26))
 
     for index, tile in enumerate(tiles):
         if index >= len(page):
@@ -87,6 +94,8 @@ def draw(screen, state: Grid, font_at, art=None, status: str = "", typing: str |
 
         if selected:
             pygame.draw.rect(screen, TEXT, tile.rect, width=3, border_radius=8)
+        if dim is not None and index != menu.tile_index:
+            screen.blit(dim, (tile.x, tile.y))
 
     if not status:
         status = (
@@ -100,6 +109,36 @@ def draw(screen, state: Grid, font_at, art=None, status: str = "", typing: str |
         status = f"search: {typing}_"
     label = font_at(18).render(status, True, TEXT if typing is not None else TEXT_DIM)
     screen.blit(label, (label.get_height(), height - label.get_height() * 2))
+
+
+def menu_rects(menu: Menu, tiles, font_at) -> list[tuple[int, int, int, int]]:
+    """One rect per action row, beside the tile on the side with room.
+
+    Computed here and only here, so the drawing and the pointer hit-testing
+    cannot disagree about where a row is.
+    """
+    tile = tiles[menu.tile_index]
+    row_h = font_at(22).get_height() + 14
+    width = max(font_at(22).size(label)[0] for label, _ in ACTIONS) + 32
+    height = row_h * len(ACTIONS) + 8
+    gap = 10
+    x = tile.x + tile.width + gap if menu.side == "right" else tile.x - gap - width
+    y = tile.y + (tile.height - height) // 2
+    return [(x, y + 4 + i * row_h, width, row_h) for i in range(len(ACTIONS))]
+
+
+def draw_menu(screen, menu: Menu, tiles, font_at) -> None:
+    rows = menu_rects(menu, tiles, font_at)
+    x, y = rows[0][0], rows[0][1] - 4
+    height = rows[-1][1] + rows[-1][3] - y + 8
+    pygame.draw.rect(screen, TILE, (x, y, rows[0][2], height), border_radius=8)
+    pygame.draw.rect(screen, TEXT_DIM, (x, y, rows[0][2], height), width=1, border_radius=8)
+    for index, (label, _) in enumerate(ACTIONS):
+        rx, ry, rw, rh = rows[index]
+        if index == menu.selected:
+            pygame.draw.rect(screen, TILE_SELECTED, (rx + 4, ry, rw - 8, rh - 4), border_radius=6)
+        text = font_at(22).render(label, True, TEXT if index == menu.selected else TEXT_DIM)
+        screen.blit(text, (rx + 16, ry + (rh - text.get_height()) // 2 - 2))
 
 
 def draw_prepare(screen, font_at, game: Game, lines: list[str], failed: bool) -> None:
@@ -134,8 +173,10 @@ def draw_prepare(screen, font_at, game: Game, lines: list[str], failed: bool) ->
     screen.blit(label, (margin, height - margin - label.get_height()))
 
 
-def run(library: Library) -> Game | None:
-    """Draw until somebody picks a game or quits, and say which happened.
+def run(library: Library) -> tuple[Game, str] | None:
+    """Draw until somebody chooses an action or quits, and say which.
+
+    Returns (game, verb) — play or configure — both of which the caller execs.
 
     The game is *returned* rather than launched here: exec has to happen after
     pygame has given the display back, or the emulator inherits a window and a
@@ -180,20 +221,29 @@ def run(library: Library) -> Game | None:
             art[game.key] = None
         return art[game.key]
 
-    chosen: Game | None = None
+    chosen: tuple[Game, str] | None = None
     typing: str | None = None
-    # The loader phase: a pick that needs work spawns `gotg install` and the
-    # grid gives way to its output until it finishes, fails, or is cancelled.
+    menu: Menu | None = None
+    # The loader phase: a verb that needs work spawns the client and the grid
+    # gives way to its output until it finishes, fails, or is cancelled.
     preparer: Preparer | None = None
     prepare_failed = False
+    # What happens when the loader succeeds: exec the verb, or come back here.
+    after_prepare: str | None = None
     running = True
 
-    def pick(game: Game | None) -> None:
-        nonlocal chosen, running, preparer
+    def pick(game: Game | None, verb: str = "play") -> None:
+        nonlocal chosen, running, preparer, after_prepare
         if game is None:
             return
+        if verb == "steam-add":
+            # Not an exec: the shortcut is written, the grid comes back.
+            preparer = Preparer(game, ["steam", "add"])
+            after_prepare = None
+            return
+        after_prepare = verb
         if is_ready(game):
-            chosen = game
+            chosen = (game, verb)
             running = False
         else:
             preparer = Preparer(game)
@@ -219,6 +269,47 @@ def run(library: Library) -> Game | None:
                             preparer.cancel()
                         preparer = None
                         prepare_failed = False
+                    continue
+
+                # While the menu is open it owns the input: the grid must
+                # not move invisibly underneath the panel.
+                if menu is not None:
+                    if event.type == pygame.KEYDOWN:
+                        if event.key in (pygame.K_ESCAPE, pygame.K_b):
+                            menu = None
+                        elif event.key == pygame.K_UP:
+                            menu.move(-1)
+                        elif event.key == pygame.K_DOWN:
+                            menu.move(1)
+                        elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                            picked, menu = menu, None
+                            pick(picked.game, picked.action)
+                    elif event.type == pygame.JOYHATMOTION:
+                        dx, dy = event.value
+                        if dy:
+                            menu.move(-dy)  # the hat is y-up
+                    elif event.type == pygame.JOYBUTTONDOWN:
+                        if event.button == 0:
+                            picked, menu = menu, None
+                            pick(picked.game, picked.action)
+                        elif event.button == 1:
+                            menu = None
+                    elif event.type == pygame.MOUSEMOTION:
+                        rows = menu_rects(menu, grid(*screen.get_size()), font_at)
+                        for i, (rx, ry, rw, rh) in enumerate(rows):
+                            if rx <= event.pos[0] < rx + rw and ry <= event.pos[1] < ry + rh:
+                                menu.select(i)
+                    elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                        rows = menu_rects(menu, grid(*screen.get_size()), font_at)
+                        hit = None
+                        for i, (rx, ry, rw, rh) in enumerate(rows):
+                            if rx <= event.pos[0] < rx + rw and ry <= event.pos[1] < ry + rh:
+                                hit = i
+                        if hit is None:
+                            menu = None  # a click that misses the panel closes it
+                        elif menu.select(hit):
+                            picked, menu = menu, None
+                            pick(picked.game, picked.action)
                     continue
 
                 # While typing, every key is text. Nothing below runs, or the
@@ -257,7 +348,8 @@ def run(library: Library) -> Game | None:
                     elif event.key == pygame.K_PAGEUP:
                         state.turn(-1)
                     elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-                        pick(state.game)
+                        if state.game is not None:
+                            menu = Menu(state.game, state.selected)
                 elif event.type == pygame.MOUSEMOTION:
                     # Hover moves the cursor, so the pointer and the stick drive
                     # one selection rather than two competing highlights. A gap
@@ -272,7 +364,7 @@ def run(library: Library) -> Game | None:
                         # already put the cursor there, so this cannot launch
                         # something the click was not on.
                         if over is not None and state.select(over):
-                            pick(state.game)
+                            menu = Menu(state.game, state.selected)
                     # No button 4/5 here: SDL2 reports a wheel as MOUSEWHEEL *and*
                     # as those two for compatibility, so handling both turns the
                     # page twice for one scroll.
@@ -285,7 +377,8 @@ def run(library: Library) -> Game | None:
                     # SDL's own mapping, which is why gotg-pads exists: A is 0,
                     # B is 1, and 4 and 5 are the shoulders.
                     if event.button == 0:
-                        pick(state.game)
+                        if state.game is not None:
+                            menu = Menu(state.game, state.selected)
                     elif event.button == 1:
                         running = False
                     elif event.button == 4:
@@ -300,13 +393,18 @@ def run(library: Library) -> Game | None:
                         # X: search. A Deck raises the Steam keyboard over this.
                         typing = browser.search
 
-            if preparer is not None:
-                if not prepare_failed and not preparer.running:
-                    if preparer.ok:
-                        chosen = preparer.game
-                        running = False
+            # Completion first, drawing second: a finished steam-add clears
+            # the preparer, and this same frame must already be the grid's.
+            if preparer is not None and not prepare_failed and not preparer.running:
+                if preparer.ok:
+                    if after_prepare is None:
+                        preparer = None  # steam add done — back to the grid
                     else:
-                        prepare_failed = True
+                        chosen = (preparer.game, after_prepare)
+                        running = False
+                else:
+                    prepare_failed = True
+            if preparer is not None:
                 draw_prepare(screen, font_at, preparer.game, preparer.tail(28), prepare_failed)
             else:
                 # Whatever the workers finished since the last frame stops being a
@@ -315,7 +413,9 @@ def run(library: Library) -> Game | None:
                     art.pop(game.key, None)
                 for game in state.page:
                     surface_for(game)
-                draw(screen, state, font_at, art, browser.status, typing)
+                draw(screen, state, font_at, art, browser.status, typing, menu)
+                if menu is not None:
+                    draw_menu(screen, menu, grid(*screen.get_size()), font_at)
             pygame.display.flip()
             # The loader only mirrors streamed text; 30fps halves the redundant
             # re-render of a mostly-unchanged tail across a minutes-long build.
@@ -325,7 +425,7 @@ def run(library: Library) -> Game | None:
         # However the loop ends — quit, exec handoff, Ctrl-C, a crash — the
         # install must not be orphaned: its process group is detached from the
         # terminal, so nothing else will ever stop it.
-        if preparer is not None and (chosen is None or preparer.game != chosen):
+        if preparer is not None and (chosen is None or preparer.game != chosen[0]):
             preparer.cancel()
 
     # Before the caller execs: the emulator must not inherit a window and a

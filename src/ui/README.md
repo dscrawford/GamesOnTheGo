@@ -18,7 +18,7 @@ nix run .#gotg-ui -- --platform snes --refresh # forget cached art and look agai
 |---|---|
 | d-pad / arrows | move; off either side turns the page |
 | shoulders / PgUp PgDn | previous and next page |
-| A / Enter | play it — this process becomes the game |
+| A / Enter | open the action menu — Play, Configure, Add to Steam |
 | Y / Tab | next platform (shift-Tab back) |
 | Back / R | next region — world is region-free and rides along (shift-R back) |
 | X / `/` | search — Enter applies, Escape cancels |
@@ -35,11 +35,12 @@ nix run .#gotg-ui -- --platform snes --refresh # forget cached art and look agai
 | `browser.py` | the platform filter, the search, and the cursor | no |
 | `art.py` | the picture cache, misses included | no |
 | `fetch.py` | asking the client's own art sources, off the frame loop | no |
+| `menu.py` | the action menu: three verbs, and which side has room | no |
 | `launch.py` | the handoff to `gotg play` | no |
 | `app.py` | drawing, and reading a controller | yes |
 | `__main__.py` | arguments, and the one error worth printing | no |
 
-Seven of the nine never import pygame, which is the point: a short last page, a
+Eight of the ten never import pygame, which is the point: a short last page, a
 filter that emptied the screen and a stick held against the right-hand column
 are all cases a screenshot will not show you, and all of them are covered in
 `tests/ui/` without a display.
@@ -92,6 +93,14 @@ the platform and X opens a search; both reset the cursor to the first page
 rather than clamping it, because a filter is a new question and keeping page
 300 across one that has three is how a grid ends up blank with nothing on
 screen explaining why. `snes` + `mario` is 23 games in 3 pages.
+
+## Picking
+
+A on a tile opens the menu rather than launching outright: Play Game,
+Configure, Add to Steam, beside the tile on whichever side has room, with the
+rest of the grid dimmed a step. Play and Configure go through the loader when
+the game needs work and then exec the client's verb; Add to Steam runs
+`gotg steam add` through the same loader and comes back to the grid.
 
 ## State
 
