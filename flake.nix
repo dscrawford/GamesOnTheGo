@@ -601,11 +601,44 @@
         # A DAT directory mapped to a platform with no environment imports
         # games nobody can launch. plan.py is pure stdlib, so this reads the
         # real map rather than a copy of it.
+        # The indexer venv rather than a bare python: this reads rules.yaml as
+        # well as plan.py now, and rules.py needs yaml — which is exactly the
+        # extra that venv carries and the service's deliberately does not.
         platforms =
-          pkgs.runCommand "check-platforms" { nativeBuildInputs = [ pkgs.python312 ]; } ''
+          let
+            py = pythonSets.${pkgs.stdenv.hostPlatform.system};
+            venv = py.set.mkVirtualEnv "gotg-indexer-env" py.workspace.deps.optionals;
+          in
+          pkgs.runCommand "check-platforms" { nativeBuildInputs = [ venv ]; } ''
             export PYTHONPATH=${./src}
             export GOTG_ENV_DIR=${./src/client/env}
             python3 ${./tests/indexer/check_platforms.py}
+            touch $out
+          '';
+
+        # The fullscreen placeholder has to expand to *no argument*, not to an
+        # empty one — ares reads an empty argument as a ROM path. The first
+        # attempt rendered ''$gotg_fullscreen'', which still forms a word, and
+        # nothing downstream would have complained. Grepped from a real built
+        # launcher rather than asserted about the nix, because the quoting is
+        # exactly what nix's escaping is doing to it.
+        fullscreen =
+          let
+            env = (import ./src/client/env { inherit pkgs; }).env-gb;
+          in
+          pkgs.runCommand "check-fullscreen" { } ''
+            launcher="${env}/bin/gotg-play"
+            grep -q 'gotg_fullscreen=""' "$launcher" \
+              || { echo "no fullscreen decision in the launcher" >&2; exit 1; }
+            grep -q '\[ -t 1 \] || gotg_fullscreen=' "$launcher" \
+              || { echo "the terminal test is gone" >&2; exit 1; }
+            # Space either side, so it is bare. The bug put a pair of single
+            # quotes where these spaces are, which still forms a word when the
+            # variable is empty — so this one pattern is the whole guard.
+            grep -qF ' ''$gotg_fullscreen ' "$launcher" \
+              || { echo "fullscreen is not expanded bare; an empty one would be an argument" >&2
+                   grep -n '^exec' "$launcher" >&2
+                   exit 1; }
             touch $out
           '';
 

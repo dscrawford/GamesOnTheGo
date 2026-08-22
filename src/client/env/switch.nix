@@ -52,7 +52,8 @@
     # nothing but the game is on screen. The update check is doubly dead weight
     # here — the nix build cannot update itself, only the flake can.
     if [ -f "$gotg_ryujinx_config" ]; then
-      if ${pkgs.jq}/bin/jq '.update_checker_type = "Off" | .show_confirm_exit = false | .start_fullscreen = true' \
+      if ${pkgs.jq}/bin/jq --argjson fs "$([ -n "$gotg_fullscreen" ] && echo true || echo false)" \
+        '.update_checker_type = "Off" | .show_confirm_exit = false | .start_fullscreen = $fs' \
         "$gotg_ryujinx_config" >"$gotg_ryujinx_config.gotg"; then
         mv "$gotg_ryujinx_config.gotg" "$gotg_ryujinx_config"
       else

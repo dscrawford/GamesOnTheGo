@@ -20,8 +20,13 @@
   bin ? null,
   # The command line. Placeholders are substituted at launch: {target} is the
   # ROM, {install} the directory it was downloaded into, {state} this
-  # environment's writable directory.
+  # environment's writable directory, and {fullscreen} the flag below — or
+  # nothing, when the launch is not one that should take the whole screen.
   args ? [ "{target}" ],
+  # What this emulator calls "full screen" on its command line. Only reached
+  # through {fullscreen}; an emulator that takes the setting from a config file
+  # instead reads $gotg_fullscreen in its preLaunch.
+  fullscreenFlag ? "--fullscreen",
   # Environment variables, with the same placeholders.
   env ? { },
   # Extra commands on PATH, for preLaunch.
@@ -105,11 +110,19 @@ let
   # Quote for the shell, then reopen the quoting around each placeholder: the
   # expansion has to sit outside the single quotes to happen at all, and inside
   # double quotes so a path with spaces stays one argument.
+  # `{fullscreen}` is the one placeholder that expands *bare*, and that is the
+  # whole point: it has to be able to expand to no argument at all. The match
+  # includes the quotes escapeShellArg put around it, because leaving even an
+  # empty pair — ''$gotg_fullscreen'' — still forms a word, and ares reads an
+  # empty argument as a ROM path. Measured, after writing it the other way.
+  #
+  # So it is only meaningful as a whole argument; embedded in a longer string
+  # it stays literal rather than silently half-working.
   render =
     s:
     lib.replaceStrings
-      [ "{target}" "{install}" "{state}" ]
-      [ "'\"$target\"'" "'\"$install\"'" "'\"$state\"'" ]
+      [ "{target}" "{install}" "{state}" "'{fullscreen}'" ]
+      [ "'\"$target\"'" "'\"$install\"'" "'\"$state\"'" "$gotg_fullscreen" ]
       (lib.escapeShellArg s);
 
   # The directory each saves glob lives in: segments up to the first wildcard,
@@ -237,6 +250,25 @@ let
     ${seedConfig}
     ${exports}
     ${foreignGl}
+    # Full screen belongs to *how a game was started*, not to the game.
+    #
+    # Steam gives a launcher no terminal — both streams land in a log file, the
+    # same test color.sh uses to decide there is nobody to colour output for —
+    # and somebody launching that way is on a sofa or a handheld and wants the
+    # game and nothing else. A terminal means a person at a desk with other
+    # windows open, and taking the whole desktop is rude at best. On a
+    # multi-monitor desktop it is worse than rude: ares spans every screen and
+    # draws on none of them.
+    #
+    # GOTG_FULLSCREEN forces it either way, and `gotg play <id> --fullscreen`
+    # still works because runtime arguments are appended after these.
+    gotg_fullscreen=""
+    case "''${GOTG_FULLSCREEN:-}" in
+      1 | true | yes | on) gotg_fullscreen=${lib.escapeShellArg fullscreenFlag} ;;
+      0 | false | no | off) gotg_fullscreen="" ;;
+      *) [ -t 1 ] || gotg_fullscreen=${lib.escapeShellArg fullscreenFlag} ;;
+    esac
+
     ${preLaunch}
     exec ${exe} ${lib.concatMapStringsSep " " render args} "$@"
   '';

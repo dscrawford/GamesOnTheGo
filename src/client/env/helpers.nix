@@ -77,8 +77,9 @@ in
       padConsole = console;
       args = [
         # A launch from the sofa goes straight to the game; the windowed UI is
-        # one Esc away when wanted.
-        "--fullscreen"
+        # one Esc away when wanted. Expands to nothing from a terminal — see
+        # the gotg_fullscreen block in lib.nix for why that is the default.
+        "{fullscreen}"
         "--setting"
         "Paths/Saves={state}/saves/"
         "{target}"
@@ -212,9 +213,11 @@ in
           gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini" \
             Input BackgroundInput True
 
-          # Straight to the game, full screen; -b already skips the UI.
+          # Straight to the game; -b already skips the UI. Dolphin takes this
+          # from its ini rather than the command line, so it reads the same
+          # decision lib.nix made — True from Steam, False at a desk.
           gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini" \
-            Display Fullscreen True
+            Display Fullscreen "$([ -n "$gotg_fullscreen" ] && echo True || echo False)"
 
           # Vulkan rather than Dolphin's OpenGL default: the Mesa/RDNA2
           # handhelds this targets run markedly faster on it.
