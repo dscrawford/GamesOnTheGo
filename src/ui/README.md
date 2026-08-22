@@ -20,6 +20,7 @@ nix run .#gotg-ui -- --platform snes --refresh # forget cached art and look agai
 | A / Enter | play it — this process becomes the game |
 | Y / Tab | next platform (shift-Tab back) |
 | X / `/` | search — Enter applies, Escape cancels |
+| pointer | hover selects, click plays; wheel turns the page |
 | B / Escape / Q | quit |
 
 ## Layout

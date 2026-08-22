@@ -51,6 +51,15 @@ class Grid:
                     column = COLUMNS - 1
         self.selected = min(row * COLUMNS + column, len(self.page) - 1)
 
+    def select(self, index: int) -> bool:
+        """Put the cursor on one tile of this page. False if there is no game
+        there — the pointer is over a gap, or past the end of a short page."""
+        page = self.page
+        if not 0 <= index < len(page):
+            return False
+        self.selected = index
+        return True
+
     def turn(self, delta: int) -> bool:
         """A page forward or back. False when there is nowhere to go."""
         target = self.page_index + delta

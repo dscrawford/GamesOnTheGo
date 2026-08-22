@@ -123,3 +123,38 @@ def test_one_page_exactly_has_nowhere_to_turn():
     assert state.library.pages == 1
     assert state.turn(1) is False
     assert state.turn(-1) is False
+
+
+# --- pointing at one directly -------------------------------------------------
+
+
+def test_selecting_a_tile_by_index():
+    state = Grid(library(25))
+    assert state.select(7) is True
+    assert state.selected == 7
+    assert state.game.id == "usa.g007"
+
+
+@pytest.mark.parametrize("index", [-1, 10, 99])
+def test_selecting_off_the_page_is_refused_and_changes_nothing(index):
+    state = Grid(library(25))
+    state.select(3)
+    assert state.select(index) is False
+    assert state.selected == 3, "a refused select leaves the cursor where it was"
+
+
+def test_selecting_past_a_short_last_page_is_refused():
+    # 25 games is a last page of five: tiles 5..9 are drawn empty, and a click
+    # on one of them names no game.
+    state = Grid(library(25))
+    state.turn(1)
+    state.turn(1)
+    assert state.select(4) is True
+    assert state.select(5) is False
+    assert state.game is not None
+
+
+def test_selecting_on_an_empty_grid_is_refused():
+    state = Grid(library(0))
+    assert state.select(0) is False
+    assert state.game is None

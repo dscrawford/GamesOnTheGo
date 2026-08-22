@@ -81,3 +81,18 @@ def grid(width: int, height: int) -> list[Tile]:
         for row in range(ROWS)
         for column in range(COLUMNS)
     ]
+
+
+def tile_at(x: int, y: int, width: int, height: int) -> int | None:
+    """Which tile a point is on, or None for the gaps and the margins.
+
+    Tested against the rectangles rather than derived from the arithmetic, so
+    it cannot drift out of step with grid(). The gaps answering None is the
+    part that matters: a pointer resting between two tiles must not quietly
+    mean the one beside it, because a click that looks like it missed would
+    then launch a game.
+    """
+    for index, tile in enumerate(grid(width, height)):
+        if tile.x <= x < tile.x + tile.width and tile.y <= y < tile.y + tile.height:
+            return index
+    return None

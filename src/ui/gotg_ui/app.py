@@ -17,7 +17,7 @@ from .browser import Browser
 from .catalog import Game, Library
 from .fetch import Loader
 from .grid import Grid
-from .layout import grid
+from .layout import grid, tile_at
 
 BACKGROUND = (18, 18, 20)
 TILE = (38, 38, 44)
@@ -192,6 +192,27 @@ def run(library: Library) -> Game | None:
                 elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
                     chosen = state.game
                     running = chosen is None
+            elif event.type == pygame.MOUSEMOTION:
+                # Hover moves the cursor, so the pointer and the stick drive
+                # one selection rather than two competing highlights. A gap
+                # leaves it where it was.
+                over = tile_at(*event.pos, *screen.get_size())
+                if over is not None:
+                    state.select(over)
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    over = tile_at(*event.pos, *screen.get_size())
+                    # Only ever the tile actually under the pointer: hover has
+                    # already put the cursor there, so this cannot launch
+                    # something the click was not on.
+                    if over is not None and state.select(over):
+                        chosen = state.game
+                        running = chosen is None
+                # No button 4/5 here: SDL2 reports a wheel as MOUSEWHEEL *and*
+                # as those two for compatibility, so handling both turns the
+                # page twice for one scroll.
+            elif event.type == pygame.MOUSEWHEEL:
+                browser.grid.turn(-1 if event.y > 0 else 1)
             elif event.type == pygame.JOYHATMOTION:
                 dx, dy = event.value
                 state.move(dx, -dy)  # SDL's hat is y-up, the grid is y-down

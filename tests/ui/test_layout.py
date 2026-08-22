@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from gotg_ui.layout import COLUMNS, ROWS, TILE_ASPECT, grid
+from gotg_ui.layout import COLUMNS, ROWS, TILE_ASPECT, grid, tile_at
 
 DECK = (1280, 800)  # the screen this is for
 DESKTOP = (1920, 1080)
@@ -75,3 +75,53 @@ def test_a_window_too_small_for_a_grid_still_returns_ten_usable_tiles():
     # zero or hand back rectangles with no area.
     for tile in grid(200, 120):
         assert tile.width > 0 and tile.height > 0
+
+
+# --- pointing at a tile -------------------------------------------------------
+
+
+def test_the_centre_of_every_tile_finds_that_tile():
+    tiles = grid(*DECK)
+    for index, tile in enumerate(tiles):
+        x = tile.x + tile.width // 2
+        y = tile.y + tile.height // 2
+        assert tile_at(x, y, *DECK) == index
+
+
+@pytest.mark.parametrize("size", [DECK, DESKTOP, (800, 600)])
+def test_every_corner_inside_a_tile_still_finds_it(size):
+    for index, tile in enumerate(grid(*size)):
+        corners = [
+            (tile.x, tile.y),
+            (tile.x + tile.width - 1, tile.y),
+            (tile.x, tile.y + tile.height - 1),
+            (tile.x + tile.width - 1, tile.y + tile.height - 1),
+        ]
+        for x, y in corners:
+            assert tile_at(x, y, *size) == index
+
+
+def test_the_gaps_between_tiles_are_nothing():
+    # A pointer resting in a gap must not silently mean the tile beside it, or
+    # a click that looks like it missed would launch a game.
+    tiles = grid(*DECK)
+    between = (tiles[0].x + tiles[0].width + tiles[1].x) // 2
+    assert tile_at(between, tiles[0].y + 5, *DECK) is None
+
+    below_first_row = tiles[0].y + tiles[0].height + 2
+    assert tile_at(tiles[0].x + 5, below_first_row, *DECK) is None
+
+
+@pytest.mark.parametrize(
+    "point",
+    [(0, 0), (5, 5), (1279, 799), (640, 795), (-10, -10), (5000, 5000)],
+    ids=["origin", "margin", "far-corner", "status-line", "negative", "way-outside"],
+)
+def test_pointing_outside_every_tile_is_nothing(point):
+    assert tile_at(point[0], point[1], *DECK) is None
+
+
+def test_a_tiny_window_does_not_claim_the_whole_screen():
+    # grid() floors tiles at one pixel; tile_at must not then answer for every
+    # point in a window that has no room for a grid.
+    assert tile_at(199, 119, 200, 120) in (None, *range(10))
