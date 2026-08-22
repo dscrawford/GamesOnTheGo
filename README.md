@@ -529,15 +529,30 @@ NIX_CONFIG="extra-access-tokens = github.com=github_pat_…" gotg play <id>
 
 ### Games that are not emulated
 
-Three games run on native ports built from their decompilations rather than in
-an emulator, which is nothing more than a per-game environment naming a
+Several games run on native ports built from their decompilations rather than
+in an emulator, which is nothing more than a per-game environment naming a
 different package:
 
-| Game | Port | nixpkgs |
+| Game | Port | Where it comes from |
 |---|---|---|
 | Ocarina of Time | Ship of Harkinian | `shipwright` |
 | Ocarina of Time: Master Quest | Ship of Harkinian | `shipwright` |
 | Majora's Mask | 2 Ship 2 Harkinian | `_2ship2harkinian` |
+| Super Mario 64 (`pc`) | sm64coopdx | compiled on first launch |
+| Paper Mario (`recut`) | Paper Mario ReCut | Windows build, under Wine |
+
+The last two are variants rather than the game itself, so `gotg play
+usa.paper_mario` is still ares and `gotg play usa.paper_mario recut` is the
+port. They earn their exceptions differently. sm64coopdx bakes the ROM's
+assets in at compile time, so there is no binary to ship without shipping
+Nintendo's assets — the first launch compiles it here instead. ReCut is
+published for Windows only: it is already statically recompiled, so nothing
+builds, but it renders through D3D12 and needs vkd3d-proton in the prefix to
+have a D3D12 at all.
+
+ReCut is a pre-release and upstream says so — widescreen is broken and left
+off, and its save states are an early snapshot format, so those are excluded
+from `gotg saves` while the in-game saves travel as usual.
 
 These take the ROM once rather than on every launch: the first run extracts it
 into an `.o2r` archive kept with the game's saves, and afterwards the port
