@@ -262,7 +262,18 @@ let
     #
     # GOTG_FULLSCREEN forces it either way, and `gotg play <id> --fullscreen`
     # still works because runtime arguments are appended after these.
+    #
+    # SC2034 is disabled on both statements: the variable is consumed through
+    # the {fullscreen} placeholder or a preLaunch *when the environment names
+    # it*, and a port that owns its display — the Harkinian games, sm64coopdx —
+    # has no flag to substitute, so in its launcher it really is unread. The
+    # build runs the linter, so without the directives every such environment
+    # fails to build at all. Found by a Master Quest launch on somebody else's
+    # machine. (And no comment line here may begin with the linter's own name,
+    # which it reads as a directive and refuses to parse — found the same way.)
+    # shellcheck disable=SC2034
     gotg_fullscreen=""
+    # shellcheck disable=SC2034
     case "''${GOTG_FULLSCREEN:-}" in
       1 | true | yes | on) gotg_fullscreen=${lib.escapeShellArg fullscreenFlag} ;;
       0 | false | no | off) gotg_fullscreen="" ;;
