@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import pygame
 
+from .art import ArtStore
 from .catalog import Game, Library
+from .fetch import Loader
 from .grid import Grid
 from .layout import grid
 
@@ -41,7 +43,7 @@ def _fit(font_at, text: str, width: int, size: int):
     return font_at(8)
 
 
-def draw(screen, state: Grid, font_at) -> None:
+def draw(screen, state: Grid, font_at, art=None) -> None:
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
     page = state.page
@@ -52,20 +54,34 @@ def draw(screen, state: Grid, font_at) -> None:
             break
         game = page[index]
         selected = index == state.selected
-        pygame.draw.rect(screen, TILE_SELECTED if selected else TILE, tile.rect, border_radius=8)
+        picture = art.get(game.key) if art else None
+
+        if picture is not None:
+            # Fitted, never stretched. A tile is 2:3 and a cartridge box is
+            # landscape, so most of this library's art arrives the wrong shape
+            # for the slot it goes in; scaling to fill would squash every one.
+            pw, ph = picture.get_size()
+            scale = min(tile.width / pw, tile.height / ph)
+            size = (max(1, int(pw * scale)), max(1, int(ph * scale)))
+            pygame.draw.rect(screen, TILE, tile.rect, border_radius=8)
+            screen.blit(
+                pygame.transform.smoothscale(picture, size),
+                (tile.x + (tile.width - size[0]) // 2, tile.y + (tile.height - size[1]) // 2),
+            )
+        else:
+            pygame.draw.rect(screen, TILE_SELECTED if selected else TILE, tile.rect, border_radius=8)
+            # No picture — the title *is* the tile, which is also what a game
+            # with no art anywhere falls back to for good.
+            inner = tile.width - 16
+            title = font_at(20).render(game.title, True, TEXT)
+            if title.get_width() > inner:
+                title = _fit(font_at, game.title, inner, 20).render(game.title, True, TEXT)
+            screen.blit(title, (tile.x + 8, tile.y + tile.height // 2 - title.get_height() // 2))
+            platform = font_at(14).render(game.platform, True, TEXT_DIM)
+            screen.blit(platform, (tile.x + 8, tile.y + tile.height - platform.get_height() - 8))
+
         if selected:
             pygame.draw.rect(screen, TEXT, tile.rect, width=3, border_radius=8)
-
-        # Until there is art, the tile is the title — which is also what a
-        # game with no art anywhere will always fall back to.
-        inner = tile.width - 16
-        title = font_at(20).render(game.title, True, TEXT)
-        if title.get_width() > inner:
-            title = _fit(font_at, game.title, inner, 20).render(game.title, True, TEXT)
-        screen.blit(title, (tile.x + 8, tile.y + tile.height // 2 - title.get_height() // 2))
-
-        platform = font_at(14).render(game.platform, True, TEXT_DIM)
-        screen.blit(platform, (tile.x + 8, tile.y + tile.height - platform.get_height() - 8))
 
     if state.library.pages:
         status = f"page {state.page_index + 1} of {state.library.pages}  ·  {len(state.library)} games"
@@ -99,6 +115,28 @@ def run(library: Library) -> Game | None:
         return fonts[size]
 
     state = Grid(library)
+    store = ArtStore()
+    loader = Loader(store)
+    # Decoded surfaces, keyed by (platform, id). Decoding is not free and the
+    # same ten tiles are redrawn sixty times a second.
+    art: dict[tuple[str, str], object] = {}
+
+    def surface_for(game):
+        """A decoded picture for one game, asking the loader if need be."""
+        if game.key in art:
+            return art[game.key]
+        path = loader.want(game)
+        if path is None:
+            return None
+        try:
+            art[game.key] = pygame.image.load(str(path)).convert_alpha()
+        except pygame.error:
+            # A truncated or unreadable file: drop it so a refresh can
+            # replace it, and draw the title this time round.
+            store.forget(game)
+            art[game.key] = None
+        return art[game.key]
+
     chosen: Game | None = None
     running = True
     while running:
@@ -139,7 +177,14 @@ def run(library: Library) -> Game | None:
                 elif event.button == 5:
                     state.turn(1)
 
-        draw(screen, state, font_at)
+        # Whatever the workers finished since the last frame stops being a
+        # placeholder now. Only the page on screen is ever asked for.
+        for game in loader.done():
+            art.pop(game.key, None)
+        for game in state.page:
+            surface_for(game)
+
+        draw(screen, state, font_at, art)
         pygame.display.flip()
         clock.tick(60)
 

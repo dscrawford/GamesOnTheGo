@@ -112,5 +112,7 @@ immediately and a worker fills it in.
    shoulder buttons and the d-pad. No art, no launching. This is the one to put
    on the Deck before anything is built on top of it.
 2. Exec `gotg play <id>` on A.
-3. Art: cache reads, then the fetcher, then the negative cache.
+3. Art: cache reads, then the fetcher, then the negative cache. *Done, with
+   one correction: the plan said `grids_portrait` and a cartridge box is
+   landscape, so libretro files it as `grids`. Both are asked for.*
 4. Platform filter and search.

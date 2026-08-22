@@ -27,6 +27,11 @@ def main(argv: list[str] | None = None) -> int:
         help="print the first page and exit, without opening a window",
     )
     parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="forget the cached art for these games, misses included, and look again",
+    )
+    parser.add_argument(
         "--play",
         metavar="ID",
         default=None,
@@ -41,6 +46,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     library = Library(games).filter(platform=args.platform, search=args.search)
+
+    if args.refresh:
+        # Nothing here expires on its own — a game with no art is remembered
+        # as having none for good — so this is the only way back to the
+        # network, and it is deliberately scoped by the same filters.
+        from .art import ArtStore
+
+        store = ArtStore()
+        for game in library.games:
+            store.forget(game)
+        print(f"forgot cached art for {len(library)} game(s)", file=sys.stderr)
 
     # A way to see what the grid would show from a terminal — over ssh, in a
     # test, or on a machine with no display at all, which is every CI runner.

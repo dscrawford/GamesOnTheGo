@@ -33,9 +33,13 @@ stdenvNoCC.mkDerivation {
     mkdir -p $out/share/gotg-ui
     cp -r gotg_ui $out/share/gotg-ui/
 
+    # The client's own artwork sources ride on PYTHONPATH rather than being
+    # copied: the grid asks SteamGridDB and libretro-thumbnails exactly as
+    # `gotg steam art` does, and a second implementation would be a second
+    # thing to keep in step with an API neither of us controls.
     makeWrapper ${python}/bin/python3 $out/bin/gotg-ui \
       --add-flags "-m gotg_ui" \
-      --set PYTHONPATH "$out/share/gotg-ui" \
+      --set PYTHONPATH "$out/share/gotg-ui:${gotg}/share/gotg/steam" \
       --prefix PATH : ${lib.makeBinPath [ gotg ]}
 
     runHook postInstall

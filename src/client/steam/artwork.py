@@ -106,12 +106,18 @@ def find_game(base_url: str, api_key: str, name: str) -> dict | None:
     return data[0] if data else None
 
 
-def best_asset(base_url: str, api_key: str, game_id: int, kind: str) -> str | None:
+def best_asset(base_url: str, api_key: str, game_id: int, kind: str, *, prefer_thumb: bool = False) -> str | None:
     """The highest-scoring asset of one kind.
 
     Sorted here rather than trusted from the response: the ordering is not
     promised by the API, and "first in the list" and "best" are not the same
     claim.
+
+    ``prefer_thumb`` takes the same picture at a fraction of the bytes, which
+    is what a grid of ten tiles a couple of hundred pixels wide wants; the
+    Steam path keeps the full size, because those get scaled into a library
+    page. Falls back to the full asset when a response carries no thumb, so a
+    source that does not offer one still answers.
     """
     endpoint, params = ENDPOINT[kind]
     url = f"{base_url}/api/v2/{endpoint}/game/{game_id}"
@@ -120,7 +126,10 @@ def best_asset(base_url: str, api_key: str, game_id: int, kind: str) -> str | No
     data = _get_json(url, api_key).get("data") or []
     if not data:
         return None
-    return max(data, key=lambda a: a.get("score", 0)).get("url")
+    best = max(data, key=lambda a: a.get("score", 0))
+    if prefer_thumb:
+        return best.get("thumb") or best.get("url")
+    return best.get("url")
 
 
 # What a person calls each of the five, since "grids_portrait" is our word for
@@ -247,9 +256,12 @@ class SteamGridDBSource:
     holding the real one. The API is identical either way, which is the point:
     the service *is* SteamGridDB as far as this class can tell."""
 
-    def __init__(self, base_url: str, api_key: str | None, names: list[str]):
+    def __init__(self, base_url: str, api_key: str | None, names: list[str], *, prefer_thumb: bool = False):
         self.base_url = base_url
         self.api_key = api_key
+        # The grid wants the small copy; Steam wants the one it will scale
+        # into a library page.
+        self.prefer_thumb = prefer_thumb
         # Tried in order: a mod's own title first, the game it is a mod of
         # behind it — rando grids when the database has them, the base game's
         # otherwise.
@@ -298,7 +310,7 @@ class SteamGridDBSource:
         if game_id is None or not self.api_key:
             return None
         try:
-            url = best_asset(self.base_url, self.api_key, game_id, kind)
+            url = best_asset(self.base_url, self.api_key, game_id, kind, prefer_thumb=self.prefer_thumb)
             if not url:
                 return None
             return _get(url, None)

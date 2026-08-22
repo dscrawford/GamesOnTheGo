@@ -10,6 +10,7 @@ nix run .#gotg-ui                      # the grid
 nix run .#gotg-ui -- --list            # page one as text, no window
 nix run .#gotg-ui -- --platform n64 --search zelda --list
 nix run .#gotg-ui -- --play snes/eur.asterix   # the handoff, without the grid
+nix run .#gotg-ui -- --platform snes --refresh # forget cached art and look again
 ```
 
 | | |
@@ -26,11 +27,13 @@ nix run .#gotg-ui -- --play snes/eur.asterix   # the handoff, without the grid
 | `catalog.py` | reading the cached catalog, filtering, paging | no |
 | `layout.py` | where the ten tiles go | no |
 | `grid.py` | where the cursor is, and on which page | no |
+| `art.py` | the picture cache, misses included | no |
+| `fetch.py` | asking the client's own art sources, off the frame loop | no |
 | `launch.py` | the handoff to `gotg play` | no |
 | `app.py` | drawing, and reading a controller | yes |
 | `__main__.py` | arguments, and the one error worth printing | no |
 
-Four of the six never import pygame, which is the point: a short last page, a
+Six of the eight never import pygame, which is the point: a short last page, a
 filter that emptied the screen and a stick held against the right-hand column
 are all cases a screenshot will not show you, and all of them are covered in
 `tests/ui/` without a display.
@@ -56,7 +59,27 @@ The id is always qualified by platform. 222 ids in a real library are on more
 than one — `eur.asterix` is on gb, nes and snes — and the grid is the one thing
 that knows which tile the cursor was on.
 
+## Art
+
+From the client's own sources — `artwork.py` on `PYTHONPATH`, so the grid asks
+SteamGridDB and libretro-thumbnails exactly as `gotg steam art` does, through
+the service that holds the real key. Cached under
+`$GOTG_STATE_DIR/ui/art/<platform>/<id>.<ext>`, keyed on platform *and* id
+because 222 ids are on more than one.
+
+Two things that are not obvious:
+
+**Misses are cached too.** Most of a real library has no art anywhere, and a
+cache that only remembered successes would ask the network about thousands of
+games on every launch. A miss is a `.miss` sidecar, nothing expires, and
+`--refresh` is the only way back to the network.
+
+**Portrait first, then the wide capsule.** libretro files box art by its shape,
+and a cartridge box is landscape — asking only for `grids_portrait` finds
+nothing for most of a cartridge library. Tiles fit the picture rather than
+stretching it, since art arrives in both shapes.
+
 ## State
 
-Milestones one and two: the catalog, the grid, paging, and handing off. No art
-yet — that is the next step in the plan.
+Milestones one to three. What is left is the platform filter and search in the
+grid itself; both already exist on the command line.
