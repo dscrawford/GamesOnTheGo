@@ -26,6 +26,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="print the first page and exit, without opening a window",
     )
+    parser.add_argument(
+        "--play",
+        metavar="ID",
+        default=None,
+        help="skip the grid and hand this id straight to the client, as picking it would",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -44,9 +50,36 @@ def main(argv: list[str] | None = None) -> int:
         print(f"page 1 of {library.pages} · {len(library)} games", file=sys.stderr)
         return 0
 
-    from .app import run  # imported here so --list needs no display and no pygame
+    if args.play:
+        # The same handoff picking a game makes, reachable without a screen.
+        found = [g for g in library.games if args.play in (g.id, f"{g.platform}/{g.id}")]
+        if not found:
+            print(f"error: no game in the catalog is {args.play!r}", file=sys.stderr)
+            return 2
+        if len({g.platform for g in found}) > 1:
+            names = ", ".join(sorted(f"{g.platform}/{g.id}" for g in found))
+            print(f"error: {args.play!r} is on more than one platform — say which: {names}", file=sys.stderr)
+            return 2
+        return _play(found[0])
 
-    return run(library)
+    from .app import run  # imported here so --list and --play need no display
+
+    chosen = run(library)
+    if chosen is None:
+        return 0
+    return _play(chosen)
+
+
+def _play(game) -> int:
+    """Hand off, and only come back if the client could not be started."""
+    from .launch import LaunchError, play
+
+    try:
+        play(game)
+    except LaunchError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    return 0  # unreachable: play() replaced this process
 
 
 if __name__ == "__main__":  # pragma: no cover

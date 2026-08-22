@@ -9,12 +9,14 @@ Design and the decisions behind it: [docs/ui-plan.md](../../docs/ui-plan.md).
 nix run .#gotg-ui                      # the grid
 nix run .#gotg-ui -- --list            # page one as text, no window
 nix run .#gotg-ui -- --platform n64 --search zelda --list
+nix run .#gotg-ui -- --play snes/eur.asterix   # the handoff, without the grid
 ```
 
 | | |
 |---|---|
 | d-pad / arrows | move; off either side turns the page |
 | shoulders / PgUp PgDn | previous and next page |
+| A / Enter | play it — this process becomes the game |
 | B / Escape / Q | quit |
 
 ## Layout
@@ -24,17 +26,18 @@ nix run .#gotg-ui -- --platform n64 --search zelda --list
 | `catalog.py` | reading the cached catalog, filtering, paging | no |
 | `layout.py` | where the ten tiles go | no |
 | `grid.py` | where the cursor is, and on which page | no |
+| `launch.py` | the handoff to `gotg play` | no |
 | `app.py` | drawing, and reading a controller | yes |
 | `__main__.py` | arguments, and the one error worth printing | no |
 
-Three of the five never import pygame, which is the point: a short last page, a
+Four of the six never import pygame, which is the point: a short last page, a
 filter that emptied the screen and a stick held against the right-hand column
 are all cases a screenshot will not show you, and all of them are covered in
 `tests/ui/` without a display.
 
 ## What it does not do
 
-Anything about how a game runs. It will exec `gotg play <id>`, exactly as
+Anything about how a game runs. It execs `gotg play <platform>/<id>`, as
 `cmd-steam.sh` shells out to `python3 artwork.py` today. Environment
 resolution, `nix build`, the download with its lock and its resume, the saves
 pull — all of that is in `src/client/lib/` and covered by the client suite. A
@@ -49,7 +52,11 @@ image that faces the internet and holds every credential — stdlib-only is that
 image's whole supply-chain posture, and a picker wants a toolkit. `src/client`
 is bash, and its Python is helpers the shell calls; this is a program.
 
+The id is always qualified by platform. 222 ids in a real library are on more
+than one — `eur.asterix` is on gb, nes and snes — and the grid is the one thing
+that knows which tile the cursor was on.
+
 ## State
 
-Milestone one: the catalog, the grid, and paging. No art, and picking a game
-does nothing yet — the next two steps are in the plan.
+Milestones one and two: the catalog, the grid, paging, and handing off. No art
+yet — that is the next step in the plan.

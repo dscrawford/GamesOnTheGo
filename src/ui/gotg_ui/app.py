@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pygame
 
-from .catalog import Library
+from .catalog import Game, Library
 from .grid import Grid
 from .layout import grid
 
@@ -75,7 +75,13 @@ def draw(screen, state: Grid, font_at) -> None:
     screen.blit(label, (label.get_height(), height - label.get_height() * 2))
 
 
-def run(library: Library) -> int:
+def run(library: Library) -> Game | None:
+    """Draw until somebody picks a game or quits, and say which happened.
+
+    The game is *returned* rather than launched here: exec has to happen after
+    pygame has given the display back, or the emulator inherits a window and a
+    grabbed GPU from a process that is about to stop existing.
+    """
     pygame.init()
     pygame.display.set_caption("GamesOnTheGo")
     screen = pygame.display.set_mode(WINDOW)
@@ -93,6 +99,7 @@ def run(library: Library) -> int:
         return fonts[size]
 
     state = Grid(library)
+    chosen: Game | None = None
     running = True
     while running:
         for event in pygame.event.get():
@@ -113,21 +120,30 @@ def run(library: Library) -> int:
                     state.turn(1)
                 elif event.key == pygame.K_PAGEUP:
                     state.turn(-1)
+                elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                    chosen = state.game
+                    running = chosen is None
             elif event.type == pygame.JOYHATMOTION:
                 dx, dy = event.value
                 state.move(dx, -dy)  # SDL's hat is y-up, the grid is y-down
             elif event.type == pygame.JOYBUTTONDOWN:
-                # 4 and 5 are the shoulders on every pad SDL maps; B is 1.
-                if event.button == 4:
+                # SDL's own mapping, which is why gotg-pads exists: A is 0,
+                # B is 1, and 4 and 5 are the shoulders.
+                if event.button == 0:
+                    chosen = state.game
+                    running = chosen is None
+                elif event.button == 1:
+                    running = False
+                elif event.button == 4:
                     state.turn(-1)
                 elif event.button == 5:
                     state.turn(1)
-                elif event.button == 1:
-                    running = False
 
         draw(screen, state, font_at)
         pygame.display.flip()
         clock.tick(60)
 
+    # Before the caller execs: the emulator must not inherit a window and a
+    # grabbed GPU from a process that is about to stop existing.
     pygame.quit()
-    return 0
+    return chosen
