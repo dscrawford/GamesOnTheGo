@@ -22,6 +22,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--platform", metavar="P", default=None, help="only this platform")
     parser.add_argument("--search", metavar="TEXT", default=None, help="only games matching this, in id or title")
     parser.add_argument(
+        "--region",
+        metavar="R",
+        default=None,
+        choices=["usa", "eur", "jpn", "world"],
+        help="only this region — world releases are region-free and always included",
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="print the first page and exit, without opening a window",
@@ -45,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {error}", file=sys.stderr)
         return 2
 
-    library = Library(games).filter(platform=args.platform, search=args.search)
+    library = Library(games).filter(platform=args.platform, search=args.search, region=args.region)
 
     if args.refresh:
         # Nothing here expires on its own — a game with no art is remembered

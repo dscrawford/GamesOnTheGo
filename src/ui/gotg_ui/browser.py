@@ -25,12 +25,18 @@ class Browser:
         self.per_page = per_page or library.per_page
         self.platforms = [ALL, *library.platforms]
         self._platform_index = 0
+        self.regions = [ALL, *library.regions]
+        self._region_index = 0
         self.search = ""
         self.grid = Grid(library)
 
     @property
     def platform(self) -> str:
         return self.platforms[self._platform_index]
+
+    @property
+    def region(self) -> str:
+        return self.regions[self._region_index]
 
     @property
     def visible(self) -> Library:
@@ -43,6 +49,15 @@ class Browser:
     def set_platform(self, platform: str) -> None:
         if platform in self.platforms:
             self._platform_index = self.platforms.index(platform)
+            self._reframe()
+
+    def cycle_region(self, delta: int) -> None:
+        self._region_index = (self._region_index + delta) % len(self.regions)
+        self._reframe()
+
+    def set_region(self, region: str) -> None:
+        if region in self.regions:
+            self._region_index = self.regions.index(region)
             self._reframe()
 
     def set_search(self, text: str) -> None:
@@ -59,6 +74,7 @@ class Browser:
         """
         found = self.library.filter(
             platform=None if self.platform == ALL else self.platform,
+            region=None if self.region == ALL else self.region,
             search=self.search or None,
         )
         self.grid = Grid(Library(found.games, self.per_page))
@@ -73,6 +89,8 @@ class Browser:
             bits = [f"page {self.grid.page_index + 1} of {self.grid.library.pages}", f"{total} games"]
         if self.platform != ALL:
             bits.append(self.platform)
+        if self.region != ALL:
+            bits.append(f"region {self.region}+world" if self.region != "world" else "region world")
         if self.search:
             bits.append(f'"{self.search}"')
         return "  ·  ".join(bits)

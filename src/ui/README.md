@@ -9,6 +9,7 @@ Design and the decisions behind it: [docs/ui-plan.md](../../docs/ui-plan.md).
 nix run .#gotg-ui                      # the grid
 nix run .#gotg-ui -- --list            # page one as text, no window
 nix run .#gotg-ui -- --platform n64 --search zelda --list
+nix run .#gotg-ui -- --region usa --list        # usa plus the region-free world set
 nix run .#gotg-ui -- --play snes/eur.asterix   # the handoff, without the grid
 nix run .#gotg-ui -- --platform snes --refresh # forget cached art and look again
 ```
@@ -19,6 +20,7 @@ nix run .#gotg-ui -- --platform snes --refresh # forget cached art and look agai
 | shoulders / PgUp PgDn | previous and next page |
 | A / Enter | play it — this process becomes the game |
 | Y / Tab | next platform (shift-Tab back) |
+| Back / R | next region — world is region-free and rides along (shift-R back) |
 | X / `/` | search — Enter applies, Escape cancels |
 | pointer | hover selects, click plays; wheel turns the page |
 | B / Escape / Q | quit |

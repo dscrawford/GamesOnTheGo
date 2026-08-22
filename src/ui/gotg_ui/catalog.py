@@ -32,6 +32,12 @@ class Game:
     handler: str
 
     @property
+    def region(self) -> str:
+        """The id's own prefix — usa, eur, jpn, world — per the entry-id
+        contract. Not stored separately because the id is the contract."""
+        return self.id.split(".", 1)[0]
+
+    @property
     def key(self) -> tuple[str, str]:
         """Ids repeat across platforms — usa.bugs_life is on two — so nothing
         that names a game to something else may use the id alone."""
@@ -125,6 +131,10 @@ class Library:
         """Sorted, so the filter row does not reshuffle between launches."""
         return sorted({g.platform for g in self.games})
 
+    @property
+    def regions(self) -> list[str]:
+        return sorted({g.region for g in self.games})
+
     def page(self, index: int) -> list[Game]:
         """One page, clamped to the ends.
 
@@ -138,12 +148,19 @@ class Library:
         start = index * self.per_page
         return self.games[start : start + self.per_page]
 
-    def filter(self, *, platform: str | None = None, search: str | None = None) -> Library:
+    def filter(self, *, platform: str | None = None, search: str | None = None, region: str | None = None) -> Library:
         """A new view. This one is left alone, so a filter is undoable by
-        keeping the library it came from."""
+        keeping the library it came from.
+
+        A world release rides through every region filter: by the id contract
+        it is region-free, so "usa" means playable-as-a-usa-library rather
+        than usa-tagged. Only region=world narrows to world alone.
+        """
         found = self.games
         if platform:
             found = [g for g in found if g.platform == platform]
+        if region:
+            found = [g for g in found if g.region == region or g.region == "world"]
         if search:
             needle = search.casefold()
             found = [g for g in found if needle in g.id.casefold() or needle in g.title.casefold()]

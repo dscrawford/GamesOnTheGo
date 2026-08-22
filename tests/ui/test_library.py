@@ -182,3 +182,54 @@ def test_the_platforms_on_offer_come_from_the_catalog(tmp_path):
     games = some(2, "snes") + some(2, "gb") + some(1, "n64")
     library = Library(load(write_cache(tmp_path / "m.json", games)))
     assert library.platforms == ["gb", "n64", "snes"], "sorted, so the filter row is stable between launches"
+
+
+# --- region, read off the id contract -----------------------------------------
+
+
+def test_a_game_knows_its_region(tmp_path):
+    cache = write_cache(
+        tmp_path / "m.json",
+        [("usa.zelda", "n64", "Z"), ("eur.asterix", "gb", "A"), ("jpn.mother", "gba", "M"), ("world.tetris", "gb", "T")],
+    )
+    assert [g.region for g in load(cache)] == ["usa", "eur", "jpn", "world"]
+
+
+def test_region_filter_includes_world_in_every_region(tmp_path):
+    # A world release is region-free by the id contract, so filtering to any
+    # region keeps it: usa means "playable as a usa library", not "usa-tagged".
+    cache = write_cache(
+        tmp_path / "m.json",
+        [("usa.zelda", "n64", "Z"), ("eur.zelda", "n64", "Z"), ("world.tetris", "gb", "T")],
+    )
+    library = Library(load(cache))
+    assert {g.id for g in library.filter(region="usa").page(0)} == {"usa.zelda", "world.tetris"}
+    assert {g.id for g in library.filter(region="eur").page(0)} == {"eur.zelda", "world.tetris"}
+    assert {g.id for g in library.filter(region="world").page(0)} == {"world.tetris"}
+
+
+def test_region_composes_with_platform_and_search(tmp_path):
+    cache = write_cache(
+        tmp_path / "m.json",
+        [
+            ("usa.mario", "n64", "Mario 64"),
+            ("eur.mario", "n64", "Mario 64"),
+            ("world.mario_kart", "n64", "Mario Kart"),
+            ("usa.mario_land", "gb", "Mario Land"),
+        ],
+    )
+    found = Library(load(cache)).filter(platform="n64", search="mario", region="usa").page(0)
+    assert {g.id for g in found} == {"usa.mario", "world.mario_kart"}
+
+
+def test_no_region_means_everything(tmp_path):
+    cache = write_cache(tmp_path / "m.json", [("usa.a", "gb", "A"), ("jpn.b", "gb", "B")])
+    assert len(Library(load(cache)).filter(region=None)) == 2
+
+
+def test_the_regions_on_offer_come_from_the_catalog(tmp_path):
+    cache = write_cache(
+        tmp_path / "m.json",
+        [("usa.a", "gb", "A"), ("world.b", "gb", "B"), ("usa.c", "n64", "C")],
+    )
+    assert Library(load(cache)).regions == ["usa", "world"], "sorted, present-only"
