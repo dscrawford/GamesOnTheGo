@@ -120,15 +120,12 @@ in
     fi
   '';
 
-  # The built ROM rather than the downloaded one. The catalog entry still has
-  # to exist — this is a variant of Emerald, and `gotg play` resolves the game
-  # before it ever reaches here — but the bytes it downloaded are not what runs.
-  args = [
-    "{fullscreen}"
-    "--setting"
-    "Paths/Saves={state}/saves/"
-    "{state}/rogue/pokeemerald.gba"
-  ];
+  # The platform's own arguments with only the target swapped: the built ROM
+  # rather than the downloaded one. A copied list would have frozen whatever
+  # the base said the day it was copied — which is exactly how this variant
+  # missed the BIOS --setting gba.nix grew, and greeted its first launch with
+  # ares' firmware dialog while bios.zip sat already fetched in its state.
+  args = map (a: if a == "{target}" then "{state}/rogue/pokeemerald.gba" else a) base.args;
 
   inherit (base) saves saveExcludes;
 }
