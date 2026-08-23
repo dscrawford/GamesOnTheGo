@@ -343,7 +343,12 @@ def run(library: Library) -> tuple[Game, str] | None:
                     elif event.key in (pygame.K_SLASH, pygame.K_f):
                         typing = browser.search
                     elif event.key == pygame.K_TAB:
-                        browser.cycle_platform(-1 if event.mod & pygame.KMOD_SHIFT else 1)
+                        # Tab walks platforms, shift-Tab walks regions — one
+                        # key for both switches. Backwards lives on R/shift-R.
+                        if event.mod & pygame.KMOD_SHIFT:
+                            browser.cycle_region(1)
+                        else:
+                            browser.cycle_platform(1)
                     elif event.key == pygame.K_LEFT:
                         state.move(-1, 0)
                     elif event.key == pygame.K_RIGHT:

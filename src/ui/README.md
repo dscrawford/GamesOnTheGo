@@ -19,8 +19,8 @@ nix run .#gotg-ui -- --platform snes --refresh # forget cached art and look agai
 | d-pad / arrows | move; off either side turns the page |
 | shoulders / PgUp PgDn | previous and next page |
 | A / Enter | open the action menu — Play, Configure, Add to Steam |
-| Y / Tab | next platform (shift-Tab back) |
-| Back / R | next region — world is region-free and rides along (shift-R back) |
+| Y / Tab | next platform |
+| Back / shift-Tab / R | next region — world is region-free and rides along (shift-R back) |
 | X / `/` | search — Enter applies, Escape cancels |
 | pointer | hover selects, click plays; wheel turns the page |
 | B / Escape / Q | quit |
