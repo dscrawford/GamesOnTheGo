@@ -97,6 +97,15 @@ def draw(screen, state: Grid, font_at, art=None, status: str = "", typing: str |
         if dim is not None and index != menu.tile_index:
             screen.blit(dim, (tile.x, tile.y))
 
+    # The hovered game's full title, in the top strip the grid never uses.
+    # Tiles shrink long titles toward unreadable and art hides them entirely;
+    # the selection is the one game whose whole name is worth a line, and
+    # hover moves the selection, so pointer and stick share it.
+    if state.game is not None:
+        text = state.game.title[:200]
+        label = _fit(font_at, text, width - 48, 26).render(text, True, TEXT)
+        screen.blit(label, ((width - label.get_width()) // 2, (tiles[0].y - label.get_height()) // 2))
+
     if not status:
         status = (
             f"page {state.page_index + 1} of {state.library.pages}  ·  {len(state.library)} games"
