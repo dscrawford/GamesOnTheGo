@@ -1,0 +1,38 @@
+t: "gotg-ui — module design: what needs a display, and what a pick does" { shape: text; near: top-center; style.font-size: 28; style.bold: true }
+legend: "dashed = subprocess/exec boundary out of the package" { shape: text; near: bottom-left; style.font-size: 16; style.italic: true }
+
+direction: down
+
+display: "needs a display (2 of 11)" {
+  main: "__main__.py\nargs · --list · --play\n(imports app lazily)"
+  app: "app.py\nframe loop · draw · input\nphases: grid | menu | loader | typing"
+  main -> app: "run(library)"
+}
+
+pure: "display-free — covered in tests/ui without a screen" {
+  catalog: "catalog.py\nGame (region from id prefix)\nLibrary.filter + paging"
+  browser: "browser.py\nplatform · region · search\nfilter change reframes to page 1"
+  grid: "grid.py\ncursor: move, page turn, select"
+  layout: "layout.py\nwhere the ten tiles go"
+  menu: "menu.py\nPlay · Configure · Add to Steam\nside picked by tile column"
+  art: "art.py\nArtStore: images + .miss sidecars\nid fence, atomic writes"
+  fetch: "fetch.py\nLoader: 2 threads, page-only\nportrait first, then wide"
+  prepare: "prepare.py\nis_ready (wants the word 'ready')\nPreparer: streamed install, group kill"
+  launch: "launch.py\ncommand_for(game, verb) · execvp"
+
+  browser -> catalog: "filters"
+  browser -> grid: "owns cursor"
+  grid -> layout: "tile geometry"
+  fetch -> art: "fills, misses too"
+}
+
+client: "gotg CLI (bash)\nsrc/client — owns installs,\ndownloads, saves, recipes" { style.stroke-dash: 4 }
+
+display.app -> pure.browser: "every input"
+display.app -> pure.menu: "A on a tile"
+display.app -> pure.fetch: "art for visible page"
+display.app -> pure.prepare: "menu verb picked:\nready? else loader"
+display.main -> pure.launch: "exec gotg <verb>\n(process replaced)"
+
+pure.prepare -> client: "gotg complete ready\ngotg install" { style.stroke-dash: 4 }
+pure.launch -> client: { style.stroke-dash: 4 }

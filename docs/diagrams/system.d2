@@ -1,0 +1,47 @@
+t: "GamesOnTheGo — system as deployed (2026-08)" { shape: text; near: top-center; style.font-size: 28; style.bold: true }
+legend: "dashed = gotg admin import, over kubectl (not HTTP)" { shape: text; near: bottom-left; style.font-size: 16; style.italic: true }
+
+direction: down
+
+player: "Player machine (desktop / Steam Deck)" {
+  ui: "gotg-ui\n(pygame grid: search, region,\naction menu, loader screen)"
+  cli: "gotg CLI (bash)\nlogin · refresh · install · play\nsteam · saves · admin"
+  localart: "art cache\nimages + misses, permanent" { shape: cylinder }
+  envs: "nix env roots\nares · dolphin · ryujinx · ports\n(fullscreen only when no tty)" { shape: cylinder }
+  ui -> cli: "exec gotg <verb>\nafter ready/loader"
+  ui -> localart: "hit = never ask again"
+  cli -> envs: "nix build from github: flake"
+}
+
+cluster: "k8s cluster (3× NixOS nodes)" {
+  ingress: "ingress gotg.dcraw.net\nTLS · 20 rps/client"
+  api: "gotg-api (Deployment)\ntokens · saves · art proxy\n/admin invites+tokens" {
+    artcache: "art metadata cache\n30Gi longhorn-retain\nX-Gotg-Cache: hit|miss" { shape: cylinder }
+  }
+  library: "gotg-library (Deployment)\ncatalog · game streaming\n/admin/scan · VPN byte host" {
+    catalog: "catalog\n(sqlite, 7.7k games)" { shape: cylinder }
+  }
+  importer: "gotg-import (CronJob)\nweekly · scan→classify→hardlink→publish"
+  media: "jellyfin-data PVC\n/data/Torrents + /data/Games\n(library mounts read-only)" { shape: cylinder }
+
+  ingress -> api: "/  (catch-all)"
+  ingress -> library: "/catalog /games /files\n/admin/scan"
+  importer -> media: "hardlink ROMs (rw)"
+  importer -> library: "publish entries\n(index token)"
+  library -> media: "stream game bytes (ro)"
+}
+
+upstream: "Upstreams" {
+  sgdbapi: "SteamGridDB API\n(metered, one shared key)"
+  sgdbcdn: "SteamGridDB CDN\n(image bytes)"
+  libretro: "libretro-thumbnails\n(no key)"
+  github: "GitHub\n(flake + decomp sources)"
+}
+
+player.cli -> cluster.ingress: "HTTPS, bearer token:\ncatalog · downloads · saves"
+player.ui -> cluster.ingress: "art metadata\nvia /steamgriddb"
+cluster.api.artcache -> upstream.sgdbapi: "only on fleet-wide miss"
+player.ui -> upstream.sgdbcdn: "image bytes, direct"
+player.ui -> upstream.libretro: "box art, direct"
+player.cli -> upstream.github: "env builds"
+player.cli -> cluster.importer: { style.stroke-dash: 4 }

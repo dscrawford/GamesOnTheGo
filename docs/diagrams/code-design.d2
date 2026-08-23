@@ -1,0 +1,43 @@
+t: "GOTG code design — how a file on disk becomes a launched game" { shape: text; near: top-center; style.font-size: 28; style.bold: true }
+legend: "solid = calls/data · dashed = ships inside the importer image, not a ConfigMap" { shape: text; near: bottom-left; style.font-size: 16; style.italic: true }
+
+direction: down
+
+indexer: "src/gotg/indexer — the import pipeline (CronJob, weekly or gotg admin import)" {
+  direction: right
+  scan: "scan\nwalk /data/Torrents\n7z/zip members too"
+  classify: "classify\nplatform + region + id\nfrom filename and dats"
+  hardlink: "hardlink\ninto /data/Games/<platform>/\nno second copy of bytes"
+  publish: "publish\nPOST entries\nwith the index token"
+  rules: "rules.yaml" { shape: page; style.stroke-dash: 4 }
+
+  scan -> classify -> hardlink -> publish
+  rules -> classify: "dat_dirs · handlers" { style.stroke-dash: 4 }
+}
+
+service: "src/gotg — the service (stdlib-only: it holds every credential)" {
+  direction: right
+  auth: "auth\nbearer tokens · hmac\nadmin check on the token itself"
+  routes: "routes\n/catalog /games /files\n/steamgriddb (cached proxy)"
+  scanmod: "catalog.scan\n/admin/scan diff:\nadded · missing · [since, now)"
+  db: "catalog\n(sqlite)" { shape: cylinder }
+
+  auth -> routes: "every request"
+  routes -> db: "read"
+  scanmod -> db: "compare"
+}
+
+client: "src/client — bash CLI + nix recipes" {
+  direction: right
+  cmds: "lib/cmd-*.sh\nplay · install · steam\nsaves · admin · complete"
+  envs: "env/*.nix recipes\nemulator + args template\n{target} {state} {fullscreen}"
+  variants: "env/games/ variants\nrogue (decomp build)\nrecut (Wine) · BIOS wiring"
+
+  cmds -> envs: "nix build, then exec"
+  variants -> envs: "extend base.args"
+}
+
+indexer.publish -> service.routes: "new entries"
+client.cmds -> service.routes: "catalog · ROM bytes\nsaves · art metadata"
+client.cmds -> indexer.scan: "gotg admin import\n(kubectl job from CronJob)"
+service.scanmod -> client.cmds: "gotg admin scan\nreports the diff"
