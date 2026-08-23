@@ -451,3 +451,113 @@ def test_a_hostile_content_type_cannot_split_our_response():
     finally:
         server.shutdown()
         listener.close()
+
+
+# --- the upstream cache -------------------------------------------------------
+#
+# What matters most: a repeated question never reaches SteamGridDB twice, a
+# failed answer is never remembered, and a cache that cannot be written is a
+# proxy that still works.
+
+
+def call_with_headers(url: str, token: str | None = "client-token"):
+    request = urllib.request.Request(url)
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, json.loads(response.read() or b"{}"), dict(response.headers)
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read() or b"{}"), dict(error.headers)
+
+
+@pytest.fixture
+def cached_proxy(upstream, tmp_path):
+    config = Config(
+        token="client-token",
+        steamgriddb_key="sg-key",
+        steamgriddb_url=upstream,
+        upstream_cache_dir=str(tmp_path / "artcache"),
+    )
+    server = make_server("127.0.0.1", free_port(), config)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}", tmp_path / "artcache"
+    server.shutdown()
+
+
+def test_a_repeated_question_reaches_upstream_once(cached_proxy):
+    proxy, _ = cached_proxy
+    status, first, headers = call_with_headers(f"{proxy}/steamgriddb/grids/game/42?dimensions=600x900")
+    assert status == 200
+    assert headers.get("X-Gotg-Cache") == "miss"
+
+    status, second, headers = call_with_headers(f"{proxy}/steamgriddb/grids/game/42?dimensions=600x900")
+    assert status == 200
+    assert headers.get("X-Gotg-Cache") == "hit"
+    assert second == first, "the cached answer is the answer"
+    assert len(Upstream.seen) == 1, "one question upstream, however many clients ask"
+
+
+def test_a_different_query_is_a_different_answer(cached_proxy):
+    proxy, _ = cached_proxy
+    call_with_headers(f"{proxy}/steamgriddb/grids/game/42?dimensions=600x900")
+    call_with_headers(f"{proxy}/steamgriddb/grids/game/42?dimensions=920x430")
+    assert len(Upstream.seen) == 2, "the query string is part of the question"
+
+
+def test_an_upstream_failure_is_relayed_and_never_remembered(cached_proxy):
+    proxy, _ = cached_proxy
+    status, _, headers = call_with_headers(f"{proxy}/steamgriddb/grids/game/missing")
+    assert status == 404
+    status, _, _ = call_with_headers(f"{proxy}/steamgriddb/grids/game/missing")
+    assert status == 404
+    assert len(Upstream.seen) == 2, "a 404 asked again is asked upstream again"
+
+
+def test_the_cache_survives_a_service_restart(upstream, tmp_path):
+    config = Config(
+        token="client-token",
+        steamgriddb_key="sg-key",
+        steamgriddb_url=upstream,
+        upstream_cache_dir=str(tmp_path / "artcache"),
+    )
+    server = make_server("127.0.0.1", free_port(), config)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    call_with_headers(f"http://127.0.0.1:{server.server_port}/steamgriddb/grids/game/7")
+    server.shutdown()
+
+    reborn = make_server("127.0.0.1", free_port(), config)
+    threading.Thread(target=lambda: reborn.serve_forever(poll_interval=0.05), daemon=True).start()
+    status, _, headers = call_with_headers(f"http://127.0.0.1:{reborn.server_port}/steamgriddb/grids/game/7")
+    reborn.shutdown()
+    assert status == 200
+    assert headers.get("X-Gotg-Cache") == "hit"
+    assert len(Upstream.seen) == 1
+
+
+def test_an_unwritable_cache_is_a_working_proxy(upstream, tmp_path):
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    blocked.chmod(0o500)
+    config = Config(
+        token="client-token",
+        steamgriddb_key="sg-key",
+        steamgriddb_url=upstream,
+        upstream_cache_dir=str(blocked / "artcache"),
+    )
+    server = make_server("127.0.0.1", free_port(), config)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    try:
+        status, _, _ = call_with_headers(f"http://127.0.0.1:{server.server_port}/steamgriddb/grids/game/9")
+        assert status == 200, "best-effort: a full or broken disk must not take artwork down"
+    finally:
+        server.shutdown()
+        blocked.chmod(0o700)
+
+
+def test_without_a_cache_dir_nothing_changes(proxy):
+    status, _, headers = call_with_headers(f"{proxy}/steamgriddb/grids/game/42")
+    assert status == 200
+    assert "X-Gotg-Cache" not in headers
+    call_with_headers(f"{proxy}/steamgriddb/grids/game/42")
+    assert len(Upstream.seen) == 2

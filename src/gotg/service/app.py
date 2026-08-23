@@ -54,7 +54,7 @@ from ..catalog import CatalogStore, Conflict, SweepRefused
 from ..saves import SavesStore
 from ..tokens import TOKEN_RE, Absent, Claimed, TokenStore, default_user
 
-USER_AGENT = "gotg-proxy/0.5.4"
+USER_AGENT = "gotg-proxy/0.5.5"
 
 # Bounded, because a request that never returns holds a thread open and enough
 # of them stop the proxy answering anybody.
@@ -147,6 +147,32 @@ def safe_content_type(value: str) -> str:
     return value[:cut].strip() or "application/octet-stream"
 
 
+def _cache_get(directory: str, key: str) -> tuple[bytes, str] | None:
+    """A remembered answer, or None. A missing kind file is a half-written
+    entry from a crash mid-put — treated as absent, rewritten on the miss."""
+    try:
+        payload = Path(directory, key).read_bytes()
+        kind = Path(directory, key + ".kind").read_text().strip()
+    except OSError:
+        return None
+    return (payload, kind or "application/json")
+
+
+def _cache_put(directory: str, key: str, payload: bytes, kind: str) -> None:
+    """Best-effort, atomically: a full or broken disk must cost the cache,
+    never the answer. The kind lands first so a reader who can see the body
+    can always see its type."""
+    try:
+        base = Path(directory)
+        base.mkdir(parents=True, exist_ok=True)
+        for name, data in ((key + ".kind", kind.encode()), (key, payload)):
+            tmp = base / (name + ".part")
+            tmp.write_bytes(data)
+            os.replace(tmp, base / name)
+    except OSError:
+        pass
+
+
 def path_climbs(rest: str) -> bool:
     """Whether a path tries to escape the API prefix it will be appended to.
 
@@ -182,6 +208,10 @@ class Config:
     # Mints and revokes per-person tokens, valid only under /admin — an admin
     # token that could also read saves would be one more shared secret.
     admin_token: str = ""
+    # Where /steamgriddb answers are kept, so a fleet of clients costs one
+    # upstream question per asset against the shared key's quota. Empty means
+    # no cache, which is every deployment before the volume existed.
+    upstream_cache_dir: str = ""
     # The library pod's pointer at the pod holding the token store: a bearer
     # no local check recognizes is asked about at {auth_url}/auth/whoami.
     auth_url: str = ""
@@ -308,10 +338,12 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- replies ------------------------------------------------------------
 
-    def _send(self, code: int, body: bytes, content_type: str) -> None:
+    def _send(self, code: int, body: bytes, content_type: str, extra: dict[str, str] | None = None) -> None:
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        for name, value in (extra or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         # A HEAD response is bodiless whatever the code: writing the JSON of a
         # 404 here would sit on the kept-alive connection and be parsed as the
@@ -430,11 +462,43 @@ class Handler(BaseHTTPRequestHandler):
         if not self.config.steamgriddb_key:
             self._problem(503, "this proxy holds no steamgriddb key")
             return
-        self._forward(
-            f"{self.config.steamgriddb_url}/api/v2/{strip_prefix(rest, 'api/v2/')}",
-            {"Authorization": f"Bearer {self.config.steamgriddb_key}"},
-            None,
-        )
+        url = f"{self.config.steamgriddb_url}/api/v2/{strip_prefix(rest, 'api/v2/')}"
+        headers = {"Authorization": f"Bearer {self.config.steamgriddb_key}"}
+        if not self.config.upstream_cache_dir or self.command != "GET":
+            self._forward(url, headers, None)
+            return
+
+        # The cache is permanent and keyed on the whole question — path and
+        # query — because the answer is art that does not change and quota
+        # that does not come back. Only a 200 is remembered: a 404 today may
+        # be somebody uploading the grid tomorrow, and an error never earns
+        # permanence. Every client already caches its own hits forever; this
+        # is the fleet-wide copy, so N machines cost one upstream question.
+        key = hashlib.sha256(rest.encode()).hexdigest()
+        cached = _cache_get(self.config.upstream_cache_dir, key)
+        if cached is not None:
+            payload, kind = cached
+            self._send(200, payload, kind, {"X-Gotg-Cache": "hit"})
+            return
+
+        request = urllib.request.Request(url)
+        request.add_header("User-Agent", USER_AGENT)
+        for name, value in headers.items():
+            request.add_header(name, value)
+        try:
+            with _OPENER.open(request, timeout=TIMEOUT) as response:  # noqa: S310
+                payload = response.read()
+                kind = safe_content_type(response.headers.get("Content-Type", ""))
+        except urllib.error.HTTPError as error:
+            payload = error.read()
+            kind = safe_content_type(error.headers.get("Content-Type", "")) if error.headers else "application/json"
+            self._send(error.code, payload, kind)
+            return
+        except (urllib.error.URLError, OSError, ValueError) as error:
+            self._problem(502, f"upstream unreachable: {error}")
+            return
+        _cache_put(self.config.upstream_cache_dir, key, payload, kind)
+        self._send(200, payload, kind, {"X-Gotg-Cache": "miss"})
 
     def _igdb(self, rest: str, body: bytes | None) -> None:
         if not (self.config.igdb_client_id and self.config.igdb_client_secret):

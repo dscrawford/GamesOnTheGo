@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gotg"
-version = "0.5.4"
+version = "0.5.5"
 description = "GOTG: the credential-holding service, the saves store, and the torrent indexer"
 requires-python = ">=3.11"
 # The service stays stdlib-only on purpose: it faces the internet and holds

@@ -23,6 +23,7 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
     return Config(
         token=env.get("GOTG_PROXY_TOKEN", ""),
         steamgriddb_key=env.get("STEAMGRIDDB_API_KEY", ""),
+        upstream_cache_dir=env.get("GOTG_UPSTREAM_CACHE_DIR", ""),
         igdb_client_id=env.get("IGDB_CLIENT_ID", ""),
         igdb_client_secret=env.get("IGDB_CLIENT_SECRET", ""),
         index_token=env.get("GOTG_INDEX_TOKEN", ""),
