@@ -1,14 +1,12 @@
-# Game Boy Color — ares, which works out the console from the ROM header, with its saves
-# redirected into this environment's own directory. See helpers.nix for why that
-# redirect is needed and what the trailing slash is doing.
-#
-# No `system` yet: ares files saves under a directory named for the console, and
-# that name has only been confirmed for SNES. Until someone launches a Game Boy Color
-# game and reads the name off "{state}/saves/", this platform adopts nothing —
-# a guess would copy old saves somewhere ares never reads, which looks exactly
-# like losing them.
+# Game Boy Color — ares pinned to the colour console; see helpers.nix
+# (aresPlatform, aresSystem, system) for the saves redirect, the pinning
+# rationale, and why the save directory below is "Game Boy" and not "Game Boy
+# Color". gb and gbc each get their own {state}, so sharing that name collides
+# with nothing.
 { helpers, ... }:
 helpers.aresPlatform {
   platform = "gbc";
+  aresSystem = "Game Boy Color";
+  system = "Game Boy";
   console = "GameBoyColor";
 }

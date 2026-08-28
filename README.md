@@ -449,6 +449,12 @@ Both of those are read off a real `settings.bml` rather than derived from the
 platform slug, and a platform without them stays dormant for that feature rather
 than guessing. A platform that needs to differ more stops calling the helper.
 
+`aresPlatform` takes a third name, `aresSystem`, which is the core to run —
+`ares --system`. `gb` and `gbc` set it because both cores claim the extension
+and ares otherwise asks on every launch. It is deliberately separate from
+`system`: ares names the save directory for the cartridge rather than the core,
+so `gbc` runs `Game Boy Color` and saves into `Game Boy`.
+
 A per-game file states only its differences:
 
 ```nix

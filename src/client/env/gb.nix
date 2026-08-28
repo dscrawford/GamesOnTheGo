@@ -1,14 +1,15 @@
-# Game Boy — ares, which works out the console from the ROM header, with its saves
-# redirected into this environment's own directory. See helpers.nix for why that
-# redirect is needed and what the trailing slash is doing.
+# Game Boy — ares pinned to the mono console; see helpers.nix (aresPlatform,
+# aresSystem, system) for the saves redirect, the pinning rationale, and the
+# save-directory subtlety.
 #
-# No `system` yet: ares files saves under a directory named for the console, and
-# that name has only been confirmed for SNES. Until someone launches a Game Boy
-# game and reads the name off "{state}/saves/", this platform adopts nothing —
-# a guess would copy old saves somewhere ares never reads, which looks exactly
-# like losing them.
+# A CGB-enhanced cart here — Pokémon Yellow is one — runs in mono rather than in
+# the colour mode gbc would give it. The save already sitting in
+# "{state}/saves/Game Boy/" assumes that, and the colour reading of such a game
+# belongs in the gbc platform beside its own save.
 { helpers, ... }:
 helpers.aresPlatform {
   platform = "gb";
+  aresSystem = "Game Boy";
+  system = "Game Boy";
   console = "GameBoy";
 }

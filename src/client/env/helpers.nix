@@ -57,17 +57,22 @@ in
       # section on first run, so it cannot be derived from the platform slug,
       # and a wrong name would write bindings nothing ever reads.
       console ? null,
-      # What ares calls this console. It does not write the save directly under
-      # Paths/Saves — it makes a directory of this name there and puts it
-      # inside. Confirmed by launching: a SNES save landed in
-      # "{state}/saves/Super Famicom/", and ares keeps a matching
-      # "Super Famicom.sys" beside its settings.
+      # Which core to run, as `ares --help` lists it. Unset, ares picks by file
+      # extension and prompts when more than one core claims it (both Game Boy
+      # cores do) — naming it here makes that choice once, not per launch.
+      aresSystem ? null,
+      # The directory ares files this platform's saves in (a subdirectory of
+      # Paths/Saves, not Paths/Saves itself) — distinct from `aresSystem`, since
+      # ares names it for the cartridge, not the core it ran.
       #
-      # So this is what an older save has to be adopted *into*. Get it wrong and
-      # the copy lands somewhere ares never looks, which from the sofa is
-      # indistinguishable from having lost the save — so a platform whose name
-      # has not been confirmed by launching adopts nothing at all rather than
-      # guessing at it.
+      # Measured on ares v148 with `--system "Game Boy Color"`: both a
+      # CGB-enhanced and a CGB-only cart saved into "{state}/saves/Game Boy/",
+      # never "Game Boy Color/" — the empty "Game Boy Color" directory under
+      # env-gb is the older, guessed answer.
+      #
+      # This is what an older save is adopted into. A wrong guess writes it
+      # somewhere ares never reads, indistinguishable from losing it — so an
+      # unconfirmed directory adopts nothing.
       system ? null,
     }:
     {
@@ -75,15 +80,20 @@ in
       bin = "ares";
       isolate = true;
       padConsole = console;
-      args = [
-        # A launch from the sofa goes straight to the game; the windowed UI is
-        # one Esc away when wanted. Expands to nothing from a terminal — see
-        # the gotg_fullscreen block in lib.nix for why that is the default.
-        "{fullscreen}"
-        "--setting"
-        "Paths/Saves={state}/saves/"
-        "{target}"
-      ];
+      args =
+        [
+          # A launch from the sofa goes straight to the game; the windowed UI is
+          # one Esc away when wanted. Expands to nothing from a terminal — see
+          # the gotg_fullscreen block in lib.nix for why that is the default.
+          "{fullscreen}"
+          "--setting"
+          "Paths/Saves={state}/saves/"
+        ]
+        ++ lib.optionals (aresSystem != null) [
+          "--system"
+          aresSystem
+        ]
+        ++ [ "{target}" ];
       saves = [ "saves/**" ];
       # Save states are tied to the ares that wrote them, so one carried from
       # another machine may simply refuse to load. Memory saves always travel.
