@@ -76,14 +76,12 @@
         in
         {
           inherit workspace;
-          set =
-            (pkgs.callPackage pyproject-nix.build.packages { python = pkgs.python312; }).overrideScope
-              (
-                nixpkgs.lib.composeManyExtensions [
-                  pyproject-build-systems.overlays.default
-                  overlay
-                ]
-              );
+          set = (pkgs.callPackage pyproject-nix.build.packages { python = pkgs.python312; }).overrideScope (
+            nixpkgs.lib.composeManyExtensions [
+              pyproject-build-systems.overlays.default
+              overlay
+            ]
+          );
         }
       );
     in
@@ -98,7 +96,9 @@
         in
         envs
         // rec {
-          gotg = pkgs.callPackage ./src/client { inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg-pads; };
+          gotg = pkgs.callPackage ./src/client {
+            inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg-pads;
+          };
 
           # The picker. Takes the client rather than reimplementing it: what
           # makes a game run is already in src/client/lib and already tested,
@@ -115,7 +115,6 @@
             venv = py.set.mkVirtualEnv "gotg-service-env" py.workspace.deps.default;
           };
           default = gotg;
-
 
           # Asks the same library the emulators ask, so nothing downstream has
           # to guess which physical controller is which.
@@ -165,7 +164,9 @@
             config = {
               Entrypoint = [ (pkgs.lib.getExe gotg-proxy) ];
               Env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" ];
-              ExposedPorts = { "8080/tcp" = { }; };
+              ExposedPorts = {
+                "8080/tcp" = { };
+              };
               # Nothing here needs root, and a service holding every API
               # credential is the last place to hand it out.
               User = "65534:65534";
@@ -203,541 +204,56 @@
           '';
         in
         {
-        default = pkgs.mkShell {
-          packages = [
-            gotg-dev
-          ]
-          ++ [
-            # The importer's own dependencies, out of its lock rather than a
-            # second list that drifts from it. `uv` is here to edit that lock —
-            # `uv lock`, `uv add` — after which `nix build` picks the change up
-            # with nothing else to update.
-            (
-              let
-                py = pythonSets.${pkgs.stdenv.hostPlatform.system};
-              in
-              py.set.mkVirtualEnv "gotg-dev-env" py.workspace.deps.all
-            )
-            pkgs.uv
-          ]
-          ++ (with pkgs; [
-            ruff
-            shellcheck
-            bats
-            git
-            bash-completion
-          ]);
+          default = pkgs.mkShell {
+            packages = [
+              gotg-dev
+            ]
+            ++ [
+              # The importer's own dependencies, out of its lock rather than a
+              # second list that drifts from it. `uv` is here to edit that lock —
+              # `uv lock`, `uv add` — after which `nix build` picks the change up
+              # with nothing else to update.
+              (
+                let
+                  py = pythonSets.${pkgs.stdenv.hostPlatform.system};
+                in
+                py.set.mkVirtualEnv "gotg-dev-env" py.workspace.deps.all
+              )
+              pkgs.uv
+            ]
+            ++ (with pkgs; [
+              ruff
+              shellcheck
+              bats
+              git
+              bash-completion
+            ]);
 
-          # Pin the checkout at shell entry, so `gotg` keeps meaning this tree
-          # even from a subdirectory.
-          shellHook = ''
-            export GOTG_DEV_ROOT="$PWD"
-            # Machinery first, then gotg's own from the checkout so edits
-            # apply on save. `nix develop` only — direnv shells get theirs
-            # via the XDG_DATA_DIRS publish in .envrc.
-            if [ -n "''${BASH_VERSION:-}" ] && type -t complete >/dev/null 2>&1; then
-              . ${pkgs.bash-completion}/etc/profile.d/bash_completion.sh
-              . "$PWD/src/client/completions/gotg.bash"
-            fi
-          '';
-        };
+            # Pin the checkout at shell entry, so `gotg` keeps meaning this tree
+            # even from a subdirectory.
+            shellHook = ''
+              export GOTG_DEV_ROOT="$PWD"
+              # Machinery first, then gotg's own from the checkout so edits
+              # apply on save. `nix develop` only — direnv shells get theirs
+              # via the XDG_DATA_DIRS publish in .envrc.
+              if [ -n "''${BASH_VERSION:-}" ] && type -t complete >/dev/null 2>&1; then
+                . ${pkgs.bash-completion}/etc/profile.d/bash_completion.sh
+                . "$PWD/src/client/completions/gotg.bash"
+              fi
+            '';
+          };
         }
       );
 
-      checks = forAllSystems (pkgs: {
-        importer = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-importer;
-
-        # Building the wrapper runs no tests (unlike the old
-        # buildPythonApplication checkPhase); python-tests below is the gate.
-        proxy = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-proxy;
-
-        # buildPythonApplication used to run these through pytestCheckHook; a
-        # uv2nix venv has no such hook, so they get a check of their own rather
-        # than quietly stopping.
-        python-tests =
-          let
-            py = pythonSets.${pkgs.stdenv.hostPlatform.system};
-            # deps.all rather than deps.default: the dev group is where pytest is.
-            venv = py.set.mkVirtualEnv "gotg-test-env" py.workspace.deps.all;
-          in
-          pkgs.runCommand "check-python-tests" { nativeBuildInputs = [ venv ]; } ''
-            mkdir repo && cd repo
-            cp -r ${./tests} tests
-            # The contract drift-guards read the shell client's patterns and the
-            # project version; nothing else of src/client, so a client edit does
-            # not re-run this suite.
-            mkdir -p src/client/lib
-            cp -r ${./src/gotg} src/gotg
-            # The picker's model half — catalog, paging, cursor — holds no
-            # pygame on purpose, so it runs in this venv like anything else.
-            # Its drawing does not, and is not tested here.
-            cp -r ${./src/ui} src/ui
-            cp ${./src/client/lib/common.sh} src/client/lib/common.sh
-            cp ${./pyproject.toml} pyproject.toml
-            chmod -R u+w tests src
-            python -m pytest tests/service tests/indexer tests/ui -q
-            touch $out
-          '';
-        client = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg;
-
-        shellcheck =
-          pkgs.runCommand "check-shellcheck"
-            {
-              nativeBuildInputs = [ pkgs.shellcheck ];
-            }
-            ''
-              cd ${./.}
-              shellcheck --external-sources --source-path=src/client src/client/bin/gotg src/client/lib/*.sh
-              touch $out
-            '';
-
-        # End-to-end against a stand-in File Browser — real HTTP, real resume,
-        # real checksums, no network — and against the real GOTG service for
-        # saves, since its conflict rules are the thing under test.
-        client-tests =
-          pkgs.runCommand "check-client-tests"
-            {
-              nativeBuildInputs = with pkgs; [
-                bats
-                parallel # bats --jobs runs test files concurrently through it
-                jq
-                curl
-                (python3.withPackages (ps: [ ps.vdf ]))
-                coreutils
-                zip
-                unzip
-                gnutar
-                zstd
-                gnugrep
-                gnused
-                gawk
-                diffutils
-                util-linux # flock: firmware_ensure serializes on the platform cache
-                self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-proxy
-              ];
-              GOTG_BIN = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.gotg;
-            }
-            ''
-              cp -r ${./tests/client} tests
-              chmod -R u+w tests
-              export HOME=$TMPDIR
-              # Every test isolates under its own BATS_TEST_TMPDIR and picks
-              # random ports, which is what makes running them concurrently
-              # sound. Bounded rather than nproc: each test can boot a real
-              # gotg-proxy, and the build sandbox shares the machine.
-              bats --print-output-on-failure --jobs 8 tests/
-              touch $out
-            '';
-
-        # The recipe chains, with the heavy tools stubbed: what is asserted is
-        # the plumbing — sfv gate, staging, largest-file selection, conversion
-        # arguments, cleanup — not a real unrar or a real disc conversion.
-        recipes =
-          let
-            switch = self.packages.${pkgs.stdenv.hostPlatform.system}.env-switch;
-            gamecube = self.packages.${pkgs.stdenv.hostPlatform.system}.env-gamecube;
-            # The real harkinian envs are too heavy to build in a check (they
-            # carry the ports); a dummy port pins the helper's contract at
-            # eval time instead. Both handlers, because the same zip is
-            # single_file from the games-root pass and no_intro_set from the
-            # DAT torrent path.
-            harkinianProbe =
-              (import ./src/client/env/helpers.nix {
-                inherit pkgs;
-                inherit (pkgs) lib;
-              }).harkinianPort
-                {
-                  port = pkgs.coreutils;
-                  bin = "true";
-                  appName = "probe";
-                  archives = [ ];
-                };
-            # An environment nothing ships, composing its own pipeline from the
-            # step library — the check that steps are usable à la carte, not
-            # only through the two canned recipes.
-            probe =
-              (import ./src/client/env/lib.nix {
-                inherit pkgs;
-                inherit (pkgs) lib;
-              })
-                {
-                  name = "recipe-probe";
-                  emulator = pkgs.coreutils;
-                  bin = "true";
-                  # One glob of each shape: a directory tree, and a file
-                  # pattern whose wildcard segment must not become a mkdir.
-                  saves = [
-                    "saves/**"
-                    "data/probe/probe*.json"
-                  ];
-                  recipes =
-                    let
-                      steps = import ./src/client/env/steps.nix { inherit pkgs; };
-                    in
-                    {
-                      probe_archive = [
-                        steps.extract7z
-                        steps.pickLargest
-                        steps.keepExtension
-                      ];
-                      # A second handler in the same env: the dispatch case
-                      # grows a branch and the tool exports merge across
-                      # pipelines.
-                      probe_scene = [
-                        steps.unrar
-                        steps.pickLargest
-                        steps.keepExtension
-                      ];
-                      # The harkinian shape, unstubbed: unzip is small enough
-                      # to run for real.
-                      probe_zip = [
-                        steps.unzip
-                        steps.placeTree
-                      ];
-                      # A composition mistake: unzip leaves a directory
-                      # cursor, which keep-extension must refuse rather than
-                      # install <id>.unzip that nothing resolves as installed.
-                      probe_dir_ext = [
-                        steps.unzip
-                        steps.keepExtension
-                      ];
-                      # Inline on purpose — this pins the harness, not a
-                      # step. A tool must be bound, never exported: Info-ZIP's
-                      # unzip reads an UNZIP environment variable as prepended
-                      # arguments, so an exported binding hands unzip its own
-                      # binary as the archive.
-                      probe_hygiene = [
-                        {
-                          name = "assert-unexported";
-                          tools.UNZIP = "${pkgs.unzip}/bin/unzip";
-                          script = ''
-                            [ -x "$UNZIP" ] || fail "UNZIP is not bound inside the script"
-                            if env | grep -q '^UNZIP='; then
-                              fail "UNZIP is exported — unzip would read it as prepended arguments"
-                            fi
-                            mkdir -p "$dest"
-                          '';
-                        }
-                      ];
-                    };
-                };
-          in
-          assert pkgs.lib.assertMsg (
-            harkinianProbe.recipes ? single_file && harkinianProbe.recipes ? no_intro_set
-          ) "harkinianPort must carry its unzip recipe for both single_file and no_intro_set";
-          pkgs.runCommand "check-recipes" { nativeBuildInputs = [ pkgs.zip ]; } ''
-            export HOME=$TMPDIR
-            mkdir -p $TMPDIR/bin
-
-            cat > $TMPDIR/bin/unrar <<'EOF'
-            #!${pkgs.runtimeShell}
-            # unrar e -idq -o+ <rar> <stage/>: drop two "extracted" files, sizes apart.
-            eval "stage=\''${$#}"
-            name=game.xci
-            [ "''${GOTG_TEST_UPPER:-0}" = 1 ] && name=GAME.XCI
-            printf 'big' > "$stage/$name"
-            printf 'x' > "$stage/readme.txt"
-            EOF
-            cat > $TMPDIR/bin/rhash <<'EOF'
-            #!${pkgs.runtimeShell}
-            [ "''${GOTG_TEST_SFV_FAILS:-0}" = 1 ] && exit 1
-            exit 0
-            EOF
-            cat > $TMPDIR/bin/7z <<'EOF'
-            #!${pkgs.runtimeShell}
-            for arg in "$@"; do case "$arg" in -o*) stage="''${arg#-o}";; esac; done
-            if [ "''${GOTG_TEST_7Z_EMPTY:-0}" = 1 ]; then exit 0; fi
-            if [ "''${GOTG_TEST_7Z_MANY:-0}" = 1 ]; then
-              for i in $(seq 3000); do
-                printf 'x' > "$stage/padding-file-with-a-long-name-to-fill-the-pipe-buffer-$i.bin"
-              done
-            fi
-            printf 'iso-bytes' > "$stage/game.iso"
-            EOF
-            cat > $TMPDIR/bin/dolphin-tool <<'EOF'
-            #!${pkgs.runtimeShell}
-            prev=""; in=""; out=""
-            for arg in "$@"; do
-              case "$prev" in -i) in="$arg";; -o) out="$arg";; esac
-              prev="$arg"
-            done
-            [ -f "$in" ] || exit 1
-            printf 'rvz-of:%s' "$(cat "$in")" > "$out"
-            EOF
-            chmod +x $TMPDIR/bin/*
-
-            export GOTG_UNRAR=$TMPDIR/bin/unrar GOTG_RHASH=$TMPDIR/bin/rhash
-            export GOTG_P7Z=$TMPDIR/bin/7z GOTG_DOLPHIN_TOOL=$TMPDIR/bin/dolphin-tool
-
-            # Scene: sfv verified, largest file wins, staging swept.
-            raw=$TMPDIR/raw-scene && mkdir -p $raw
-            touch $raw/group.rar $raw/group.r00 $raw/group.sfv
-            ${switch}/bin/gotg-recipe scene_archive $raw $TMPDIR/out/world.game
-            [ "$(cat $TMPDIR/out/world.game.xci)" = big ]
-            [ -z "$(ls -A $TMPDIR/out | grep gotg-recipe || true)" ]
-
-            # Scene with a failing sfv: refused, nothing installed.
-            if GOTG_TEST_SFV_FAILS=1 ${switch}/bin/gotg-recipe scene_archive $raw $TMPDIR/out2/x; then
-              echo "a failing sfv must fail the recipe" >&2; exit 1
-            fi
-            [ ! -e $TMPDIR/out2/x.xci ]
-
-            # Disc: extract then convert, chained through the stubs.
-            raw=$TMPDIR/raw-disc && mkdir -p $raw
-            touch "$raw/Game (USA).7z"
-            ${gamecube}/bin/gotg-recipe single_archive $raw $TMPDIR/out/usa.game
-            [ "$(cat $TMPDIR/out/usa.game.rvz)" = "rvz-of:iso-bytes" ]
-
-            # An unknown handler is a refusal, not a guess.
-            if ${switch}/bin/gotg-recipe mystery $raw $TMPDIR/out/y 2>$TMPDIR/err-dispatch; then
-              echo "an unknown handler must fail" >&2; exit 1
-            fi
-            grep -q 'gotg-recipe\[dispatch\]' $TMPDIR/err-dispatch
-
-            # A pipeline composed à la carte: extract, pick, keep the extension
-            # — no conversion — through an env the tree does not ship.
-            raw=$TMPDIR/raw-probe && mkdir -p $raw
-            touch "$raw/Game (USA).7z"
-            ${probe}/bin/gotg-recipe probe_archive $raw $TMPDIR/out/usa.probe
-            [ "$(cat $TMPDIR/out/usa.probe.iso)" = iso-bytes ]
-
-            # A step that fails names itself, and staging is swept even then.
-            raw=$TMPDIR/raw-empty && mkdir -p $raw
-            if ${probe}/bin/gotg-recipe probe_archive $raw $TMPDIR/out3/x 2>$TMPDIR/err; then
-              echo "an empty raw dir must fail the extract step" >&2; exit 1
-            fi
-            grep -q 'gotg-recipe\[7z\]' $TMPDIR/err
-            [ -z "$(ls -A $TMPDIR/out3 | grep gotg-recipe || true)" ]
-
-            # Scene without an .sfv: absence is fine, only a failing check
-            # refuses — and an uppercase extension is stored lowercase, or the
-            # emulator cannot dispatch on it.
-            raw=$TMPDIR/raw-nosfv && mkdir -p $raw
-            touch $raw/group.rar $raw/group.r00
-            GOTG_TEST_UPPER=1 ${switch}/bin/gotg-recipe scene_archive $raw $TMPDIR/out/nosfv.game
-            [ "$(cat $TMPDIR/out/nosfv.game.xci)" = big ]
-
-            # An extraction that succeeds but yields nothing fails
-            # mid-pipeline: the picking step names itself, and the
-            # already-populated staging is swept.
-            raw=$TMPDIR/raw-hollow && mkdir -p $raw
-            touch "$raw/Hollow.7z"
-            if GOTG_TEST_7Z_EMPTY=1 ${probe}/bin/gotg-recipe probe_archive $raw $TMPDIR/out4/x 2>$TMPDIR/err2; then
-              echo "an empty extraction must fail the pick step" >&2; exit 1
-            fi
-            grep -q 'gotg-recipe\[pick-largest\]' $TMPDIR/err2
-            [ -z "$(ls -A $TMPDIR/out4 | grep gotg-recipe || true)" ]
-
-            # An extraction with many files must still pick the largest: head
-            # closing the pipe early must not kill the pipeline under pipefail.
-            raw=$TMPDIR/raw-many && mkdir -p $raw
-            touch "$raw/Many.7z"
-            GOTG_TEST_7Z_MANY=1 ${probe}/bin/gotg-recipe probe_archive $raw $TMPDIR/out/many.probe
-            [ "$(cat $TMPDIR/out/many.probe.iso)" = iso-bytes ]
-
-            # A destination with spaces survives the quoting end to end —
-            # staging is derived from its dirname.
-            raw=$TMPDIR/raw-spaced && mkdir -p $raw
-            touch "$raw/Game (USA).7z"
-            ${probe}/bin/gotg-recipe probe_archive $raw "$TMPDIR/out dir/usa.probe"
-            [ "$(cat "$TMPDIR/out dir/usa.probe.iso")" = iso-bytes ]
-
-            # The second handler of a multi-handler env dispatches
-            # independently.
-            raw=$TMPDIR/raw-two && mkdir -p $raw
-            touch $raw/group.rar
-            ${probe}/bin/gotg-recipe probe_scene $raw $TMPDIR/out/two.game
-            [ "$(cat $TMPDIR/out/two.game.xci)" = big ]
-
-            # A zipped ROM becomes the unpacked tree at the bare destination —
-            # the harkinian shape, with the real unzip.
-            raw=$TMPDIR/raw-zip && mkdir -p $raw
-            printf 'rom bytes' > "$TMPDIR/Zelda (USA).z64"
-            (cd $TMPDIR && zip -q "$raw/usa.zelda.zip" "Zelda (USA).z64")
-            ${probe}/bin/gotg-recipe probe_zip $raw $TMPDIR/out/usa.zelda
-            [ "$(cat "$TMPDIR/out/usa.zelda/Zelda (USA).z64")" = "rom bytes" ]
-
-            # A tree carrying a symlink is refused at the sink, whole.
-            raw=$TMPDIR/raw-link && mkdir -p $raw/dir
-            printf 'rom bytes' > "$raw/dir/game.z64"
-            ln -s /etc/passwd "$raw/dir/escape"
-            (cd $raw/dir && zip -qy "$raw/usa.linked.zip" game.z64 escape)
-            rm -rf $raw/dir
-            if ${probe}/bin/gotg-recipe probe_zip $raw $TMPDIR/out-link/x 2>$TMPDIR/err-link; then
-              echo "a zip planting a symlink must be refused" >&2; exit 1
-            fi
-            grep -q 'symlink' $TMPDIR/err-link
-            [ ! -e $TMPDIR/out-link/x ]
-
-            # unzip leaves a directory cursor; keep-extension must refuse it.
-            raw=$TMPDIR/raw-dirext && mkdir -p $raw
-            cp $TMPDIR/raw-zip/usa.zelda.zip $raw/
-            if ${probe}/bin/gotg-recipe probe_dir_ext $raw $TMPDIR/out5/x 2>$TMPDIR/err3; then
-              echo "a directory cursor must fail keep-extension" >&2; exit 1
-            fi
-            grep -q 'gotg-recipe\[keep-extension\]' $TMPDIR/err3
-
-            # probe_zip only fails on an exported tool by side effect; this
-            # names the invariant.
-            raw=$TMPDIR/raw-hygiene && mkdir -p $raw
-            ${probe}/bin/gotg-recipe probe_hygiene $raw $TMPDIR/out/hygiene
-
-            # An emulator told where to save must find that place existing —
-            # ares reports a missing save path as read-only and the progress
-            # of the session is lost. The wrapper creates the static prefix
-            # of every declared saves glob, and only the static prefix.
-            grep -qF 'mkdir -p "$state"/saves' ${probe}/bin/gotg-play
-            grep -qF 'mkdir -p "$state"/data/probe' ${probe}/bin/gotg-play
-            ! grep -F 'probe*' ${probe}/bin/gotg-play | grep -q mkdir
-
-            # recipe.json is what download.sh consults; a migration must not
-            # rename a handler on the wire.
-            grep -q '"scene_archive"' ${switch}/share/gotg/recipe.json
-            grep -q '"single_archive"' ${gamecube}/share/gotg/recipe.json
-
-            touch $out
-          '';
-
-        # A DAT directory mapped to a platform with no environment imports
-        # games nobody can launch. plan.py is pure stdlib, so this reads the
-        # real map rather than a copy of it.
-        # The indexer venv rather than a bare python: this reads rules.yaml as
-        # well as plan.py now, and rules.py needs yaml — which is exactly the
-        # extra that venv carries and the service's deliberately does not.
-        platforms =
-          let
-            py = pythonSets.${pkgs.stdenv.hostPlatform.system};
-            venv = py.set.mkVirtualEnv "gotg-indexer-env" py.workspace.deps.optionals;
-          in
-          pkgs.runCommand "check-platforms" { nativeBuildInputs = [ venv ]; } ''
-            export PYTHONPATH=${./src}
-            export GOTG_ENV_DIR=${./src/client/env}
-            python3 ${./tests/indexer/check_platforms.py}
-            touch $out
-          '';
-
-        # The fullscreen placeholder has to expand to *no argument*, not to an
-        # empty one — ares reads an empty argument as a ROM path. The first
-        # attempt rendered ''$gotg_fullscreen'', which still forms a word, and
-        # nothing downstream would have complained. Grepped from a real built
-        # Every launcher, built. The build runs shellcheck over each generated
-        # gotg-play, and which warnings fire depends on which placeholders an
-        # environment's arguments name — so ares-shaped launchers passing says
-        # nothing about the ports. The fullscreen block shipped exactly that
-        # hole: every Harkinian and decomp-port environment failed SC2034 on a
-        # variable only ares-shaped launchers consume, and the first build to
-        # run was a Master Quest launch on somebody else's machine.
-        environments =
-          let
-            envs = import ./src/client/env { inherit pkgs; };
-          in
-          pkgs.linkFarm "check-environments" (
-            pkgs.lib.mapAttrsToList (name: path: { inherit name path; }) envs
-          );
-
-        # launcher rather than asserted about the nix, because the quoting is
-        # exactly what nix's escaping is doing to it.
-        fullscreen =
-          let
-            env = (import ./src/client/env { inherit pkgs; }).env-gb;
-          in
-          pkgs.runCommand "check-fullscreen" { } ''
-            launcher="${env}/bin/gotg-play"
-            grep -q 'gotg_fullscreen=""' "$launcher" \
-              || { echo "no fullscreen decision in the launcher" >&2; exit 1; }
-            grep -q '\[ -t 1 \] || gotg_fullscreen=' "$launcher" \
-              || { echo "the terminal test is gone" >&2; exit 1; }
-            # Space either side, so it is bare. The bug put a pair of single
-            # quotes where these spaces are, which still forms a word when the
-            # variable is empty — so this one pattern is the whole guard.
-            grep -qF ' ''$gotg_fullscreen ' "$launcher" \
-              || { echo "fullscreen is not expanded bare; an empty one would be an argument" >&2
-                   grep -n '^exec' "$launcher" >&2
-                   exit 1; }
-            touch $out
-          '';
-
-        # ares reads --system as one argument, so a regression that let the
-        # space through unquoted would split "Game" from "Boy" and put the
-        # picker back in front of every launch — the exact thing gb and gbc were
-        # pinned to stop. Grepping the source text cannot see that: it is what
-        # the shell does with the line, not what the line reads as. So this runs
-        # the generated launcher with ares swapped for something that prints one
-        # line per argument it was actually handed.
-        aresSystem =
-          let
-            envs = import ./src/client/env { inherit pkgs; };
-            argvPrinter = pkgs.writeShellScript "print-argv" ''
-              for a in "$@"; do printf 'ARG<%s>\n' "$a"; done
-            '';
-            # GOTG_FULLSCREEN=0 because the sandbox has no tty, and the default
-            # for that is --fullscreen — which would shift everything after it.
-            # That behaviour is the fullscreen check's to assert, not this one's.
-            argvOf =
-              env: label: rom:
-              pkgs.runCommand "ares-argv-${label}" { } ''
-                cp ${env}/bin/gotg-play launcher
-                chmod +w launcher
-                sed -E -i \
-                  's#/nix/store/[a-z0-9]+-ares-[0-9.]+/bin/ares#${argvPrinter}#' \
-                  launcher
-                grep -qF '${argvPrinter}' launcher \
-                  || { echo "ares was not where this expected to find it" >&2
-                       grep -n '^exec' launcher >&2
-                       exit 1; }
-                GOTG_FULLSCREEN=0 GOTG_ENV_STATE="$TMPDIR/state" \
-                  ./launcher ${rom} >$out
-              '';
-            gbArgv = argvOf envs.env-gb "gb" "/nowhere/game.gb";
-            gbcArgv = argvOf envs.env-gbc "gbc" "/nowhere/game.gbc";
-          in
-          pkgs.runCommand "check-ares-system" { } ''
-            actual_gb="$(grep -A2 -x -F 'ARG<--system>' ${gbArgv})"
-            expected_gb="$(printf 'ARG<--system>\nARG<Game Boy>\nARG</nowhere/game.gb>')"
-            [ "$actual_gb" = "$expected_gb" ] \
-              || { echo "gb's --system did not survive as one argument ahead of the rom" >&2
-                   cat ${gbArgv} >&2
-                   exit 1; }
-
-            actual_gbc="$(grep -A2 -x -F 'ARG<--system>' ${gbcArgv})"
-            expected_gbc="$(printf 'ARG<--system>\nARG<Game Boy Color>\nARG</nowhere/game.gbc>')"
-            [ "$actual_gbc" = "$expected_gbc" ] \
-              || { echo "gbc's --system did not survive as one argument ahead of the rom" >&2
-                   cat ${gbcArgv} >&2
-                   exit 1; }
-
-            # A platform that never named a core has to keep letting ares work
-            # it out, so a refactor that started passing --system to everything
-            # fails here rather than showing up as a prompt nobody was watching
-            # for.
-            ! grep -q -- '--system' ${envs.env-n64}/bin/gotg-play \
-              || { echo "n64 grew a --system it never asked for" >&2; exit 1; }
-
-            # gbc saves into "Game Boy", not "Game Boy Color" — ares names the
-            # directory for the cartridge rather than the core it was told to
-            # run. Unifying the two fields is the obvious-looking refactor, and
-            # it does not error: it quietly starts adopting saves into a
-            # directory ares never reads.
-            grep -q '"into":"saves/Game Boy"' ${envs.env-gbc}/share/gotg/saves.json \
-              || { echo "gbc's legacy saves no longer land in 'Game Boy'" >&2; exit 1; }
-            ! grep -q '"into":"saves/Game Boy Color"' ${envs.env-gbc}/share/gotg/saves.json \
-              || { echo "gbc's legacy saves now target its own name, not the cartridge's" >&2; exit 1; }
-
-            touch $out
-          '';
-
-        ruff =
-          pkgs.runCommand "check-ruff"
-            {
-              nativeBuildInputs = [ pkgs.ruff ];
-            }
-            ''
-              cd ${./.}
-              ruff check --no-cache src/gotg tests/conftest.py tests/service tests/indexer
-              ruff format --no-cache --check src/gotg tests/conftest.py tests/service tests/indexer
-              touch $out
-            '';
-      });
+      # One file per check, under nix/checks — see the comment there.
+      checks = forAllSystems (
+        pkgs:
+        import ./nix/checks {
+          inherit pkgs;
+          packages = self.packages.${pkgs.stdenv.hostPlatform.system};
+          py = pythonSets.${pkgs.stdenv.hostPlatform.system};
+        }
+      );
 
       formatter = forAllSystems (pkgs: pkgs.nixfmt-tree);
     };
