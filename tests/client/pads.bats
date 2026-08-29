@@ -25,6 +25,9 @@ setup() {
         "lefttrigger":{"type":"axis","index":2,"min":-32768,"max":32767},
         "leftx":{"type":"axis","index":0,"min":-32768,"max":32767},
         "lefty":{"type":"axis","index":1,"min":-32768,"max":32767}}'
+  # The same pad with a third face button, which the Steam Controller mapping
+  # above does not carry and the Mega Drive's A/B/C needs.
+  MAP_ABC="$(jq -c '. + {"x":{"type":"button","index":2}}' <<<"$MAP")"
 }
 
 @test "a button becomes group 3 and its raw index" {
@@ -592,4 +595,41 @@ BML
   ares_heal_audio env-n64
   grep -q "^  Driver: OpenGL 3.2$" "$file"
   grep -q "^  Driver: PulseAudio$" "$file"
+}
+
+@test "the Mega Drive binds the pad ares actually connects, not the one beside it" {
+  # ares writes both blocks for this console but connects the Control Pad —
+  # mega-drive.cpp allocates "Control Pad" for both ports. Bindings written to
+  # Fighting.Pad would be well-formed, sit in the file ares reads, and do
+  # nothing at all, which is the one failure here that looks like success.
+  cat >"$TEST_TMP/settings.bml" <<'BML'
+MegaDrive
+  Input
+    Controller.Port.1
+      Control.Pad
+        Up: ;;
+        A: ;;
+      Fighting.Pad
+        Up: ;;
+        A: ;;
+BML
+
+  pads_ares_rewrite "$TEST_TMP/settings.bml" MegaDrive Controller.Port.1 Control.Pad \
+    "$(jq -nc '{Up: "GUID/0/1/1/Lo;;", A: "GUID/0/3/2;;"}')"
+
+  # Both bindings landed, and the Fighting.Pad block below is untouched.
+  run grep -c "GUID" "$TEST_TMP/settings.bml"
+  [ "$output" = "2" ]
+  run sed -n '/Fighting.Pad/,$p' "$TEST_TMP/settings.bml"
+  [[ "$output" != *GUID* ]]
+}
+
+@test "the shipped table sends the Mega Drive's three buttons to three inputs" {
+  # A, B and C are a row on the real pad, so they must not collapse onto one
+  # SDL element — a table typo there is invisible until someone cannot jump.
+  run pads_ares_bindings MegaDrive "$ID" 0 "$MAP_ABC"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.A' <<<"$output")" = "$ID/0/3/2;;" ]
+  [ "$(jq -r '.B' <<<"$output")" = "$ID/0/3/0;;" ]
+  [ "$(jq -r '.C' <<<"$output")" = "$ID/0/3/1;;" ]
 }

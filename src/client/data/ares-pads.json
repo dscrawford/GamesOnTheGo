@@ -136,5 +136,19 @@
       "Select": "back",
       "Start": "start"
     }
+  },
+
+  "MegaDrive": {
+    "layout": { "container": "Controller.Port", "pad": "Control.Pad", "players": 2 },
+    "buttons": {
+      "Up": ["dpup", "lefty-"],
+      "Down": ["dpdown", "lefty+"],
+      "Left": ["dpleft", "leftx-"],
+      "Right": ["dpright", "leftx+"],
+      "A": "x",
+      "B": "a",
+      "C": "b",
+      "Start": "start"
+    }
   }
 }

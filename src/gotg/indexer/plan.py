@@ -23,6 +23,7 @@ DAT_DIR_PLATFORM = {
     "Nintendo - Nintendo Entertainment System (Headered)": ("nes", "no_intro_set"),
     # NES aftermarket/homebrew set is excluded by decision (2026-07-26).
     "Nintendo - Nintendo Entertainment System (Headered) (Aftermarket)": ("nes", "excluded"),
+    "Sega - Mega Drive - Genesis": ("genesis", "no_intro_set"),
 }
 
 # Single-file extension -> platform (for loose ROM torrents).
@@ -30,6 +31,9 @@ EXT_PLATFORM = {
     "z64": "n64", "n64": "n64", "v64": "n64",
     "sfc": "snes", "smc": "snes",
     "nes": "nes",
+    # ares' mia also opens .bin for this console, but .bin is a raw disc track
+    # on half a dozen others — it is deliberately not mapped. See rules.yaml.
+    "md": "genesis", "gen": "genesis",
     "nsp": "switch", "xci": "switch",
     "rvz": "gamecube", "gcm": "gamecube",
     "wua": "wiiu", "wux": "wiiu",

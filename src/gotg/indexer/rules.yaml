@@ -45,6 +45,13 @@ dat_dirs:
   "Nintendo - Nintendo Entertainment System (Headered) (Aftermarket)":
     platform: nes
     handler: excluded
+  # No-Intro names the one set for both regions, which is why the slug has to
+  # pick a side; `genesis` reads better in an id than `megadrive`. The console
+  # itself is a Mega Drive everywhere it matters — that is the name ares takes
+  # and the name it files saves under (see env/genesis.nix).
+  "Sega - Mega Drive - Genesis":
+    platform: genesis
+    handler: no_intro_set
 
 # Single-file extension -> platform, for loose ROM torrents.
 extensions:
@@ -71,6 +78,13 @@ extensions:
   gba: gba
   gbc: gbc
   gb: gb
+  # ares' mia opens {md, gen, bin} for the Mega Drive. `.bin` is left out on
+  # purpose: it is also a raw CD track on the Saturn, the PlayStation and the
+  # Mega CD itself, so mapping it here would file a disc image as a cartridge.
+  # A loose `.bin` stays unmapped and gets flagged for a human, which is the
+  # right outcome until a disc platform exists to claim it.
+  md: genesis
+  gen: genesis
 
 # The format each platform's emulator wants (IMPORTER_SPEC.md §5a). A platform
 # absent here is imported as it arrives, which is every platform so far.
