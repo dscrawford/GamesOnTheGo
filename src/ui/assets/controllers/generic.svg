@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A generic pad, and deliberately nobody's in particular.
+
+  This is the placeholder the diagram screen was built against: it exists so the
+  anchor pipeline and the leader-line layout could be finished and tested before
+  any real console art was drawn. A per-console file replaces it by being named
+  in controllers.py's TABLE and carrying the same anchor ids; nothing else has
+  to change.
+
+  Two rules a replacement has to keep:
+
+    - Every button carries an `anchor-<input>` circle on the anchors layer,
+      where <input> is the ares input name as ares-pads.json spells it. The
+      circles are what build-controllers.py reads; the artwork itself is never
+      parsed, so it can be drawn however it likes.
+    - The anchors have no stroke. A stroked shape has two different bounding
+      boxes — visual and geometric — and which one a tool reports is a question
+      nobody should have to ask.
+
+  Flat, unbranded line art on purpose: see docs/controller-diagram-research.md
+  for why that is the licence answer and the trademark answer at the same time.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="480" viewBox="0 0 800 480">
+  <g id="artwork" fill="none">
+    <!-- shell -->
+    <path d="M 232 118
+             L 568 118
+             q 78 0 104 62
+             l 84 196
+             q 22 52 -26 76
+             q -46 22 -82 -22
+             l -66 -80
+             q -18 -22 -48 -22
+             L 604 328
+             L 196 328
+             q -30 0 -48 22
+             l -66 80
+             q -36 44 -82 22
+             q -48 -24 -26 -76
+             l 84 -196
+             q 26 -62 104 -62 Z"
+          fill="#34343e" stroke="#8b8b9c" stroke-width="3" stroke-linejoin="round"/>
+
+    <!-- d-pad -->
+    <path d="M 218 196 h 34 v 34 h 34 v 34 h -34 v 34 h -34 v -34 h -34 v -34 h 34 Z"
+          fill="#484854" stroke="#9a9aad" stroke-width="2.5" stroke-linejoin="round"/>
+
+    <!-- face buttons -->
+    <circle cx="612" cy="247" r="21" fill="#484854" stroke="#9a9aad" stroke-width="2.5"/>
+    <circle cx="566" cy="293" r="21" fill="#484854" stroke="#9a9aad" stroke-width="2.5"/>
+    <circle cx="520" cy="247" r="21" fill="#484854" stroke="#9a9aad" stroke-width="2.5"/>
+    <circle cx="566" cy="201" r="21" fill="#484854" stroke="#9a9aad" stroke-width="2.5"/>
+
+    <!-- shoulders -->
+    <rect x="176" y="86" width="104" height="30" rx="15"
+          fill="#484854" stroke="#9a9aad" stroke-width="2.5"/>
+    <rect x="520" y="86" width="104" height="30" rx="15"
+          fill="#484854" stroke="#9a9aad" stroke-width="2.5"/>
+
+    <!-- centre buttons -->
+    <rect x="332" y="196" width="52" height="20" rx="10"
+          fill="#484854" stroke="#9a9aad" stroke-width="2.5"/>
+    <rect x="416" y="196" width="52" height="20" rx="10"
+          fill="#484854" stroke="#9a9aad" stroke-width="2.5"/>
+
+    <!-- sticks -->
+    <circle cx="330" cy="292" r="34" fill="#2b2b33" stroke="#9a9aad" stroke-width="2.5"/>
+    <circle cx="330" cy="292" r="21" fill="#4e4e5c" stroke="#a8a8bb" stroke-width="2"/>
+    <circle cx="470" cy="292" r="34" fill="#2b2b33" stroke="#9a9aad" stroke-width="2.5"/>
+    <circle cx="470" cy="292" r="21" fill="#4e4e5c" stroke="#a8a8bb" stroke-width="2"/>
+  </g>
+
+  <!-- The anchors. Invisible, unstroked, and the only thing the build reads. -->
+  <g id="anchors" fill="none" stroke="none">
+    <circle id="anchor-Up" cx="235" cy="200" r="6"/>
+    <circle id="anchor-Down" cx="235" cy="294" r="6"/>
+    <circle id="anchor-Left" cx="188" cy="247" r="6"/>
+    <circle id="anchor-Right" cx="282" cy="247" r="6"/>
+
+    <circle id="anchor-A" cx="612" cy="247" r="6"/>
+    <circle id="anchor-B" cx="566" cy="293" r="6"/>
+    <circle id="anchor-Y" cx="520" cy="247" r="6"/>
+    <circle id="anchor-X" cx="566" cy="201" r="6"/>
+    <circle id="anchor-C" cx="640" cy="290" r="6"/>
+    <circle id="anchor-Z" cx="640" cy="204" r="6"/>
+
+    <circle id="anchor-L" cx="228" cy="101" r="6"/>
+    <circle id="anchor-R" cx="572" cy="101" r="6"/>
+
+    <circle id="anchor-Select" cx="358" cy="206" r="6"/>
+    <circle id="anchor-Start" cx="442" cy="206" r="6"/>
+    <circle id="anchor-Mode" cx="400" cy="240" r="6"/>
+  </g>
+</svg>

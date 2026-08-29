@@ -15,6 +15,8 @@ import pygame
 from .art import ArtStore
 from .browser import Browser
 from .catalog import Game, Library
+from .controllers import assets_dir
+from .controllers import draw as draw_controllers
 from .fetch import Loader
 from .grid import Grid
 from .layout import grid, tile_at
@@ -233,6 +235,11 @@ def run(library: Library) -> tuple[Game, str] | None:
     chosen: tuple[Game, str] | None = None
     typing: str | None = None
     menu: Menu | None = None
+    # Which platform's bindings are being looked at, or None for the grid.
+    # A screen rather than an overlay: it is a page of reference, not an
+    # action, and nothing underneath it should keep moving.
+    controllers: str | None = None
+    controller_art: dict = {}
     # The loader phase: a verb that needs work spawns the client and the grid
     # gives way to its output until it finishes, fails, or is cancelled.
     preparer: Preparer | None = None
@@ -278,6 +285,15 @@ def run(library: Library) -> tuple[Game, str] | None:
                             preparer.cancel()
                         preparer = None
                         prepare_failed = False
+                    continue
+
+                # Same for the controller diagram: it is a whole screen, so
+                # the only input it takes is the way back.
+                if controllers is not None:
+                    if (event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_b, pygame.K_c)) or (
+                        event.type == pygame.JOYBUTTONDOWN and event.button == 1
+                    ):
+                        controllers = None
                     continue
 
                 # While the menu is open it owns the input: the grid must
@@ -342,6 +358,12 @@ def run(library: Library) -> tuple[Game, str] | None:
                         running = False
                     elif event.key in (pygame.K_SLASH, pygame.K_f):
                         typing = browser.search
+                    elif event.key == pygame.K_c:
+                        # The selected game names the platform; the diagram is
+                        # per-platform, because that is the grain the bindings
+                        # are written at.
+                        if state.game is not None:
+                            controllers = state.game.platform
                     elif event.key == pygame.K_TAB:
                         # Tab walks platforms, shift-Tab walks regions — one
                         # key for both switches. Backwards lives on R/shift-R.
@@ -420,6 +442,8 @@ def run(library: Library) -> tuple[Game, str] | None:
                     prepare_failed = True
             if preparer is not None:
                 draw_prepare(screen, font_at, preparer.game, preparer.tail(28), prepare_failed)
+            elif controllers is not None:
+                draw_controllers(screen, assets_dir(), controllers, font_at, controller_art)
             else:
                 # Whatever the workers finished since the last frame stops being a
                 # placeholder now. Only the page on screen is ever asked for.

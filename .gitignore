@@ -20,3 +20,6 @@ __pycache__/
 .swarm/
 ruvector.db
 .claude-flow/
+
+# Built by src/ui/build-controllers.py at build time.
+src/ui/assets/built/
