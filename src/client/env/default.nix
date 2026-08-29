@@ -37,7 +37,16 @@ let
     "steps"
   ] (nixNames ./.);
 
-  baseFor = platform: import (./. + "/${platform}.nix") { inherit pkgs lib helpers gotgPkgs; };
+  baseFor =
+    platform:
+    import (./. + "/${platform}.nix") {
+      inherit
+        pkgs
+        lib
+        helpers
+        gotgPkgs
+        ;
+    };
 
   gamesFor =
     platform:
@@ -93,9 +102,7 @@ let
   # the Harkinian ports' — have nothing to narrow and are left alone.
   scopeLegacyToGame =
     id: paths:
-    map (
-      entry: entry // { from = lib.replaceStrings [ "/*." ] [ "/${id}." ] entry.from; }
-    ) paths;
+    map (entry: entry // { from = lib.replaceStrings [ "/*." ] [ "/${id}." ] entry.from; }) paths;
 
   gameEnv =
     platform: fileName:
@@ -109,11 +116,29 @@ let
       platformBase = baseFor platform;
       base =
         if variant != null && builtins.pathExists plainFile then
-          merge platformBase (import plainFile { inherit pkgs lib helpers gotgPkgs; base = platformBase; })
+          merge platformBase (
+            import plainFile {
+              inherit
+                pkgs
+                lib
+                helpers
+                gotgPkgs
+                ;
+              base = platformBase;
+            }
+          )
         else
           platformBase;
 
-      patch = import (./games + "/${platform}/${fileName}.nix") { inherit pkgs lib base helpers gotgPkgs; };
+      patch = import (./games + "/${platform}/${fileName}.nix") {
+        inherit
+          pkgs
+          lib
+          base
+          helpers
+          gotgPkgs
+          ;
+      };
       merged = merge base patch;
     in
     mkEnv (

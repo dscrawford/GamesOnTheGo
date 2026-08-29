@@ -136,23 +136,32 @@ let
       isWild = s: builtins.match ".*[*?[].*" s != null;
       # take-while, by fold: the pinned nixpkgs has no lib.lists.takeWhile.
       static =
-        (lib.foldl' (
-          acc: s:
-          if acc.stop || isWild s then
-            acc // { stop = true; }
-          else
-            {
-              stop = false;
-              segs = acc.segs ++ [ s ];
-            }
-        ) { stop = false; segs = [ ]; } segments).segs;
+        (lib.foldl'
+          (
+            acc: s:
+            if acc.stop || isWild s then
+              acc // { stop = true; }
+            else
+              {
+                stop = false;
+                segs = acc.segs ++ [ s ];
+              }
+          )
+          {
+            stop = false;
+            segs = [ ];
+          }
+          segments
+        ).segs;
       dirs = if lib.length static == lib.length segments then lib.init segments else static;
     in
     lib.concatStringsSep "/" dirs;
 
   savesDirs = lib.unique (lib.filter (d: d != "") (map savesDirPrefix saves));
 
-  seedSavesDirs = lib.concatMapStringsSep "\n" (d: ''mkdir -p "$state"/${lib.escapeShellArg d}'') savesDirs;
+  seedSavesDirs = lib.concatMapStringsSep "\n" (
+    d: ''mkdir -p "$state"/${lib.escapeShellArg d}''
+  ) savesDirs;
 
   # Hints every emulator here needs, merged *under* an environment's own env so
   # that a platform can still override one.
@@ -216,73 +225,73 @@ let
   app = pkgs.writeShellApplication {
     name = "gotg-play";
     runtimeInputs = [ pkgs.coreutils ] ++ path;
-  text = ''
-    # usage: gotg-play [rom] [extra emulator arguments]
-    #
-    # `gotg play` passes the ROM it resolved from the catalog; running this
-    # straight out of the store takes the same argument, which is most of the
-    # point of building it this way.
-    target="''${1:-''${GOTG_TARGET:-}}"
-    if [ "$#" -gt 0 ]; then shift; fi
-    if [ -z "$target" ]; then
-      echo "usage: gotg-play <rom>" >&2
-      exit 1
-    fi
+    text = ''
+      # usage: gotg-play [rom] [extra emulator arguments]
+      #
+      # `gotg play` passes the ROM it resolved from the catalog; running this
+      # straight out of the store takes the same argument, which is most of the
+      # point of building it this way.
+      target="''${1:-''${GOTG_TARGET:-}}"
+      if [ "$#" -gt 0 ]; then shift; fi
+      if [ -z "$target" ]; then
+        echo "usage: gotg-play <rom>" >&2
+        exit 1
+      fi
 
-    # Part of the contract whether or not this environment refers to it.
-    # shellcheck disable=SC2034
-    install="''${GOTG_INSTALL:-$target}"
+      # Part of the contract whether or not this environment refers to it.
+      # shellcheck disable=SC2034
+      install="''${GOTG_INSTALL:-$target}"
 
-    state="''${GOTG_ENV_STATE:-''${XDG_STATE_HOME:-$HOME/.local/state}/gotg/env/${name}}"
-    mkdir -p "$state"
-    ${seedSavesDirs}
+      state="''${GOTG_ENV_STATE:-''${XDG_STATE_HOME:-$HOME/.local/state}/gotg/env/${name}}"
+      mkdir -p "$state"
+      ${seedSavesDirs}
 
-    # The player's own configuration directory, captured *before* isolation
-    # moves XDG_CONFIG_HOME under {state}. Preferences that belong to the person
-    # rather than to the environment are read from here, so one setting can
-    # apply across every environment without being baked into any of them.
-    export GOTG_USER_CONFIG="''${GOTG_USER_CONFIG:-''${XDG_CONFIG_HOME:-$HOME/.config}/gotg}"
-    ${lib.optionalString isolate ''
-      export XDG_CONFIG_HOME="$state/config"
-      export XDG_DATA_HOME="$state/data"
-      mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
-    ''}
-    ${seedConfig}
-    ${exports}
-    ${foreignGl}
-    # Full screen belongs to *how a game was started*, not to the game.
-    #
-    # Steam gives a launcher no terminal — both streams land in a log file, the
-    # same test color.sh uses to decide there is nobody to colour output for —
-    # and somebody launching that way is on a sofa or a handheld and wants the
-    # game and nothing else. A terminal means a person at a desk with other
-    # windows open, and taking the whole desktop is rude at best. On a
-    # multi-monitor desktop it is worse than rude: ares spans every screen and
-    # draws on none of them.
-    #
-    # GOTG_FULLSCREEN forces it either way, and `gotg play <id> --fullscreen`
-    # still works because runtime arguments are appended after these.
-    #
-    # SC2034 is disabled on both statements: the variable is consumed through
-    # the {fullscreen} placeholder or a preLaunch *when the environment names
-    # it*, and a port that owns its display — the Harkinian games, sm64coopdx —
-    # has no flag to substitute, so in its launcher it really is unread. The
-    # build runs the linter, so without the directives every such environment
-    # fails to build at all. Found by a Master Quest launch on somebody else's
-    # machine. (And no comment line here may begin with the linter's own name,
-    # which it reads as a directive and refuses to parse — found the same way.)
-    # shellcheck disable=SC2034
-    gotg_fullscreen=""
-    # shellcheck disable=SC2034
-    case "''${GOTG_FULLSCREEN:-}" in
-      1 | true | yes | on) gotg_fullscreen=${lib.escapeShellArg fullscreenFlag} ;;
-      0 | false | no | off) gotg_fullscreen="" ;;
-      *) [ -t 1 ] || gotg_fullscreen=${lib.escapeShellArg fullscreenFlag} ;;
-    esac
+      # The player's own configuration directory, captured *before* isolation
+      # moves XDG_CONFIG_HOME under {state}. Preferences that belong to the person
+      # rather than to the environment are read from here, so one setting can
+      # apply across every environment without being baked into any of them.
+      export GOTG_USER_CONFIG="''${GOTG_USER_CONFIG:-''${XDG_CONFIG_HOME:-$HOME/.config}/gotg}"
+      ${lib.optionalString isolate ''
+        export XDG_CONFIG_HOME="$state/config"
+        export XDG_DATA_HOME="$state/data"
+        mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+      ''}
+      ${seedConfig}
+      ${exports}
+      ${foreignGl}
+      # Full screen belongs to *how a game was started*, not to the game.
+      #
+      # Steam gives a launcher no terminal — both streams land in a log file, the
+      # same test color.sh uses to decide there is nobody to colour output for —
+      # and somebody launching that way is on a sofa or a handheld and wants the
+      # game and nothing else. A terminal means a person at a desk with other
+      # windows open, and taking the whole desktop is rude at best. On a
+      # multi-monitor desktop it is worse than rude: ares spans every screen and
+      # draws on none of them.
+      #
+      # GOTG_FULLSCREEN forces it either way, and `gotg play <id> --fullscreen`
+      # still works because runtime arguments are appended after these.
+      #
+      # SC2034 is disabled on both statements: the variable is consumed through
+      # the {fullscreen} placeholder or a preLaunch *when the environment names
+      # it*, and a port that owns its display — the Harkinian games, sm64coopdx —
+      # has no flag to substitute, so in its launcher it really is unread. The
+      # build runs the linter, so without the directives every such environment
+      # fails to build at all. Found by a Master Quest launch on somebody else's
+      # machine. (And no comment line here may begin with the linter's own name,
+      # which it reads as a directive and refuses to parse — found the same way.)
+      # shellcheck disable=SC2034
+      gotg_fullscreen=""
+      # shellcheck disable=SC2034
+      case "''${GOTG_FULLSCREEN:-}" in
+        1 | true | yes | on) gotg_fullscreen=${lib.escapeShellArg fullscreenFlag} ;;
+        0 | false | no | off) gotg_fullscreen="" ;;
+        *) [ -t 1 ] || gotg_fullscreen=${lib.escapeShellArg fullscreenFlag} ;;
+      esac
 
-    ${preLaunch}
-    exec ${exe} ${lib.concatMapStringsSep " " render args} "$@"
-  '';
+      ${preLaunch}
+      exec ${exe} ${lib.concatMapStringsSep " " render args} "$@"
+    '';
   };
   # Every tool any step in any pipeline names, deduplicated. Two steps naming
   # one variable must mean the same binary — asserted, not assumed, because a
@@ -360,14 +369,10 @@ pkgs.runCommand "gotg-env-${name}"
     ln -s ${app}/bin/gotg-play $out/bin/gotg-play
     cp ${pkgs.writeText "saves.json" (builtins.toJSON manifest)} $out/share/gotg/saves.json
     ${lib.optionalString (keys != null) ''
-      cp ${
-        pkgs.writeText "keys.json" (builtins.toJSON keys)
-      } $out/share/gotg/keys.json
+      cp ${pkgs.writeText "keys.json" (builtins.toJSON keys)} $out/share/gotg/keys.json
     ''}
     ${lib.optionalString (firmware != null) ''
-      cp ${
-        pkgs.writeText "firmware.json" (builtins.toJSON firmware)
-      } $out/share/gotg/firmware.json
+      cp ${pkgs.writeText "firmware.json" (builtins.toJSON firmware)} $out/share/gotg/firmware.json
     ''}
     ${lib.optionalString (recipes != { }) ''
       ln -s ${recipeApp.drv}/bin/gotg-recipe $out/bin/gotg-recipe

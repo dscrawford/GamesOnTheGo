@@ -27,7 +27,7 @@ stdenv.mkDerivation (finalAttrs: {
 
   buildInputs = [
     zlib
-    libpng   # lib-image2.c: the tools convert Nintendo image formats too
+    libpng # lib-image2.c: the tools convert Nintendo image formats too
     ncurses
   ];
 
