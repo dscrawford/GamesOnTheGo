@@ -91,6 +91,21 @@
         "Audio/Frequency=48000"
         "--setting"
         "Audio/Latency=60"
+
+        # No "now load a second ROM" dialog. A launch from here always names
+        # exactly one game, and a modal file browser in front of it is
+        # unanswerable from a sofa — there is no keyboard and the pad does not
+        # drive a file dialog.
+        #
+        # Not hypothetical, and not only the 64DD. nintendo-64.cpp gates two
+        # prompts on this: the 64DD disk, and a Transfer Pak asking for a Game
+        # Boy cartridge for any cart whose database entry sets tpak. That is 19
+        # games in ares' own table, ten of which are in this library — Pokémon
+        # Stadium 1 and 2, Perfect Dark, Mario Golf, Mario Tennis among them.
+        #
+        # Safe for the rest: the flag only suppresses requests for *additional*
+        # media, never the game named on the command line.
+        "--no-file-prompt"
       ]
       ++ lib.optionals (aresSystem != null) [
         "--system"
