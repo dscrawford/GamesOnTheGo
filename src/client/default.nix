@@ -46,10 +46,14 @@ let
     # `gotg install` builds emulators; launching never evaluates nix.
     nix
   ];
+
+  # Bound here so the installPhase can substitute the same string the
+  # derivation reports, and `gotg version` cannot drift from `nix eval`.
+  version = "0.1.0";
 in
 stdenvNoCC.mkDerivation {
   pname = "gotg";
-  version = "0.1.0";
+  inherit version;
 
   passthru = { inherit runtimeInputs; };
 
@@ -68,6 +72,12 @@ stdenvNoCC.mkDerivation {
     install -Dm644 completions/gotg.bash \
       $out/share/bash-completion/completions/gotg
     install -Dm755 bin/gotg $out/share/gotg/bin/gotg
+    # `gotg version` reports this. Substituted rather than written into the
+    # script so there is one place to bump, and --replace-fail so that place
+    # going missing is a build error rather than a CLI that reports the
+    # literal "@version@".
+    substituteInPlace $out/share/gotg/bin/gotg \
+      --replace-fail '@version@' '${version}'
 
     makeWrapper $out/share/gotg/bin/gotg $out/bin/gotg \
       --set GOTG_ROOT $out/share/gotg \

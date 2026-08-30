@@ -6,6 +6,10 @@ set -euo pipefail
 
 # Resolve the library next to this script so the CLI works both from a checkout
 # and from the nix store.
+# Filled in by the build; a checkout has none and says so rather than claiming
+# a number nobody set.
+GOTG_VERSION="@version@"
+
 GOTG_ROOT="${GOTG_ROOT:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)}"
 GOTG_LIB="$GOTG_ROOT/lib"
 GOTG_DATA="${GOTG_DATA:-$GOTG_ROOT/data}"
@@ -60,6 +64,19 @@ source "$GOTG_LIB/cmd-admin.sh"
 # shellcheck source=lib/cmd-complete.sh
 source "$GOTG_LIB/cmd-complete.sh"
 
+# The store path as well as the number, because on this machine the number is
+# the less useful half: every build of an unchanged tree reports 0.1.0, and the
+# path is what says *which* one is on PATH. From a checkout it is the working
+# copy, which is the same answer to the same question.
+cmd_version() {
+  if [[ "$GOTG_VERSION" == @*@ ]]; then
+    printf 'gotg (unbuilt checkout)\n'
+  else
+    printf 'gotg %s\n' "$GOTG_VERSION"
+  fi
+  printf '%s\n' "$GOTG_ROOT"
+}
+
 usage() {
   cat <<'EOF'
 usage: gotg <command> [args]
@@ -81,6 +98,7 @@ usage: gotg <command> [args]
                      open that environment's own emulator settings
   steam <command>    add / remove / list non-Steam games (steam help)
   sync               rebuild gotg and the environment GC roots after a git pull
+  version            which gotg this is, and where it was installed from
 
 Ids look like usa.legend_of_zelda_majoras_mask. When the same id exists on more
 than one platform, qualify it: n64/usa.bugs_life
@@ -148,6 +166,7 @@ main() {
     configure) cmd_configure "$@" ;;
     steam) cmd_steam "$@" ;;
     admin) cmd_admin "$@" ;;
+    version | --version | -V) cmd_version ;;
     # Not in the usage: this is what shell completion calls.
     complete) cmd_complete "$@" ;;
     sync) cmd_sync "$@" ;;
