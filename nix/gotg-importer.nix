@@ -14,11 +14,15 @@
   coreutils,
 }:
 
-runCommand "gotg-importer-0.5.1"
+runCommand "gotg-importer-0.5.2"
   {
     nativeBuildInputs = [ makeWrapper ];
     inherit venv;
-    passthru.version = "0.5.1";
+    # Bumped for the Mega Drive / Genesis mapping. The image tag comes from
+    # here, so leaving it would have pushed over the tag the cluster is
+    # currently running — the CronJob pins a digest, so nothing would have
+    # broken, but the way back to the previous build would have been gone.
+    passthru.version = "0.5.2";
     meta = {
       description = "Indexes completed game torrents into the GOTG catalog and /Games";
       mainProgram = "gotg-importer";
