@@ -55,6 +55,42 @@
         "{fullscreen}"
         "--setting"
         "Paths/Saves={state}/saves/"
+
+        # Audio latency, and it is not a preference — it is the difference
+        # between sound and crackling.
+        #
+        # ruby/audio/sdl.cpp sizes its buffer as (latency * frequency) / 1000,
+        # and ares v148 starts a fresh environment with latency 0. It never
+        # recovers: initialize() writes the negotiated rate back into
+        # `frequency` but never into `latency`, so Audio::latency() keeps
+        # returning 0, hasLatency(0) stays false, and audioLatencyUpdate()
+        # dutifully sets the setting to 0 again on every launch.
+        #
+        # A zero buffer is not silence, which is what makes it hard to place.
+        # output() blocks while `bytesRemaining > _bufferSize`, so with a
+        # buffer of 0 it waits for the device queue to drain *completely*
+        # before writing each sample — the card is starved by construction and
+        # the result is a permanent underrun.
+        #
+        # 60 has to be one of the values hasLatencies() lists — {10, 20, 40,
+        # 60, 80, 100} — because a value outside it is rejected and replaced by
+        # the same broken 0. Measured through PipeWire: without this the ares
+        # node runs at quantum 960/48000, with it at 2880/48000, which is
+        # exactly the (60 * 48000) / 1000 the source asks for.
+        #
+        # Frequency is pinned alongside it only so the buffer is right on the
+        # very first initialize() rather than on the re-init a moment later;
+        # that one does self-correct, since spec.freq is written back.
+        #
+        # Every ares platform, not just the one it was noticed on. The bug is
+        # in ares, so it applies to all of them — the older environments here
+        # escape it only because they were first run by an ares that still
+        # negotiated a real latency, and would hit it the moment their state
+        # was rebuilt.
+        "--setting"
+        "Audio/Frequency=48000"
+        "--setting"
+        "Audio/Latency=60"
       ]
       ++ lib.optionals (aresSystem != null) [
         "--system"
