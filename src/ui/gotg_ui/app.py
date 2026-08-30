@@ -249,8 +249,12 @@ def run(library: Library) -> tuple[Game, str] | None:
     running = True
 
     def pick(game: Game | None, verb: str = "play") -> None:
-        nonlocal chosen, running, preparer, after_prepare
+        nonlocal chosen, running, preparer, after_prepare, controllers
         if game is None:
+            return
+        if verb == "controllers":
+            # A screen in this program, not a verb for the client.
+            controllers = game.platform
             return
         if verb == "steam-add":
             # Not an exec: the shortcut is written, the grid comes back.

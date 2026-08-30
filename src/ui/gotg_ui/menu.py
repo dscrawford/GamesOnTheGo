@@ -12,10 +12,15 @@ from .catalog import Game
 from .layout import COLUMNS
 
 # Label and verb. The verb is what reaches the client — `gotg <verb>` — except
-# steam-add, which is two words and mapped where the command is built.
+# steam-add, which is two words and mapped where the command is built, and
+# controllers, which is a screen in this program and never leaves it.
+#
+# The controller diagram is also on C, but a handheld has no keyboard and this
+# is the only way to it there — which is the case it was written for.
 ACTIONS: list[tuple[str, str]] = [
     ("Play Game", "play"),
     ("Configure", "configure"),
+    ("Controllers", "controllers"),
     ("Add to Steam", "steam-add"),
 ]
 

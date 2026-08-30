@@ -17,8 +17,8 @@ def game(id="usa.zelda", platform="n64"):
     return Game(id=id, platform=platform, title="A Game", handler="single_file")
 
 
-def test_the_three_verbs_in_order():
-    assert [label for label, _ in ACTIONS] == ["Play Game", "Configure", "Add to Steam"]
+def test_the_verbs_in_order():
+    assert [label for label, _ in ACTIONS] == ["Play Game", "Configure", "Controllers", "Add to Steam"]
 
 
 def test_opening_holds_the_game_and_starts_on_play():
@@ -32,6 +32,8 @@ def test_moving_walks_and_clamps():
     m = Menu(game(), tile_index=0)
     m.move(1)
     assert m.action == "configure"
+    m.move(1)
+    assert m.action == "controllers"
     m.move(1)
     assert m.action == "steam-add"
     m.move(1)
@@ -53,8 +55,8 @@ def test_the_panel_lands_on_the_open_side_of_the_tile(tile_index, side):
 
 def test_selecting_an_item_by_index_is_refused_off_the_list():
     m = Menu(game(), tile_index=0)
-    assert m.select(2) is True
+    assert m.select(3) is True
     assert m.action == "steam-add"
-    assert m.select(3) is False
+    assert m.select(4) is False
     assert m.action == "steam-add", "a refused select leaves the cursor"
     assert m.select(-1) is False

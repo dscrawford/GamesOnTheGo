@@ -28,16 +28,21 @@ LEADER = (108, 108, 122)
 LEADER_LIT = (120, 180, 240)
 DOT = (150, 150, 162)
 
-# Which SVG stands for which console. Every console points at the placeholder
-# for now; a real drawing arrives by being named here, and nothing else moves.
+# Which drawing stands for which console. A console absent here falls back to
+# the generic pad, which is what a new platform gets until someone draws it.
+# See assets/controllers/README.md for where the artwork came from and how to
+# add another.
 TABLE = {
-    "SuperFamicom": "generic",
-    "Famicom": "generic",
-    "Nintendo64": "generic",
-    "GameBoy": "generic",
-    "GameBoyColor": "generic",
-    "GameBoyAdvance": "generic",
-    "MegaDrive": "generic",
+    "SuperFamicom": "snes",
+    "Famicom": "nes",
+    "Nintendo64": "n64",
+    "GameBoy": "gameboy",
+    # The Color shares the Pocket's shape and its whole button set. A drawing
+    # of its own would differ only in the shell colour, which the diagram does
+    # not depend on.
+    "GameBoyColor": "gameboy",
+    "GameBoyAdvance": "gba",
+    "MegaDrive": "megadrive",
 }
 FALLBACK = "generic"
 
@@ -186,14 +191,16 @@ def draw(screen, assets: pathlib.Path, platform: str, font_at, cache: dict, high
         ((width - font_at(24).size(line)[0]) // 2, int(height * 0.93)),
     )
 
-    # Said out loud rather than left to be noticed. While every console shares
-    # one placeholder pad there are bindings it has nowhere to point at — the
-    # N64's C buttons, a stick's axes — and a diagram that quietly showed ten
-    # of twenty-two would read as a complete answer. This is also the to-do:
-    # the number goes to zero when that console gets its own drawing.
+    # Said out loud rather than left to be noticed: a diagram that quietly drew
+    # twenty-one of twenty-two would read as a complete answer.
+    #
+    # Not always a gap to close, either. Every pad here is drawn from the front,
+    # so the N64's Z sits under the grip and has nowhere to point at — it is
+    # bound, it works, and this line is the only place that says so. A console
+    # still on the generic pad has a larger number and that one *is* a to-do.
     missing = len(bindings) - len(anchors)
     if missing:
-        note = f"{missing} more bound, with nowhere on this placeholder pad to show them"
+        note = f"{missing} more bound, with nowhere on this drawing to point at"
         screen.blit(
             font_at(21).render(note, True, LEADER),
             ((width - font_at(21).size(note)[0]) // 2, int(height * 0.965)),

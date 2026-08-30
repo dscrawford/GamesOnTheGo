@@ -8,6 +8,14 @@ Research for a UI screen showing, per platform, a gamepad diagram with leader
 lines from each button to a label giving what it maps to — the bindings
 `gotg pads` already writes into ares' `settings.bml`.
 
+> **Superseded on the artwork question, 2026-08-29.** This report concluded the
+> art had to be drawn, having failed to open ES-DE's tree — it is listed under
+> "Unresolved" at the bottom. ES-DE ships MIT-licensed SVG bodies for the SNES,
+> NES, N64, GameCube and a three-button Mega Drive, with no gradients, filters
+> or text, which is better than anything below and better than drawing them.
+> They are vendored in `src/ui/assets/controllers/`; see the README there. The
+> pipeline and layout sections stand.
+
 ## Executive summary
 
 **The artwork does not exist and has to be drawn.** This is the load-bearing
