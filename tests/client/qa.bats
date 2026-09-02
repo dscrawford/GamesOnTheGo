@@ -140,6 +140,43 @@ make_rundir() {
   [ "$(jq .checks.controller.pass "$TEST_TMP/run/verdict.json")" = "false" ]
 }
 
+# --- process ancestry, which decides whose audio is the run's ---
+
+# The name in /proc/<pid>/stat is the process's own to choose and may hold
+# spaces, so ppid is not a field number. Reading it as one returned the tail of
+# the name instead — measured: `npm exec open-w` answered "open-w)" — the walk
+# failed, the emulator's audio was never moved onto the QA sink, and the run
+# graded silent. A copy of the shell under such a name reproduces it.
+@test "ancestry: a child whose name contains a space is still found" {
+  # The shell's own binary, not coreutils: coreutils is a multi-call binary
+  # that dispatches on argv[0] and refuses to run under any other name. The
+  # trailing `:` keeps bash from exec'ing straight into sleep, which would
+  # replace the name being tested.
+  cp "$(readlink -f "/proc/$BASHPID/exe")" "$TEST_TMP/a b"
+  chmod +x "$TEST_TMP/a b"
+  "$TEST_TMP/a b" -c 'sleep 20; :' &
+  local child=$! parent=$BASHPID
+  # Give it long enough to be in /proc under its new name.
+  sleep 0.5
+  run qa_pid_under "$child" "$parent"
+  kill "$child" 2>/dev/null || true
+  [ "$status" -eq 0 ]
+}
+
+@test "ancestry: a process is under its own parent, and not under a stranger" {
+  run qa_pid_under "$$" "$PPID"
+  [ "$status" -eq 0 ]
+  run qa_pid_under "$$" 99999999
+  [ "$status" -ne 0 ]
+}
+
+# A name can be chosen to look like a pid, so anything non-numeric ends the
+# walk rather than being followed.
+@test "ancestry: a non-numeric pid is refused" {
+  run qa_pid_under "a b 1" 1
+  [ "$status" -ne 0 ]
+}
+
 # --- the command ---
 
 @test "qa: no id is an error with a usage line" {

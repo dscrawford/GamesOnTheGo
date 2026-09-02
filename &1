@@ -1,2 +1,0 @@
-gotg: no client/bin/gotg under /tmp/gotg-fc7d1f0f
-      set GOTG_DEV_ROOT to your checkout, or use: nix run .#gotg

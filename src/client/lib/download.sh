@@ -268,6 +268,11 @@ _run_recipe() {
   local attr recipe
   attr="$(env_attr "$game")"
   recipe="$GOTG_ROOTS_DIR/$attr/bin/gotg-recipe"
+  # An environment that gains a recipe leaves every root built before it
+  # without one, and env_ensure only builds what is missing altogether — so the
+  # game would fail here on exactly the machines that already had it working.
+  # Rebuild once before believing the root, which is the trade install makes.
+  [[ -x "$recipe" ]] || env_refresh "$attr" || true
   [[ -x "$recipe" ]] ||
     die "$attr has no recipe for '$handler' built yet — run: gotg install $(manifest_field "$game" id)"
   jq -e --arg h "$handler" '.handlers | index($h)' \

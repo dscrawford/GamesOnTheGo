@@ -19,12 +19,15 @@ chmod 700 "$XDG_RUNTIME_DIR"
 # run 401s asking the catalog for something with no credentials. Copying breaks
 # the symlink and lets the real mode show.
 config_src="${GOTG_QA_CONFIG_SRC:-/run/gotg-config}"
-if [[ -d "$config_src" ]]; then
+if [[ -d "$config_src" ]] && compgen -G "$config_src/*" >/dev/null; then
   config_dir="$HOME/.config/gotg"
-  mkdir -p "$config_dir"
-  cp -fL "$config_src"/* "$config_dir"/
-  chmod 700 "$config_dir"
-  chmod 600 "$config_dir"/*
+  # Under a umask, not chmod after: the token must never exist readable, even
+  # for the moment between the copy and the tightening.
+  (
+    umask 077
+    mkdir -p "$config_dir"
+    cp -fL "$config_src"/* "$config_dir"/
+  )
 fi
 
 # Adopt the environments baked into the image. A pod's nix store is a

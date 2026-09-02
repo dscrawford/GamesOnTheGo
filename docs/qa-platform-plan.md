@@ -211,6 +211,16 @@ software renderer.
 - Exit criteria: `kubectl create job qa-usa-majoras-mask` produces a correct
   verdict + watchable artifacts.
 
+### Deferred: image size
+The image carries nixpkgs' stock `mesa`, which builds all 24 gallium and 12
+vulkan drivers so it can serve every GPU. This image only ever loads
+llvmpipe/lavapipe — the CPU tier's renderer and the GPU tier's fallback — so
+`mesa.override { galliumDrivers = [ "llvmpipe" ]; vulkanDrivers = [ "swrast" ]; }`
+would drop most of a 273MB dependency out of a ~934MB image. Not taken yet:
+it means building mesa from source (no cache hit), a mesa unique to this
+image on every node, and that rebuild again at each nixpkgs bump. Worth doing
+when image pull time actually hurts, not before.
+
 ### Phase 3 — the sweep
 - A small dispatcher (CronJob, same pattern as the indexer) walks the
   catalog and fans out Jobs: CPU tier wide across node1/2, GPU tier queued

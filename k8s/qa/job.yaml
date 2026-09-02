@@ -68,6 +68,11 @@ spec:
               mountPath: /dev/uinput
             - name: input
               mountPath: /dev/input
+              # The pad is created through /dev/uinput; this mount is only how
+              # SDL enumerates it. Read-only keeps the pod off the host's
+              # keystrokes, and keeps that intent recorded if the privileged
+              # flag above is ever narrowed to a device plugin.
+              readOnly: true
             # Big enough for a run's capture before it is written out; the
             # default 64M would truncate a minute of lossless video.
             - name: shm

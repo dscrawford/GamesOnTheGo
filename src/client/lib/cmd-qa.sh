@@ -98,11 +98,26 @@ qa_cleanup() {
 }
 
 # Is $1 a descendant of $2, by walking /proc ppids.
+#
+# ppid cannot be taken as a field number. Field two is the process name, it can
+# hold spaces and parentheses, and a name is the process's own to choose — so
+# everything up to the *last* ") " is pid and name, and ppid is what follows.
+# Taking $4 instead reads the tail of the name: measured here, `npm exec
+# open-w` answers "open-w)" and `mt76-tx phy1` answers "S". That fails the walk
+# and the emulator's audio is never moved onto the QA sink, which grades as a
+# silent run — the audio axis failing on a name it had no business reading.
+#
+# The numeric test is the other half: a name can be chosen to look like a pid,
+# so anything that is not a number ends the walk rather than being followed.
 qa_pid_under() {
-  local pid="$1" root="$2"
-  while [[ -n "$pid" && "$pid" != 0 && "$pid" != 1 ]]; do
+  local pid="$1" root="$2" stat rest
+  while [[ "$pid" =~ ^[0-9]+$ && "$pid" != 0 && "$pid" != 1 ]]; do
     [[ "$pid" == "$root" ]] && return 0
-    pid="$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null)" || return 1
+    read -r stat <"/proc/$pid/stat" 2>/dev/null || return 1
+    # What follows the last ") " is the state letter, then ppid.
+    rest="${stat##*') '}"
+    rest="${rest#* }"
+    pid="${rest%% *}"
   done
   return 1
 }
@@ -126,7 +141,8 @@ qa_audio_route() {
   # whole router on the spot.
   while :; do
     pactl list sink-inputs 2>/dev/null |
-      awk '/^Sink Input #/ {id=substr($3,2)} /application.process.id/ {gsub(/"/,"",$3); print id, $3}' |
+      awk '/^Sink Input #/ {id = substr($3, 2)}
+           /^[[:space:]]*application\.process\.id[[:space:]]*=/ {gsub(/"/, "", $3); print id, $3}' |
       while read -r input pid; do
         if qa_pid_under "$pid" "$session_pid"; then
           # Volume too: the stream arrives with whatever level the server

@@ -124,6 +124,9 @@ in
   # is the player's own — neither is worth carrying.
   saveExcludes = [
     ".config/DK64Recompiled/mods/**"
-    "rom/**"
+    # The ROM the launcher stored. Nothing in `saves` matches a .z64 today, so
+    # this guards a widening of that glob rather than a live path — a 32MB
+    # copyrighted ROM must never start syncing between machines.
+    ".config/DK64Recompiled/*.z64"
   ];
 }

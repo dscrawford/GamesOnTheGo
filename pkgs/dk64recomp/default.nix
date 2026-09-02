@@ -18,7 +18,14 @@
   SDL2,
   vulkan-loader,
   libGL,
-  xorg,
+  libx11,
+  libxext,
+  libsm,
+  libice,
+  libxrandr,
+  libxi,
+  libxcursor,
+  libxfixes,
   libxkbcommon,
   wayland,
   alsa-lib,
@@ -66,14 +73,14 @@ stdenv.mkDerivation (finalAttrs: {
     pipewire
     libpulseaudio
     udev
-    xorg.libX11
-    xorg.libXext
-    xorg.libSM
-    xorg.libICE
-    xorg.libXrandr
-    xorg.libXi
-    xorg.libXcursor
-    xorg.libXfixes
+    libx11
+    libxext
+    libsm
+    libice
+    libxrandr
+    libxi
+    libxcursor
+    libxfixes
   ];
 
   unpackPhase = ''
@@ -94,7 +101,7 @@ stdenv.mkDerivation (finalAttrs: {
     # to find a driver, which outside a NixOS session means being told.
     makeWrapper $out/share/dk64recomp/DK64Recompiled $out/bin/DK64Recompiled \
       --chdir $out/share/dk64recomp \
-      --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ vulkan-loader ]}
+      --suffix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ vulkan-loader ]}
     runHook postInstall
   '';
 
