@@ -49,12 +49,24 @@ cmd_play() {
     shift
   fi
 
+  play_prepare "$want" "$variant"
+
+  log "launching $(manifest_field "$PLAY_GAME" title) with $PLAY_ATTR"
+  exec "$(env_bin "$PLAY_ATTR")" "$PLAY_TARGET" "$@"
+}
+
+# Everything a launch needs short of running the emulator, shared by play and
+# qa. Leaves PLAY_GAME, PLAY_ATTR and PLAY_TARGET set, and the GOTG_* launch
+# variables exported.
+play_prepare() {
+  local want="$1" variant="${2:-}"
+
   # Prefer the cached catalog: a game already installed here must still launch
   # when the server is unreachable.
   manifest_cached || manifest_ensure
-  local game attr
-  game="$(manifest_find "$want")"
-  attr="$(env_attr "$game" "$variant")"
+  PLAY_GAME="$(manifest_find "$want")"
+  PLAY_ATTR="$(env_attr "$PLAY_GAME" "$variant")"
+  local game="$PLAY_GAME" attr="$PLAY_ATTR"
 
   # Before the download, not after. A missing emulator is the failure most likely
   # to need a person, and finding that out at the end of a 10 GB transfer helps
@@ -63,8 +75,8 @@ cmd_play() {
 
   download_game "$game"
 
-  local target install env_state
-  target="$(resolve_target "$game")"
+  local install env_state
+  PLAY_TARGET="$(resolve_target "$game")"
   install="$(game_installed_path "$game")" ||
     die "nothing on disk for $(manifest_field "$game" id) after download"
   env_state="$(env_state_dir "$attr")"
@@ -110,10 +122,7 @@ cmd_play() {
   # is told is which file to run, where that came from, and where to keep what
   # it writes — that last one from env_state_dir, so the CLI and the wrapper
   # agree on it rather than each computing their own.
-  export GOTG_TARGET="$target" GOTG_INSTALL="$install" GOTG_ENV_STATE="$env_state"
-
-  log "launching $(manifest_field "$game" title) with $attr"
-  exec "$(env_bin "$attr")" "$target" "$@"
+  export GOTG_TARGET="$PLAY_TARGET" GOTG_INSTALL="$install" GOTG_ENV_STATE="$env_state"
 }
 
 # Rebuild the GC roots after pulling a new version of the flake.

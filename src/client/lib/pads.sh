@@ -301,7 +301,9 @@ pads_ares_bindings() {
 # Its own file rather than a key in config.json: that one holds the server
 # password and is kept 0600, and which pad is player 1 is neither a secret nor
 # worth rewriting a credentials file over.
-pads_order_file() { printf '%s/controllers.json' "$GOTG_CONFIG_DIR"; }
+# Overridable so a QA run can seat its virtual pad first without touching the
+# order a person chose for this machine.
+pads_order_file() { printf '%s' "${GOTG_PADS_ORDER_FILE:-$GOTG_CONFIG_DIR/controllers.json}"; }
 
 # The pinned order, as identity/slot keys. Absent, unreadable and malformed all
 # mean the same thing — no preference — because a config file that cannot be

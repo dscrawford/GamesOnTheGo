@@ -35,6 +35,10 @@ source "$GOTG_LIB/env.sh"
 source "$GOTG_LIB/launcher.sh"
 # shellcheck source=lib/cmd-play.sh
 source "$GOTG_LIB/cmd-play.sh"
+# shellcheck source=lib/qa-analyze.sh
+source "$GOTG_LIB/qa-analyze.sh"
+# shellcheck source=lib/cmd-qa.sh
+source "$GOTG_LIB/cmd-qa.sh"
 # shellcheck source=lib/pads.sh
 source "$GOTG_LIB/pads.sh"
 # shellcheck source=lib/pads-dolphin.sh
@@ -92,6 +96,7 @@ usage: gotg <command> [args]
   download <id>      fetch a game without setting up a launcher
   install <id>       fetch it, build its environment, write a Steam launcher
   play <id> [variant] fetch and build whatever is missing, then launch
+  qa <id> [variant]  run it headless with a virtual pad and grade the recording
   saves <command>    move saves between machines (saves help for the rest)
   controllers <cmd>  what SDL sees, and where its inputs land
   configure <id> [variant]
@@ -161,6 +166,7 @@ main() {
     download | get) cmd_download "$@" ;;
     install) cmd_install "$@" ;;
     play | launch) cmd_play "$@" ;;
+    qa) cmd_qa "$@" ;;
     saves) cmd_saves "$@" ;;
     controllers) cmd_controllers "$@" ;;
     configure) cmd_configure "$@" ;;

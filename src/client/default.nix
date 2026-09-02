@@ -67,8 +67,9 @@ stdenvNoCC.mkDerivation {
     mkdir -p $out/share/gotg
     # env/ is shipped for its file names, not to be evaluated from here: the CLI
     # reads them to work out which flake attribute a game wants, without nix.
-    cp -r lib data templates env steam $out/share/gotg/
+    cp -r lib data templates env steam qa $out/share/gotg/
     chmod +x $out/share/gotg/steam/shortcuts.py
+    chmod +x $out/share/gotg/qa/session.sh $out/share/gotg/qa/pad.py
     install -Dm644 completions/gotg.bash \
       $out/share/bash-completion/completions/gotg
     install -Dm755 bin/gotg $out/share/gotg/bin/gotg

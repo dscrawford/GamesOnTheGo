@@ -20,6 +20,8 @@ pkgs.runCommand "check-client-tests"
       gawk
       diffutils
       util-linux # flock: firmware_ensure serializes on the platform cache
+      ffmpeg # qa.bats synthesizes its fixtures and runs the analyzers
+      imagemagick # qa.bats: the golden-frame phash comparison
       packages.gotg-proxy
     ];
     GOTG_BIN = pkgs.lib.getExe packages.gotg;

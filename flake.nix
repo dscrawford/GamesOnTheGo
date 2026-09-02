@@ -120,6 +120,11 @@
           # to guess which physical controller is which.
           gotg-pads = pkgs.callPackage ./src/client/gotg-pads { };
 
+          # What `gotg qa` runs a game inside: headless compositor, recorders,
+          # analyzers, and a python that can create uinput pads. Built on
+          # demand like the emulator environments.
+          qa-tools = pkgs.callPackage ./src/client/qa/tools.nix { };
+
           # Not in nixpkgs, though its sibling wiimms-iso-tools is. Needed to
           # open and rebuild the Yaz0 archives GameCube games keep their data in.
           wiimms-szs-tools = pkgs.callPackage ./pkgs/wiimms-szs-tools { };

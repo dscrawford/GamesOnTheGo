@@ -1,0 +1,151 @@
+# shellcheck shell=bash
+# Grading a QA run's captures: is there sound, is there picture, did the
+# scripted inputs visibly move anything. Everything here works on files a
+# session already wrote, so all of it is testable against synthesized media
+# with known defects — see tests/client/qa.bats.
+#
+# Every threshold is an environment variable with a default, because they are
+# guesses tuned against real captures, not derivations.
+
+# ffmpeg's detectors report to stderr as log lines; that text is the
+# interface. Two quirks matter and are handled here:
+#   - silencedetect closes an interval at EOF, freezedetect does not — a game
+#     frozen until the end emits only freeze_start, and the tail has to be
+#     closed against the clip duration.
+#   - astats reports "-inf" for digital silence, which is not a JSON number.
+
+qa_media_duration() {
+  ffprobe -v error -show_entries format=duration -of csv=p=0 "$1"
+}
+
+# {rms_db, silence_total, longest_silence, duration}
+qa_audio_stats() {
+  local wav="$1" lines dur
+  dur="$(qa_media_duration "$wav")"
+  lines="$(ffmpeg -hide_banner -nostats -i "$wav" \
+    -af "silencedetect=n=${GOTG_QA_SILENCE_DB:--50dB}:d=0.5,astats=metadata=0" \
+    -f null - 2>&1)"
+
+  # The last "RMS level dB" is astats' Overall section, after the per-channel
+  # ones.
+  local rms
+  rms="$(awk -F': ' '/RMS level dB/ {v=$2} END {print (v == "" || v == "-inf") ? -120 : v}' <<<"$lines")"
+
+  local total longest
+  total="$(awk -F'silence_duration: ' '/silence_duration/ {s+=$2} END {printf "%.3f", s}' <<<"$lines")"
+  longest="$(awk -F'silence_duration: ' '/silence_duration/ {if ($2>m) m=$2} END {printf "%.3f", m}' <<<"$lines")"
+
+  jq -n --argjson rms "$rms" --argjson total "$total" \
+    --argjson longest "$longest" --argjson dur "$dur" \
+    '{rms_db: $rms, silence_total: $total, longest_silence: $longest, duration: $dur}'
+}
+
+# {black_total, freeze_in_window, duration, window_start}
+#
+# Freeze is only measured from window_start on — the scripted inputs begin
+# there, and a title screen sitting still before them is not a defect. The
+# same measurement is the controller check: inputs that reach the game move
+# pixels.
+qa_video_stats() {
+  local video="$1" window_start="$2" dur
+  dur="$(qa_media_duration "$video")"
+
+  local black
+  black="$(ffmpeg -hide_banner -nostats -i "$video" \
+    -vf "blackdetect=d=0.5:pix_th=${GOTG_QA_BLACK_PIX_TH:-0.10}" -f null - 2>&1 |
+    awk -F'black_duration:' '/black_duration/ {s+=$2} END {printf "%.3f", s}')"
+
+  local freeze_lines window_dur freeze
+  freeze_lines="$(ffmpeg -hide_banner -nostats -i "$video" \
+    -vf "trim=start=$window_start,setpts=PTS-STARTPTS,freezedetect=n=${GOTG_QA_FREEZE_DB:--60dB}:d=2" \
+    -f null - 2>&1 | grep -F 'freezedetect' || true)"
+  window_dur="$(jq -n --argjson d "$dur" --argjson w "$window_start" '$d - $w')"
+  freeze="$(awk -F': ' -v total="$window_dur" '
+    /freeze_start/ {start=$2; open=1}
+    /freeze_duration/ {s+=$2; open=0}
+    END {if (open) s+=total-start; printf "%.3f", s}' <<<"$freeze_lines")"
+
+  jq -n --argjson black "$black" --argjson freeze "$freeze" \
+    --argjson dur "$dur" --argjson w "$window_start" \
+    '{black_total: $black, freeze_in_window: $freeze, duration: $dur, window_start: $w}'
+}
+
+qa_frame() {
+  local video="$1" at="$2" out="$3"
+  ffmpeg -hide_banner -loglevel error -y -ss "$at" -i "$video" -frames:v 1 "$out"
+}
+
+# ImageMagick's phash metric: 0 for identical, coefficient distance otherwise.
+# The scale is not a Hamming distance — same scene lands near zero, a
+# different scene lands in the tens of thousands. compare exits 1 to say
+# "different", which is an answer, not a failure.
+qa_phash() {
+  local a="$1" b="$2" out
+  out="$(magick compare -metric phash "$a" "$b" null: 2>&1)" || [[ $? -eq 1 ]]
+  awk '{print $1}' <<<"$out"
+}
+
+# Grade a run directory — audio.wav, video.mkv, status, optionally golden.png
+# — into verdict.json. Exit 0 only if every axis passed.
+#
+# expected_duration is how long the emulator ran. The recorder only receives
+# frames when the screen changes, so a capture far shorter than the run means
+# the screen sat still — an emulator stuck on a dialog looks exactly like
+# this, and it was the first failure a real run produced. It fails the video
+# axis, and it means the freeze window may lie beyond the capture, so the
+# controller axis cannot silently pass off the back of an empty trim.
+qa_verdict() {
+  local rundir="$1" window_start="$2" expected_duration="$3"
+
+  # timeout reports 124 when it had to stop the emulator — that is the
+  # expected end of a run. 143 is the emulator seeing the TERM itself.
+  local status boots
+  status="$(cat "$rundir/status")"
+  boots="$(jq -n --argjson s "$status" '$s == 0 or $s == 124 or $s == 143')"
+
+  local audio video
+  audio="$(qa_audio_stats "$rundir/audio.wav")"
+  video="$(qa_video_stats "$rundir/video.mkv" "$window_start")"
+
+  # Graphics only grades against a golden frame, taken at the same offset
+  # --bless takes it. No golden, no opinion: pass stays null.
+  local graphics='{"pass": null}'
+  if [[ -f "$rundir/golden.png" ]]; then
+    local frame_at distance
+    frame_at="$(jq -n --argjson d "$expected_duration" '$d - 2')"
+    qa_frame "$rundir/video.mkv" "$frame_at" "$rundir/frame.png"
+    distance="$(qa_phash "$rundir/frame.png" "$rundir/golden.png")"
+    graphics="$(jq -n --argjson d "$distance" \
+      --argjson max "${GOTG_QA_PHASH_MAX:-1000}" \
+      '{pass: ($d <= $max), distance: $d}')"
+  fi
+
+  jq -n \
+    --argjson boots "$boots" --argjson status "$status" \
+    --argjson audio "$audio" --argjson video "$video" \
+    --argjson graphics "$graphics" \
+    --argjson rms_min "${GOTG_QA_RMS_MIN:--45}" \
+    --argjson silence_max "${GOTG_QA_SILENCE_MAX:-10}" \
+    --argjson black_max "${GOTG_QA_BLACK_MAX:-5}" \
+    --argjson freeze_frac_max "${GOTG_QA_FREEZE_FRAC_MAX:-0.65}" \
+    --argjson expected "$expected_duration" \
+    '($video.duration >= $expected * 0.8) as $captured |
+    # Frozen time as a share of the input window: splash and menu screens
+    # legitimately sit still for seconds, so only a window that is MOSTLY
+    # still — inputs moving nothing — is a controller failure.
+    ($video.freeze_in_window / ([$expected - $video.window_start, 1] | max)) as $freeze_frac |
+    {
+      checks: {
+        boots: {pass: $boots, status: $status},
+        audio: ($audio + {pass: ($audio.rms_db > $rms_min and $audio.longest_silence <= $silence_max)}),
+        video: ($video + {expected_duration: $expected,
+                          pass: ($captured and $video.black_total <= $black_max)}),
+        controller: {pass: ($captured and $freeze_frac <= $freeze_frac_max),
+                     freeze_in_window: $video.freeze_in_window, freeze_frac: $freeze_frac},
+        graphics: $graphics
+      }
+    } | .pass = ([.checks[].pass] | all(. != false))' \
+    >"$rundir/verdict.json"
+
+  jq -e '.pass' "$rundir/verdict.json" >/dev/null
+}
