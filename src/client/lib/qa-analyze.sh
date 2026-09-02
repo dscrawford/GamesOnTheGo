@@ -50,10 +50,19 @@ qa_video_stats() {
   local video="$1" window_start="$2" dur
   dur="$(qa_media_duration "$video")"
 
-  local black
-  black="$(ffmpeg -hide_banner -nostats -i "$video" \
+  # Black is graded over the input window, not the whole capture: a real game
+  # spends its first seconds on black boot and logo screens (an N64 title takes
+  # a while to render its first frame), and only black *once the game should be
+  # showing something and taking input* is a rendering fault. black_total is
+  # kept for the eye; black_in_window is what the verdict grades.
+  local black_total black_in_window
+  black_total="$(ffmpeg -hide_banner -nostats -i "$video" \
     -vf "blackdetect=d=0.5:pix_th=${GOTG_QA_BLACK_PIX_TH:-0.10}" -f null - 2>&1 |
-    awk -F'black_duration:' '/black_duration/ {s+=$2} END {printf "%.3f", s}')"
+    awk -F'black_duration:' '/black_duration/ {s+=$2} END {printf "%.3f", s+0}')"
+  black_in_window="$(ffmpeg -hide_banner -nostats -i "$video" \
+    -vf "trim=start=$window_start,setpts=PTS-STARTPTS,blackdetect=d=0.5:pix_th=${GOTG_QA_BLACK_PIX_TH:-0.10}" \
+    -f null - 2>&1 |
+    awk -F'black_duration:' '/black_duration/ {s+=$2} END {printf "%.3f", s+0}')"
 
   local freeze_lines window_dur freeze
   freeze_lines="$(ffmpeg -hide_banner -nostats -i "$video" \
@@ -65,9 +74,9 @@ qa_video_stats() {
     /freeze_duration/ {s+=$2; open=0}
     END {if (open) s+=total-start; printf "%.3f", s}' <<<"$freeze_lines")"
 
-  jq -n --argjson black "$black" --argjson freeze "$freeze" \
-    --argjson dur "$dur" --argjson w "$window_start" \
-    '{black_total: $black, freeze_in_window: $freeze, duration: $dur, window_start: $w}'
+  jq -n --argjson black "$black_total" --argjson blackw "$black_in_window" \
+    --argjson freeze "$freeze" --argjson dur "$dur" --argjson w "$window_start" \
+    '{black_total: $black, black_in_window: $blackw, freeze_in_window: $freeze, duration: $dur, window_start: $w}'
 }
 
 qa_frame() {
@@ -97,11 +106,14 @@ qa_phash() {
 qa_verdict() {
   local rundir="$1" window_start="$2" expected_duration="$3"
 
-  # timeout reports 124 when it had to stop the emulator — that is the
-  # expected end of a run. 143 is the emulator seeing the TERM itself.
+  # A run ends by being stopped, so the stopping signals are how a healthy one
+  # exits: 124 is timeout giving up, 143 the emulator taking the TERM, 137 the
+  # KILL that follows for one that traps TERM to save on the way out (the
+  # HarbourMasters ports do). 0 is a game that closed itself. Anything else —
+  # a SIGSEGV, a non-zero return — is a crash, and fails to boot.
   local status boots
   status="$(cat "$rundir/status")"
-  boots="$(jq -n --argjson s "$status" '$s == 0 or $s == 124 or $s == 143')"
+  boots="$(jq -n --argjson s "$status" '$s == 0 or $s == 124 or $s == 143 or $s == 137')"
 
   local audio video
   audio="$(qa_audio_stats "$rundir/audio.wav")"
@@ -139,7 +151,7 @@ qa_verdict() {
         boots: {pass: $boots, status: $status},
         audio: ($audio + {pass: ($audio.rms_db > $rms_min and $audio.longest_silence <= $silence_max)}),
         video: ($video + {expected_duration: $expected,
-                          pass: ($captured and $video.black_total <= $black_max)}),
+                          pass: ($captured and $video.black_in_window <= $black_max)}),
         controller: {pass: ($captured and $freeze_frac <= $freeze_frac_max),
                      freeze_in_window: $video.freeze_in_window, freeze_frac: $freeze_frac},
         graphics: $graphics

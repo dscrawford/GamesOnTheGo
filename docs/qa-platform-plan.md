@@ -61,9 +61,31 @@ shakedown, encoded in the code comments where they bit:
   pipewire; parecord hears them → parecord is the recorder.
 - It caught two real bugs on day one: the stale env-gb root predating the
   --system pin (qa now env_refreshes first), and 2ship2harkinian's O2R
-  first-run dialog, which makes usa.legend_of_zelda_majoras_mask unable to
-  cold-start unattended — env fix still owed (generate the O2R in
-  preLaunch when missing).
+  first-run dialog.
+
+The O2R dialog turned out un-automatable headlessly, and the finding is worth
+recording. HarbourMasters ports (SoH, 2ship) extract a multi-MB .o2r from the
+ROM on first run behind a zenity "Generate now?" prompt. It cannot be answered
+without a human:
+- zenity's discovery ignores PATH and the derivation's `zenity` input (the
+  compiled binary is byte-identical across an override; the real path is
+  resolved by a mechanism independent of both), so a stub can't shadow it.
+- Under the headless `cage` kiosk the dialog is a second toplevel the
+  compositor won't route input to, and `WLR_LIBINPUT_NO_DEVICES=1` blocks
+  input to windows entirely — a uinput keyboard reaches SDL (the pad works)
+  but not GTK.
+The archive is derived from the ROM, not from play, so QA seeds it: any .o2r
+in the machine's real env state is copied into the run's isolated scratch
+state (`qa_seed_bootstrap`), skipping the dialog while keeping saves isolated.
+A game never bootstrapped on this machine is stopped before it hangs, with one
+line telling the user to `gotg play <id>` once (`qa_require_bootstrap`).
+Verified: usa.legend_of_zelda_majoras_mask passes all five axes headlessly —
+the pad drives the intro through to the file-name entry screen.
+
+Grading learned from the harkinian run: black is graded only within the input
+window (N64 titles boot through seconds of legit black/logo screens), and exit
+status 137 (SIGKILL after a trapped SIGTERM, how these ports exit) counts as a
+clean stop alongside 0/124/143.
 All the value is in the harness; the cluster is just a place to run it.
 - `src/gotg/qa/`: session setup (pipewire, null sink, cage, pad), capture,
   analyzers, `verdict.json` writer. New CLI entry: `gotg qa <id>`.

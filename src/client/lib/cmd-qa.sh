@@ -31,6 +31,47 @@ qa_golden_path() {
   printf '%s/qa/golden/%s/%s.png' "$GOTG_STATE_DIR" "$platform" "$id"
 }
 
+# Carry a game's ROM-derived assets into the run's isolated state.
+#
+# QA gives every run a scratch GOTG_ENV_STATE_DIR so button-mashing can never
+# reach a real save. The HarbourMasters ports (Ship of Harkinian, 2 Ship 2
+# Harkinian) keep more than saves there though: a multi-megabyte .o2r they
+# extract from the ROM on first run — and that extraction is a GUI "Generate
+# now?" dialog, drawn by zenity as a second window the headless kiosk cannot
+# route input to, so no unattended run can answer it. The archive is derived
+# from the ROM, not from play, so copying the machine's own into the scratch
+# state changes nothing about what is graded and skips the dialog entirely.
+#
+# When there is none to copy, the game has never been bootstrapped on this
+# machine at all; qa_require_bootstrap turns that into one clear sentence
+# rather than a run that hangs on a dialog until the timeout.
+# scratch is the run's GOTG_ENV_STATE_DIR, under which each environment keeps
+# its state at <scratch>/<attr> — the same layout as the machine's real state
+# dir, so a file's path relative to one maps straight onto the other.
+qa_seed_bootstrap() {
+  local attr="$1" scratch="$2" real o2r dest
+  real="$GOTG_STATE_DIR/env/$attr"
+  [[ -d "$real" ]] || return 0
+  while IFS= read -r -d '' o2r; do
+    dest="$scratch/$attr/${o2r#"$real"/}"
+    mkdir -p "$(dirname "$dest")"
+    cp -f "$o2r" "$dest"
+  done < <(find "$real" -name '*.o2r' -print0 2>/dev/null)
+}
+
+# Stop before a run that is only going to hang. A harkinian environment whose
+# first-run extraction has never happened cannot start unattended; say so, and
+# say the one command that fixes it.
+qa_require_bootstrap() {
+  local attr="$1" scratch="$2"
+  grep -q 'first run: extracting game assets' "$(env_bin "$attr")" 2>/dev/null || return 0
+  find "$scratch" -name '*.o2r' -print -quit 2>/dev/null | grep -q . && return 0
+  die "this game extracts its assets on first run, behind a dialog no headless
+     run can answer. Bootstrap it once with a real window:
+       gotg play ${attr#env-}
+     answer the extraction prompt, quit, then QA will reuse what it made."
+}
+
 # The rig must not outlive the run, however the run ends.
 qa_cleanup() {
   [[ -n "${QA_PAD_PID:-}" ]] && kill "$QA_PAD_PID" 2>/dev/null
@@ -185,6 +226,9 @@ EOF
   local id platform
   id="$(manifest_field "$PLAY_GAME" id)"
   platform="$(manifest_field "$PLAY_GAME" platform)"
+
+  qa_seed_bootstrap "$PLAY_ATTR" "$rundir/env-state"
+  qa_require_bootstrap "$PLAY_ATTR" "$rundir/env-state"
 
   # A null sink of our own: the run is silent in the room, and the monitor
   # source is the recording. Unique per run so two runs cannot cross-record.
