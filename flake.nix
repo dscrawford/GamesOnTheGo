@@ -146,6 +146,10 @@
             ] envs;
           };
 
+          # Donkey Kong 64: Recompiled — not in nixpkgs, though its siblings
+          # zelda64recomp and n64recomp are.
+          dk64recomp = pkgs.callPackage ./pkgs/dk64recomp { };
+
           # Not in nixpkgs, though its sibling wiimms-iso-tools is. Needed to
           # open and rebuild the Yaz0 archives GameCube games keep their data in.
           wiimms-szs-tools = pkgs.callPackage ./pkgs/wiimms-szs-tools { };

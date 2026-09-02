@@ -20,6 +20,7 @@ let
   # nixpkgs does not carry. Passed alongside pkgs so an env file never has to
   # reach back up the tree with a relative path.
   gotgPkgs = {
+    dk64recomp = pkgs.callPackage ../../../pkgs/dk64recomp { };
     pyisotools = pkgs.callPackage ../../../pkgs/pyisotools { };
     wiimms-szs-tools = pkgs.callPackage ../../../pkgs/wiimms-szs-tools { };
   };
