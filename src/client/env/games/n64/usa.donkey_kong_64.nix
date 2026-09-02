@@ -21,10 +21,21 @@
 #     which documents a path to drop the ROM at, this one stores the ROM
 #     itself after you choose it ("check_all_stored_roms" in the binary) and
 #     the FAQ answers "how do I choose a different ROM?" with "you don't".
-#     There is no drop-in path to write, so preLaunch unpacks the .z64 next to
-#     the state directory and says where it is; the first launch is one
-#     "Load ROM" click, and no launch after it asks again.
-{ pkgs, lib, gotgPkgs, ... }:
+#     So the recipe below leaves a bare .z64 in the games directory and the
+#     first launch is one "Load ROM" click at it; no launch after it asks
+#     again.
+#
+# The unpacking is the recipe's job, not this file's — see the `recipes`
+# attribute. Doing it in preLaunch instead would mean reimplementing the
+# extraction limits and the symlink refusal that steps.unzip and
+# steps.placeTree already carry, once per environment that needs a bare ROM.
+{
+  pkgs,
+  lib,
+  helpers,
+  gotgPkgs,
+  ...
+}:
 let
   # The mods are .nrm archives — N64ModernRuntime's own format, which this
   # runtime loads from its mods directory and lists in the in-game Mods menu.
@@ -68,6 +79,24 @@ in
   # The ROM is not a command-line argument here; the launcher holds it.
   args = [ ];
 
+  # The port reads a bare .z64, not the No-Intro zip it travels as — the same
+  # need the HarbourMasters ports have, met the same way. Both handlers,
+  # because one zip is single_file from the games-root pass and no_intro_set
+  # from the DAT torrent path. The matching half is data/overrides.json
+  # marking this entry `unzip`, which is what puts the unpacked tree where
+  # `gotg list` can find it offline and makes {target} the .z64 inside it.
+  recipes =
+    let
+      unpacked = [
+        helpers.steps.unzip
+        helpers.steps.placeTree
+      ];
+    in
+    {
+      single_file = unpacked;
+      no_intro_set = unpacked;
+    };
+
   env = {
     # The one that does the isolating. See the note at the top.
     HOME = "{state}";
@@ -77,33 +106,16 @@ in
 
   preLaunch = ''
     export HOME="$state"
-    config="$state/.config/DK64Recompiled"
-    mods_dir="$config/mods"
+    mods_dir="$state/.config/DK64Recompiled/mods"
     mkdir -p "$mods_dir"
 
     ${installMods}
 
-    # Unpack the ROM where the picker can reach it. The port converts formats
-    # other than .z64 itself, but only for the one ROM it accepts, so handing
-    # it the archive would be handing it something it will refuse.
-    rom="$state/rom/donkey_kong_64.z64"
-    if [ ! -f "$rom" ]; then
-      mkdir -p "$state/rom"
-      if [ -d "$install" ]; then
-        found="$(find "$install" -iname '*.z64' | head -1)"
-      else
-        rm -rf "$state/.romtmp"
-        mkdir -p "$state/.romtmp"
-        unzip -q -o "$install" -d "$state/.romtmp" 2>/dev/null || true
-        found="$(find "$state/.romtmp" -iname '*.z64' | head -1)"
-      fi
-      if [ -n "$found" ]; then
-        cp "$found" "$rom"
-        rm -rf "$state/.romtmp"
-      fi
-    fi
-    if [ -f "$rom" ] && [ ! -d "$config/saves" ]; then
-      echo "first run: choose Load ROM and pick $rom — asked once, then stored" >&2
+    # $target is the bare .z64 the recipe left in the games directory, so
+    # there is nothing to unpack here — only the one thing this port cannot
+    # be told from the outside.
+    if [ ! -f "$state/.config/DK64Recompiled/DK64.z64" ]; then
+      echo "first run: choose Load ROM and pick $target — asked once, then stored" >&2
     fi
   '';
 

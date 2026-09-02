@@ -21,6 +21,23 @@ let
         appName = "probe";
         archives = [ ];
       };
+  # The one game environment that composes the unzip recipe itself rather
+  # than inheriting it from a helper. Imported with a stand-in for the port
+  # so this stays an eval — building the real one would pull the whole
+  # recompilation into a check about plumbing.
+  dk64Probe = import ../../src/client/env/games/n64/usa.donkey_kong_64.nix {
+    inherit pkgs;
+    inherit (pkgs) lib;
+    helpers = import ../../src/client/env/helpers.nix {
+      inherit pkgs;
+      inherit (pkgs) lib;
+    };
+    gotgPkgs = {
+      dk64recomp = pkgs.coreutils;
+    };
+  };
+  overrides = builtins.fromJSON (builtins.readFile ../../src/client/data/overrides.json);
+
   # An environment nothing ships, composing its own pipeline from the
   # step library — the check that steps are usable à la carte, not
   # only through the two canned recipes.
@@ -94,6 +111,22 @@ in
 assert pkgs.lib.assertMsg (
   harkinianProbe.recipes ? single_file && harkinianProbe.recipes ? no_intro_set
 ) "harkinianPort must carry its unzip recipe for both single_file and no_intro_set";
+assert pkgs.lib.assertMsg (
+  dk64Probe.recipes ? single_file && dk64Probe.recipes ? no_intro_set
+) "the DK64 environment must carry its unzip recipe for both single_file and no_intro_set";
+assert pkgs.lib.assertMsg (
+  map (s: s.name) dk64Probe.recipes.single_file == [
+    "unzip"
+    "place-tree"
+  ]
+) "the DK64 environment must unpack through the step library, not by hand in preLaunch";
+# The two halves of `unzip` live in different files and are silently useless
+# apart: the recipe unpacks, and this flag is how the CLI knows the shape of
+# the path before anything is built. A recipe without the flag installs a tree
+# the CLI then looks for under the archive's name.
+assert pkgs.lib.assertMsg (
+  (overrides."n64/usa.donkey_kong_64" or { }).unzip or false
+) "src/client/data/overrides.json must mark n64/usa.donkey_kong_64 unzip, to match its recipe";
 pkgs.runCommand "check-recipes" { nativeBuildInputs = [ pkgs.zip ]; } ''
   export HOME=$TMPDIR
   mkdir -p $TMPDIR/bin

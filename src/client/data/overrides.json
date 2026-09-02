@@ -21,6 +21,15 @@
   "n64/usa.legend_of_zelda_ocarina_of_time_rev2": { "unzip": true, "target": "*.z64" },
   "n64/usa.legend_of_zelda_ocarina_of_time_master_quest": { "unzip": true, "target": "*.z64" },
 
+  "_comment_recomp": [
+    "Donkey Kong 64 runs on a static recompilation rather than a decompiled",
+    "port, but needs the same shape for the same reason: the launcher picks a",
+    "bare .z64, so the zip has to be unpacked. The recipe lives in",
+    "src/client/env/games/n64/usa.donkey_kong_64.nix."
+  ],
+
+  "n64/usa.donkey_kong_64": { "unzip": true, "target": "*.z64" },
+
   "wiiu/usa.legend_of_zelda_twilight_princess_hd": { "target": "code/*.rpx" },
   "wiiu/usa.legend_of_zelda_the_wind_waker_hd": { "target": "code/*.rpx" }
 }
