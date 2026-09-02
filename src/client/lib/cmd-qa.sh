@@ -13,17 +13,33 @@
 
 qa_tools_root() { printf '%s/qa/tools' "$GOTG_STATE_DIR"; }
 
+# Every binary a run reaches for by name. Named in one place because this list
+# is also how a GC root from an older qa-tools is recognised: the root already
+# existing says nothing about whether it carries the tool added since. A root
+# built before gotg-qa-python was split out passed a check for cage alone and
+# then died on the virtual pad, which is what this list prevents.
+QA_TOOLS=(cage wf-recorder ffmpeg ffprobe magick parecord pactl gotg-qa-python)
+
+qa_tools_have_all() {
+  local prefix="${1:-}" tool
+  for tool in "${QA_TOOLS[@]}"; do
+    if [[ -n "$prefix" ]]; then
+      [[ -x "$prefix/$tool" ]] || return 1
+    else
+      command -v "$tool" >/dev/null 2>&1 || return 1
+    fi
+  done
+}
+
 qa_tools_ensure() {
   # Already provided — the container image carries them, and a pod has no
   # writable nix store to build into anyway. Checked by asking for the tools
   # rather than for the GC root, so any way of supplying them counts.
-  if command -v cage >/dev/null 2>&1 && command -v wf-recorder >/dev/null 2>&1; then
-    return 0
-  fi
+  qa_tools_have_all && return 0
 
   local root
   root="$(qa_tools_root)"
-  if [[ ! -x "$root/bin/cage" ]]; then
+  if ! qa_tools_have_all "$root/bin"; then
     local flake
     flake="$(gotg_flake)"
     log "building QA tools from $flake#qa-tools"
@@ -31,6 +47,10 @@ qa_tools_ensure() {
       die "could not build qa-tools from $flake"
   fi
   export PATH="$root/bin:$PATH"
+
+  qa_tools_have_all ||
+    die "qa-tools is missing something a run needs — rebuild it with:
+     nix build $(gotg_flake)#qa-tools -o $root"
 }
 
 qa_golden_path() {
