@@ -125,6 +125,27 @@
           # demand like the emulator environments.
           qa-tools = pkgs.callPackage ./src/client/qa/tools.nix { };
 
+          # The QA runner as a container, for Jobs on the cluster.
+          #
+          #   nix build .#qa-image
+          #   skopeo copy docker-archive:result docker://localhost:30500/gotg-qa:0.1.0
+          qa-image = pkgs.callPackage ./src/client/qa/image.nix {
+            inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg qa-tools;
+            # The cartridge platforms, which share one ares and so cost one
+            # emulator between them. The disc consoles are deliberately absent:
+            # each brings its own large emulator, and none of them has been
+            # graded on a cluster GPU yet.
+            environments = pkgs.lib.getAttrs [
+              "env-gb"
+              "env-gbc"
+              "env-gba"
+              "env-nes"
+              "env-snes"
+              "env-genesis"
+              "env-n64"
+            ] envs;
+          };
+
           # Not in nixpkgs, though its sibling wiimms-iso-tools is. Needed to
           # open and rebuild the Yaz0 archives GameCube games keep their data in.
           wiimms-szs-tools = pkgs.callPackage ./pkgs/wiimms-szs-tools { };

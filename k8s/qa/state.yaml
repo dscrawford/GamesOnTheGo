@@ -1,0 +1,38 @@
+# Where a QA sweep keeps everything that should outlive a pod: the downloaded
+# games, the environment GC roots adopted from the image, the golden frames a
+# verdict is graded against, and the runs themselves.
+#
+# One volume rather than one per concern, because they are one working set —
+# a run reads the golden written by an earlier run and the game fetched by the
+# one before that.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gotg-qa-state
+  namespace: gotg
+spec:
+  accessModes:
+    # Runs are serialized per node anyway (they share one GPU), and Longhorn's
+    # RWO is the mode that does not need a shared filesystem underneath.
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 200Gi
+---
+# The same credentials `gotg login` writes on a desktop: the service URL and a
+# token. Create it from a real login rather than by hand —
+#
+#   kubectl -n gotg create secret generic gotg-qa-config \
+#     --from-file=config.json=$HOME/.config/gotg/config.json
+#
+# so that the file the pod reads is one that is known to work.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gotg-qa-config
+  namespace: gotg
+type: Opaque
+stringData:
+  config.json: |
+    {"url": "http://gotg-proxy.gotg.svc.cluster.local:8080", "token": "replace-me"}

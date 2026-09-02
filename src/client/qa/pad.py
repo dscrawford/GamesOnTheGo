@@ -79,7 +79,11 @@ def main():
         product=0x028E,
         version=0x110,
     )
-    print(f"pad: created {ui.device.path}", flush=True)
+    # ui.device is evdev looking its own creation back up in /dev/input, which
+    # needs udev and so comes back None in a container. The pad is real either
+    # way — SDL finds it by scanning /dev/input — so this is only a label.
+    where = getattr(ui.device, "path", None) or ui.devnode or "(no udev)"
+    print(f"pad: created {where}", flush=True)
     pathlib.Path(args.ready_file).touch()
 
     deadline = time.monotonic() + args.boot_wait

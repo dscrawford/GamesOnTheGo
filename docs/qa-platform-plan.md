@@ -99,7 +99,32 @@ All the value is in the harness; the cluster is just a place to run it.
   tuning thresholds). Exit criteria: correct verdicts on one known-good and
   one deliberately-broken game per tier (e.g. snes + n64).
 
-### Phase 2 — containerize, run on node3
+### Phase 2 — containerize, run on node3 — IMAGE DONE 2026-09-02
+`nix build .#qa-image` (src/client/qa/image.nix, entrypoint.sh) plus the
+manifests and runbook in [k8s/qa/](../k8s/qa/README.md). Verified locally
+under docker with **no host /nix mount and an empty state volume**: gb
+Pokémon Yellow passes all five axes in-container. What the containerizing
+actually turned on:
+- **Emulator envs are baked into the image**, not built at runtime: a pod's
+  nix store is a read-only image layer, so `gotg qa` can never build there.
+  The entrypoint links them into the state volume's `roots/`, and
+  `qa_tools_ensure` now no-ops when the tools are already on PATH.
+- **A software GL stack (mesa/libglvnd/vulkan-loader) had to go in.** Without
+  it the container has no GL at all — cage falls back to pixman, Xwayland to
+  sw accel, and the emulator gets no context: a one-second capture. It is the
+  CPU tier's whole renderer; the GPU tier's NVIDIA userspace arrives via CDI.
+- **The QA python is now `gotg-qa-python`.** The client ships a python3 (vdf)
+  and qa-tools shipped another (evdev); whichever won PATH decided whether the
+  pad could be created. In the image the client's won and pad.py died on
+  `import evdev`.
+- `/dev/uinput` needs `privileged: true` — containerd's device cgroup refuses
+  it to an unprivileged container regardless of node file permissions.
+
+Not yet done: an actual Job on node3 (needs the image pushed to the in-cluster
+registry), and therefore the GPU tier under CDI is still ungraded — everything
+above was measured on llvmpipe.
+
+### Phase 2 (original plan) — containerize, run on node3
 - Nix-built OCI image (`dockerTools` / `nix2container`) with the harness;
   game env comes from the same flake logic the client already uses, ROM
   fetched from the in-cluster service (the credentials problem is already

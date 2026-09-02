@@ -1,0 +1,88 @@
+# One QA run, as a Job. Templated by substitution rather than by a chart:
+# @GAME@, @NAME@ and the tier fields are what change between runs, and a
+# dispatcher that renders this file is easier to read than a chart that hides
+# it. See README.md for what to substitute.
+#
+#   sed -e 's/@NAME@/usa-diddy-kong-racing/' -e 's/@GAME@/usa.diddy_kong_racing_rev1/' \
+#       k8s/qa/job.yaml | kubectl apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gotg-qa-@NAME@
+  namespace: gotg
+spec:
+  # A QA verdict is a measurement, and a retried measurement that disagrees
+  # with the first is the interesting case, not one to paper over. Failures
+  # stay failed and keep their artifacts.
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      # The GPU tier. node3 is where the card is, and the nvidia runtime class
+      # is what injects its userspace — without it the pod falls back to the
+      # image's llvmpipe, which is the CPU tier by another name and would
+      # quietly grade a software renderer as if it were the real one.
+      #
+      # For the CPU tier (8/16-bit, ares under llvmpipe) drop runtimeClassName
+      # and the nvidia.com/gpu-0 limit, and let it schedule anywhere.
+      runtimeClassName: nvidia
+      nodeSelector:
+        kubernetes.io/hostname: node3
+      containers:
+        - name: qa
+          image: localhost:30500/gotg-qa:0.1.0
+          args: ["@GAME@", "--duration", "60", "--boot-wait", "25"]
+          resources:
+            limits:
+              # One time-slice of the card. node3 advertises two, so a run can
+              # share with the transcoder — there is no memory isolation
+              # between slices, which retro emulators can afford and a sweep of
+              # heavier ones could not.
+              nvidia.com/gpu-0: 1
+              memory: 8Gi
+            requests:
+              cpu: "4"
+              memory: 4Gi
+          env:
+            - name: GOTG_GAMES_DIR
+              value: /state/games
+          securityContext:
+            # /dev/uinput is the virtual pad, and containerd's device cgroup
+            # denies it to an unprivileged container however the node's file
+            # permissions read. This is the one thing in the stack that wants
+            # privilege, and it is why QA runs on a private cluster.
+            privileged: true
+          volumeMounts:
+            - name: state
+              mountPath: /state
+            - name: config
+              mountPath: /root/.config/gotg
+              readOnly: true
+            - name: uinput
+              mountPath: /dev/uinput
+            - name: input
+              mountPath: /dev/input
+            # Big enough for a run's capture before it is written out; the
+            # default 64M would truncate a minute of lossless video.
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: gotg-qa-state
+        - name: config
+          secret:
+            secretName: gotg-qa-config
+        - name: uinput
+          hostPath:
+            path: /dev/uinput
+            type: CharDevice
+        - name: input
+          hostPath:
+            path: /dev/input
+            type: Directory
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi

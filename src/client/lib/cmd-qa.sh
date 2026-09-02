@@ -14,6 +14,13 @@
 qa_tools_root() { printf '%s/qa/tools' "$GOTG_STATE_DIR"; }
 
 qa_tools_ensure() {
+  # Already provided — the container image carries them, and a pod has no
+  # writable nix store to build into anyway. Checked by asking for the tools
+  # rather than for the GC root, so any way of supplying them counts.
+  if command -v cage >/dev/null 2>&1 && command -v wf-recorder >/dev/null 2>&1; then
+    return 0
+  fi
+
   local root
   root="$(qa_tools_root)"
   if [[ ! -x "$root/bin/cage" ]]; then
@@ -183,8 +190,10 @@ EOF
   QA_PAD_PID="" QA_SINK_MODULE=""
   trap qa_cleanup EXIT
 
+  # The QA python, not the client's: only one of them has evdev, and which
+  # `python3` resolves to depends on how the two got onto PATH.
   local padlog="$rundir/pad.log"
-  python3 "$GOTG_ROOT/qa/pad.py" --ready-file "$rundir/pad-ready" \
+  gotg-qa-python "$GOTG_ROOT/qa/pad.py" --ready-file "$rundir/pad-ready" \
     --boot-wait "$boot_wait" >"$padlog" 2>&1 &
   QA_PAD_PID=$!
   local waited=0

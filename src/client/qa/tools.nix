@@ -17,7 +17,13 @@ pkgs.buildEnv {
     ffmpeg
     imagemagick
     pulseaudio # pactl, against the host's pipewire-pulse
-    (python3.withPackages (ps: [ ps.evdev ]))
+    # Under its own name, not python3: the client carries a python3 of its own
+    # (for vdf), and whichever lands first on PATH would otherwise decide
+    # whether the virtual pad can be created at all. In the image the client's
+    # wins, and pad.py dies on `import evdev`.
+    (writeShellScriptBin "gotg-qa-python" ''
+      exec ${python3.withPackages (ps: [ ps.evdev ])}/bin/python3 "$@"
+    '')
   ];
   meta.description = "Compositor, recorders and analyzers for gotg qa";
 }
