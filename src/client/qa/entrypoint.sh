@@ -11,6 +11,23 @@ export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/xdg}"
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 
+# Stage the credentials somewhere they can have the mode they need.
+#
+# api.json holds the service token, and the client refuses to send a token it
+# found in a world-readable file — rightly. A Kubernetes secret projects its
+# entries as symlinks, so the mode the client sees is the symlink's 0777
+# whatever defaultMode says, and the run ends up asking the catalog for
+# something with no credentials and getting a 401. Copying breaks the symlink
+# and lets the mode be real.
+config_src="${GOTG_QA_CONFIG_SRC:-/run/gotg-config}"
+if [[ -d "$config_src" ]]; then
+  config_dir="$HOME/.config/gotg"
+  mkdir -p "$config_dir"
+  cp -fL "$config_src"/* "$config_dir"/
+  chmod 700 "$config_dir"
+  chmod 600 "$config_dir"/*
+fi
+
 # Adopt the environments baked into the image. A pod's nix store is a
 # read-only image layer, so nothing can be built here; these were built when
 # the image was, and linking them where `gotg play` looks is what makes a run

@@ -20,7 +20,7 @@ rather than expecting the pod to build it.
 
 ```bash
 kubectl apply -f k8s/qa/state.yaml
-kubectl -n gotg create secret generic gotg-qa-config \
+kubectl -n default create secret generic gotg-qa-config \
   --from-file=config.json="$HOME/.config/gotg/config.json" \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
@@ -32,7 +32,7 @@ sed -e 's/@NAME@/usa-diddy-kong-racing/' \
     -e 's/@GAME@/usa.diddy_kong_racing_rev1/' \
     k8s/qa/job.yaml | kubectl apply -f -
 
-kubectl -n gotg logs -f job/gotg-qa-usa-diddy-kong-racing
+kubectl -n default logs -f job/gotg-qa-usa-diddy-kong-racing
 ```
 
 The pod's exit status is the verdict: zero when every axis passed. The
@@ -54,6 +54,15 @@ The manifest as written is the GPU tier: `runtimeClassName: nvidia`, pinned to
 node3, holding one of the card's two time-slices. For the 8/16-bit platforms
 drop `runtimeClassName`, the `nodeSelector` and the `nvidia.com/gpu-0` limit —
 the image's llvmpipe renders them, and they schedule anywhere.
+
+## What the GPU tier does and does not accelerate
+
+Asking for a slice gets the *compositor* onto the card — CDI mounts the host
+NVIDIA userspace at `/run/opengl-driver`, and the image searches it ahead of
+mesa. The *emulator* renders through Xwayland, whose glamor does not currently
+initialize on NVIDIA here, so the game itself still runs on llvmpipe. Verdicts
+are sound; performance-sensitive ones are not yet meaningful. See
+`docs/qa-platform-plan.md` for what was measured and what to try next.
 
 ## What needs privilege, and why
 

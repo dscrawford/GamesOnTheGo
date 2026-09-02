@@ -64,6 +64,11 @@ let
     mkdir -p $out/etc
     echo "root:x:0:0:root:/root:${bash}/bin/bash" > $out/etc/passwd
     echo "root:x:0:" > $out/etc/group
+    # Without this glibc has no name-service configuration at all and answers
+    # every DNS lookup with "not found" — the catalog fetch fails against a
+    # cluster service that a port-forward reaches fine, which is how this line
+    # was earned.
+    echo "hosts: files dns" > $out/etc/nsswitch.conf
     mkdir -p $out/etc/nix
     {
       echo "experimental-features = nix-command flakes"
@@ -116,13 +121,31 @@ dockerTools.buildLayeredImage {
       # wlroots has no monitor and must not go looking for one.
       "WLR_BACKENDS=headless"
       "WLR_LIBINPUT_NO_DEVICES=1"
-      # Point the loaders at the software drivers by absolute path. The GPU
-      # tier's NVIDIA userspace arrives at runtime through CDI, which sets its
-      # own discovery up and takes precedence; these are what is left when it
-      # does not, and are why a CPU-tier pod renders at all.
-      "LIBGL_DRIVERS_PATH=${mesa}/lib/dri"
-      "__EGL_VENDOR_LIBRARY_DIRS=${mesa}/share/glvnd/egl_vendor.d"
-      "LD_LIBRARY_PATH=${lib.makeLibraryPath [ libglvnd mesa vulkan-loader ]}"
+      # Both renderers, in the order they should win.
+      #
+      # /run/opengl-driver is what this cluster's CDI injects into a pod that
+      # asked for a GPU slice — the host's NVIDIA userspace, matched to the
+      # running kernel driver. It has to come first and it has to be searched
+      # at all: pointing these only at mesa (the first version of this file)
+      # hid the NVIDIA vendor library, so glvnd handed the card to mesa, mesa
+      # answered "driver (null)", EGL failed and the compositor fell back to
+      # software — a GPU-tier run that passed while grading llvmpipe.
+      #
+      # The mesa entries behind them are the CPU tier's whole renderer, and
+      # the fallback when there is no slice to inject.
+      "LIBGL_DRIVERS_PATH=/run/opengl-driver/lib/dri:${mesa}/lib/dri"
+      "__EGL_VENDOR_LIBRARY_DIRS=/run/opengl-driver/share/glvnd/egl_vendor.d:${mesa}/share/glvnd/egl_vendor.d"
+      "VK_DRIVER_FILES=/run/opengl-driver/share/vulkan/icd.d:${mesa}/share/vulkan/icd.d"
+      "LD_LIBRARY_PATH=/run/opengl-driver/lib:${lib.makeLibraryPath [ libglvnd mesa vulkan-loader ]}"
+      # Deliberately NOT set here: GBM_BACKENDS_PATH=/run/opengl-driver/lib/gbm
+      # and __GLX_VENDOR_LIBRARY_NAME=nvidia. They are the obvious way to get
+      # Xwayland's glamor onto the card — the compositor reaches it, Xwayland
+      # does not ("eglInitialize() failed / Disabling GLAMOR"), so the game
+      # renders on llvmpipe while cage composites on the GPU. Measured: they
+      # make it worse, taking away the working software fallback without
+      # replacing it, and a 60s run captures one second of nothing. The
+      # emulator's own path to the GPU is unfinished work, not a missing
+      # env var.
       "GOTG_QA_BAKED_ENVS=${bakedEnvs}"
     ];
     WorkingDir = "/state";

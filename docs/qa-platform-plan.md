@@ -120,9 +120,39 @@ actually turned on:
 - `/dev/uinput` needs `privileged: true` — containerd's device cgroup refuses
   it to an unprivileged container regardless of node file permissions.
 
-Not yet done: an actual Job on node3 (needs the image pushed to the in-cluster
-registry), and therefore the GPU tier under CDI is still ungraded — everything
-above was measured on llvmpipe.
+**Running on the cluster — DONE 2026-09-02.** Pushed to the in-cluster
+registry and run as Jobs in `default` on node3: gb Pokémon Yellow and n64
+Diddy Kong Racing both pass, fetching their ROM from the in-cluster library
+service and writing artifacts to the Longhorn volume. What the cluster added
+on top of the container work:
+- **No `runtimeClassName: nvidia`.** This cluster injects the driver through
+  CDI (containerd `enable_cdi` + generic-cdi-plugin); naming a runtime class
+  wedges the pod on "no runtime for nvidia is configured".
+- **The catalog lives behind `gotg-library`, not `gotg-api`** — the latter is
+  proxy-only in-cluster and answers `/catalog` with 503.
+- **`/etc/nsswitch.conf` had to be written into the image.** Without it glibc
+  has no name-service config and every DNS lookup fails, so the catalog fetch
+  fails against a service a port-forward reaches fine.
+- **The credentials are staged, not mounted in place.** A secret projects its
+  entries as symlinks, so the token file reads as mode 0777 whatever
+  `defaultMode` says, and the client rightly refuses to send a token it found
+  world-readable — the run then 401s. The entrypoint copies them and fixes
+  the mode.
+
+**The GPU tier is half-done, and worth being precise about.** With a
+`nvidia.com/gpu-0` slice the compositor does reach the card (EGL vendor
+NVIDIA, GL renderer "NVIDIA GeForce GTX 1080 Ti"), because CDI mounts the
+host userspace at `/run/opengl-driver` and the image now searches there ahead
+of mesa. But **Xwayland's glamor still fails to initialize on NVIDIA**
+("eglInitialize() failed / Disabling GLAMOR"), and the emulator renders
+through Xwayland — so the game itself is still on llvmpipe while cage
+composites on the GPU. Setting `GBM_BACKENDS_PATH` and
+`__GLX_VENDOR_LIBRARY_NAME=nvidia` is the obvious next move and was measured
+to make it strictly worse: it removes the software fallback without replacing
+it, and a 60s run captures one second of nothing. Getting the emulator onto
+the card (native-Wayland SDL, or a working Xwayland/NVIDIA GBM path) is the
+open piece of Phase 2 — until then every verdict, on either tier, grades a
+software renderer.
 
 ### Phase 2 (original plan) — containerize, run on node3
 - Nix-built OCI image (`dockerTools` / `nix2container`) with the harness;

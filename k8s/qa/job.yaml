@@ -9,7 +9,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: gotg-qa-@NAME@
-  namespace: gotg
+  namespace: default
 spec:
   # A QA verdict is a measurement, and a retried measurement that disagrees
   # with the first is the interesting case, not one to paper over. Failures
@@ -19,14 +19,16 @@ spec:
   template:
     spec:
       restartPolicy: Never
-      # The GPU tier. node3 is where the card is, and the nvidia runtime class
-      # is what injects its userspace — without it the pod falls back to the
-      # image's llvmpipe, which is the CPU tier by another name and would
-      # quietly grade a software renderer as if it were the real one.
+      # The GPU tier. node3 is where the card is, and asking for one of its
+      # slices is the whole of it: this cluster injects the driver through CDI
+      # (containerd's enable_cdi, fed by generic-cdi-plugin), so there is no
+      # nvidia runtime class to name — naming one wedges the pod on "no
+      # runtime for nvidia is configured", which is how this comment was
+      # written. Without the slice the pod still runs, on the image's llvmpipe,
+      # and would quietly grade a software renderer as the real one.
       #
-      # For the CPU tier (8/16-bit, ares under llvmpipe) drop runtimeClassName
-      # and the nvidia.com/gpu-0 limit, and let it schedule anywhere.
-      runtimeClassName: nvidia
+      # For the CPU tier (8/16-bit under llvmpipe) drop the nodeSelector and
+      # the nvidia.com/gpu-0 limit, and let it schedule anywhere.
       nodeSelector:
         kubernetes.io/hostname: node3
       containers:
@@ -56,8 +58,11 @@ spec:
           volumeMounts:
             - name: state
               mountPath: /state
+            # Staged, not used in place: the entrypoint copies these to
+            # ~/.config/gotg so the token file can be mode 600, which a
+            # secret's symlinks can never be.
             - name: config
-              mountPath: /root/.config/gotg
+              mountPath: /run/gotg-config
               readOnly: true
             - name: uinput
               mountPath: /dev/uinput
@@ -74,6 +79,10 @@ spec:
         - name: config
           secret:
             secretName: gotg-qa-config
+            # api.json holds the service token, and the client checks the mode
+            # before it trusts a file that does — the projected default is
+            # world-readable and draws a warning on every run.
+            defaultMode: 0600
         - name: uinput
           hostPath:
             path: /dev/uinput
