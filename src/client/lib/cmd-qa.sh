@@ -1,23 +1,18 @@
 # shellcheck shell=bash
 # qa — run a game headlessly for a minute and grade the recording.
 #
-# The session is the fake gaming rig: a virtual pad that exists before the
-# emulator does, a null audio sink recorded from its monitor, and a headless
-# cage compositor recorded by wf-recorder. The grading lives in qa-analyze.sh;
-# this file only assembles the rig, runs the game, and tears it down.
+# Assembles a virtual pad, a null audio sink, and a headless cage compositor
+# recorded by wf-recorder; qa-analyze.sh does the grading.
 #
-# Nothing here touches the machine's real launch state: GOTG_ENV_STATE_DIR is
-# pointed into the run directory before play_prepare, so settings, bindings,
-# adopted saves and pulled saves all land in scratch — a QA run must never be
+# GOTG_ENV_STATE_DIR is pointed into the run directory before play_prepare, so
+# settings, bindings and saves all land in scratch — a QA run must never be
 # able to push button-mash progress over a person's save.
 
 qa_tools_root() { printf '%s/qa/tools' "$GOTG_STATE_DIR"; }
 
-# Every binary a run reaches for by name. Named in one place because this list
-# is also how a GC root from an older qa-tools is recognised: the root already
-# existing says nothing about whether it carries the tool added since. A root
-# built before gotg-qa-python was split out passed a check for cage alone and
-# then died on the virtual pad, which is what this list prevents.
+# Every binary a run needs, named once — also how a stale qa-tools root is
+# detected: a root built before gotg-qa-python was split out passed a check
+# for cage alone, then died on the virtual pad.
 QA_TOOLS=(cage wf-recorder ffmpeg ffprobe magick parecord pactl gotg-qa-python)
 
 qa_tools_have_all() {
@@ -60,21 +55,15 @@ qa_golden_path() {
 
 # Carry a game's ROM-derived assets into the run's isolated state.
 #
-# QA gives every run a scratch GOTG_ENV_STATE_DIR so button-mashing can never
-# reach a real save. The HarbourMasters ports (Ship of Harkinian, 2 Ship 2
-# Harkinian) keep more than saves there though: a multi-megabyte .o2r they
-# extract from the ROM on first run — and that extraction is a GUI "Generate
-# now?" dialog, drawn by zenity as a second window the headless kiosk cannot
-# route input to, so no unattended run can answer it. The archive is derived
-# from the ROM, not from play, so copying the machine's own into the scratch
-# state changes nothing about what is graded and skips the dialog entirely.
+# The HarbourMasters ports extract a multi-megabyte .o2r from the ROM on first
+# run, behind a zenity "Generate now?" dialog drawn as a second window the
+# headless kiosk cannot route input to. The archive depends on the ROM, not on
+# play, so copying the machine's own into scratch skips the dialog without
+# changing what is graded. None to copy means never bootstrapped —
+# qa_require_bootstrap turns that into one clear sentence rather than a hang.
 #
-# When there is none to copy, the game has never been bootstrapped on this
-# machine at all; qa_require_bootstrap turns that into one clear sentence
-# rather than a run that hangs on a dialog until the timeout.
-# scratch is the run's GOTG_ENV_STATE_DIR, under which each environment keeps
-# its state at <scratch>/<attr> — the same layout as the machine's real state
-# dir, so a file's path relative to one maps straight onto the other.
+# scratch mirrors the real state dir's layout, <scratch>/<attr>, so a path
+# relative to one maps straight onto the other.
 qa_seed_bootstrap() {
   local attr="$1" scratch="$2" real o2r dest
   real="$GOTG_STATE_DIR/env/$attr"
@@ -224,13 +213,11 @@ EOF
     [[ "$waited" -lt 50 ]] || die "virtual pad never came up: $(cat "$padlog")"
   done
 
-  # Seat the virtual pad as player 1 for this run only. The machine's own
-  # controllers.json stays untouched — it likely pins a real pad, and QA
-  # binding a person's controller instead of its own is a test of nothing.
-  # SDL renames the pad to its mapping's name, so it is found by the
-  # vendor/product bytes in the GUID (045e/028e little-endian at the offsets
-  # SDL puts them); ours is the newest device, so the last match wins over a
-  # real wired pad with the same silicon.
+  # Seat the virtual pad as player 1 for this run only; the machine's own
+  # controllers.json, likely pinned to a real pad, stays untouched. SDL renames
+  # the pad to its mapping's name, so it is matched on the GUID's vendor and
+  # product bytes instead (045e/028e little-endian); the last match wins,
+  # taking ours over a real wired pad with the same silicon.
   local pad_key
   pad_key="$("$(pads_bin)" 2>/dev/null |
     jq -r '[.[] | select(.identity | test("^0300....5e0400008e02"))][-1] | "\(.identity)/\(.slot)"')"

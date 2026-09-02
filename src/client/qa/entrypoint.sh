@@ -13,12 +13,11 @@ chmod 700 "$XDG_RUNTIME_DIR"
 
 # Stage the credentials somewhere they can have the mode they need.
 #
-# api.json holds the service token, and the client refuses to send a token it
-# found in a world-readable file — rightly. A Kubernetes secret projects its
-# entries as symlinks, so the mode the client sees is the symlink's 0777
-# whatever defaultMode says, and the run ends up asking the catalog for
-# something with no credentials and getting a 401. Copying breaks the symlink
-# and lets the mode be real.
+# api.json holds the service token, and the client refuses to send one it found
+# in a world-readable file. A Kubernetes secret projects its entries as
+# symlinks though, so the mode seen is 0777 whatever defaultMode says, and the
+# run 401s asking the catalog for something with no credentials. Copying breaks
+# the symlink and lets the real mode show.
 config_src="${GOTG_QA_CONFIG_SRC:-/run/gotg-config}"
 if [[ -d "$config_src" ]]; then
   config_dir="$HOME/.config/gotg"

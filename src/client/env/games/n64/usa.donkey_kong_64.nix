@@ -1,12 +1,8 @@
 # Donkey Kong 64 — Rekongpiled, the N64Recomp/RT64 static recompilation, in
-# place of ares. The same family as the Paper Mario ReCut beside it, and the
-# easier one: upstream publishes a native Linux x64 build, so there is no Wine
-# prefix here — just the binary, patched onto nixpkgs' libraries in
-# pkgs/dk64recomp.
-#
-# What it buys over the emulator: RT64 rendering with the N64's effects intact,
-# high framerate decoupled from game speed, low input lag and instant loads.
-# The DK64-specific reason to prefer it is the mod runtime — see below.
+# place of ares: RT64 rendering, framerate decoupled from game speed, and a mod
+# runtime. The same family as the Paper Mario ReCut beside it, and the easier
+# one — upstream ships a native Linux build, so there is no Wine prefix, just
+# the binary patched onto nixpkgs' libraries in pkgs/dk64recomp.
 #
 # Two things about this port shape the file:
 #
@@ -37,14 +33,11 @@
   ...
 }:
 let
-  # The mods are .nrm archives — N64ModernRuntime's own format, which this
-  # runtime loads from its mods directory and lists in the in-game Mods menu.
-  # Installing them is a file copy; whether each is *on* is the player's
-  # choice, made in that menu and remembered in mod_config.
-  #
-  # Both are DK64-specific quality-of-life rather than content:
-  #   tag-anywhere  swap Kong without walking back to a tag barrel
-  #   beaver-bother the Beaver Bother minigame, made bearable
+  # .nrm archives — N64ModernRuntime's format. Installing is a file copy, and
+  # whether each is on is the player's choice, made in the in-game Mods menu
+  # and remembered in mod_config.
+  #   tag-anywhere   swap Kong without walking back to a tag barrel
+  #   beaver-bother  the Beaver Bother minigame, made bearable
   mods = {
     "dk64_tag_anywhere.nrm" = pkgs.fetchurl {
       url =

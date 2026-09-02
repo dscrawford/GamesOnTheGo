@@ -141,18 +141,14 @@ dockerTools.buildLayeredImage {
       # wlroots has no monitor and must not go looking for one.
       "WLR_BACKENDS=headless"
       "WLR_LIBINPUT_NO_DEVICES=1"
-      # Both renderers, in the order they should win.
-      #
-      # /run/opengl-driver is what this cluster's CDI injects into a pod that
-      # asked for a GPU slice — the host's NVIDIA userspace, matched to the
-      # running kernel driver. It has to come first and it has to be searched
-      # at all: pointing these only at mesa (the first version of this file)
-      # hid the NVIDIA vendor library, so glvnd handed the card to mesa, mesa
-      # answered "driver (null)", EGL failed and the compositor fell back to
-      # software — a GPU-tier run that passed while grading llvmpipe.
-      #
-      # The mesa entries behind them are the CPU tier's whole renderer, and
-      # the fallback when there is no slice to inject.
+      # Both renderers, in the order they should win. /run/opengl-driver is
+      # what this cluster's CDI injects into a pod with a GPU slice — the
+      # host's NVIDIA userspace, matched to the running kernel driver — and it
+      # must come first. Pointing these only at mesa (the first version of this
+      # file) hid the NVIDIA vendor library, so glvnd handed the card to mesa,
+      # mesa answered "driver (null)", EGL failed and the compositor fell back
+      # to software: a GPU-tier run that passed while grading llvmpipe. The
+      # mesa entries behind them are the CPU tier's whole renderer.
       "LIBGL_DRIVERS_PATH=/run/opengl-driver/lib/dri:${mesa}/lib/dri"
       "__EGL_VENDOR_LIBRARY_DIRS=/run/opengl-driver/share/glvnd/egl_vendor.d:${mesa}/share/glvnd/egl_vendor.d"
       "VK_DRIVER_FILES=/run/opengl-driver/share/vulkan/icd.d:${mesa}/share/vulkan/icd.d"
