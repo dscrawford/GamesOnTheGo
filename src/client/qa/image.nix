@@ -27,6 +27,7 @@
   gzip,
   xz,
   mesa,
+  libgbm,
   libglvnd,
   vulkan-loader,
   # The environments to carry, as { env-gb = <drv>; ... }. A pod has no
@@ -69,6 +70,20 @@ let
     # cluster service that a port-forward reaches fine, which is how this line
     # was earned.
     echo "hosts: files dns" > $out/etc/nsswitch.conf
+
+    # Teach EGL about NVIDIA's GBM platform.
+    #
+    # Xwayland is where the emulator renders, and its glamor reaches the card
+    # through GBM. The driver ships the implementation
+    # (libnvidia-egl-gbm.so.1, present in the CDI mount) but this cluster's
+    # CDI does not mount the json that advertises it — /run/opengl-driver has
+    # no share/egl at all — so EGL never loads the platform, eglInitialize
+    # fails, and Xwayland falls back to software while the compositor beside
+    # it runs on the GPU. The file is a pointer, not a copy: it names the
+    # driver's own library, which is resolved at runtime from the mount.
+    mkdir -p $out/etc/egl/egl_external_platform.d
+    echo '{"file_format_version":"1.0.0","ICD":{"library_path":"libnvidia-egl-gbm.so.1"}}' \
+      > $out/etc/egl/egl_external_platform.d/15_nvidia_gbm.json
     mkdir -p $out/etc/nix
     {
       echo "experimental-features = nix-command flakes"
@@ -78,7 +93,7 @@ let
 in
 dockerTools.buildLayeredImage {
   name = "gotg-qa";
-  tag = "0.1.0";
+  tag = "0.2.0";
   contents = [
     entrypoint
     gotg
@@ -103,6 +118,11 @@ dockerTools.buildLayeredImage {
     # software, and the emulator gets no GL context at all — measured, as a
     # capture one second long.
     mesa
+    # Split out of mesa in nixpkgs, and needed by name: Xwayland creates its
+    # GBM device through libgbm.so.1, and without it glamor cannot start at
+    # all — "failed to setup GBM backend", with the emulator on llvmpipe
+    # while the compositor runs on the card.
+    libgbm
     libglvnd
     vulkan-loader
     bakedEnvs
@@ -136,16 +156,18 @@ dockerTools.buildLayeredImage {
       "LIBGL_DRIVERS_PATH=/run/opengl-driver/lib/dri:${mesa}/lib/dri"
       "__EGL_VENDOR_LIBRARY_DIRS=/run/opengl-driver/share/glvnd/egl_vendor.d:${mesa}/share/glvnd/egl_vendor.d"
       "VK_DRIVER_FILES=/run/opengl-driver/share/vulkan/icd.d:${mesa}/share/vulkan/icd.d"
-      "LD_LIBRARY_PATH=/run/opengl-driver/lib:${lib.makeLibraryPath [ libglvnd mesa vulkan-loader ]}"
-      # Deliberately NOT set here: GBM_BACKENDS_PATH=/run/opengl-driver/lib/gbm
-      # and __GLX_VENDOR_LIBRARY_NAME=nvidia. They are the obvious way to get
-      # Xwayland's glamor onto the card — the compositor reaches it, Xwayland
-      # does not ("eglInitialize() failed / Disabling GLAMOR"), so the game
-      # renders on llvmpipe while cage composites on the GPU. Measured: they
-      # make it worse, taking away the working software fallback without
-      # replacing it, and a 60s run captures one second of nothing. The
-      # emulator's own path to the GPU is unfinished work, not a missing
-      # env var.
+      "LD_LIBRARY_PATH=/run/opengl-driver/lib:${lib.makeLibraryPath [ libglvnd mesa libgbm vulkan-loader ]}"
+      # Xwayland's glamor reaches the card through GBM: the backend to load,
+      # and the config dir naming the external platform that drives it. The
+      # json is ours (see accounts above) because the CDI mount has no
+      # share/egl of its own.
+      #
+      # __GLX_VENDOR_LIBRARY_NAME=nvidia is deliberately absent. It looks like
+      # it belongs beside these and measurably does not: forcing NVIDIA GLX
+      # takes the software fallback away without replacing it, and a 60s run
+      # captures one second of nothing.
+      "GBM_BACKENDS_PATH=/run/opengl-driver/lib/gbm"
+      "__EGL_EXTERNAL_PLATFORM_CONFIG_DIRS=/etc/egl/egl_external_platform.d"
       "GOTG_QA_BAKED_ENVS=${bakedEnvs}"
     ];
     WorkingDir = "/state";

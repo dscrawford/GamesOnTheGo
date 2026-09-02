@@ -139,6 +139,50 @@ on top of the container work:
   world-readable — the run then 401s. The entrypoint copies them and fixes
   the mode.
 
+**Why the emulator is still on llvmpipe — root cause, 2026-09-02.** Traced to
+the end, and the answer is on the node, not in the image.
+
+`/run/opengl-driver/lib` is a symlink farm into the host's nix store. This
+cluster's CDI mounts the driver package (`nvidia-x11-580.142`) but **not the
+EGL external-platform packages**, so those symlinks dangle:
+
+| library | target | mounted |
+|---|---|---|
+| `libEGL_nvidia.so.0` | `nvidia-x11-580.142` | yes |
+| `libGLX_nvidia.so.0` | `nvidia-x11-580.142` | yes |
+| `libnvidia-egl-gbm.so.1` | `nvidia-egl-external-platforms` → `egl-gbm-1.1.3` | **no** |
+| `libnvidia-egl-xlib.so.1` | `nvidia-egl-external-platforms` → `egl-x11` | **no** |
+
+That is exactly the split we see: the compositor uses `libEGL_nvidia` and gets
+the card, while Xwayland's glamor needs the GBM external platform, cannot
+`dlopen` it, and falls back to software — taking the emulator with it.
+
+Proven in-pod with a ctypes probe. With `libgbm` added to the image (nixpkgs
+split it out of mesa, and without it `gbm_create_device` cannot even be
+called), the `15_nvidia_gbm.json` this image now carries, and the two missing
+store paths bind-mounted by hand:
+
+```
+gbm_create_device -> ok   backend: nvidia
+eglGetPlatformDisplay -> ok
+eglInitialize -> 1 (EGL_SUCCESS), EGL 1.5
+```
+
+So the recipe works. Two things still stand in the way of turning it on:
+- It also needs `__EGL_VENDOR_LIBRARY_FILENAMES` pinned to NVIDIA, or glvnd
+  hands the GBM display to mesa, which rejects an NVIDIA gbm device
+  ("gbm device using incorrect/incompatible backend"). Pinning it globally
+  then breaks *ares*, which needs the X11 external platform — `egl-x11`,
+  dangling for the same reason. A 60s run captures 1.5s of nothing.
+- Hand-mounting host store paths into the Job is not a fix worth committing:
+  the hashes change with every driver update.
+
+**The real fix is one node3 option**, `hardware.nvidia-container-toolkit.mounts`,
+adding the external-platform closure to the CDI spec so every GPU pod sees a
+complete driver. That is a dotfiles change and a rebuild of a cluster node, so
+it is not done here — it needs a maintenance window, since node3 also runs
+Jellyfin.
+
 **The GPU tier is half-done, and worth being precise about.** With a
 `nvidia.com/gpu-0` slice the compositor does reach the card (EGL vendor
 NVIDIA, GL renderer "NVIDIA GeForce GTX 1080 Ti"), because CDI mounts the
