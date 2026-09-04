@@ -190,3 +190,20 @@ make_rundir() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"usage: gotg qa"* ]]
 }
+
+# --- the catalog ---
+
+@test "a game imported since the cache was written is found after one refresh" {
+  start_saves_service
+  write_api_config
+  add_game n64 "usa.old.z64" "rom" "Old"
+  gotg refresh
+  add_game n64 "usa.new.z64" "rom" "New"
+
+  # The lookup is the first thing qa does; past it the run wants a compositor
+  # this test has no business starting, so the message is what is checked.
+  gotg qa usa.new --duration 1
+  [[ "$stderr" != *"no game called 'usa.new'"* ]]
+  [[ "$stderr" == *"catalog updated"* ]]
+  stop_saves_service
+}

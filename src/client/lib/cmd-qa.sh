@@ -248,8 +248,14 @@ EOF
   # happens to be rooted here — a stale root was the first bug a real run ever
   # caught. Same trade install makes: refresh when possible, run regardless.
   manifest_cached || manifest_ensure
-  local attr
-  attr="$(env_attr "$(manifest_find "$want")" "$variant")"
+  # A game imported since the cache was written is the usual thing a QA run
+  # is for: one refresh before giving up on the id.
+  local attr game
+  if ! game="$(manifest_find "$want" 2>/dev/null)"; then
+    manifest_refresh || true
+    game="$(manifest_find "$want")"
+  fi
+  attr="$(env_attr "$game" "$variant")"
   if env_is_built "$attr"; then
     env_refresh "$attr" || warn "could not rebuild $attr — grading the build already here"
   fi
