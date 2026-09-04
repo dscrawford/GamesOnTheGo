@@ -277,7 +277,7 @@ def test_convert_normalizes_an_archived_image_and_leaves_the_source_alone(cfg, m
 
     calls: list[list[str]] = []
 
-    def fake_run(cmd, cwd=None):
+    def fake_run(cmd, cwd=None, writing=None):
         calls.append(cmd)
         if cmd[0] == "7z":
             out = Path(cmd[3][2:])
@@ -326,7 +326,7 @@ def test_extract_unpacks_a_lone_archive_with_7z(cfg, monkeypatch):
     archive.write_bytes(b"7z" * 100)
     calls = []
 
-    def fake_run(cmd, cwd=None):
+    def fake_run(cmd, cwd=None, writing=None):
         calls.append(cmd)
         out = Path(next(a for a in cmd if a.startswith("-o"))[2:])
         (out / "Game (World).xci").write_bytes(b"cartridge")
@@ -351,7 +351,7 @@ def test_extract_of_a_lone_archive_that_yields_no_game_is_an_error(cfg, monkeypa
     archive = cfg.source_root / "Game (World).7z"
     archive.write_bytes(b"7z" * 100)
 
-    def fake_run(cmd, cwd=None):
+    def fake_run(cmd, cwd=None, writing=None):
         out = Path(next(a for a in cmd if a.startswith("-o"))[2:])
         (out / "readme.nfo").write_bytes(b"x")
 
@@ -364,3 +364,41 @@ def test_extract_of_a_lone_archive_that_yields_no_game_is_an_error(cfg, monkeypa
     assert result.status == STATUS_ERROR
     assert "produced no .xci" in result.message
     assert not list((cfg.games_root / "switch").glob(".gotg-extract-*"))
+
+
+# --- the page cache is given back as it forms ----------------------------------
+
+
+def test_a_tool_that_writes_has_its_output_cache_dropped_while_it_runs(tmp_path, monkeypatch):
+    from gotg.indexer import execute as ex
+
+    dropped = []
+    monkeypatch.setattr(ex, "_drop_cache", lambda path: dropped.append(path.name))
+    monkeypatch.setattr(ex, "CACHE_DROP_INTERVAL", 0.05)
+    out = tmp_path / "out"
+    out.mkdir()
+
+    ex._run(["sh", "-c", f"printf x > '{out}/big.xci'; sleep 0.3"], writing=out)
+
+    assert "big.xci" in dropped
+    assert dropped.count("big.xci") >= 2, "dropped repeatedly, not once at the end"
+
+
+def test_a_failing_tool_still_reports_its_last_lines_when_watched(tmp_path):
+    from gotg.indexer import execute as ex
+
+    with pytest.raises(ex.ExecutionError, match="sh failed \\(3\\): nope"):
+        ex._run(["sh", "-c", "echo nope >&2; exit 3"], writing=tmp_path)
+
+
+def test_hashing_a_large_file_gives_its_cache_back(tmp_path, monkeypatch):
+    from gotg.indexer import execute as ex
+
+    calls = []
+    monkeypatch.setattr(ex.os, "posix_fadvise", lambda fd, off, ln, advice: calls.append(advice))
+    monkeypatch.setattr(ex, "CACHE_DROP_BYTES", 8)
+    big = tmp_path / "big.bin"
+    big.write_bytes(b"z" * 64)
+
+    assert sha256_file(big) == __import__("hashlib").sha256(b"z" * 64).hexdigest()
+    assert calls and all(a == ex.os.POSIX_FADV_DONTNEED for a in calls)

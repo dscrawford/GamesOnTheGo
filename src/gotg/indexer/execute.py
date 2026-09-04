@@ -19,6 +19,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -107,11 +108,41 @@ def _require_space(root: Path, needed: int) -> None:
         raise ExecutionError(f"need ~{needed / 1e9:.1f} GB under {root} but only {free / 1e9:.1f} GB free")
 
 
+# How often the page cache of a file being written or read is given back.
+# The pod runs under a memory limit that counts cached pages, and a 32 GB
+# extract fills it: measured as the kernel OOM-killing 7z at 8 GiB with
+# 60 MB of process memory and 6.5 GB of file cache. The cache is dropped as
+# it forms, so what the job holds stays the size of what it is doing.
+CACHE_DROP_INTERVAL = 1.0
+CACHE_DROP_BYTES = 256 * 1024 * 1024
+
+
+def _drop_cache(path: Path) -> None:
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
+    since_drop = 0
     with open(path, "rb") as fh:
         for chunk in iter(lambda: fh.read(4 * 1024 * 1024), b""):
             digest.update(chunk)
+            since_drop += len(chunk)
+            if since_drop >= CACHE_DROP_BYTES:
+                since_drop = 0
+                try:
+                    os.posix_fadvise(fh.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+                except OSError:
+                    pass
     return digest.hexdigest()
 
 
@@ -129,12 +160,24 @@ def write_sidecar(path: Path) -> str:
     return digest
 
 
-def _run(cmd: list[str], cwd: Path | None = None) -> None:
+def _run(cmd: list[str], cwd: Path | None = None, *, writing: Path | None = None) -> None:
+    """Run a tool; with `writing`, keep dropping the cache of what it writes there."""
     log.debug("run: %s (cwd=%s)", " ".join(cmd), cwd)
-    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-3:]
-        raise ExecutionError(f"{cmd[0]} failed ({proc.returncode}): {' / '.join(tail)}")
+    if writing is None:
+        proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+        out, err, code = proc.stdout, proc.stderr, proc.returncode
+    else:
+        with subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as proc:
+            while proc.poll() is None:
+                time.sleep(CACHE_DROP_INTERVAL)
+                for produced in writing.rglob("*"):
+                    if produced.is_file():
+                        _drop_cache(produced)
+            out, err = proc.communicate()
+            code = proc.returncode
+    if code != 0:
+        tail = (err or out or "").strip().splitlines()[-3:]
+        raise ExecutionError(f"{cmd[0]} failed ({code}): {' / '.join(tail)}")
 
 
 def _same_file(a: Path, b: Path) -> bool:
@@ -192,7 +235,7 @@ def _extract_file(src: Path, dst: Path, cfg: Config) -> tuple[str, Path]:
     _require_space(cfg.games_root, src.stat().st_size * 2)
     dst.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=dst.parent, prefix=".gotg-extract-") as tmp:
-        _run(["7z", "x", "-y", f"-o{tmp}", str(src)])
+        _run(["7z", "x", "-y", f"-o{tmp}", str(src)], writing=Path(tmp))
         produced = [p for p in Path(tmp).rglob(f"*.{ext}") if p.is_file()]
         if not produced:
             raise ExecutionError(f"{src.name} produced no .{ext} file")
@@ -225,7 +268,7 @@ def _extract(op: Op, cfg: Config) -> tuple[str, Path]:
     dst.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(dir=dst.parent, prefix=".gotg-extract-") as tmp:
-        _run(["unrar", "x", "-o-", "-idq", str(rars[0]), tmp + "/"])
+        _run(["unrar", "x", "-o-", "-idq", str(rars[0]), tmp + "/"], writing=Path(tmp))
         produced = [p for p in Path(tmp).rglob(f"*.{ext}") if p.is_file()]
         if not produced:
             raise ExecutionError(f"archive in {src_dir} produced no .{ext} file")
@@ -258,7 +301,7 @@ def _convert(op: Op, cfg: Config) -> tuple[str, Path]:
     dst.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(dir=dst.parent, prefix=".gotg-extract-") as tmp:
-        _run(["7z", "x", "-y", f"-o{tmp}", str(src)])
+        _run(["7z", "x", "-y", f"-o{tmp}", str(src)], writing=Path(tmp))
         images = [p for p in Path(tmp).rglob("*") if p.is_file()]
         if not images:
             raise ExecutionError(f"{src.name} produced no files")
@@ -315,7 +358,7 @@ def _archive(op: Op, cfg: Config) -> tuple[str, Path]:
     with tempfile.TemporaryDirectory(dir=dst.parent, prefix=".gotg-zip-") as tmp:
         staged = Path(tmp) / dst.name
         # -1 keeps a multi-GB pack fast; this content barely compresses anyway.
-        _run(["zip", "-r", "-1", "-q", str(staged), *members], cwd=src_dir)
+        _run(["zip", "-r", "-1", "-q", str(staged), *members], cwd=src_dir, writing=Path(tmp))
         os.replace(staged, dst)
     return STATUS_DONE, dst
 

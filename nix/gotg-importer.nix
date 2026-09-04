@@ -14,7 +14,7 @@
   coreutils,
 }:
 
-runCommand "gotg-importer-0.5.3"
+runCommand "gotg-importer-0.5.4"
   {
     nativeBuildInputs = [ makeWrapper ];
     inherit venv;
@@ -22,7 +22,7 @@ runCommand "gotg-importer-0.5.3"
     # comes from here, so leaving it would push over the tag the cluster is
     # currently running — the CronJob pins a digest, so nothing would break,
     # but the way back to the previous build would be gone.
-    passthru.version = "0.5.3";
+    passthru.version = "0.5.4";
     meta = {
       description = "Indexes completed game torrents into the GOTG catalog and /Games";
       mainProgram = "gotg-importer";
