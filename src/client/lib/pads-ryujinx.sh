@@ -35,9 +35,29 @@ pads_ryujinx_configure() {
   if pads_ryujinx_motion "$attr"; then
     pads_ryujinx_keep "$attr"
   fi
+  pads_ryujinx_warn_steam "$attr"
   # Never fatal, like every other binding writer: no pad attached, or one SDL
   # cannot read, is a launch without motion rather than no launch.
   return 0
+}
+
+# A Steam Controller is a gamepad only while Steam runs; without it the puck
+# stays in lizard mode and Ryujinx sees no pad at all. A Switch game then
+# opens its "connect a controller" screen, which Ryujinx cannot show — it
+# throws twenty seconds in. Said before the launch, where it can be acted on.
+pads_ryujinx_warn_steam() {
+  local attr="$1" config
+  config="$(pads_ryujinx_config "$attr")"
+  [[ -f "$config" ]] || return 0
+  jq -e '[.input_config[]? | .id // "" | test("28de")] | any' "$config" >/dev/null 2>&1 || return 0
+  if [[ -n "${GOTG_STEAM_RUNNING:-}" ]]; then
+    [[ "$GOTG_STEAM_RUNNING" == "1" ]] && return 0
+  elif pgrep -x steam >/dev/null 2>&1; then
+    return 0
+  fi
+  warn "Steam is not running: the Steam Controller stays a keyboard and Ryujinx will find no pad,
+         so the game will stop on its controller screen. Start Steam, or bind another pad:
+         gotg controllers order --set <pad> && gotg controllers apply <id>"
 }
 
 pads_ryujinx_keep() {
