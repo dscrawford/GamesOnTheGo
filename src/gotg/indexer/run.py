@@ -19,7 +19,7 @@ from . import plan as pl
 from . import publish as pub
 from . import scan as sc
 from .config import Config
-from .execute import STATUS_ERROR, STATUS_MANUAL, Result, cleanup_staging, execute
+from .execute import CLIENT_ACTIONS, STATUS_ERROR, STATUS_MANUAL, Result, cleanup_staging, execute
 from .planner import plan_source
 from .rules import Rules
 
@@ -80,6 +80,8 @@ def _log_result(result: Result) -> None:
         log.error("%s %s: %s", result.op.action, result.op.src, result.message)
     elif result.status == STATUS_MANUAL:
         log.warning("manual review: %s (%s)", result.op.src, result.message)
+    elif result.op.action in CLIENT_ACTIONS:
+        log.info("%s %s (raw members; the client unpacks)", result.status, result.op.entry_id or result.op.src)
     else:
         log.info("%s %s -> %s", result.status, result.op.entry_id or result.op.src, result.op.dst or "-")
 
