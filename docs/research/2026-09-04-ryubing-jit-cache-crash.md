@@ -1,5 +1,5 @@
 # Ryubing 1.3.3 aborts when a game outgrows its JIT cache: Research Report
-*Generated: 2026-09-04 | Sources: 22 | Confidence: High on the mechanism, Medium on upstream status*
+*Generated: 2026-09-04 | Sources: 22 | Confidence: High*
 
 ## Executive Summary
 Tears of the Kingdom 1.4.3 dies about twenty seconds into its opening on
