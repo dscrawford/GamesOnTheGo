@@ -342,3 +342,25 @@ def test_extract_unpacks_a_lone_archive_with_7z(cfg, monkeypatch):
     assert calls[0][:2] == ["7z", "x"]
     assert (cfg.games_root / "switch" / "world.game.xci").read_bytes() == b"cartridge"
     assert not list((cfg.games_root / "switch").glob(".gotg-extract-*"))
+
+
+def test_extract_of_a_lone_archive_that_yields_no_game_is_an_error(cfg, monkeypatch):
+    from gotg.indexer import execute as ex
+    from gotg.indexer.plan import ACTION_EXTRACT
+
+    archive = cfg.source_root / "Game (World).7z"
+    archive.write_bytes(b"7z" * 100)
+
+    def fake_run(cmd, cwd=None):
+        out = Path(next(a for a in cmd if a.startswith("-o"))[2:])
+        (out / "readme.nfo").write_bytes(b"x")
+
+    monkeypatch.setattr(ex, "_run", fake_run)
+    monkeypatch.setattr(ex, "_require_space", lambda root, needed: None)
+
+    op = Op(ACTION_EXTRACT, "switch", str(archive), f"{cfg.games_root}/switch/world.game.xci", "world.game")
+    result = execute(op, cfg)
+
+    assert result.status == STATUS_ERROR
+    assert "produced no .xci" in result.message
+    assert not list((cfg.games_root / "switch").glob(".gotg-extract-*"))

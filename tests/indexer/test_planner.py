@@ -319,7 +319,7 @@ def test_a_scene_update_attaches_to_its_base_game(roots):
     make_dir(
         src,
         "The_Legend_of_Zelda_Tears_of_the_Kingdom_Update_v1.4.3_PROPER_NSW-SUXXORS",
-        files=("sxs-totk_v720896.rar", "sxs-totk_v720896.r00", "sxs-totk_v720896.sfv", "sxs-totk_v720896.nfo"),
+        files=("sxs-totk_v720896.nsp", "sxs-totk_v720896.rar", "sxs-totk_v720896.r00", "sxs-totk_v720896.sfv"),
     )
 
     ops = plan_source(src / "The_Legend_of_Zelda_Tears_of_the_Kingdom_Update_v1.4.3_PROPER_NSW-SUXXORS", games, RULES)
@@ -360,7 +360,7 @@ def test_a_no_intro_update_archive_attaches_by_its_tags(roots):
 
 def test_a_scene_base_release_still_extracts(roots):
     src, games = roots
-    make_dir(src, "Luigis_Mansion_2_HD_PROPER_NSW-HR", files=("hr-banra.rar", "hr-banra.r00", "hr-banra.sfv"))
+    make_dir(src, "Luigis_Mansion_2_HD_PROPER_NSW-HR", files=("hr-banra.xci", "hr-banra.rar", "hr-banra.r00"))
 
     ops = plan_source(src / "Luigis_Mansion_2_HD_PROPER_NSW-HR", games, RULES)
 
@@ -382,3 +382,17 @@ def test_an_update_for_a_platform_without_extras_support_is_quarantined(roots):
 
     assert [(o.action, o.platform, o.entry_id) for o in ops] == [(ACTION_MANUAL, "gamecube", "usa.some_game")]
     assert "no recipe for extras" in ops[0].reason
+
+
+def test_a_scene_update_with_an_underscore_version_keeps_every_group(roots):
+    from gotg.indexer.plan import ACTION_ATTACH
+
+    src, games = roots
+    make_dir(src, "Game_Update_v1_2_1_NSW-GRP", files=("g.nsp", "g.rar", "g.r00", "g.sfv"))
+    make_dir(src, "Game_Update_v1_9_0_NSW-GRP", files=("h.nsp", "h.rar", "h.r00", "h.sfv"))
+
+    first = plan_source(src / "Game_Update_v1_2_1_NSW-GRP", games, RULES)[0]
+    second = plan_source(src / "Game_Update_v1_9_0_NSW-GRP", games, RULES)[0]
+
+    assert (first.action, first.entry_id, first.version) == (ACTION_ATTACH, "world.game", "1.2.1")
+    assert (second.action, second.version) == (ACTION_ATTACH, "1.9.0")

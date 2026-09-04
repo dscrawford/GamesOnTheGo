@@ -169,6 +169,9 @@ def _clean_scene_name(name: str) -> str:
     name = _re.sub(r"\.[A-Za-z0-9]{1,4}$", "", name)   # drop extension
     name = _re.sub(r"^[a-z]{1,2}-", "", name)             # v- / s- volume prefix
     name = _re.sub(r"[-_]([A-Z0-9]{2,}(?:-[A-Z0-9]+)?)$", "", name)  # -NSW-VENOM group
+    # v1_2_1 is a version, not three words; dotted before the underscores go.
+    name = _re.sub(r"(?<![A-Za-z0-9])v(\d+(?:_\d+)+)(?![A-Za-z0-9])",
+                   lambda m: "v" + m.group(1).replace("_", "."), name)
     name = name.replace("_", " ").strip()
     # Release flags say how the release was made, never what it is.
     return _re.sub(r"(\s+(?:PROPER|REPACK|READNFO|iNTERNAL|INTERNAL|RERIP|DIRFIX|NFOFIX))+$", "", name)

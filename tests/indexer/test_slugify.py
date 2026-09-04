@@ -236,6 +236,10 @@ def test_a_title_with_only_tagged_dumps_still_imports():
         ("Splatoon 3 Update v9.2.0 PROPER", "Splatoon 3", "update", "9.2.0"),
         ("Mario Kart 8 Deluxe DLC Booster Course Pass", "Mario Kart 8 Deluxe", "dlc", ""),
         ("Some Game Update", "Some Game", "update", ""),
+        ("Game Update 9.2.0", "Game", "update", "9.2.0"),
+        ("Game update", "Game", "update", ""),
+        ("Updater's Journal", "Updater's Journal", "", ""),
+        ("Update v1.2", "Update v1.2", "", ""),
         # No role: the title comes back whole, no matter how it reads.
         ("Luigis Mansion 2 HD", "Luigis Mansion 2 HD", "", ""),
         ("Updated Edition", "Updated Edition", "", ""),

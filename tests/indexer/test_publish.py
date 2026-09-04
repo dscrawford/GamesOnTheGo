@@ -645,3 +645,26 @@ def test_an_update_sees_a_base_published_earlier_in_the_run(tmp_path, stub):
 
     assert len(handler.puts) == 2
     assert [f["name"] for f in handler.puts[-1][1]["files"]][:2] == ["Zelda (World).7z", "extras/update_1.4.3/g.r00"]
+
+
+def test_an_update_and_a_dlc_coexist_under_different_extras_slots(tmp_path, stub):
+    url, handler = stub
+    handler.games.append(base_row(tmp_path))
+    publisher = Publisher(CatalogAPI(url, "t"))
+    publisher.publish(attach_result(tmp_path, role="update", version="1.4.3"))
+
+    dlc_release = tmp_path / "Torrents" / "Zelda_DLC_Pack"
+    dlc_release.mkdir()
+    (dlc_release / "pack.nsp").write_bytes(b"dlc")
+    dlc_op = Op(ACTION_ATTACH, "switch", str(dlc_release), "", "world.zelda", role="dlc", handler="scene_archive")
+    publisher.publish(Result(dlc_op, STATUS_DONE))
+
+    _, payload = handler.puts[-1]
+    names = [f["name"] for f in payload["files"]]
+    assert names == [
+        "Zelda (World).7z",
+        "extras/update_1.4.3/g.r00",
+        "extras/update_1.4.3/g.rar",
+        "extras/update_1.4.3/g.sfv",
+        "extras/dlc_zelda_dlc_pack/pack.nsp",
+    ]
