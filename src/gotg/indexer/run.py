@@ -48,7 +48,14 @@ class RunStats:
         """The one-line run summary (IMPORTER_SPEC.md §10)."""
         parts = [
             f"{action}={self.actions[action]}"
-            for action in (pl.ACTION_HARDLINK, pl.ACTION_EXTRACT, pl.ACTION_ARCHIVE, pl.ACTION_MANUAL, pl.ACTION_SKIP)
+            for action in (
+                pl.ACTION_HARDLINK,
+                pl.ACTION_EXTRACT,
+                pl.ACTION_ARCHIVE,
+                pl.ACTION_ATTACH,
+                pl.ACTION_MANUAL,
+                pl.ACTION_SKIP,
+            )
         ]
         parts.append(f"unchanged={self.statuses['noop']}")
         parts.append(f"error={self.statuses[STATUS_ERROR]}")
@@ -84,9 +91,11 @@ def process_source(
     entries: dict[str, mf.Entry],
     *,
     checksum: bool = True,
+    ops: list[pl.Op] | None = None,
 ) -> list[Result]:
     """Plan and execute one payload, folding its entries into the catalog."""
-    ops = plan_source(path, cfg.games_root, rules)
+    if ops is None:
+        ops = plan_source(path, cfg.games_root, rules)
     results = []
     for op in ops:
         result = execute(op, cfg, checksum=checksum)
@@ -170,6 +179,17 @@ def run_scan(
     return stats
 
 
+def _plan_all(paths: list[Path], cfg: Config, rules: Rules) -> list[tuple[Path, list[pl.Op]]]:
+    """Every source planned, with updates and DLC after the games they attach to.
+
+    An update publishes onto its base's entry, so the base has to be there
+    first — and directory order is the release group's naming, not ours. The
+    sort is stable: everything else keeps the order it was given.
+    """
+    planned = [(path, plan_source(path, cfg.games_root, rules)) for path in paths]
+    return sorted(planned, key=lambda item: any(op.action == pl.ACTION_ATTACH for op in item[1]))
+
+
 def run_paths(
     paths: list[Path],
     cfg: Config,
@@ -181,18 +201,17 @@ def run_paths(
 ) -> RunStats:
     """Import explicit source directories (--bootstrap)."""
     stats = RunStats()
+    planned = _plan_all(paths, cfg, rules)
     if dry_run:
-        ops: list[pl.Op] = []
-        for path in paths:
-            ops.extend(plan_source(path, cfg.games_root, rules))
+        ops = [op for _, source_ops in planned for op in source_ops]
         print_plan(ops)
         stats.actions.update(op.action for op in ops)
         return stats
 
     cleanup_staging(cfg.games_root)
     entries = mf.load(cfg.manifest_path)
-    for path in paths:
-        results = process_source(path, cfg, rules, entries, checksum=checksum)
+    for path, ops in planned:
+        results = process_source(path, cfg, rules, entries, checksum=checksum, ops=ops)
         stats.record(results)
         # Publish after every source rather than at the end. A run killed part
         # way through — an OOM during a large extract, an evicted pod — would

@@ -26,6 +26,7 @@ from .config import Config
 from .manifest import Entry
 from .plan import (
     ACTION_ARCHIVE,
+    ACTION_ATTACH,
     ACTION_CONVERT,
     ACTION_EXTRACT,
     ACTION_HARDLINK,
@@ -182,6 +183,23 @@ def _verify_archive(src_dir: Path) -> None:
     _run(["rhash", "-c", sfvs[0].name], cwd=src_dir)
 
 
+def _extract_file(src: Path, dst: Path, cfg: Config) -> tuple[str, Path]:
+    """A lone archive whose content is already the format the emulator wants."""
+    ext = dst.suffix.lstrip(".")
+    # A game container barely compresses, so the unpacked copy is about the
+    # archive's size again; convert's x3 is for disc images and would refuse
+    # a 32 GB cartridge dump on a volume with room for it.
+    _require_space(cfg.games_root, src.stat().st_size * 2)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=dst.parent, prefix=".gotg-extract-") as tmp:
+        _run(["7z", "x", "-y", f"-o{tmp}", str(src)])
+        produced = [p for p in Path(tmp).rglob(f"*.{ext}") if p.is_file()]
+        if not produced:
+            raise ExecutionError(f"{src.name} produced no .{ext} file")
+        os.replace(max(produced, key=lambda p: p.stat().st_size), dst)
+    return STATUS_DONE, dst
+
+
 def _extract(op: Op, cfg: Config) -> tuple[str, Path]:
     src_dir = Path(op.src)
     dst = _assert_under(Path(op.dst), cfg.games_root)
@@ -189,6 +207,9 @@ def _extract(op: Op, cfg: Config) -> tuple[str, Path]:
 
     if dst.exists():
         return STATUS_NOOP, dst
+
+    if src_dir.is_file():
+        return _extract_file(src_dir, dst, cfg)
 
     already = _find_extracted(src_dir, ext)
     if already is not None:
@@ -317,6 +338,10 @@ def execute(op: Op, cfg: Config, *, checksum: bool = True) -> Result:
         return Result(op, STATUS_SKIP, op.reason)
     if op.action == ACTION_MANUAL:
         return Result(op, STATUS_MANUAL, op.reason)
+    if op.action == ACTION_ATTACH:
+        # Nothing to write: the extra is served from where it seeds, on the
+        # base game's entry. Publishing is where it exists at all.
+        return Result(op, STATUS_DONE, op.reason)
 
     try:
         if op.action == ACTION_HARDLINK:

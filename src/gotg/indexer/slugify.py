@@ -59,6 +59,17 @@ _REV_RE = re.compile(r"^(?:rev\s*([0-9a-z.]+)|v\s*([0-9]+(?:\.[0-9]+)*))$", re.I
 _LANG_RE = re.compile(r"^[A-Z][a-z](,[A-Z][a-z])+$")
 _DATE_RE = re.compile(r"^\d{4}(-\d{2}){0,2}$")
 
+# Update and DLC releases: what they patch or extend, which of the two, and
+# the version when the name carries one. "Update" is the word every scene
+# group and No-Intro use; a title of its own that ends in it would be lost to
+# this, and none has been seen.
+ROLE_UPDATE = "update"
+ROLE_DLC = "dlc"
+_EXTRA_RE = re.compile(
+    r"^(?P<base>.+?)\s+(?P<role>update|dlc)\b(?:\s+v?(?P<version>\d+(?:\.\d+)*))?(?P<rest>.*)$",
+    re.I,
+)
+
 
 def _normalize_status(tag: str) -> str:
     """'Beta 1' -> 'beta'. No-Intro numbers repeated dumps of the same kind, and
@@ -130,6 +141,28 @@ def _restore_article(base: str) -> str:
         if lead and lead.group(1).lower() in _ARTICLES:
             base = lead.group(2).strip()
     return base
+
+
+def split_extra(title: str) -> tuple[str, str, str]:
+    """('Zelda Tears of the Kingdom Update v1.4.3', ...) -> (base title, role, version).
+
+    A plain title — tags already stripped — that names an update or DLC gives
+    the title it belongs to; anything else comes back whole with no role.
+    """
+    m = _EXTRA_RE.match(title.strip())
+    if not m or not m.group("base").strip():
+        return title.strip(), "", ""
+    return m.group("base").strip(), m.group("role").lower(), m.group("version") or ""
+
+
+def extra_role(tags: list[str]) -> str:
+    """The role a No-Intro tag list claims: '(Update)' or '(DLC)', else none."""
+    lowered = {t.strip().lower() for t in tags}
+    if ROLE_UPDATE in lowered:
+        return ROLE_UPDATE
+    if ROLE_DLC in lowered:
+        return ROLE_DLC
+    return ""
 
 
 def title_slug(base: str) -> str:

@@ -57,6 +57,16 @@ HANDLERS = frozenset(
 # the dual-publish diff compares by hash rather than by presence.
 LINK_HANDLERS = frozenset({HANDLER_SINGLE_FILE, HANDLER_NO_INTRO_SET})
 
+# Members under this prefix are a game's updates and DLC, one release per
+# directory — attached to the base game's entry rather than entries of their
+# own, since none is playable alone. The catalog's conflict rule looks past
+# them: the game is the same bytes whether or not a patch has arrived since.
+EXTRAS_PREFIX = "extras/"
+
+
+def is_extra(name: str) -> bool:
+    return name.startswith(EXTRAS_PREFIX)
+
 
 def _valid_segment(segment: str) -> bool:
     return 0 < len(segment) <= 255 and segment.isprintable() and not segment.startswith(".")

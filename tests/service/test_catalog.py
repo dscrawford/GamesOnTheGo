@@ -1253,3 +1253,55 @@ def test_one_scan_at_a_time(admin_service, catalog, monkeypatch):
     assert first[0][0] == 200
     # The slot is released, so the next caller is served normally.
     assert call(f"{admin_service}/admin/scan", token=ADMIN)[0] == 200
+
+
+# --- updates and DLC ----------------------------------------------------------
+
+
+def test_extras_arriving_on_an_entry_are_not_a_conflict(catalog, library):
+    game = library / "Zelda (World).7z"
+    game.write_bytes(b"base")
+    update = library / "Zelda_Update_v1.1" / "u.rar"
+    update.parent.mkdir()
+    update.write_bytes(b"patch")
+    base = {"handler": "single_archive", "title": "Zelda", "files": [_file("Zelda (World).7z", game)]}
+    catalog.upsert("switch", "world.zelda", base)
+
+    with_update = {
+        **base,
+        "files": base["files"] + [_file("extras/update_1.1/u.rar", update)],
+    }
+    stored = catalog.upsert("switch", "world.zelda", with_update)
+    assert [f["name"] for f in stored["files"]] == ["Zelda (World).7z", "extras/update_1.1/u.rar"]
+
+    # And back: an update withdrawn is not a new game either.
+    stored = catalog.upsert("switch", "world.zelda", base)
+    assert [f["name"] for f in stored["files"]] == ["Zelda (World).7z"]
+
+
+def test_a_different_base_behind_the_same_extras_is_still_a_conflict(catalog, library):
+    game = library / "Zelda (World).7z"
+    game.write_bytes(b"base")
+    other = library / "Other" / "Zelda (World).7z"
+    other.parent.mkdir()
+    other.write_bytes(b"other")
+    update = library / "u.rar"
+    update.write_bytes(b"patch")
+    extras = [_file("extras/update_1.1/u.rar", update)]
+    catalog.upsert(
+        "switch",
+        "world.zelda",
+        {"handler": "single_archive", "title": "Zelda", "files": [_file("Zelda (World).7z", game)] + extras},
+    )
+
+    with pytest.raises(Conflict):
+        catalog.upsert(
+            "switch",
+            "world.zelda",
+            {"handler": "single_archive", "title": "Zelda", "files": [_file("Zelda (World).7z", other)] + extras},
+        )
+
+
+def _file(name, path):
+    st = path.stat()
+    return {"name": name, "path": str(path), "size_bytes": st.st_size, "mtime": int(st.st_mtime), "sha256": None}

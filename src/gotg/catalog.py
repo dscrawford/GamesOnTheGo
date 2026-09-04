@@ -35,6 +35,7 @@ from .contract import (
     HANDLERS,
     PLATFORM_RE,
     SHA256_RE,
+    is_extra,
     valid_filename,
 )
 
@@ -72,6 +73,11 @@ CREATE TABLE IF NOT EXISTS entry_file (
   FOREIGN KEY (platform, id) REFERENCES entry(platform, id) ON DELETE CASCADE
 );
 """
+
+
+def _game_paths(files: list[dict]) -> set[str]:
+    """The bytes that are the game itself; an update arriving is not a new game."""
+    return {f["path"] for f in files if not is_extra(f["name"])}
 
 
 class Conflict(Exception):
@@ -219,7 +225,7 @@ class CatalogStore:
                 # hardlink collision used to surface; an upsert must not
                 # swallow it. Same bytes moving is fine — same id from a
                 # different source is not.
-                if {f["path"] for f in stored["files"]} != {f["path"] for f in entry["files"]}:
+                if _game_paths(stored["files"]) != _game_paths(entry["files"]):
                     raise Conflict(stored)
 
             imported_at = stored["imported_at"] if stored else now

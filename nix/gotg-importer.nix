@@ -14,15 +14,15 @@
   coreutils,
 }:
 
-runCommand "gotg-importer-0.5.2"
+runCommand "gotg-importer-0.5.3"
   {
     nativeBuildInputs = [ makeWrapper ];
     inherit venv;
-    # Bumped for the Mega Drive / Genesis mapping. The image tag comes from
-    # here, so leaving it would have pushed over the tag the cluster is
-    # currently running — the CronJob pins a digest, so nothing would have
-    # broken, but the way back to the previous build would have been gone.
-    passthru.version = "0.5.2";
+    # Bumped for updates and DLC attaching to their base game. The image tag
+    # comes from here, so leaving it would push over the tag the cluster is
+    # currently running — the CronJob pins a digest, so nothing would break,
+    # but the way back to the previous build would be gone.
+    passthru.version = "0.5.3";
     meta = {
       description = "Indexes completed game torrents into the GOTG catalog and /Games";
       mainProgram = "gotg-importer";

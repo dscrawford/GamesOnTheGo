@@ -307,3 +307,61 @@ def test_scene_title_comes_from_the_release_not_the_inner_codename(roots):
     assert op.entry_id == "world.luigis_mansion_2_hd"
     # "HD" survives as an initialism rather than becoming "Hd".
     assert op.title == "Luigis Mansion 2 HD"
+
+
+# --- updates and DLC attach to their base ------------------------------------
+
+
+def test_a_scene_update_attaches_to_its_base_game(roots):
+    from gotg.indexer.plan import ACTION_ATTACH
+
+    src, games = roots
+    make_dir(
+        src,
+        "The_Legend_of_Zelda_Tears_of_the_Kingdom_Update_v1.4.3_PROPER_NSW-SUXXORS",
+        files=("sxs-totk_v720896.rar", "sxs-totk_v720896.r00", "sxs-totk_v720896.sfv", "sxs-totk_v720896.nfo"),
+    )
+
+    ops = plan_source(src / "The_Legend_of_Zelda_Tears_of_the_Kingdom_Update_v1.4.3_PROPER_NSW-SUXXORS", games, RULES)
+
+    assert len(ops) == 1
+    op = ops[0]
+    assert op.action == ACTION_ATTACH
+    assert op.entry_id == "world.legend_of_zelda_tears_of_the_kingdom"
+    assert (op.role, op.version) == ("update", "1.4.3")
+    assert op.dst == ""
+    assert op.handler == "scene_archive"
+    assert "update v1.4.3" in op.reason
+    assert not list(games.iterdir())
+
+
+def test_a_no_intro_update_archive_attaches_by_its_tags(roots):
+    from gotg.indexer.plan import ACTION_ATTACH
+
+    src, games = roots
+    (src / "Legend of Zelda, The - Breath of the Wild (World) (v1.6.0) (Update).7z").write_bytes(b"7z")
+
+    def listing(path):
+        return ("update.nsp",)
+
+    import gotg.indexer.scan as scan
+
+    real = scan.list_archive_file
+    scan.list_archive_file = listing
+    try:
+        ops = plan_source(src / "Legend of Zelda, The - Breath of the Wild (World) (v1.6.0) (Update).7z", games, RULES)
+    finally:
+        scan.list_archive_file = real
+
+    assert [(o.action, o.entry_id, o.role, o.version) for o in ops] == [
+        (ACTION_ATTACH, "world.legend_of_zelda_breath_of_the_wild", "update", "1.6.0")
+    ]
+
+
+def test_a_scene_base_release_still_extracts(roots):
+    src, games = roots
+    make_dir(src, "Luigis_Mansion_2_HD_PROPER_NSW-HR", files=("hr-banra.rar", "hr-banra.r00", "hr-banra.sfv"))
+
+    ops = plan_source(src / "Luigis_Mansion_2_HD_PROPER_NSW-HR", games, RULES)
+
+    assert [(o.action, o.entry_id, o.role) for o in ops] == [(ACTION_EXTRACT, "world.luigis_mansion_2_hd", "")]

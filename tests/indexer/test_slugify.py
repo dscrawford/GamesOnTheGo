@@ -219,3 +219,38 @@ def test_a_title_with_only_tagged_dumps_still_imports():
     winner = select_1g1r([parse("Game (USA) (Arcade).zip")])
     assert winner is not None
     assert winner.variants == ["Arcade"]
+
+
+# --- updates and DLC ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "title, base, role, version",
+    [
+        (
+            "The Legend of Zelda Tears of the Kingdom Update v1.4.3",
+            "The Legend of Zelda Tears of the Kingdom",
+            "update",
+            "1.4.3",
+        ),
+        ("Splatoon 3 Update v9.2.0 PROPER", "Splatoon 3", "update", "9.2.0"),
+        ("Mario Kart 8 Deluxe DLC Booster Course Pass", "Mario Kart 8 Deluxe", "dlc", ""),
+        ("Some Game Update", "Some Game", "update", ""),
+        # No role: the title comes back whole, no matter how it reads.
+        ("Luigis Mansion 2 HD", "Luigis Mansion 2 HD", "", ""),
+        ("Updated Edition", "Updated Edition", "", ""),
+        ("Update", "Update", "", ""),
+    ],
+)
+def test_split_extra(title, base, role, version):
+    from gotg.indexer.slugify import split_extra
+
+    assert split_extra(title) == (base, role, version)
+
+
+def test_extra_role_reads_no_intro_tags():
+    from gotg.indexer.slugify import extra_role
+
+    assert extra_role(["Update", "En,Fr"]) == "update"
+    assert extra_role(["dlc"]) == "dlc"
+    assert extra_role(["Expansion Pass"]) == ""

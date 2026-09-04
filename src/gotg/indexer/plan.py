@@ -12,7 +12,7 @@ import collections
 import re as _re
 from dataclasses import dataclass
 
-from .slugify import ParsedRom, parse, select_1g1r, title_slug
+from .slugify import ParsedRom, extra_role, parse, select_1g1r, split_extra, title_slug
 
 # Source directory name (No-Intro DAT dirname) -> platform slug + handler.
 # Extend here to add platforms; this mirrors the ConfigMap `rules.yaml`.
@@ -46,6 +46,7 @@ ACTION_CONVERT = "convert"        # derived conversion (source -> the format the
 ACTION_DECRYPT = "decrypt"        # WiiU NUS -> code/content/meta (deferred)
 ACTION_SKIP = "skip"              # excluded / non-retail / duplicate
 ACTION_MANUAL = "manual"          # low-confidence -> quarantine for human review
+ACTION_ATTACH = "attach"          # an update or DLC: published onto its base game, materialized nowhere
 
 
 @dataclass
@@ -61,6 +62,12 @@ class Op:
     handler: str = ""             # the classification, stamped by plan_source;
                                   # the catalog carries it so the client knows
                                   # which recipe turns the raw source into a game
+    role: str = ""                # "update" | "dlc" for an attach; entry_id is then the base game
+    version: str = ""             # the update's version when its name says, e.g. "1.4.3"
+
+
+def _extra_reason(role: str, version: str, entry: str) -> str:
+    return f"{role}{' v' + version if version else ''} for {entry}"
 
 
 def _display_title(p: ParsedRom) -> str:
@@ -118,6 +125,13 @@ def plan_single_archive(platform: str, games_root: str, src_file: str,
         return Op(ACTION_MANUAL, platform, src_file, "", parsed.entry_id,
                   reason="archive name does not yield a valid id")
 
+    role = extra_role(parsed.variants)
+    if role:
+        entry = f"{parsed.region}.{parsed.slug}"
+        version = parsed.revision.lstrip("v").replace("_", ".")
+        return Op(ACTION_ATTACH, platform, src_file, "", entry, title=_display_title(parsed),
+                  reason=_extra_reason(role, version, entry), type="file", role=role, version=version)
+
     inner_ext = _ext_of(inner_name)
     # Convert only when the emulator wants something else; an archive that
     # already holds the target format just needs unpacking.
@@ -142,7 +156,9 @@ def _clean_scene_name(name: str) -> str:
     name = _re.sub(r"\.[A-Za-z0-9]{1,4}$", "", name)   # drop extension
     name = _re.sub(r"^[a-z]{1,2}-", "", name)             # v- / s- volume prefix
     name = _re.sub(r"[-_]([A-Z0-9]{2,}(?:-[A-Z0-9]+)?)$", "", name)  # -NSW-VENOM group
-    return name.replace("_", " ").strip()
+    name = name.replace("_", " ").strip()
+    # Release flags say how the release was made, never what it is.
+    return _re.sub(r"(\s+(?:PROPER|REPACK|READNFO|iNTERNAL|INTERNAL|RERIP|DIRFIX|NFOFIX))+$", "", name)
 
 
 def plan_scene_archive(platform: str, games_root: str, src_dir: str,
@@ -157,13 +173,17 @@ def plan_scene_archive(platform: str, games_root: str, src_dir: str,
     # "Banra". The inner name stays as the fallback for a release whose
     # directory cleans away to nothing.
     title = _clean_scene_name(release_name) or _clean_scene_name(inner_name)
+    title, role, version = split_extra(title)
     slug = title_slug(title)
-    ext = inner_name.rsplit(".", 1)[-1].lower() if "." in inner_name else "nsp"
     entry = f"{region}.{slug}"
+    display = " ".join(w if w.isupper() else w.capitalize() for w in title.split())
+    if role:
+        return Op(ACTION_ATTACH, platform, f"{src_dir}/{release_name}", "", entry, title=display,
+                  reason=_extra_reason(role, version, entry), type="file", role=role, version=version)
+    ext = inner_name.rsplit(".", 1)[-1].lower() if "." in inner_name else "nsp"
     dst = f"{games_root}/{platform}/{entry}.{ext}"
     return Op(ACTION_EXTRACT, platform, f"{src_dir}/{release_name}", dst, entry,
-              title=" ".join(w if w.isupper() else w.capitalize() for w in title.split()),
-              type="file", reason="region defaulted; confirm")
+              title=display, type="file", reason="region defaulted; confirm")
 
 
 def plan_wiiu_decrypted(games_root: str, src_dir: str, dir_name: str) -> Op:

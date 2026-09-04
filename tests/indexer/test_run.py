@@ -368,3 +368,45 @@ def test_the_retail_nes_set_imports_and_the_aftermarket_one_does_not(cfg):
         RULES,
     )
     assert [op.action for op in after] == ["skip"]
+
+
+def test_updates_publish_after_the_games_they_attach_to(cfg):
+    """Directory order is the release group's naming: the update's directory
+    sorts before its base here, and must still be published second."""
+    from gotg.indexer.plan import ACTION_ATTACH, ACTION_EXTRACT
+
+    make_set(cfg, "A_Game_Update_v1.1_NSW-GRP", ["u.rar", "u.r00", "u.sfv"])
+    make_set(cfg, "Zzz_A_Game_NSW-GRP", ["g.rar", "g.r00", "g.sfv"])
+    order = []
+
+    import gotg.indexer.run as runmod
+
+    real = runmod.process_source
+
+    def record(path, *args, **kwargs):
+        order.append([op.action for op in kwargs["ops"]])
+        return []
+
+    runmod.process_source = record
+    try:
+        run_paths(
+            [cfg.source_root / "A_Game_Update_v1.1_NSW-GRP", cfg.source_root / "Zzz_A_Game_NSW-GRP"],
+            cfg,
+            RULES,
+            dry_run=False,
+        )
+    finally:
+        runmod.process_source = real
+
+    assert order == [[ACTION_EXTRACT], [ACTION_ATTACH]]
+
+
+def test_dry_run_prints_attach_lines(cfg, capsys):
+    make_set(cfg, "A_Game_Update_v1.1_NSW-GRP", ["u.rar", "u.r00", "u.sfv"])
+
+    stats = run_paths([cfg.source_root / "A_Game_Update_v1.1_NSW-GRP"], cfg, RULES, dry_run=True)
+
+    out = capsys.readouterr().out
+    assert out.startswith("attach    switch")
+    assert "[world.a_game]" in out and "update v1.1 for world.a_game" in out
+    assert "attach=1" in stats.summary()

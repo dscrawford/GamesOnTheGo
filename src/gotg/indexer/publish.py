@@ -22,9 +22,10 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..contract import LINK_HANDLERS, SHA256_RE, valid_filename
+from ..contract import EXTRAS_PREFIX, LINK_HANDLERS, SHA256_RE, is_extra, valid_filename
 from . import execute as ex
 from . import plan as pl
+from .slugify import title_slug
 
 log = logging.getLogger("gotg.publish")
 
@@ -113,6 +114,28 @@ class _Member:
     path: Path
 
 
+def extras_prefix(op: pl.Op) -> str:
+    """Where one update or DLC release's members live on the base entry.
+
+    Named by role and version, so a re-released update of the same version
+    replaces the earlier one rather than sitting beside it; a release naming
+    no version falls back to its own name.
+    """
+    tail = op.version or title_slug(Path(op.src).name.rsplit(".", 1)[0]) or "release"
+    return f"{EXTRAS_PREFIX}{op.role}_{tail}/"
+
+
+def _kept_extras(stored: dict | None, *, dropping: str = "") -> list[dict]:
+    """The extras a stored entry carries that still exist, minus one release."""
+    if not stored:
+        return []
+    return [
+        f
+        for f in stored.get("files", [])
+        if is_extra(f["name"]) and not (dropping and f["name"].startswith(dropping)) and Path(f["path"]).is_file()
+    ]
+
+
 def _members(op: pl.Op) -> list[_Member]:
     """The raw source files behind one op, named as the catalog will name them.
 
@@ -122,6 +145,10 @@ def _members(op: pl.Op) -> list[_Member]:
     the archive exactly as released.
     """
     src = Path(op.src)
+    if op.action == pl.ACTION_ATTACH:
+        prefix = extras_prefix(op)
+        files = [src] if src.is_file() else [f for f in sorted(src.iterdir()) if f.is_file()]
+        return [_Member(prefix + f.name, f) for f in files]
     if op.action == pl.ACTION_HARDLINK:
         return [_Member(Path(op.dst).name, src)]
     if op.action in (pl.ACTION_CONVERT,) or (op.action == pl.ACTION_EXTRACT and src.is_file()):
@@ -143,7 +170,11 @@ class Publisher:
         # (platform, id, name) -> stored file row, for the hash skip.
         self.published_this_run: set[tuple[str, str]] = set()
         self.known: dict[tuple[str, str, str], dict] = {}
+        # (platform, id) -> the whole stored entry: what an update attaches to,
+        # and where a base being republished finds the extras it already has.
+        self.rows: dict[tuple[str, str], dict] = {}
         for game in self.api.full_view().get("games", []):
+            self.rows[(game["platform"], game["id"])] = game
             for row in game.get("files", []):
                 self.known[(game["platform"], game["id"], row["name"])] = row
 
@@ -217,12 +248,24 @@ class Publisher:
         if not files:
             raise PublishError(f"{op.entry_id}: nothing to publish behind {op.src}")
 
-        self.api.put(
-            op.platform,
-            op.entry_id,
-            {"handler": op.handler, "title": op.title or op.entry_id, "files": files},
-        )
-        self.published_this_run.add((op.platform, op.entry_id))
+        key = (op.platform, op.entry_id)
+        stored = self.rows.get(key)
+        if op.action == pl.ACTION_ATTACH:
+            if stored is None:
+                raise PublishError(f"{op.entry_id}: no base game in the catalog to attach this {op.role} to")
+            payload = {
+                "handler": stored["handler"],
+                "title": stored["title"],
+                "files": [f for f in stored["files"] if not is_extra(f["name"])]
+                + _kept_extras(stored, dropping=extras_prefix(op))
+                + files,
+            }
+        else:
+            payload = {"handler": op.handler, "title": op.title or op.entry_id, "files": files + _kept_extras(stored)}
+
+        self.api.put(op.platform, op.entry_id, payload)
+        self.rows[key] = {"platform": op.platform, "id": op.entry_id, **payload}
+        self.published_this_run.add(key)
 
     def sweep(self, since: str) -> None:
         report = self.api.sweep(since)
@@ -306,7 +349,8 @@ def publish_games_root(publisher: Publisher, entries: dict, cfg) -> tuple[int, i
                             "mtime": int(st.st_mtime),
                             "sha256": sha,
                         }
-                    ],
+                    ]
+                    + _kept_extras(publisher.rows.get(key)),
                 },
             )
             published += 1

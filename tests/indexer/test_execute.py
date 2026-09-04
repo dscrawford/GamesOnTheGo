@@ -298,3 +298,47 @@ def test_convert_normalizes_an_archived_image_and_leaves_the_source_alone(cfg, m
     # And no staging directory survives the run.
     assert not list((games / "gamecube").glob(".gotg-extract-*"))
     assert calls[0][0] == "7z" and calls[1][0] == "dolphin-tool"
+
+
+# --- updates and DLC, and lone archives ---------------------------------------
+
+
+def test_attach_writes_nothing_and_succeeds(cfg):
+    from gotg.indexer.plan import ACTION_ATTACH
+
+    release = cfg.source_root / "Game_Update_v1.1_NSW-GRP"
+    release.mkdir()
+    (release / "g.rar").write_bytes(b"rar")
+    op = Op(ACTION_ATTACH, "switch", str(release), "", "world.game", role="update", version="1.1")
+
+    result = execute(op, cfg)
+
+    assert result.status == STATUS_DONE
+    assert result.entry is None
+    assert list(cfg.games_root.iterdir()) == []
+
+
+def test_extract_unpacks_a_lone_archive_with_7z(cfg, monkeypatch):
+    from gotg.indexer import execute as ex
+    from gotg.indexer.plan import ACTION_EXTRACT
+
+    archive = cfg.source_root / "Game (World).7z"
+    archive.write_bytes(b"7z" * 100)
+    calls = []
+
+    def fake_run(cmd, cwd=None):
+        calls.append(cmd)
+        out = Path(next(a for a in cmd if a.startswith("-o"))[2:])
+        (out / "Game (World).xci").write_bytes(b"cartridge")
+        (out / "readme.nfo").write_bytes(b"x")
+
+    monkeypatch.setattr(ex, "_run", fake_run)
+    monkeypatch.setattr(ex, "_require_space", lambda root, needed: None)
+
+    op = Op(ACTION_EXTRACT, "switch", str(archive), f"{cfg.games_root}/switch/world.game.xci", "world.game")
+    result = execute(op, cfg)
+
+    assert result.status == STATUS_DONE
+    assert calls[0][:2] == ["7z", "x"]
+    assert (cfg.games_root / "switch" / "world.game.xci").read_bytes() == b"cartridge"
+    assert not list((cfg.games_root / "switch").glob(".gotg-extract-*"))

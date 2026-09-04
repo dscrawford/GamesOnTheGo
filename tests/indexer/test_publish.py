@@ -18,6 +18,7 @@ import pytest
 from gotg.indexer.execute import STATUS_DONE, STATUS_ERROR, Result
 from gotg.indexer.plan import (
     ACTION_ARCHIVE,
+    ACTION_ATTACH,
     ACTION_CONVERT,
     ACTION_EXTRACT,
     ACTION_HARDLINK,
@@ -521,3 +522,126 @@ def test_a_games_root_entry_missing_on_disk_is_an_error_not_a_crash(stub, tmp_pa
     entries = {"/Games/n64/usa.gone.z64": Entry("n64", "/Games/n64/usa.gone.z64", "file", 4, "a" * 64, "Gone")}
     published, errors = publish_games_root(Publisher(CatalogAPI(base, "t")), entries, cfg)
     assert (published, errors) == (0, 1)
+
+
+# --- updates and DLC ride on the base entry -----------------------------------
+
+
+def attach_result(tmp_path, *, version="1.4.3", role="update", entry_id="world.zelda"):
+    release = tmp_path / "Torrents" / f"Zelda_Update_v{version}_NSW-GRP"
+    release.mkdir(parents=True, exist_ok=True)
+    for name in ["g.rar", "g.r00", "g.sfv"]:
+        (release / name).write_bytes(name.encode())
+    op = Op(ACTION_ATTACH, "switch", str(release), "", entry_id, role=role, version=version, handler="scene_archive")
+    return Result(op, STATUS_DONE)
+
+
+def base_row(tmp_path, entry_id="world.zelda", extras=()):
+    archive = tmp_path / "Torrents" / "Zelda (World).7z"
+    archive.parent.mkdir(exist_ok=True)
+    archive.write_bytes(b"base")
+    files = [{"name": "Zelda (World).7z", "path": str(archive), "size_bytes": 4, "mtime": 1, "sha256": "a" * 64}]
+    for name, path in extras:
+        files.append({"name": name, "path": str(path), "size_bytes": 1, "mtime": 1, "sha256": "b" * 64})
+    return {"platform": "switch", "id": entry_id, "handler": "single_archive", "title": "Zelda", "files": files}
+
+
+def test_an_update_lists_its_members_under_the_extras_prefix(tmp_path):
+    result = attach_result(tmp_path)
+    assert [m.name for m in _members(result.op)] == [
+        "extras/update_1.4.3/g.r00",
+        "extras/update_1.4.3/g.rar",
+        "extras/update_1.4.3/g.sfv",
+    ]
+
+
+def test_an_update_attaches_to_the_stored_base_entry(tmp_path, stub):
+    url, handler = stub
+    handler.games.append(base_row(tmp_path))
+    publisher = Publisher(CatalogAPI(url, "t"))
+
+    publisher.publish(attach_result(tmp_path))
+
+    path, payload = handler.puts[-1]
+    assert path == "/catalog/switch/world.zelda"
+    assert payload["handler"] == "single_archive" and payload["title"] == "Zelda"
+    assert [f["name"] for f in payload["files"]] == [
+        "Zelda (World).7z",
+        "extras/update_1.4.3/g.r00",
+        "extras/update_1.4.3/g.rar",
+        "extras/update_1.4.3/g.sfv",
+    ]
+    assert all(f["sha256"] for f in payload["files"])
+
+
+def test_an_update_without_a_base_is_a_publish_error(tmp_path, stub):
+    url, handler = stub
+    publisher = Publisher(CatalogAPI(url, "t"))
+
+    with pytest.raises(PublishError, match="no base game"):
+        publisher.publish(attach_result(tmp_path))
+    assert handler.puts == []
+
+
+def test_a_base_republished_keeps_the_extras_it_had(tmp_path, stub):
+    url, handler = stub
+    kept = tmp_path / "Torrents" / "dlc.nsp"
+    kept.parent.mkdir(exist_ok=True)
+    kept.write_bytes(b"dlc")
+    gone = tmp_path / "Torrents" / "vanished.nsp"
+    handler.games.append(base_row(tmp_path, extras=[("extras/dlc_pack/dlc.nsp", kept), ("extras/dlc_old/x.nsp", gone)]))
+    publisher = Publisher(CatalogAPI(url, "t"))
+
+    archive = tmp_path / "Torrents" / "Zelda (World).7z"
+    op = Op(
+        ACTION_EXTRACT,
+        "switch",
+        str(archive),
+        "/g/switch/world.zelda.xci",
+        "world.zelda",
+        title="Zelda",
+        handler="single_archive",
+    )
+    publisher.publish(Result(op, STATUS_DONE))
+
+    _, payload = handler.puts[-1]
+    assert [f["name"] for f in payload["files"]] == ["Zelda (World).7z", "extras/dlc_pack/dlc.nsp"]
+
+
+def test_a_newer_release_of_the_same_update_replaces_it(tmp_path, stub):
+    url, handler = stub
+    old = tmp_path / "Torrents" / "old.rar"
+    old.parent.mkdir(exist_ok=True)
+    old.write_bytes(b"old")
+    handler.games.append(base_row(tmp_path, extras=[("extras/update_1.4.3/old.rar", old)]))
+    publisher = Publisher(CatalogAPI(url, "t"))
+
+    publisher.publish(attach_result(tmp_path))
+
+    _, payload = handler.puts[-1]
+    names = [f["name"] for f in payload["files"]]
+    assert "extras/update_1.4.3/old.rar" not in names
+    assert "extras/update_1.4.3/g.rar" in names
+
+
+def test_an_update_sees_a_base_published_earlier_in_the_run(tmp_path, stub):
+    url, handler = stub
+    publisher = Publisher(CatalogAPI(url, "t"))
+    archive = tmp_path / "Torrents" / "Zelda (World).7z"
+    archive.parent.mkdir(exist_ok=True)
+    archive.write_bytes(b"base")
+    op = Op(
+        ACTION_EXTRACT,
+        "switch",
+        str(archive),
+        "/g/switch/world.zelda.xci",
+        "world.zelda",
+        title="Zelda",
+        handler="single_archive",
+    )
+    publisher.publish(Result(op, STATUS_DONE))
+
+    publisher.publish(attach_result(tmp_path))
+
+    assert len(handler.puts) == 2
+    assert [f["name"] for f in handler.puts[-1][1]["files"]][:2] == ["Zelda (World).7z", "extras/update_1.4.3/g.r00"]
