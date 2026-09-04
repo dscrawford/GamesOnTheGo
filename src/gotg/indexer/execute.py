@@ -111,8 +111,9 @@ def _require_space(root: Path, needed: int) -> None:
 # How often the page cache of a file being written or read is given back.
 # The pod runs under a memory limit that counts cached pages, and a 32 GB
 # extract fills it: measured as the kernel OOM-killing 7z at 8 GiB with
-# 60 MB of process memory and 6.5 GB of file cache. The cache is dropped as
-# it forms, so what the job holds stays the size of what it is doing.
+# 60 MB of process memory and 6.5 GB of file cache. The games volume is
+# NFS, whose dirty pages are slow to leave, so they are flushed first and
+# only then dropped; what the job holds stays the size of what it is doing.
 CACHE_DROP_INTERVAL = 1.0
 CACHE_DROP_BYTES = 256 * 1024 * 1024
 
@@ -123,6 +124,7 @@ def _drop_cache(path: Path) -> None:
     except OSError:
         return
     try:
+        os.fsync(fd)
         os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
     except OSError:
         pass

@@ -402,3 +402,18 @@ def test_hashing_a_large_file_gives_its_cache_back(tmp_path, monkeypatch):
 
     assert sha256_file(big) == __import__("hashlib").sha256(b"z" * 64).hexdigest()
     assert calls and all(a == ex.os.POSIX_FADV_DONTNEED for a in calls)
+
+
+def test_dropping_a_files_cache_flushes_it_first(tmp_path, monkeypatch):
+    from gotg.indexer import execute as ex
+
+    order = []
+    monkeypatch.setattr(ex.os, "fsync", lambda fd: order.append("fsync"))
+    monkeypatch.setattr(ex.os, "posix_fadvise", lambda fd, off, ln, advice: order.append("drop"))
+    target = tmp_path / "out.xci"
+    target.write_bytes(b"x")
+
+    ex._drop_cache(target)
+    ex._drop_cache(tmp_path / "missing.xci")
+
+    assert order == ["fsync", "drop"]
