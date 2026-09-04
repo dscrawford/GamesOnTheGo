@@ -30,6 +30,7 @@
   libgbm,
   libglvnd,
   vulkan-loader,
+  xwayland,
   # The environments to carry, as { env-gb = <drv>; ... }. A pod has no
   # writable nix store — the image's is a read-only layer — so anything a run
   # might need has to be here already. The cartridge platforms share one ares,
@@ -46,6 +47,20 @@ let
       lib.mapAttrsToList (name: drv: "ln -s ${drv} $out/${name}") environments
     )}
   '';
+  # Xwayland with glamor off. Measured on node3 once the CDI mount carried
+  # NVIDIA's EGL platforms: glamor comes up on the card through GBM — and
+  # then offers X11 clients no GLX visual at all ("couldn't find RGB GLX
+  # visual or fbconfig" from glxinfo, every vendor setting tried), so an
+  # emulator that draws through GLX gets no context and a 60s run captures
+  # one second of nothing. With glamor off, Xwayland's GLX is Mesa's over
+  # llvmpipe and every visual is there. The compositor beside it still runs
+  # on the GPU; what is pinned here is that the X11 emulators render at all.
+  # A Job can point WLR_XWAYLAND back at the plain binary to try again on a
+  # driver that does better.
+  xwaylandSoftware = writeShellApplication {
+    name = "xwayland-glamor-off";
+    text = ''exec ${xwayland}/bin/Xwayland -glamor off "$@"'';
+  };
   entrypoint = writeShellApplication {
     name = "gotg-qa-entrypoint";
     runtimeInputs = [
@@ -93,9 +108,10 @@ let
 in
 dockerTools.buildLayeredImage {
   name = "gotg-qa";
-  tag = "0.3.0";
+  tag = "0.4.0";
   contents = [
     entrypoint
+    xwaylandSoftware
     gotg
     qa-tools
     nix
@@ -141,6 +157,8 @@ dockerTools.buildLayeredImage {
       # wlroots has no monitor and must not go looking for one.
       "WLR_BACKENDS=headless"
       "WLR_LIBINPUT_NO_DEVICES=1"
+      # See xwaylandSoftware above.
+      "WLR_XWAYLAND=${lib.getExe xwaylandSoftware}"
       # Both renderers, in the order they should win. /run/opengl-driver is
       # what this cluster's CDI injects into a pod with a GPU slice — the
       # host's NVIDIA userspace, matched to the running kernel driver — and it
@@ -153,15 +171,11 @@ dockerTools.buildLayeredImage {
       "__EGL_VENDOR_LIBRARY_DIRS=/run/opengl-driver/share/glvnd/egl_vendor.d:${mesa}/share/glvnd/egl_vendor.d"
       "VK_DRIVER_FILES=/run/opengl-driver/share/vulkan/icd.d:${mesa}/share/vulkan/icd.d"
       "LD_LIBRARY_PATH=/run/opengl-driver/lib:${lib.makeLibraryPath [ libglvnd mesa libgbm vulkan-loader ]}"
-      # Xwayland's glamor reaches the card through GBM: the backend to load,
-      # and the config dir naming the external platform that drives it. The
-      # json is ours (see accounts above) because the CDI mount has no
-      # share/egl of its own.
-      #
-      # __GLX_VENDOR_LIBRARY_NAME=nvidia is deliberately absent. It looks like
-      # it belongs beside these and measurably does not: forcing NVIDIA GLX
-      # takes the software fallback away without replacing it, and a 60s run
-      # captures one second of nothing.
+      # The GBM backend and the platform config for anything that does reach
+      # the card through EGL — the compositor does. Xwayland is kept off it
+      # (WLR_XWAYLAND above), and __GLX_VENDOR_LIBRARY_NAME=nvidia is absent
+      # on purpose: measured with the platforms mounted, it changes nothing
+      # about the missing GLX visuals.
       "GBM_BACKENDS_PATH=/run/opengl-driver/lib/gbm"
       "__EGL_EXTERNAL_PLATFORM_CONFIG_DIRS=/etc/egl/egl_external_platform.d"
       "GOTG_QA_BAKED_ENVS=${bakedEnvs}"

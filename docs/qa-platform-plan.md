@@ -183,6 +183,27 @@ complete driver. That is a dotfiles change and a rebuild of a cluster node, so
 it is not done here — it needs a maintenance window, since node3 also runs
 Jellyfin.
 
+**Outcome after the node3 CDI fix, 2026-09-04.** The mounts landed and did
+exactly what the probe predicted: Xwayland's glamor now initialises on the
+card through GBM. What that turned out to buy an X11 emulator is nothing —
+`glxinfo` inside the session answers "couldn't find RGB GLX visual or
+fbconfig" under every vendor setting tried (default, `__GLX_VENDOR_LIBRARY_NAME
+=nvidia`, all five NVIDIA platform JSONs on the config path), and NVIDIA's own
+EGL refuses the X11 platform (`eglInitialize failed`). So ares, which draws
+through GLX, got no context at all and a 60s run captured one second — a
+*regression* from the software path that had been passing by accident of
+glamor failing. Measured on node3's 580-branch driver with the 1080 Ti; the
+desktop's 610 branch on a 3080 Ti gives ares an NVIDIA context under the same
+cage, so this is the driver branch, not the harness.
+
+The image now pins `Xwayland -glamor off` (a `WLR_XWAYLAND` wrapper), which
+makes the X11 path deterministic rather than accidental: the compositor
+composites on the GPU, the emulator renders on llvmpipe, and both tiers pass.
+Accelerating an X11/GLX emulator through Xwayland is closed on this driver;
+the accelerated route, if wanted, is a Wayland-native EGL client (cage proves
+NVIDIA EGL works on the Wayland platform here) or a newer driver branch. A Job
+can point `WLR_XWAYLAND` back at the plain binary to try again.
+
 **The GPU tier is half-done, and worth being precise about.** With a
 `nvidia.com/gpu-0` slice the compositor does reach the card (EGL vendor
 NVIDIA, GL renderer "NVIDIA GeForce GTX 1080 Ti"), because CDI mounts the
