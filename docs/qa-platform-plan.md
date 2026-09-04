@@ -267,6 +267,12 @@ when image pull time actually hurts, not before.
 
 ## Risks / open questions
 
+- **Switch cold starts**: Ryujinx's PPTC and shader caches live in the run's
+  scratch state, so every run is a first run — minutes on the loading bar
+  for a large title before a frame of gameplay. Either persist the per-title
+  caches across runs (at the cost of run-to-run independence) or accept a
+  long `--boot-wait` for the platform. Measured 2026-09-04 on TOTK 1.4.3.
+
 - **wlroots headless on NVIDIA in a container**: cage+EGL on the 1080 Ti via
   CDI should work but is the least-verified link; fallback is Xvfb (+
   VirtualGL for GLX apps), which is boring and known-good. Decide in Phase 1

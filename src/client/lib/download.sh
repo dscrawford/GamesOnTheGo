@@ -196,6 +196,14 @@ download_game() {
 
   service_have || die "no service configured — run: gotg login"
 
+  # With the library mounted, a cache fetched before it was carries no
+  # paths: one refresh, so the copy below has somewhere to copy from.
+  if [[ -n "${GOTG_LIBRARY_MOUNT:-}" ]] && ! jq -e '[.files[]?.path] | any' <<<"$game" >/dev/null 2>&1; then
+    if manifest_refresh; then
+      game="$(manifest_find "$platform/$id")"
+    fi
+  fi
+
   local total count
   total="$(jq -r '[.files[].size_bytes] | add' <<<"$game")"
   count="$(jq -r '.files | length' <<<"$game")"

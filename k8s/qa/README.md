@@ -8,7 +8,7 @@ service it fetches the game from.
 
 ```bash
 nix build .#qa-image
-skopeo copy docker-archive:result docker://localhost:30500/gotg-qa:0.5.5
+skopeo copy docker-archive:result docker://localhost:30500/gotg-qa:0.5.6
 ```
 
 The image carries the cartridge platforms (gb, gbc, gba, nes, snes, genesis,
@@ -59,6 +59,25 @@ The manifest as written is the GPU tier: `runtimeClassName: nvidia`, pinned to
 node3, holding one of the card's two time-slices. For the 8/16-bit platforms
 drop `runtimeClassName`, the `nodeSelector` and the `nvidia.com/gpu-0` limit —
 the image's llvmpipe renders them, and they schedule anywhere.
+
+## Switch
+
+A Switch title is the heavy case, and the Job as written is sized for it:
+16 GiB of memory and an 8 GiB `/dev/shm` (Ryujinx backs guest memory with
+shared memory; under 8 GiB and 2 GiB it died mapping the guest heap). The
+first run of a title translates its code and compiles its shaders from
+nothing, and the QA state is scratch per run, so a title the size of Tears
+of the Kingdom is still on Ryujinx's own loading bar at 60 s. Give it time:
+
+```bash
+sed -e 's/@NAME@/world-totk/' -e 's/@GAME@/world.legend_of_zelda_tears_of_the_kingdom/' \
+    -e 's/"--duration", "60", "--boot-wait", "25"/"--duration", "120", "--boot-wait", "300"/' \
+    k8s/qa/job.yaml | kubectl apply -f -
+```
+
+Updates and DLC attached to the entry install beside the game and are
+registered with Ryujinx before the launch; the launch log's
+`<title id>: update <file>, N DLC` line says what was applied.
 
 ## What the GPU tier does and does not accelerate
 

@@ -612,3 +612,17 @@ SHIM
   [[ "$stderr" != *"copying"* ]]
   [ -f "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
 }
+
+@test "a cache from before the library was mounted is refreshed for its paths" {
+  add_game n64 "usa.zelda.z64" "rom-content" "Zelda"
+  write_api_config library-token
+  gotg refresh
+  run jq -r '.games[0].files[0].path // "none"' "$GOTG_CACHE_FILE"
+  [ "$output" = none ]
+
+  GOTG_FILES_URL="http://127.0.0.1:9" GOTG_LIBRARY_MOUNT="$SERVICE_LIBRARY_DIR" gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"catalog updated"* ]]
+  [[ "$stderr" == *"copying usa.zelda.z64 from the library"* ]]
+  [ "$(cat "$GOTG_GAMES_DIR/n64/usa.zelda.z64")" = rom-content ]
+}
