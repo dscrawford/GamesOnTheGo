@@ -23,6 +23,7 @@
   shellcheck = import ./shellcheck.nix { inherit pkgs; };
   client-tests = import ./client-tests.nix { inherit pkgs packages; };
   recipes = import ./recipes.nix { inherit pkgs packages; };
+  switchContent = import ./switch-content.nix { inherit pkgs; };
   platforms = import ./platforms.nix { inherit pkgs py; };
   environments = import ./environments.nix { inherit pkgs; };
   fullscreen = import ./fullscreen.nix { inherit pkgs; };

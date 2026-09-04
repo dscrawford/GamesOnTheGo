@@ -7,12 +7,16 @@
 # config home and reading back the tree it created — Logs, sdcard, system, bis,
 # profiles, games.
 { pkgs, helpers, ... }:
+let
+  # Reads NCA headers to find what an install holds; see switch/content.py.
+  contentPython = pkgs.python3.withPackages (p: [ p.cryptography ]);
+in
 {
   emulator = pkgs.ryubing;
 
-  # Switch releases arrive as scene rar sets; the recipe unpacks one into the
-  # XCI/NSP the emulator loads, once, on first install.
-  recipes = helpers.sceneArchiveRecipe;
+  # A Switch release, and the updates and DLC the catalog attached to it,
+  # unpacked into one directory on first install.
+  recipes = helpers.switchRecipe;
   bin = "Ryujinx";
   isolate = true;
   args = [ "{target}" ];
@@ -59,6 +63,19 @@
       else
         rm -f "$gotg_ryujinx_config.gotg"
       fi
+    fi
+
+    # Updates and DLC. Ryujinx applies only what games/<title>/updates.json
+    # and dlc.json name, and a launch by path never runs the library screen
+    # that would write them — so they are written here, from the NCA headers
+    # of everything in the install directory. Every launch, not once: it costs
+    # milliseconds, and a re-download or a hand-added file is then never
+    # stale. An old install is a bare file, and has nothing to register.
+    if [ -d "$install" ] && [ -f "$XDG_CONFIG_HOME/Ryujinx/system/prod.keys" ]; then
+      ${contentPython}/bin/python3 ${./switch/content.py} register \
+        --keys "$XDG_CONFIG_HOME/Ryujinx/system/prod.keys" \
+        --ryujinx "$XDG_CONFIG_HOME/Ryujinx" "$install" ||
+        echo "gotg: could not register this game's updates and DLC; launching without them" >&2
     fi
   '';
 

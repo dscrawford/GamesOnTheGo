@@ -21,9 +21,8 @@ cmd_uninstall() {
   validate_platform "$platform"
 
   local removed=""
-  local path root handler
+  local path root
   root="$GOTG_GAMES_DIR/$platform"
-  handler="$(manifest_field "$game" handler)"
   if path="$(game_installed_path "$game")"; then
     # "Under the platform directory" is true by construction and proves
     # nothing: files[0].name is the catalog's to choose and may hold slashes,
@@ -42,7 +41,7 @@ cmd_uninstall() {
     if [[ "$(override_field "$game" unzip)" == "true" ]]; then
       [[ "$path" == "$root/$id" ]] ||
         die "refusing to remove $path: an unpacked game is the directory named by its id"
-    elif [[ "$handler" == "single_file" || "$handler" == "no_intro_set" ]]; then
+    elif game_is_placed_file "$game"; then
       [[ -f "$path" && ! -L "$path" ]] ||
         die "refusing to remove $path: a single-file entry installs as a file, and this is not one"
     else

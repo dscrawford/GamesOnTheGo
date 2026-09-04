@@ -24,6 +24,31 @@ let
     ];
   };
 
+  # A Switch release with whatever updates and DLC the catalog attached to
+  # it: the game unpacked as ever, the extras unpacked beside it, and the two
+  # installed as one directory Ryujinx is then pointed at. Three handlers
+  # because the base arrives three ways — a rar set, a 7z, a loose container.
+  switchRecipe = {
+    scene_archive = [
+      steps.verifySfv
+      steps.unrar
+      steps.pickLargest
+      steps.collectExtras
+      steps.placeBundle
+    ];
+    single_archive = [
+      steps.extract7z
+      steps.pickLargest
+      steps.collectExtras
+      steps.placeBundle
+    ];
+    single_file = [
+      steps.pickBase
+      steps.collectExtras
+      steps.placeBundle
+    ];
+  };
+
   # A disc image that travelled as a 7z: extract, convert to the RVZ the
   # emulator wants, keep nothing else. Space cost is transient (staging holds
   # the raw image); the refined artifact is deterministic, so the raw members
@@ -52,6 +77,11 @@ let
 
 in
 {
-  inherit steps sceneArchiveRecipe discArchiveRecipe;
+  inherit
+    steps
+    sceneArchiveRecipe
+    discArchiveRecipe
+    switchRecipe
+    ;
 }
 // lib.foldl' (a: b: a // b) { } (emulators ++ mods)

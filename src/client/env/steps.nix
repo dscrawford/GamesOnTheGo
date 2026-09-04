@@ -135,6 +135,85 @@
     '';
   };
 
+  # The largest file directly in the cursor — a loose container that arrived
+  # as itself, with nothing to unpack. pick-largest would look into extras/.
+  pickBase = {
+    name = "pick-base";
+    script = ''
+      pick="$(find "$cur" -maxdepth 1 -type f -printf '%s\t%p\0' | sort -z -rn | head -z -n1 | cut -z -f2- | tr -d '\0' || true)"
+      [ -n "$pick" ] || fail "nothing to pick in $cur"
+      cur="$pick"
+    '';
+  };
+
+  # Updates and DLC ride beside the game as extras/<release>/ — each a rar
+  # set, a 7z, or loose containers, exactly as released. Every one is
+  # unpacked into one directory of .nsp/.xci for place-bundle to carry; the
+  # cursor stays on the game. No extras/ at all is the common case and fine.
+  collectExtras = {
+    name = "collect-extras";
+    tools.UNRAR = "${pkgs.unrar}/bin/unrar";
+    tools.P7Z = "${pkgs._7zz}/bin/7zz";
+    tools.RHASH = "${pkgs.rhash}/bin/rhash";
+    script = ''
+      out="$stage/extras"
+      mkdir -p "$out"
+      for release in "$raw"/extras/*/; do
+        [ -d "$release" ] || continue
+        name="$(basename "$release")"
+        case "$name" in *[!A-Za-z0-9._-]* | "") fail "unusable extras release name: $name" ;; esac
+        unpacked="$stage/extras-$name"
+        mkdir -p "$unpacked"
+        sfv="$(find "$release" -maxdepth 1 -name '*.sfv' | head -1 || true)"
+        if [ -n "$sfv" ]; then
+          (cd "$release" && "$RHASH" -c "$sfv") || fail "sfv verification failed in $name"
+        fi
+        rar="$(find "$release" -maxdepth 1 -name '*.rar' | head -1 || true)"
+        sevenz="$(find "$release" -maxdepth 1 -name '*.7z' | head -1 || true)"
+        if [ -n "$rar" ]; then
+          "$UNRAR" e -idq -o+ "$rar" "$unpacked/" || fail "unrar failed in $name"
+        elif [ -n "$sevenz" ]; then
+          "$P7Z" x -bd -y -o"$unpacked" "$sevenz" >/dev/null || fail "extract failed in $name"
+        else
+          find "$release" -maxdepth 1 -type f \( -iname '*.nsp' -o -iname '*.xci' \) -exec mv -t "$unpacked" {} +
+        fi
+        found=0
+        while IFS= read -r -d "" f; do
+          [ -L "$f" ] && fail "refusing a symlink in $name"
+          # The name is the archive's to choose and lands in Ryujinx's json;
+          # it is only a label there, so anything odd becomes an underscore.
+          base="$(basename "$f")"
+          base="''${base//[^A-Za-z0-9._-]/_}"
+          mv "$f" "$out/$name-$base" || fail "could not collect $base"
+          found=1
+        done < <(find "$unpacked" -type f \( -iname '*.nsp' -o -iname '*.xci' \) -print0)
+        [ "$found" = 1 ] || fail "no .nsp or .xci in $name"
+      done
+    '';
+  };
+
+  # Terminal: the game as <id>/<id>.<ext> with its extras/ beside it — a
+  # directory install, so the emulator's update and DLC registration has one
+  # place to read. The extension survives as keep-extension keeps it.
+  placeBundle = {
+    name = "place-bundle";
+    script = ''
+      [ -f "$cur" ] && [ ! -L "$cur" ] || fail "place-bundle needs a file, got $(basename "$cur")"
+      ext="$(basename "$cur")"
+      ext="''${ext##*.}"
+      case "$ext" in
+        *[!A-Za-z0-9]* | "") fail "unusable extension on $(basename "$cur")" ;;
+      esac
+      rm -rf "$dest"
+      mkdir -p "$dest/extras"
+      mv "$cur" "$dest/$(basename "$dest").''${ext,,}" || fail "could not place $(basename "$dest").''${ext,,}"
+      if [ -d "$stage/extras" ]; then
+        find "$stage/extras" -mindepth 1 -maxdepth 1 -exec mv -t "$dest/extras" {} +
+      fi
+      cur="$dest"
+    '';
+  };
+
   # Terminal: whatever disc image came out of the archive, stored as the RVZ
   # the emulator wants.
   convertRvz = {

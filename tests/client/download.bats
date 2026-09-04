@@ -432,3 +432,94 @@ publish_scene_game() {
   [ "$status" -eq 0 ]
   [ "$(cat "$GOTG_GAMES_DIR/n64/usa.zelda.z64")" = "short" ]
 }
+
+# --- updates and DLC ----------------------------------------------------------
+
+# A game whose entry carries an update (a rar set) and a DLC (a loose nsp)
+# under extras/, on a single_file base: the shape a Switch title takes once
+# the importer attaches what arrived after it.
+publish_bundle_game() {
+  local dir="$SERVICE_LIBRARY_DIR/switch"
+  mkdir -p "$dir/Zelda_Update_v1.4.3" "$dir/dlc"
+  printf 'base-bytes' >"$dir/world.zelda.nsp"
+  printf 'update-rar' >"$dir/Zelda_Update_v1.4.3/u.rar"
+  printf 'dlc-bytes' >"$dir/dlc/pack.nsp"
+  local files
+  files="$(jq -n --arg d "$dir" \
+    --arg s1 "$(sha256sum "$dir/world.zelda.nsp" | cut -d' ' -f1)" \
+    --arg s2 "$(sha256sum "$dir/Zelda_Update_v1.4.3/u.rar" | cut -d' ' -f1)" \
+    --arg s3 "$(sha256sum "$dir/dlc/pack.nsp" | cut -d' ' -f1)" \
+    '[{name: "world.zelda.nsp", path: ($d + "/world.zelda.nsp"), size_bytes: 10, mtime: 1, sha256: $s1},
+      {name: "extras/update_1.4.3/u.rar", path: ($d + "/Zelda_Update_v1.4.3/u.rar"), size_bytes: 10, mtime: 1, sha256: $s2},
+      {name: "extras/dlc_pack/pack.nsp", path: ($d + "/dlc/pack.nsp"), size_bytes: 9, mtime: 1, sha256: $s3}]')"
+  add_member_game switch world.zelda "Zelda" single_file "$files"
+}
+
+# The switch recipe's shape, without nix: <id>/<id>.<ext> plus extras/, built
+# from whatever staged — which is what the assertions below read back.
+stub_bundle_recipe_env() {
+  stub_recipe_env switch
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    cat <<'SHIM'
+handler="$1"; raw="$2"; dest="$3"
+mkdir -p "$dest/extras"
+cp "$raw"/world.zelda.nsp "$dest/world.zelda.nsp"
+for release in "$raw"/extras/*/; do
+  name="$(basename "$release")"
+  for f in "$release"/*; do cp "$f" "$dest/extras/$name-$(basename "$f")"; done
+done
+printf '%s' "$handler" >"$dest/handler"
+SHIM
+  } >"$GOTG_ROOTS_DIR/env-switch/bin/gotg-recipe"
+  chmod +x "$GOTG_ROOTS_DIR/env-switch/bin/gotg-recipe"
+  jq -n '{handlers: ["single_file"]}' >"$GOTG_ROOTS_DIR/env-switch/share/gotg/recipe.json"
+}
+
+@test "attached extras stage under their release directories and install as a bundle" {
+  publish_bundle_game
+  stub_bundle_recipe_env
+  gotg refresh
+
+  gotg download world.zelda
+  [ "$status" -eq 0 ]
+
+  local install="$GOTG_GAMES_DIR/switch/world.zelda"
+  [ -d "$install" ]
+  [ "$(cat "$install/world.zelda.nsp")" = base-bytes ]
+  [ "$(cat "$install/extras/update_1.4.3-u.rar")" = update-rar ]
+  [ "$(cat "$install/extras/dlc_pack-pack.nsp")" = dlc-bytes ]
+  # A single_file base with extras still goes through the recipe, as itself.
+  [ "$(cat "$install/handler")" = single_file ]
+  [ ! -e "$GOTG_GAMES_DIR/switch/world.zelda.nsp" ]
+  [ ! -e "$GOTG_PARTIAL_DIR/world.zelda" ]
+
+  gotg list --installed
+  [[ "$output" == *"[*]"*"world.zelda"* ]]
+  gotg complete installed
+  [[ "$output" == *"switch/world.zelda"* ]]
+}
+
+@test "a bundle launches its game file, not its directory" {
+  publish_bundle_game
+  stub_bundle_recipe_env
+  gotg refresh
+  gotg download world.zelda
+  [ "$status" -eq 0 ]
+
+  gotg play world.zelda
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"env-switch launched with: $GOTG_GAMES_DIR/switch/world.zelda/world.zelda.nsp"* ]]
+}
+
+@test "uninstalling a bundle removes the directory" {
+  publish_bundle_game
+  stub_bundle_recipe_env
+  gotg refresh
+  gotg download world.zelda
+  [ "$status" -eq 0 ]
+
+  gotg uninstall world.zelda
+  [ "$status" -eq 0 ]
+  [ ! -e "$GOTG_GAMES_DIR/switch/world.zelda" ]
+}

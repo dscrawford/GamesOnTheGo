@@ -250,6 +250,16 @@ resolve_target() {
     die "not installed: $(game_local_path "$game")"
 
   pattern="$(override_field "$game" target)"
+  if [[ -z "$pattern" && -d "$path" ]]; then
+    # A recipe's bundle: the game is <id>.<ext> inside, its extras beside it.
+    local id bundled
+    id="$(manifest_field "$game" id)"
+    bundled=("$path/$id".*)
+    if [[ -f "${bundled[0]}" ]]; then
+      printf '%s' "${bundled[0]}"
+      return 0
+    fi
+  fi
   if [[ -z "$pattern" || ! -d "$path" ]]; then
     printf '%s' "$path"
     return 0

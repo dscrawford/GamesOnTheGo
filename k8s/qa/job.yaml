@@ -33,7 +33,7 @@ spec:
         kubernetes.io/hostname: node3
       containers:
         - name: qa
-          image: localhost:30500/gotg-qa:0.4.0
+          image: localhost:30500/gotg-qa:0.5.0
           args: ["@GAME@", "--duration", "60", "--boot-wait", "25"]
           resources:
             limits:

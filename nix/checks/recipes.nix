@@ -175,14 +175,14 @@ pkgs.runCommand "check-recipes" { nativeBuildInputs = [ pkgs.zip ]; } ''
   raw=$TMPDIR/raw-scene && mkdir -p $raw
   touch $raw/group.rar $raw/group.r00 $raw/group.sfv
   ${switch}/bin/gotg-recipe scene_archive $raw $TMPDIR/out/world.game
-  [ "$(cat $TMPDIR/out/world.game.xci)" = big ]
+  [ "$(cat $TMPDIR/out/world.game/world.game.xci)" = big ]
   [ -z "$(ls -A $TMPDIR/out | grep gotg-recipe || true)" ]
 
   # Scene with a failing sfv: refused, nothing installed.
   if GOTG_TEST_SFV_FAILS=1 ${switch}/bin/gotg-recipe scene_archive $raw $TMPDIR/out2/x; then
     echo "a failing sfv must fail the recipe" >&2; exit 1
   fi
-  [ ! -e $TMPDIR/out2/x.xci ]
+  [ ! -e $TMPDIR/out2/x ]
 
   # Disc: extract then convert, chained through the stubs.
   raw=$TMPDIR/raw-disc && mkdir -p $raw
@@ -217,7 +217,7 @@ pkgs.runCommand "check-recipes" { nativeBuildInputs = [ pkgs.zip ]; } ''
   raw=$TMPDIR/raw-nosfv && mkdir -p $raw
   touch $raw/group.rar $raw/group.r00
   GOTG_TEST_UPPER=1 ${switch}/bin/gotg-recipe scene_archive $raw $TMPDIR/out/nosfv.game
-  [ "$(cat $TMPDIR/out/nosfv.game.xci)" = big ]
+  [ "$(cat $TMPDIR/out/nosfv.game/nosfv.game.xci)" = big ]
 
   # An extraction that succeeds but yields nothing fails
   # mid-pipeline: the picking step names itself, and the
@@ -296,6 +296,48 @@ pkgs.runCommand "check-recipes" { nativeBuildInputs = [ pkgs.zip ]; } ''
   # rename a handler on the wire.
   grep -q '"scene_archive"' ${switch}/share/gotg/recipe.json
   grep -q '"single_archive"' ${gamecube}/share/gotg/recipe.json
+  grep -q '"single_file"' ${switch}/share/gotg/recipe.json
+
+  # A Switch scene release with extras attached: the game unpacked as ever,
+  # an update (a rar set) and a DLC (a loose nsp) unpacked beside it, the
+  # whole installed as <id>/<id>.<ext> + extras/. The update's rar goes
+  # through the same unrar stub, so it "unpacks" to game.xci too.
+  raw=$TMPDIR/raw-bundle && mkdir -p $raw/extras/update_1.4.3 $raw/extras/dlc_pack
+  touch $raw/group.rar $raw/group.r00 $raw/group.sfv
+  touch $raw/extras/update_1.4.3/u.rar $raw/extras/update_1.4.3/u.r00
+  printf 'dlc' > $raw/extras/dlc_pack/pack.nsp
+  ${switch}/bin/gotg-recipe scene_archive $raw $TMPDIR/out/world.bundle
+  [ "$(cat $TMPDIR/out/world.bundle/world.bundle.xci)" = big ]
+  [ "$(cat $TMPDIR/out/world.bundle/extras/update_1.4.3-game.xci)" = big ]
+  [ "$(cat $TMPDIR/out/world.bundle/extras/dlc_pack-pack.nsp)" = dlc ]
+  [ ! -e $TMPDIR/out/world.bundle/extras/update_1.4.3-readme.txt ]
+  [ -z "$(ls -A $TMPDIR/out | grep gotg-recipe || true)" ]
+
+  # A loose container as the base: pick-base takes the file beside extras/,
+  # never a bigger file inside it.
+  raw=$TMPDIR/raw-loose && mkdir -p $raw/extras/dlc_big
+  printf 'game' > $raw/world.loose.nsp
+  printf 'a-much-larger-dlc-file' > $raw/extras/dlc_big/pack.nsp
+  ${switch}/bin/gotg-recipe single_file $raw $TMPDIR/out/world.loose
+  [ "$(cat $TMPDIR/out/world.loose/world.loose.nsp)" = game ]
+  [ "$(cat $TMPDIR/out/world.loose/extras/dlc_big-pack.nsp)" = a-much-larger-dlc-file ]
+
+  # No extras at all is the common case: a bundle with an empty extras/.
+  raw=$TMPDIR/raw-plain && mkdir -p $raw
+  touch $raw/group.rar $raw/group.r00
+  ${switch}/bin/gotg-recipe scene_archive $raw $TMPDIR/out/world.plain
+  [ "$(cat $TMPDIR/out/world.plain/world.plain.xci)" = big ]
+  [ -d $TMPDIR/out/world.plain/extras ] && [ -z "$(ls -A $TMPDIR/out/world.plain/extras)" ]
+
+  # An extras release that unpacks to no container is a refusal, whole.
+  raw=$TMPDIR/raw-hollow-extra && mkdir -p $raw/extras/dlc_nothing
+  touch $raw/group.rar $raw/group.r00
+  printf 'x' > $raw/extras/dlc_nothing/readme.txt
+  if ${switch}/bin/gotg-recipe scene_archive $raw $TMPDIR/out6/x 2>$TMPDIR/err-extra; then
+    echo "an extras release without a container must fail" >&2; exit 1
+  fi
+  grep -q 'gotg-recipe\[collect-extras\]' $TMPDIR/err-extra
+  [ ! -e $TMPDIR/out6/x ]
 
   touch $out
 ''

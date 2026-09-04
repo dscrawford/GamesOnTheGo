@@ -234,8 +234,9 @@ download_game() {
     single_file | no_intro_set)
       # An `unzip` override means this game's own environment carries the
       # recipe that unpacks it — the same pipeline every processed source
-      # goes through. Everything else is placement, not processing.
-      if [[ "$(override_field "$game" unzip)" == "true" ]]; then
+      # goes through — and so do attached updates or DLC, which only a recipe
+      # can set beside the game. Everything else is placement, not processing.
+      if [[ "$(override_field "$game" unzip)" == "true" ]] || game_has_extras "$game"; then
         _run_recipe "$game" "$handler" "$staged" "$dest"
       else
         local member

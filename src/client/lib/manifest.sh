@@ -129,19 +129,34 @@ manifest_field() {
   jq -r --arg f "$2" '.[$f] // empty' <<<"$1"
 }
 
+# Whether the entry carries updates or DLC beside the game (members under
+# extras/). Such a game always installs through its recipe, as a directory.
+game_has_extras() {
+  jq -e '[.files[]?.name | startswith("extras/")] | any' <<<"$1" >/dev/null 2>&1
+}
+
+# The single-file handlers install their one member as it is named — unless
+# an unzip override or attached extras hand the game to a recipe instead.
+game_is_placed_file() {
+  local game="$1" handler
+  handler="$(manifest_field "$game" handler)"
+  [[ "$handler" == "single_file" || "$handler" == "no_intro_set" ]] &&
+    [[ "$(override_field "$game" unzip)" != "true" ]] &&
+    ! game_has_extras "$game"
+}
+
 # Local install path for a game: ~/Games/<platform>/<entry name>.
 #
 # Single-file entries land under their canonical member name. Everything a
 # recipe refines, and every tree fetched in place, lands as or under the id —
 # `unzip` overrides included, which keep their old shape.
 game_local_path() {
-  local game="$1" platform name handler
+  local game="$1" platform name
   platform="$(manifest_field "$game" platform)"
   validate_platform "$platform"
-  handler="$(manifest_field "$game" handler)"
   if [[ "$(override_field "$game" unzip)" == "true" ]]; then
     name="$(manifest_field "$game" id)"
-  elif [[ "$handler" == "single_file" || "$handler" == "no_intro_set" ]]; then
+  elif game_is_placed_file "$game"; then
     name="$(jq -r '.files[0].name' <<<"$game")"
     validate_filename "$name"
   else
@@ -156,15 +171,13 @@ game_local_path() {
 # single-file game's base already carries its extension, and globbing there
 # would mistake a leftover .sav sidecar for the game itself.
 game_installed_path() {
-  local game="$1" base handler
+  local game="$1" base
   base="$(game_local_path "$game")"
   if [[ -e "$base" ]]; then
     printf '%s' "$base"
     return 0
   fi
-  handler="$(manifest_field "$game" handler)"
-  if [[ "$handler" != "single_file" && "$handler" != "no_intro_set" &&
-    "$(override_field "$game" unzip)" != "true" ]]; then
+  if ! game_is_placed_file "$game" && [[ "$(override_field "$game" unzip)" != "true" ]]; then
     local matches=("$base".*)
     if [[ -e "${matches[0]}" ]]; then
       printf '%s' "${matches[0]}"
