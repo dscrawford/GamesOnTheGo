@@ -27,10 +27,50 @@ _curl_download() {
     -C - "${validate[@]}" "$@" -o "$out" "$url"
 }
 
+# One line of progress: how far, how fast, how long to go. Speed is the
+# average since the transfer started — steadier than a per-tick figure, and
+# what an ETA should be built from. Bytes already on disk from an earlier
+# attempt count as done but not as speed.
+_meter_line() {
+  local size="$1" expected="$2" resumed_from="$3" start="$4" now="$5"
+  local elapsed=$((now - start)) rate=0 eta="" pct=""
+  ((elapsed > 0)) && rate=$(((size - resumed_from) / elapsed))
+  if ((expected > 0)); then
+    pct="$((size * 100 / expected))"
+    ((pct > 99)) && pct=99
+    if ((rate > 0)); then
+      local left=$(((expected - size) / rate))
+      if ((left >= 3600)); then eta="$((left / 3600))h$(((left % 3600) / 60))m"
+      elif ((left >= 60)); then eta="$((left / 60))m$((left % 60))s"
+      else eta="${left}s"; fi
+    fi
+    printf '%3s%%  %s of %s' "$pct" "$(human_size "$size")" "$(human_size "$expected")"
+  else
+    printf '%s' "$(human_size "$size")"
+  fi
+  ((rate > 0)) && printf '  %s/s' "$(human_size "$rate")"
+  [[ -z "$eta" ]] || printf '  eta %s' "$eta"
+}
+
+# The terminal meter: curl in the background, one line redrawn in place from
+# the size of the partial file — the same figures the graphical dialog shows.
 _download_terminal() {
-  local url="$1" out="$2" etag="$3"
+  local url="$1" out="$2" etag="$3" expected="${4:-0}"
   log "downloading to $out"
-  _curl_download "$url" "$out" "$etag" --progress-bar
+  local resumed_from start now size curl_pid status=0
+  resumed_from="$(stat -c '%s' "$out" 2>/dev/null || echo 0)"
+  start="$(date +%s)"
+  _curl_download "$url" "$out" "$etag" --silent --show-error &
+  curl_pid=$!
+  while kill -0 "$curl_pid" 2>/dev/null; do
+    size="$(stat -c '%s' "$out" 2>/dev/null || echo 0)"
+    now="$(date +%s)"
+    printf '\r\033[K  %s' "$(_meter_line "$size" "$expected" "$resumed_from" "$start" "$now")" >&2
+    sleep "$PROGRESS_TICK"
+  done
+  wait "$curl_pid" || status=$?
+  printf '\r\033[K' >&2
+  return "$status"
 }
 
 _download_quiet() {
@@ -62,7 +102,9 @@ _download_zenity() {
   _curl_download "$url" "$out" "$etag" --silent --show-error &
   curl_pid=$!
 
-  local size pct=0
+  local size pct=0 resumed_from start now
+  resumed_from="$(stat -c '%s' "$out" 2>/dev/null || echo 0)"
+  start="$(date +%s)"
   while kill -0 "$curl_pid" 2>/dev/null; do
     # The user closed or cancelled the dialog: stop the transfer, keep the
     # partial file so the next attempt resumes.
@@ -75,15 +117,14 @@ _download_zenity() {
       # rather than asserting an intent we cannot observe.
       die "download stopped: the progress dialog closed (cancelled, or zenity could not run)"
     fi
+    size="$(stat -c '%s' "$out" 2>/dev/null || echo 0)"
+    now="$(date +%s)"
     if [[ "$expected" -gt 0 ]]; then
-      size="$(stat -c '%s' "$out" 2>/dev/null || echo 0)"
       pct=$((size * 100 / expected))
       ((pct > 99)) && pct=99
-      printf '%s\n# %s of %s\n' "$pct" "$(human_size "$size")" "$(human_size "$expected")" >&9
-    else
-      size="$(stat -c '%s' "$out" 2>/dev/null || echo 0)"
-      printf '# %s downloaded\n' "$(human_size "$size")" >&9
+      printf '%s\n' "$pct" >&9
     fi
+    printf '# %s\n' "$(_meter_line "$size" "$expected" "$resumed_from" "$start" "$now")" >&9
     sleep "$PROGRESS_TICK"
   done
 
@@ -105,7 +146,7 @@ _download_zenity() {
 _download_with_progress() {
   local url="$1" out="$2" etag="$3" title="$4" expected="$5"
   if is_tty; then
-    _download_terminal "$url" "$out" "$etag"
+    _download_terminal "$url" "$out" "$etag" "$expected"
   elif has_display && command -v zenity >/dev/null 2>&1; then
     _download_zenity "$url" "$out" "$etag" "$title" "$expected"
   else

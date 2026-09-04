@@ -139,11 +139,16 @@ cmd_sync() {
   fi
 
   mkdir -p "$GOTG_STATE_DIR"
-  log "building gotg -> $GOTG_APP_ROOT"
+  local before after
+  before="$(readlink -f "$GOTG_APP_ROOT" 2>/dev/null || true)"
   "$(nix_bin)" build "$flake#gotg" -o "$GOTG_APP_ROOT" "${refresh[@]}" || die "could not build gotg from $flake"
+  after="$(readlink -f "$GOTG_APP_ROOT" 2>/dev/null || true)"
+  _sync_mark "$([[ "$before" != "$after" ]] && echo changed || echo same)" gotg
 
-  # Only rebuild the environments that are already in use here.
-  local root name before after changed=0
+  # Only rebuild the environments that are already in use here. One line
+  # each, and a failure marks its line rather than ending the pass — a
+  # platform whose build broke should not keep the others stale.
+  local root name changed=0 failed=0
   if [[ -d "$GOTG_ROOTS_DIR" ]]; then
     for root in "$GOTG_ROOTS_DIR"/*; do
       [[ -e "$root" ]] || continue
@@ -154,27 +159,38 @@ cmd_sync() {
       # produces, and skipped rather than fatal — one stray symlink in here
       # should not stop every other environment from being rebuilt.
       if ! [[ "$name" =~ $GOTG_ATTR_RE ]]; then
-        warn "skipping $name: not an environment name. Remove it with: rm $root"
+        _sync_mark skipped "$name" "not an environment name; rm $root"
         continue
       fi
       before="$(readlink -f "$root" 2>/dev/null || true)"
-      log "rebuilding $name"
-      env_build "$name"
-      after="$(readlink -f "$root" 2>/dev/null || true)"
-      # Say which ones actually moved. A rebuild that changes nothing looks
-      # identical to one that changes how a game runs, and the difference is
-      # worth a line — a stale root is used silently for as long as it lasts.
-      if [[ "$before" != "$after" ]]; then
-        log "  $name changed"
-        changed=$((changed + 1))
+      if (GOTG_BUILD_QUIET=1 env_build "$name") 2>"$GOTG_STATE_DIR/sync-$name.log"; then
+        after="$(readlink -f "$root" 2>/dev/null || true)"
+        if [[ "$before" != "$after" ]]; then
+          _sync_mark changed "$name"
+          changed=$((changed + 1))
+        else
+          _sync_mark same "$name"
+        fi
+      else
+        _sync_mark failed "$name" "$GOTG_STATE_DIR/sync-$name.log"
+        failed=$((failed + 1))
       fi
     done
   fi
 
-  if ((changed > 0)); then
-    log ""
-    log "$changed environment(s) changed. Anything already open keeps the old one"
-    log "until it is closed and launched again."
-  fi
-  log "done"
+  ((changed == 0)) || log "${C_DIM}anything already open keeps its old environment until relaunched${C_RESET}"
+  ((failed == 0)) || die "$failed environment(s) did not build"
+}
+
+# ● name — green for a root that moved, dim for one that did not, yellow for
+# a skip, red for a build that failed. The note is where to look next.
+_sync_mark() {
+  local state="$1" name="$2" note="${3:-}" dot
+  case "$state" in
+    changed) dot="${C_OK}●${C_RESET}" ;;
+    same) dot="${C_DIM}●${C_RESET}" ;;
+    skipped) dot="${C_WARN}●${C_RESET}" ;;
+    *) dot="${C_ERROR}●${C_RESET}" ;;
+  esac
+  printf '%s %-24s %s%s%s\n' "$dot" "$name" "$C_DIM" "${note:-$state}" "$C_RESET" >&2
 }

@@ -659,3 +659,23 @@ SHIM
   GOTG_FILES_URL="$GOTG_SERVICE_URL/" run manifest_files_hosts
   [ "$output" = "$GOTG_SERVICE_URL" ]
 }
+
+# --- the meter ------------------------------------------------------------------
+
+@test "the meter says how far, how fast and how long to go" {
+  load_client_libs
+  # 300 MB of 1 GB after 30 s from nothing: 10 MB/s, ~72 s left.
+  run _meter_line $((300 * 1048576)) $((1024 * 1048576)) 0 1000 1030
+  [ "$output" = " 29%  300.0 MB of 1.0 GB  10.0 MB/s  eta 1m12s" ]
+  # Resumed bytes count toward progress, not toward speed.
+  run _meter_line $((300 * 1048576)) $((1024 * 1048576)) $((200 * 1048576)) 1000 1010
+  [[ "$output" == " 29%  300.0 MB of 1.0 GB  10.0 MB/s  eta "* ]]
+  # No size known: bytes and speed only. No time passed: no speed, no eta.
+  run _meter_line 5242880 0 0 1000 1005
+  [ "$output" = "5.0 MB  1.0 MB/s" ]
+  run _meter_line 5242880 10485760 0 1000 1000
+  [ "$output" = " 50%  5.0 MB of 10.0 MB" ]
+  # Hours read as hours.
+  run _meter_line 1048576 $((100 * 1048576 * 1024)) 0 1000 1001
+  [[ "$output" == *"eta "*h*m ]]
+}
