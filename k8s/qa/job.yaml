@@ -42,7 +42,10 @@ spec:
               # between slices, which retro emulators can afford and a sweep of
               # heavier ones could not.
               nvidia.com/gpu-0: 1
-              memory: 8Gi
+              # A Switch title under Ryujinx holds 8-10 GiB of host memory
+              # once its guest heap is mapped; the cartridge platforms need a
+              # fraction of this and do not mind the headroom.
+              memory: 16Gi
             requests:
               cpu: "4"
               memory: 4Gi
@@ -80,8 +83,9 @@ spec:
               # keystrokes, and keeps that intent recorded if the privileged
               # flag above is ever narrowed to a device plugin.
               readOnly: true
-            # Big enough for a run's capture before it is written out; the
-            # default 64M would truncate a minute of lossless video.
+            # Big enough for a run's capture before it is written out — the
+            # default 64M would truncate a minute of lossless video — and for
+            # an emulator's guest memory, which .NET backs with shared memory.
             - name: shm
               mountPath: /dev/shm
             # The library itself, read-only, at the path the catalog names.
@@ -112,7 +116,9 @@ spec:
         - name: shm
           emptyDir:
             medium: Memory
-            sizeLimit: 2Gi
+            # Ryujinx backs guest memory with shared memory too, and a Switch
+            # title maps several GiB of it; counted against the pod's limit.
+            sizeLimit: 8Gi
         - name: library
           persistentVolumeClaim:
             claimName: jellyfin-data
