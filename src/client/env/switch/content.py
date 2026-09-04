@@ -105,8 +105,8 @@ def _partition(fh, base: int, hfs: bool) -> list[Entry]:
     expected = b"HFS0" if hfs else b"PFS0"
     if magic != expected:
         raise ContentError(f"expected {expected.decode()} at {base:#x}, found {magic!r}")
-    if count > 4096:
-        raise ContentError(f"implausible entry count {count}")
+    if count > 4096 or strings_size > 1 << 20:
+        raise ContentError(f"implausible file table at {base:#x} ({count} entries, {strings_size:#x} of names)")
     entry_size = 0x40 if hfs else 0x18
     table = _read(fh, base + 0x10, count * entry_size)
     strings = _read(fh, base + 0x10 + count * entry_size, strings_size)
@@ -212,16 +212,22 @@ def _cnmt(fh, entry: Entry, header: NcaHeader, keys: dict[str, bytes]) -> tuple[
         return None
     pfs_offset, pfs_size = struct.unpack_from("<QQ", fs, 0x8 + 0x28 + 0x10)
     section_ctr = struct.unpack_from("<Q", fs, 0x140)[0]
-    if pfs_size > 1 << 20:
+    if not 0x10 <= pfs_size <= 1 << 20:
         return None
 
     section_offset = entry.offset + media_start * MEDIA_UNIT + pfs_offset
     relative = media_start * MEDIA_UNIT + pfs_offset
-    pfs = _ctr_decrypt(ctr_key, section_ctr, relative, _read(fh, section_offset, pfs_size))
+    try:
+        encrypted = _read(fh, section_offset, pfs_size)
+    except ContentError:
+        return None  # a section past the end of the file: not a CNMT this can read
+    pfs = _ctr_decrypt(ctr_key, section_ctr, relative, encrypted)
     magic, count, strings_size = struct.unpack_from("<4sII", pfs, 0)
     if magic != b"PFS0" or count > 64:
         return None
     table = pfs[0x10 : 0x10 + count * 0x18]
+    if len(table) < count * 0x18:
+        return None
     strings = pfs[0x10 + count * 0x18 : 0x10 + count * 0x18 + strings_size]
     data_start = 0x10 + count * 0x18 + strings_size
     for i in range(count):
@@ -231,6 +237,8 @@ def _cnmt(fh, entry: Entry, header: NcaHeader, keys: dict[str, bytes]) -> tuple[
         if not name.lower().endswith(b".cnmt") or size < 0x20:
             continue
         cnmt = pfs[data_start + offset : data_start + offset + 0x20]
+        if len(cnmt) < 0x20:
+            return None
         title_id, version = struct.unpack_from("<QI", cnmt, 0)
         return cnmt[0xC], title_id, version
     return None
@@ -273,16 +281,34 @@ def _containers(install: Path) -> list[Path]:
     return sorted(found)
 
 
+def _is_extra(path: Path, install: Path) -> bool:
+    return "extras" in path.relative_to(install).parts
+
+
 def register(install: Path, ryujinx: Path, keys: dict[str, bytes]) -> dict:
     """Write updates.json and dlc.json for every title under `install`.
 
     The install directory is authoritative: what vanished from it is dropped;
     entries naming files elsewhere (added by hand in Ryujinx) are kept.
+
+    Which titles get written is decided by the game itself, never by extras/:
+    an attached file claiming to be some other title's application would
+    otherwise write that title's registration, and the config is shared.
     """
-    containers = [inspect(p, keys) for p in _containers(install)]
-    bases = {base_id(t) for c in containers for t in c.applications}
+    containers: list[tuple[Path, Container]] = []
+    for path in _containers(install):
+        try:
+            containers.append((path, inspect(path, keys)))
+        except (ContentError, struct.error) as error:
+            # A broken or hostile extra must not cost the game its launch;
+            # the game itself failing to read is the caller's to hear about.
+            if not _is_extra(path, install):
+                raise
+            print(f"switch-content: skipping {path.name}: {error}", file=sys.stderr)
+    bases = {base_id(t) for p, c in containers if not _is_extra(p, install) for t in c.applications}
     if not bases:
         raise ContentError(f"no application found under {install}")
+    containers = [c for _, c in containers]
 
     report: dict[str, dict] = {}
     for base in sorted(bases):
@@ -394,7 +420,7 @@ def main(argv: list[str] | None = None) -> int:
             for base, what in report.items():
                 update = Path(what["update"]).name if what["update"] else "none"
                 print(f"{base}: update {update}, {what['dlc']} DLC", file=sys.stderr)
-    except (ContentError, OSError) as error:
+    except (ContentError, OSError, struct.error, ValueError) as error:
         print(f"switch-content: {error}", file=sys.stderr)
         return 1
     return 0

@@ -523,3 +523,33 @@ SHIM
   [ "$status" -eq 0 ]
   [ ! -e "$GOTG_GAMES_DIR/switch/world.zelda" ]
 }
+
+@test "a game installed before its extras arrived is still the game, and says so" {
+  add_game switch "world.zelda.nsp" "base-bytes" "Zelda"
+  gotg refresh
+  gotg download world.zelda
+  [ "$status" -eq 0 ]
+  [ -f "$GOTG_GAMES_DIR/switch/world.zelda.nsp" ]
+
+  # The catalog row gains an update; the file on disk predates it.
+  publish_bundle_game
+  stub_bundle_recipe_env
+  gotg refresh
+
+  gotg list --installed
+  [[ "$output" == *"[*]"*"world.zelda"* ]]
+  gotg download world.zelda
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"without its updates and DLC"* ]]
+  [ ! -d "$GOTG_GAMES_DIR/switch/world.zelda" ]
+  gotg play world.zelda
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"env-switch launched with: $GOTG_GAMES_DIR/switch/world.zelda.nsp"* ]]
+
+  gotg uninstall world.zelda
+  [ "$status" -eq 0 ]
+  [ ! -e "$GOTG_GAMES_DIR/switch/world.zelda.nsp" ]
+  gotg download world.zelda
+  [ "$status" -eq 0 ]
+  [ -f "$GOTG_GAMES_DIR/switch/world.zelda/extras/dlc_pack-pack.nsp" ]
+}

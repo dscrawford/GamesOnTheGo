@@ -365,3 +365,20 @@ def test_a_scene_base_release_still_extracts(roots):
     ops = plan_source(src / "Luigis_Mansion_2_HD_PROPER_NSW-HR", games, RULES)
 
     assert [(o.action, o.entry_id, o.role) for o in ops] == [(ACTION_EXTRACT, "world.luigis_mansion_2_hd", "")]
+
+
+def test_an_update_for_a_platform_without_extras_support_is_quarantined(roots):
+    src, games = roots
+    (src / "Some Game (USA) (v1.1) (Update).7z").write_bytes(b"7z")
+
+    import gotg.indexer.scan as scan
+
+    real = scan.list_archive_file
+    scan.list_archive_file = lambda path: ("Some Game (USA).rvz",)
+    try:
+        ops = plan_source(src / "Some Game (USA) (v1.1) (Update).7z", games, RULES)
+    finally:
+        scan.list_archive_file = real
+
+    assert [(o.action, o.platform, o.entry_id) for o in ops] == [(ACTION_MANUAL, "gamecube", "usa.some_game")]
+    assert "no recipe for extras" in ops[0].reason

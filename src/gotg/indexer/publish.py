@@ -252,6 +252,12 @@ class Publisher:
         if op.action == pl.ACTION_ATTACH:
             if stored is None:
                 raise PublishError(f"{op.entry_id}: no base game in the catalog to attach this {op.role} to")
+            prefix = extras_prefix(op)
+            before = {f["path"] for f in stored["files"] if f["name"].startswith(prefix)}
+            if before and before != {f["path"] for f in files}:
+                # A PROPER of the same version is the usual reason; a second
+                # source claiming a release is the other, so it is said.
+                log.warning("%s: %s now comes from %s, replacing %s", op.entry_id, prefix, op.src, sorted(before)[0])
             payload = {
                 "handler": stored["handler"],
                 "title": stored["title"],

@@ -144,7 +144,9 @@ def dlc_ncas(index, title_id=BASE):
 @pytest.fixture
 def keys(tmp_path):
     path = tmp_path / "prod.keys"
-    path.write_text(f"header_key = {HEADER_KEY.hex()}\nkey_area_key_application_02 = {KAEK.hex()}\nmaster_key_00 = 00\n")
+    path.write_text(
+        f"header_key = {HEADER_KEY.hex()}\nkey_area_key_application_02 = {KAEK.hex()}\nmaster_key_00 = 00\n"
+    )
     return content.load_keys(path)
 
 
@@ -201,7 +203,10 @@ def test_register_selects_the_newest_update_and_lists_every_dlc(tmp_path, keys):
     games = ryujinx / "games" / f"{BASE:016x}"
     updates = json.loads((games / "updates.json").read_text())
     assert updates["selected"] == str(install / "extras" / "update_1.4-b.nsp")
-    assert updates["paths"] == [str(install / "extras" / "update_1.1-a.nsp"), str(install / "extras" / "update_1.4-b.nsp")]
+    assert updates["paths"] == [
+        str(install / "extras" / "update_1.1-a.nsp"),
+        str(install / "extras" / "update_1.4-b.nsp"),
+    ]
     dlc = json.loads((games / "dlc.json").read_text())
     assert dlc == [
         {
@@ -285,3 +290,54 @@ def test_the_cli_reports_and_exits_cleanly(tmp_path, capsys):
     assert shown[0]["applications"] == [{"title_id": f"{BASE:016x}", "version": 0}]
 
     assert content.main(["register", "--keys", str(tmp_path / "missing.keys"), "--ryujinx", "x", str(install)]) == 1
+
+
+# --- hostile input ------------------------------------------------------------
+
+
+def test_an_extra_cannot_nominate_another_title_as_a_base(tmp_path, keys):
+    """A hostile attached file claiming to be some other game's application
+    must not write that game's registration: the config is shared."""
+    other = 0x0100000000010000
+    install = install_dir(tmp_path)
+    nsp(install / "extras" / "evil.nsp", base_ncas(title_id=other) + patch_ncas(0xFFFF0000, title_id=other))
+    ryujinx = tmp_path / "Ryujinx"
+
+    report = content.register(install, ryujinx, keys)
+
+    assert list(report) == [f"{BASE:016x}"]
+    assert not (ryujinx / "games" / f"{other:016x}").exists()
+
+
+def test_an_absurd_string_table_is_refused_not_allocated(tmp_path, keys):
+    hostile = tmp_path / "hostile.nsp"
+    hostile.write_bytes(struct.pack("<4sIII", b"PFS0", 1, 0xFFFFFFF0, 0) + b"\0" * 0x40)
+    with pytest.raises(content.ContentError, match="implausible"):
+        content.inspect(hostile, keys)
+
+
+def test_a_truncated_cnmt_section_is_skipped_not_a_crash(tmp_path, keys):
+    ncas = base_ncas()
+    name, meta = ncas[1]
+    # Zero the section: the CNMT region then reads as an empty PFS0 buffer.
+    ncas[1] = (name, meta[:0xC00])
+    container = content.inspect(nsp(tmp_path / "short.nsp", ncas), keys)
+    assert container.applications == {}
+
+
+def test_a_broken_extra_is_skipped_and_the_game_still_registers(tmp_path, keys, capsys):
+    install = install_dir(tmp_path)
+    nsp(install / "extras" / "update.nsp", patch_ncas(0x10000))
+    (install / "extras" / "junk.nsp").write_bytes(struct.pack("<4sIII", b"PFS0", 1, 0xFFFFFFF0, 0) + b"\0" * 0x40)
+    ryujinx = tmp_path / "Ryujinx"
+
+    report = content.register(install, ryujinx, keys)
+
+    assert report[f"{BASE:016x}"]["update"] == str(install / "extras" / "update.nsp")
+    assert "skipping junk.nsp" in capsys.readouterr().err
+
+
+def test_the_cli_turns_a_malformed_container_into_an_exit_code(tmp_path, keys):
+    hostile = tmp_path / "hostile.nsp"
+    hostile.write_bytes(struct.pack("<4sIII", b"PFS0", 1, 0xFFFFFFF0, 0) + b"\0" * 0x40)
+    assert content.main(["inspect", "--keys", str(tmp_path / "prod.keys"), str(hostile)]) == 1

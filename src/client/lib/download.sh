@@ -158,6 +158,7 @@ download_game() {
   validate_platform "$platform"
 
   if game_is_installed "$game"; then
+    _warn_without_extras "$game"
     return 0
   fi
   dest="$(game_local_path "$game")"
@@ -259,6 +260,16 @@ download_game() {
 
   exec 8>&-
   log "installed $(game_installed_path "$game" || printf '%s' "$dest")"
+}
+
+# An install from before the catalog attached updates or DLC to this game
+# runs as it is; fetching them means reinstalling, which is not done behind
+# anyone's back.
+_warn_without_extras() {
+  local game="$1" legacy
+  legacy="$(game_legacy_path "$game")" || return 0
+  [[ -f "$legacy" ]] || return 0
+  warn "$(manifest_field "$game" id) is installed without its updates and DLC — uninstall and install again to fetch them"
 }
 
 # The environment owns the recipe and its tools; the catalog only said what

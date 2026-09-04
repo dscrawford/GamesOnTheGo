@@ -184,7 +184,25 @@ game_installed_path() {
       return 0
     fi
   fi
+  # A single-file game installed before its updates arrived: still the game,
+  # at the name it was placed under, and playable without them.
+  local legacy
+  if legacy="$(game_legacy_path "$game")" && [[ -f "$legacy" ]]; then
+    printf '%s' "$legacy"
+    return 0
+  fi
   return 1
+}
+
+# Where a single-file entry that has since gained extras was installed.
+game_legacy_path() {
+  local game="$1" handler name
+  handler="$(manifest_field "$game" handler)"
+  [[ "$handler" == "single_file" || "$handler" == "no_intro_set" ]] || return 1
+  game_has_extras "$game" || return 1
+  name="$(jq -r '.files[0].name' <<<"$game")"
+  validate_filename "$name"
+  printf '%s/%s/%s' "$GOTG_GAMES_DIR" "$(manifest_field "$game" platform)" "$name"
 }
 
 game_is_installed() { game_installed_path "$1" >/dev/null; }

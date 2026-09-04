@@ -48,6 +48,11 @@ ACTION_SKIP = "skip"              # excluded / non-retail / duplicate
 ACTION_MANUAL = "manual"          # low-confidence -> quarantine for human review
 ACTION_ATTACH = "attach"          # an update or DLC: published onto its base game, materialized nowhere
 
+# Where the client has a recipe that installs extras beside the game. Anywhere
+# else an update is quarantined rather than attached: attached, it would send
+# the base through a recipe the platform does not carry.
+EXTRAS_PLATFORMS = frozenset({"switch"})
+
 
 @dataclass
 class Op:
@@ -68,6 +73,15 @@ class Op:
 
 def _extra_reason(role: str, version: str, entry: str) -> str:
     return f"{role}{' v' + version if version else ''} for {entry}"
+
+
+def _attach(platform: str, src: str, entry: str, title: str, role: str, version: str) -> Op:
+    if platform not in EXTRAS_PLATFORMS:
+        return Op(ACTION_MANUAL, platform, src, "", entry, title=title,
+                  reason=f"{_extra_reason(role, version, entry)}; {platform} has no recipe for extras",
+                  type="file", role=role, version=version)
+    return Op(ACTION_ATTACH, platform, src, "", entry, title=title,
+              reason=_extra_reason(role, version, entry), type="file", role=role, version=version)
 
 
 def _display_title(p: ParsedRom) -> str:
@@ -129,8 +143,7 @@ def plan_single_archive(platform: str, games_root: str, src_file: str,
     if role:
         entry = f"{parsed.region}.{parsed.slug}"
         version = parsed.revision.lstrip("v").replace("_", ".")
-        return Op(ACTION_ATTACH, platform, src_file, "", entry, title=_display_title(parsed),
-                  reason=_extra_reason(role, version, entry), type="file", role=role, version=version)
+        return _attach(platform, src_file, entry, _display_title(parsed), role, version)
 
     inner_ext = _ext_of(inner_name)
     # Convert only when the emulator wants something else; an archive that
@@ -178,8 +191,7 @@ def plan_scene_archive(platform: str, games_root: str, src_dir: str,
     entry = f"{region}.{slug}"
     display = " ".join(w if w.isupper() else w.capitalize() for w in title.split())
     if role:
-        return Op(ACTION_ATTACH, platform, f"{src_dir}/{release_name}", "", entry, title=display,
-                  reason=_extra_reason(role, version, entry), type="file", role=role, version=version)
+        return _attach(platform, f"{src_dir}/{release_name}", entry, display, role, version)
     ext = inner_name.rsplit(".", 1)[-1].lower() if "." in inner_name else "nsp"
     dst = f"{games_root}/{platform}/{entry}.{ext}"
     return Op(ACTION_EXTRACT, platform, f"{src_dir}/{release_name}", dst, entry,

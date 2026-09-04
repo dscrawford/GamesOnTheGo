@@ -169,16 +169,25 @@
         fi
         rar="$(find "$release" -maxdepth 1 -name '*.rar' | head -1 || true)"
         sevenz="$(find "$release" -maxdepth 1 -name '*.7z' | head -1 || true)"
+        # Both flatten (`e`), as the unrar step does, and both run under a
+        # file-size cap: the catalog hash covers the archive, not what it
+        # expands to, and the stage is on the games volume.
         if [ -n "$rar" ]; then
-          "$UNRAR" e -idq -o+ "$rar" "$unpacked/" || fail "unrar failed in $name"
+          (
+            ulimit -f $((64 * 1024 * 1024))
+            exec "$UNRAR" e -idq -o+ "$rar" "$unpacked/"
+          ) || fail "unrar failed in $name"
         elif [ -n "$sevenz" ]; then
-          "$P7Z" x -bd -y -o"$unpacked" "$sevenz" >/dev/null || fail "extract failed in $name"
+          (
+            ulimit -f $((64 * 1024 * 1024))
+            exec "$P7Z" e -bd -y -o"$unpacked" "$sevenz"
+          ) >/dev/null || fail "extract failed in $name"
         else
           find "$release" -maxdepth 1 -type f \( -iname '*.nsp' -o -iname '*.xci' \) -exec mv -t "$unpacked" {} +
         fi
+        [ -z "$(find "$unpacked" -type l -print -quit)" ] || fail "refusing a symlink in $name"
         found=0
         while IFS= read -r -d "" f; do
-          [ -L "$f" ] && fail "refusing a symlink in $name"
           # The name is the archive's to choose and lands in Ryujinx's json;
           # it is only a label there, so anything odd becomes an underscore.
           base="$(basename "$f")"
