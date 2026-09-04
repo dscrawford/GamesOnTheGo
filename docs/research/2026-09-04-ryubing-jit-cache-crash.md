@@ -17,9 +17,11 @@ every lost translation race into allocator corruption and, shortly after, a
 fault in overwritten JIT output. Restoring the original 2 GB reservation (a
 one-line source patch in `pkgs/ryubing`) means the growth path never runs; no
 game-specific setting is involved, so the fix belongs to the Switch platform
-environment rather than a per-game one. Whether upstream has since repaired
-the multi-region code could not be verified: Ryubing's Forgejo rejects
-non-browser fetches and its GitHub mirrors are gone.
+environment rather than a per-game one. Upstream repaired it in Canary
+1.3.327 (PR #152 "instanced jit cache", 2026-06-30), but no stable release
+carries the fix: stable is still 1.3.3 and Canary is at 1.3.351, confirmed
+through Ryubing's Forgejo API, which answers plain HTTP even though its web
+pages sit behind a bot wall.
 
 ## 1. What the crash is
 - The failing session's log ends on the region-growth warning and the process
@@ -86,10 +88,16 @@ non-browser fetches and its GitHub mirrors are gone.
 - No per-game environment: the bug is in the emulator's code cache, not in a
   TOTK setting, so a TOTK-only file would leave the next large game to hit it.
 - The PPTC change made while diagnosing was reverted (`enable_ptc = true`).
-- Revisit when nixpkgs moves past 1.3.3: if a release note mentions the JIT
-  cache regions or `Unmap`, drop the override.
+- Drop the override once nixpkgs' Ryubing is a release that includes PR #152
+  (Canary ≥ 1.3.327; the next stable after 1.3.3). Building Canary 1.3.351
+  ourselves is possible (its API serves tarballs) but means regenerating the
+  NuGet lock, so the one-line patch on stable is the cheaper path today.
+- Ryubing's Forgejo REST API (`/api/v1/repos/projects/Ryubing/...`,
+  `/api/v1/repos/Ryubing/Canary/releases`) is reachable from scripts; the
+  web UI and raw pages are not.
 
 ## Sources
+0. [Ryubing PR #152 "instanced jit cache"](https://git.ryujinx.app/projects/Ryubing/pulls/152) — the upstream fix, Canary 1.3.327; [stable releases](https://git.ryujinx.app/api/v1/repos/projects/Ryubing/releases), [Canary releases](https://git.ryujinx.app/api/v1/repos/Ryubing/Canary/releases).
 1. [Ryubing 1.2.82 release note](https://newreleases.io/project/github/Ryubing/Ryujinx/release/1.2.82) — the 2 GB → 256 MB regions change.
 2. [Upstream JitCache.cs (Codeberg mirror)](https://codeberg.org/smj2k/Ryujinx/raw/branch/master/src/ARMeilleure/Translation/Cache/JitCache.cs) — `CacheSize = 2047 MB`, no regions.
 3. [Upstream ArmProcessContextFactory.cs](https://codeberg.org/smj2k/Ryujinx/raw/branch/master/src/Ryujinx.HLE/HOS/ArmProcessContextFactory.cs) — LightningJit and hypervisor are ARM64/macOS paths.

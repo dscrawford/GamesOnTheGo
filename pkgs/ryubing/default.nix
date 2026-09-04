@@ -15,6 +15,12 @@
 # checked). With the original size the growth path never runs. Reserved, not
 # committed, so the 2 GB is address space, which is why upstream ran that way
 # for years.
+#
+# Fixed upstream in Canary 1.3.327 (PR #152 "instanced jit cache",
+# 2026-06-30: one allocator across regions, "no longer cause crashes due to
+# entry offset collisions"); no stable release carries it as of 2026-09-04
+# (stable is 1.3.3, Canary 1.3.351). Drop this override once nixpkgs' ryubing
+# is past that.
 { ryubing }:
 ryubing.overrideAttrs (old: {
   pname = "ryubing-jit2g";
