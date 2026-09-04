@@ -6,13 +6,21 @@
 # "system" directory inside that. Confirmed by running it against an empty
 # config home and reading back the tree it created — Logs, sdcard, system, bis,
 # profiles, games.
-{ pkgs, helpers, ... }:
+{
+  pkgs,
+  helpers,
+  gotgPkgs,
+  ...
+}:
 let
   # Reads NCA headers to find what an install holds; see switch/content.py.
   contentPython = pkgs.python3.withPackages (p: [ p.cryptography ]);
 in
 {
-  emulator = pkgs.ryubing;
+  # Not pkgs.ryubing: the packaged 1.3.3 aborts when a large game outgrows
+  # its 256 MB JIT cache — pkgs/ryubing/default.nix says how and restores the
+  # 2 GB reservation upstream always had.
+  emulator = gotgPkgs.ryubing;
 
   # A Switch release, and the updates and DLC the catalog attached to it,
   # unpacked into one directory on first install.
@@ -54,7 +62,7 @@ in
     # the rest at whatever the deserialiser picks rather than at Ryujinx's own
     # defaults.
     if [ ! -f "$gotg_ryujinx_config" ]; then
-      env -u DISPLAY -u WAYLAND_DISPLAY ${pkgs.ryubing}/bin/Ryujinx >/dev/null 2>&1 || true
+      env -u DISPLAY -u WAYLAND_DISPLAY ${gotgPkgs.ryubing}/bin/Ryujinx >/dev/null 2>&1 || true
     fi
 
     # Pinned on every launch, not seeded once: these are what makes a launch go
