@@ -19,7 +19,12 @@ chmod 700 "$XDG_RUNTIME_DIR"
 # run 401s asking the catalog for something with no credentials. Copying breaks
 # the symlink and lets the real mode show.
 config_src="${GOTG_QA_CONFIG_SRC:-/run/gotg-config}"
-if [[ -d "$config_src" ]] && compgen -G "$config_src/*" >/dev/null; then
+# A glob into an array, not compgen: the image's bash is nixpkgs' non-interactive
+# build, which has no programmable completion and so no compgen at all.
+shopt -s nullglob
+config_files=("$config_src"/*)
+shopt -u nullglob
+if [[ -d "$config_src" && ${#config_files[@]} -gt 0 ]]; then
   config_dir="$HOME/.config/gotg"
   # Under a umask, not chmod after: the token must never exist readable, even
   # for the moment between the copy and the tightening.
