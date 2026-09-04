@@ -217,7 +217,8 @@ env_build() {
   local -a refresh=()
   flake_is_path "$flake" || refresh=(--refresh)
 
-  log "building $attr from $ref — the first launch on a platform compiles its emulator"
+  [[ -n "${GOTG_BUILD_QUIET:-}" ]] ||
+    log "building $attr from $ref — the first launch on a platform compiles its emulator"
   if ! is_tty && has_display && command -v zenity >/dev/null 2>&1; then
     _env_build_zenity "$ref" "$root" "$attr" "${refresh[@]}" || _env_build_failed "$attr" "$ref"
   else

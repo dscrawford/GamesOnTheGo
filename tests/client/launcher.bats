@@ -372,3 +372,39 @@ teardown() {
   [ "$status" -eq 0 ]
   grep -q -- "build git+ssh://git@example.com/repo?shallow=1#gotg .* --refresh" "$NIX_LOG"
 }
+
+@test "sync marks each environment on one line" {
+  stub_nix
+  fake_env env-n64
+  fake_env env-snes
+  gotg sync
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"● gotg"* ]]
+  [[ "$stderr" == *"● env-n64"*"same"* ]]
+  [[ "$stderr" == *"● env-snes"*"same"* ]]
+  # No prose per environment: the line is the report.
+  [[ "$stderr" != *"rebuilding env-n64"* ]]
+  [[ "$stderr" != *"building env-n64 from"* ]]
+}
+
+@test "an environment that fails to build is marked, and the others still sync" {
+  stub_nix fail-env
+  fake_env env-n64
+  fake_env env-broken
+  gotg sync
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"● env-broken"*"sync-env-broken.log"* ]]
+  [[ "$stderr" == *"● env-n64"*"same"* ]]
+  [[ "$stderr" == *"1 environment(s) did not build"* ]]
+  grep -q "build .*#env-n64" "$NIX_LOG"
+}
+
+@test "a root that is not an environment is marked and skipped" {
+  stub_nix
+  fake_env env-n64
+  mkdir -p "$GOTG_ROOTS_DIR/ares"
+  gotg sync
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"● ares"*"not an environment name"* ]]
+  [[ "$stderr" == *"● env-n64"* ]]
+}

@@ -284,6 +284,8 @@ stub_nix() {
 printf '%s\n' "$*" >>"$NIX_LOG"
 SHIM
     if [[ "$mode" == "fail" ]]; then printf 'exit 1\n'; fi
+    # One environment whose build breaks, the rest fine.
+    if [[ "$mode" == "fail-env" ]]; then printf '[[ "$*" != *"#env-broken"* ]] || exit 1\n'; fi
     cat <<'SHIM'
 out=""
 prev=""
