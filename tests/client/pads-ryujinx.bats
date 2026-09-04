@@ -318,3 +318,26 @@ FLAT_PAD='[{"name": "Xbox 360 Controller", "guid": "030000005e0400008e0200001001
   [ "$status" -eq 0 ]
   [ "$(jq -r '.input_config[0].motion.enable_motion' "$(config_path)")" = "true" ]
 }
+
+# --- a Steam Controller without Steam ---
+
+STEAM_PAD='[{"id": "0-00000003-28de-0000-ff11-000001000000", "name": "Steam Controller (0)", "player_index": "Player1", "backend": "GamepadSDL2"}]'
+
+@test "a Steam Controller bound with no Steam running is warned about before the launch" {
+  fake_ryujinx_env
+  write_ryujinx_config "$STEAM_PAD"
+  GOTG_STEAM_RUNNING=0 run pads_configure env-switch
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Steam is not running"* ]]
+  [[ "$output" == *"gotg controllers order --set"* ]]
+  GOTG_STEAM_RUNNING=1 run pads_configure env-switch
+  [[ "$output" != *"Steam is not running"* ]]
+}
+
+@test "a pad that needs no Steam draws no warning about Steam" {
+  fake_ryujinx_env
+  write_ryujinx_config "$BOUND"
+  GOTG_STEAM_RUNNING=0 run pads_configure env-switch
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Steam is not running"* ]]
+}
