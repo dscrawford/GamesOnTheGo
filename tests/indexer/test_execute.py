@@ -1,7 +1,6 @@
 """Execution: the half that writes. Invariants matter more than happy paths here."""
 
 import os
-from pathlib import Path
 
 import pytest
 
@@ -16,7 +15,15 @@ from gotg.indexer.execute import (
     sha256_file,
     write_sidecar,
 )
-from gotg.indexer.plan import ACTION_ARCHIVE, ACTION_HARDLINK, ACTION_MANUAL, ACTION_SKIP, Op
+from gotg.indexer.plan import (
+    ACTION_ARCHIVE,
+    ACTION_CONVERT,
+    ACTION_EXTRACT,
+    ACTION_HARDLINK,
+    ACTION_MANUAL,
+    ACTION_SKIP,
+    Op,
+)
 
 
 @pytest.fixture
@@ -149,99 +156,32 @@ def test_skip_and_manual_write_nothing(cfg, action, status):
     assert list(cfg.games_root.iterdir()) == []
 
 
-# --- Archiving a decrypted WiiU title ----------------------------------------
+# --- The client's actions: published, never materialized ---------------------
 
 
-def test_archive_packs_the_decrypted_dirs(cfg):
-    title = cfg.source_root / "Zelda (USA)"
-    for sub, name in (("code", "Zelda.rpx"), ("content", "data.bin"), ("meta", "meta.xml")):
-        (title / sub).mkdir(parents=True)
-        (title / sub / name).write_bytes(b"payload")
+@pytest.mark.parametrize("action", [ACTION_EXTRACT, ACTION_CONVERT, ACTION_ARCHIVE])
+def test_unpacking_and_converting_are_the_clients_and_write_nothing_here(cfg, action):
+    """A scene rar set, a 7z disc image, a decrypted WiiU tree: the catalog
+    names the raw members and a recipe on the client does the rest. The
+    server ships what it has and makes no second copy."""
+    release = cfg.source_root / "Game_NSW-GRP"
+    release.mkdir()
+    (release / "g.rar").write_bytes(b"rar")
 
-    op = Op(
-        ACTION_ARCHIVE,
-        "wiiu",
-        str(title),
-        f"{cfg.games_root}/wiiu/usa.zelda.zip",
-        "usa.zelda",
-        title="Zelda",
-        type="file",
-    )
+    op = Op(action, "switch", str(release), f"{cfg.games_root}/switch/world.game.xci", "world.game", type="file")
     result = execute(op, cfg)
 
-    if result.status == STATUS_ERROR and "zip" in result.message:
-        pytest.skip("zip binary unavailable outside the nix build")
-    assert result.status == STATUS_DONE
-    dst = cfg.games_root / "wiiu" / "usa.zelda.zip"
-    assert dst.is_file()
-    assert execute(op, cfg).status == STATUS_NOOP
-
-    import zipfile
-
-    with zipfile.ZipFile(dst) as zf:
-        assert "code/Zelda.rpx" in zf.namelist()
+    assert result.status == STATUS_DONE and result.ok
+    assert result.entry is None
+    assert "client" in result.message
+    assert list(cfg.games_root.iterdir()) == []
 
 
-def test_archive_leaves_no_staging_directory_behind(cfg):
-    title = cfg.source_root / "Zelda (USA)"
-    (title / "code").mkdir(parents=True)
-    (title / "code" / "Zelda.rpx").write_bytes(b"x")
-
-    op = Op(ACTION_ARCHIVE, "wiiu", str(title), f"{cfg.games_root}/wiiu/usa.zelda.zip", "usa.zelda", type="file")
+def test_an_unknown_action_is_an_error_not_a_write(cfg):
+    op = Op("teleport", "switch", str(cfg.source_root / "x"), f"{cfg.games_root}/switch/x.nsp", "world.x")
     result = execute(op, cfg)
-
-    if result.status == STATUS_ERROR and "zip" in result.message:
-        pytest.skip("zip binary unavailable outside the nix build")
-    leftovers = [p for p in (cfg.games_root / "wiiu").iterdir() if p.name.startswith(".gotg-")]
-    assert leftovers == []
-
-
-def test_archive_of_a_directory_without_decrypted_output_fails_cleanly(cfg):
-    title = cfg.source_root / "Zelda (USA)"
-    title.mkdir()
-    op = Op(ACTION_ARCHIVE, "wiiu", str(title), f"{cfg.games_root}/wiiu/usa.zelda.zip", "usa.zelda", type="file")
-
-    result = execute(op, cfg)
-
     assert result.status == STATUS_ERROR
-    assert not (cfg.games_root / "wiiu" / "usa.zelda.zip").exists()
-
-
-# --- Extraction shortcut -----------------------------------------------------
-
-
-def test_extract_hardlinks_an_already_unpacked_rom(cfg):
-    from gotg.indexer.plan import ACTION_EXTRACT
-
-    release = cfg.source_root / "Game_NSW-GRP"
-    release.mkdir()
-    (release / "v-game.rar").write_bytes(b"rar")
-    inner = release / "v-game.nsp"
-    inner.write_bytes(b"the actual rom")
-
-    op = Op(
-        ACTION_EXTRACT, "switch", str(release), f"{cfg.games_root}/switch/world.game.nsp", "world.game", type="file"
-    )
-    result = execute(op, cfg)
-
-    assert result.status == STATUS_DONE
-    dst = cfg.games_root / "switch" / "world.game.nsp"
-    # Unpacking multiple gigabytes again would be pure waste when it is right there.
-    assert dst.stat().st_ino == inner.stat().st_ino
-
-
-def test_extract_without_archive_or_rom_fails_cleanly(cfg):
-    from gotg.indexer.plan import ACTION_EXTRACT
-
-    release = cfg.source_root / "Game_NSW-GRP"
-    release.mkdir()
-    (release / "readme.nfo").write_bytes(b"x")
-
-    op = Op(
-        ACTION_EXTRACT, "switch", str(release), f"{cfg.games_root}/switch/world.game.nsp", "world.game", type="file"
-    )
-
-    assert execute(op, cfg).status == STATUS_ERROR
+    assert list(cfg.games_root.iterdir()) == []
 
 
 def test_execute_never_raises_on_a_missing_source(cfg):
@@ -263,44 +203,7 @@ def test_source_tree_is_never_modified(cfg):
     assert os.listdir(cfg.source_root) == ["Zelda (USA).z64"]
 
 
-def test_convert_normalizes_an_archived_image_and_leaves_the_source_alone(cfg, monkeypatch):
-    """The Sunshine shape: a lone archive holding an image in the wrong format.
-
-    dolphin-tool is stubbed — the conversion itself was verified against the real
-    file (IMPORTER_SPEC.md §5a); what matters here is the staging discipline.
-    """
-    from gotg.indexer import execute as ex
-
-    games = cfg.games_root
-    src = cfg.source_root / "Some Game (USA).7z"
-    src.write_bytes(b"pretend archive")
-
-    calls: list[list[str]] = []
-
-    def fake_run(cmd, cwd=None, writing=None):
-        calls.append(cmd)
-        if cmd[0] == "7z":
-            out = Path(cmd[3][2:])
-            (out / "Some Game (USA).nkit.iso").write_bytes(b"image")
-        else:  # dolphin-tool convert -o <staged>
-            Path(cmd[cmd.index("-o") + 1]).write_bytes(b"converted")
-
-    monkeypatch.setattr(ex, "_run", fake_run)
-    monkeypatch.setattr(ex, "_require_space", lambda *a: None)
-
-    op = Op(ex.ACTION_CONVERT, "gamecube", str(src), str(games / "gamecube" / "usa.some_game.rvz"), "usa.some_game")
-    result = ex.execute(op, cfg, checksum=False)
-
-    assert result.status == ex.STATUS_DONE
-    assert (games / "gamecube" / "usa.some_game.rvz").read_bytes() == b"converted"
-    # The archive keeps seeding, untouched.
-    assert src.read_bytes() == b"pretend archive"
-    # And no staging directory survives the run.
-    assert not list((games / "gamecube").glob(".gotg-extract-*"))
-    assert calls[0][0] == "7z" and calls[1][0] == "dolphin-tool"
-
-
-# --- updates and DLC, and lone archives ---------------------------------------
+# --- updates and DLC ----------------------------------------------------------
 
 
 def test_attach_writes_nothing_and_succeeds(cfg):
@@ -318,77 +221,7 @@ def test_attach_writes_nothing_and_succeeds(cfg):
     assert list(cfg.games_root.iterdir()) == []
 
 
-def test_extract_unpacks_a_lone_archive_with_7z(cfg, monkeypatch):
-    from gotg.indexer import execute as ex
-    from gotg.indexer.plan import ACTION_EXTRACT
-
-    archive = cfg.source_root / "Game (World).7z"
-    archive.write_bytes(b"7z" * 100)
-    calls = []
-
-    def fake_run(cmd, cwd=None, writing=None):
-        calls.append(cmd)
-        out = Path(next(a for a in cmd if a.startswith("-o"))[2:])
-        (out / "Game (World).xci").write_bytes(b"cartridge")
-        (out / "readme.nfo").write_bytes(b"x")
-
-    monkeypatch.setattr(ex, "_run", fake_run)
-    monkeypatch.setattr(ex, "_require_space", lambda root, needed: None)
-
-    op = Op(ACTION_EXTRACT, "switch", str(archive), f"{cfg.games_root}/switch/world.game.xci", "world.game")
-    result = execute(op, cfg)
-
-    assert result.status == STATUS_DONE
-    assert calls[0][:2] == ["7z", "x"]
-    assert (cfg.games_root / "switch" / "world.game.xci").read_bytes() == b"cartridge"
-    assert not list((cfg.games_root / "switch").glob(".gotg-extract-*"))
-
-
-def test_extract_of_a_lone_archive_that_yields_no_game_is_an_error(cfg, monkeypatch):
-    from gotg.indexer import execute as ex
-    from gotg.indexer.plan import ACTION_EXTRACT
-
-    archive = cfg.source_root / "Game (World).7z"
-    archive.write_bytes(b"7z" * 100)
-
-    def fake_run(cmd, cwd=None, writing=None):
-        out = Path(next(a for a in cmd if a.startswith("-o"))[2:])
-        (out / "readme.nfo").write_bytes(b"x")
-
-    monkeypatch.setattr(ex, "_run", fake_run)
-    monkeypatch.setattr(ex, "_require_space", lambda root, needed: None)
-
-    op = Op(ACTION_EXTRACT, "switch", str(archive), f"{cfg.games_root}/switch/world.game.xci", "world.game")
-    result = execute(op, cfg)
-
-    assert result.status == STATUS_ERROR
-    assert "produced no .xci" in result.message
-    assert not list((cfg.games_root / "switch").glob(".gotg-extract-*"))
-
-
-# --- the page cache is given back as it forms ----------------------------------
-
-
-def test_a_tool_that_writes_has_its_output_cache_dropped_while_it_runs(tmp_path, monkeypatch):
-    from gotg.indexer import execute as ex
-
-    dropped = []
-    monkeypatch.setattr(ex, "_drop_cache", lambda path: dropped.append(path.name))
-    monkeypatch.setattr(ex, "CACHE_DROP_INTERVAL", 0.05)
-    out = tmp_path / "out"
-    out.mkdir()
-
-    ex._run(["sh", "-c", f"printf x > '{out}/big.xci'; sleep 0.3"], writing=out)
-
-    assert "big.xci" in dropped
-    assert dropped.count("big.xci") >= 2, "dropped repeatedly, not once at the end"
-
-
-def test_a_failing_tool_still_reports_its_last_lines_when_watched(tmp_path):
-    from gotg.indexer import execute as ex
-
-    with pytest.raises(ex.ExecutionError, match="sh failed \\(3\\): nope"):
-        ex._run(["sh", "-c", "echo nope >&2; exit 3"], writing=tmp_path)
+# --- hashing gives its cache back ---------------------------------------------
 
 
 def test_hashing_a_large_file_gives_its_cache_back(tmp_path, monkeypatch):
@@ -402,18 +235,3 @@ def test_hashing_a_large_file_gives_its_cache_back(tmp_path, monkeypatch):
 
     assert sha256_file(big) == __import__("hashlib").sha256(b"z" * 64).hexdigest()
     assert calls and all(a == ex.os.POSIX_FADV_DONTNEED for a in calls)
-
-
-def test_dropping_a_files_cache_flushes_it_first(tmp_path, monkeypatch):
-    from gotg.indexer import execute as ex
-
-    order = []
-    monkeypatch.setattr(ex.os, "fsync", lambda fd: order.append("fsync"))
-    monkeypatch.setattr(ex.os, "posix_fadvise", lambda fd, off, ln, advice: order.append("drop"))
-    target = tmp_path / "out.xci"
-    target.write_bytes(b"x")
-
-    ex._drop_cache(target)
-    ex._drop_cache(tmp_path / "missing.xci")
-
-    assert order == ["fsync", "drop"]

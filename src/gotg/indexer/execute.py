@@ -2,13 +2,16 @@
 
 Two invariants hold everywhere in this module:
 
-* **Sources are never modified.** Originals stay seeding, so the only operations
-  are hardlinks from them and derived files written elsewhere.
+* **Sources are never modified.** Originals stay seeding, so the only operation
+  that touches disk is a hardlink from one.
 * **Every write lands under ``GAMES_ROOT``.** Destinations are checked, not
   trusted, so a bad rule or a crafted torrent name cannot escape the tree.
 
-Every operation is idempotent: an already-imported entry is a no-op, never a
-clobber, so re-running the CronJob costs one stat per game.
+Only hardlinks are materialized. Everything a source has to be *unpacked or
+converted* into is the client's to make, from the raw members the catalog
+names — a recipe runs once per machine, and the server ships the bytes it
+already has rather than a second copy. That keeps a transfer the size of the
+release, and the server out of the business of decompressing cartridge dumps.
 """
 
 from __future__ import annotations
@@ -17,9 +20,6 @@ import hashlib
 import logging
 import os
 import shutil
-import subprocess
-import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,7 +35,6 @@ from .plan import (
     ACTION_SKIP,
     Op,
 )
-from .scan import WIIU_DECRYPTED_DIRS
 
 log = logging.getLogger("gotg-importer")
 
@@ -45,11 +44,16 @@ STATUS_MANUAL = "manual"
 STATUS_SKIP = "skip"
 STATUS_ERROR = "error"
 
-# Headroom required beyond the estimated size of a derived file.
-FREE_SPACE_MARGIN = 1.10
-
-# Prefixes of the temporary directories used while building a derived file.
+# Prefixes of the staging directories earlier importers left behind while
+# they still unpacked on the server.
 STAGING_PREFIXES = (".gotg-extract-", ".gotg-zip-")
+
+# Hashing drops its page cache as it goes: the pod's memory limit counts
+# cached pages, and a 17 GB archive would fill it.
+CACHE_DROP_BYTES = 256 * 1024 * 1024
+
+# The actions whose result is a recipe on the client, not a file here.
+CLIENT_ACTIONS = frozenset({ACTION_EXTRACT, ACTION_CONVERT, ACTION_ARCHIVE})
 
 
 class ExecutionError(Exception):
@@ -102,36 +106,6 @@ def cleanup_staging(games_root: Path) -> int:
     return removed
 
 
-def _require_space(root: Path, needed: int) -> None:
-    free = shutil.disk_usage(root).free
-    if free < needed * FREE_SPACE_MARGIN:
-        raise ExecutionError(f"need ~{needed / 1e9:.1f} GB under {root} but only {free / 1e9:.1f} GB free")
-
-
-# How often the page cache of a file being written or read is given back.
-# The pod runs under a memory limit that counts cached pages, and a 32 GB
-# extract fills it: measured as the kernel OOM-killing 7z at 8 GiB with
-# 60 MB of process memory and 6.5 GB of file cache. The games volume is
-# NFS, whose dirty pages are slow to leave, so they are flushed first and
-# only then dropped; what the job holds stays the size of what it is doing.
-CACHE_DROP_INTERVAL = 1.0
-CACHE_DROP_BYTES = 256 * 1024 * 1024
-
-
-def _drop_cache(path: Path) -> None:
-    try:
-        fd = os.open(path, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(fd)
-        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
-    except OSError:
-        pass
-    finally:
-        os.close(fd)
-
-
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     since_drop = 0
@@ -162,26 +136,6 @@ def write_sidecar(path: Path) -> str:
     return digest
 
 
-def _run(cmd: list[str], cwd: Path | None = None, *, writing: Path | None = None) -> None:
-    """Run a tool; with `writing`, keep dropping the cache of what it writes there."""
-    log.debug("run: %s (cwd=%s)", " ".join(cmd), cwd)
-    if writing is None:
-        proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
-        out, err, code = proc.stdout, proc.stderr, proc.returncode
-    else:
-        with subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as proc:
-            while proc.poll() is None:
-                time.sleep(CACHE_DROP_INTERVAL)
-                for produced in writing.rglob("*"):
-                    if produced.is_file():
-                        _drop_cache(produced)
-            out, err = proc.communicate()
-            code = proc.returncode
-    if code != 0:
-        tail = (err or out or "").strip().splitlines()[-3:]
-        raise ExecutionError(f"{cmd[0]} failed ({code}): {' / '.join(tail)}")
-
-
 def _same_file(a: Path, b: Path) -> bool:
     try:
         return a.samefile(b)
@@ -203,166 +157,6 @@ def _link(src: Path, dst: Path) -> str:
             raise ExecutionError(f"{src} and {dst} are on different filesystems; hardlinks need one volume") from exc
         raise ExecutionError(f"link {src} -> {dst}: {exc}") from exc
     return STATUS_DONE
-
-
-def _find_extracted(src_dir: Path, ext: str) -> Path | None:
-    """An already-unpacked ROM sitting next to the archive volumes.
-
-    Scene uploads often ship the extracted file alongside the RAR set, and a
-    previous run may have left one. Hardlinking it costs nothing and skips an
-    expensive unpack of several gigabytes.
-    """
-    matches = sorted(src_dir.glob(f"*.{ext}"), key=lambda p: p.stat().st_size, reverse=True)
-    return matches[0] if matches else None
-
-
-def _verify_archive(src_dir: Path) -> None:
-    sfvs = sorted(src_dir.glob("*.sfv"))
-    if not sfvs:
-        return
-    if not shutil.which("rhash"):
-        # Say so rather than silently trusting the archive: a bad image build
-        # would otherwise import unverified extracts with no trace in the log.
-        log.warning("rhash is not installed; skipping the checksum in %s", sfvs[0].name)
-        return
-    _run(["rhash", "-c", sfvs[0].name], cwd=src_dir)
-
-
-def _extract_file(src: Path, dst: Path, cfg: Config) -> tuple[str, Path]:
-    """A lone archive whose content is already the format the emulator wants."""
-    ext = dst.suffix.lstrip(".")
-    # A game container barely compresses, so the unpacked copy is about the
-    # archive's size again; convert's x3 is for disc images and would refuse
-    # a 32 GB cartridge dump on a volume with room for it.
-    _require_space(cfg.games_root, src.stat().st_size * 2)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=dst.parent, prefix=".gotg-extract-") as tmp:
-        _run(["7z", "x", "-y", f"-o{tmp}", str(src)], writing=Path(tmp))
-        produced = [p for p in Path(tmp).rglob(f"*.{ext}") if p.is_file()]
-        if not produced:
-            raise ExecutionError(f"{src.name} produced no .{ext} file")
-        os.replace(max(produced, key=lambda p: p.stat().st_size), dst)
-    return STATUS_DONE, dst
-
-
-def _extract(op: Op, cfg: Config) -> tuple[str, Path]:
-    src_dir = Path(op.src)
-    dst = _assert_under(Path(op.dst), cfg.games_root)
-    ext = dst.suffix.lstrip(".")
-
-    if dst.exists():
-        return STATUS_NOOP, dst
-
-    if src_dir.is_file():
-        return _extract_file(src_dir, dst, cfg)
-
-    already = _find_extracted(src_dir, ext)
-    if already is not None:
-        log.info("using ROM already unpacked in the source: %s", already.name)
-        return _link(already, dst), dst
-
-    rars = sorted(src_dir.glob("*.rar"))
-    if not rars:
-        raise ExecutionError(f"no .rar volume to extract in {src_dir}")
-
-    _verify_archive(src_dir)
-    _require_space(cfg.games_root, _dir_size(src_dir))
-    dst.parent.mkdir(parents=True, exist_ok=True)
-
-    with tempfile.TemporaryDirectory(dir=dst.parent, prefix=".gotg-extract-") as tmp:
-        _run(["unrar", "x", "-o-", "-idq", str(rars[0]), tmp + "/"], writing=Path(tmp))
-        produced = [p for p in Path(tmp).rglob(f"*.{ext}") if p.is_file()]
-        if not produced:
-            raise ExecutionError(f"archive in {src_dir} produced no .{ext} file")
-        winner = max(produced, key=lambda p: p.stat().st_size)
-        os.replace(winner, dst)  # same filesystem: atomic
-    return STATUS_DONE, dst
-
-
-def _convert(op: Op, cfg: Config) -> tuple[str, Path]:
-    """Unpack a lone archive and normalize the image to the emulator's format.
-
-    Two derived steps rather than one: the archive is extracted to staging, then
-    converted out of staging into place. The intermediate is never left under a
-    name the client could serve, and the original archive is untouched so it
-    keeps seeding.
-    """
-    src = Path(op.src)
-    dst = _assert_under(Path(op.dst), cfg.games_root)
-    target_ext = dst.suffix.lstrip(".")
-
-    if dst.exists():
-        return STATUS_NOOP, dst
-
-    if not src.is_file():
-        raise ExecutionError(f"not an archive: {src}")
-
-    # Staging holds the uncompressed image, which for a disc is far larger than
-    # the archive; check against that rather than the archive's own size.
-    _require_space(cfg.games_root, src.stat().st_size * 3)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-
-    with tempfile.TemporaryDirectory(dir=dst.parent, prefix=".gotg-extract-") as tmp:
-        _run(["7z", "x", "-y", f"-o{tmp}", str(src)], writing=Path(tmp))
-        images = [p for p in Path(tmp).rglob("*") if p.is_file()]
-        if not images:
-            raise ExecutionError(f"{src.name} produced no files")
-        image = max(images, key=lambda p: p.stat().st_size)
-
-        if image.suffix.lstrip(".").lower() == target_ext:
-            os.replace(image, dst)
-            return STATUS_DONE, dst
-
-        staged = Path(tmp) / dst.name
-        # Dolphin's own converter: it reads every format it can play, including
-        # NKit, and RVZ is both smaller and what the library stores. Note it
-        # repackages rather than restoring NKit's stripped data — see
-        # IMPORTER_SPEC.md §5a; these are normalized images, not pristine dumps.
-        _run(
-            [
-                "dolphin-tool",
-                "convert",
-                "-f",
-                target_ext,
-                "-b",
-                "131072",
-                "-c",
-                "zstd",
-                "-l",
-                "5",
-                "-i",
-                str(image),
-                "-o",
-                str(staged),
-            ]
-        )
-        if not staged.is_file():
-            raise ExecutionError(f"converting {image.name} produced no {target_ext}")
-        os.replace(staged, dst)
-    return STATUS_DONE, dst
-
-
-def _archive(op: Op, cfg: Config) -> tuple[str, Path]:
-    """Pack a decrypted WiiU title's code/content/meta into one zip."""
-    src_dir = Path(op.src)
-    dst = _assert_under(Path(op.dst), cfg.games_root)
-
-    if dst.exists():
-        return STATUS_NOOP, dst
-
-    members = [d for d in WIIU_DECRYPTED_DIRS if (src_dir / d).is_dir()]
-    if not members:
-        raise ExecutionError(f"nothing to archive in {src_dir}")
-
-    _require_space(cfg.games_root, sum(_dir_size(src_dir / m) for m in members))
-    dst.parent.mkdir(parents=True, exist_ok=True)
-
-    with tempfile.TemporaryDirectory(dir=dst.parent, prefix=".gotg-zip-") as tmp:
-        staged = Path(tmp) / dst.name
-        # -1 keeps a multi-GB pack fast; this content barely compresses anyway.
-        _run(["zip", "-r", "-1", "-q", str(staged), *members], cwd=src_dir, writing=Path(tmp))
-        os.replace(staged, dst)
-    return STATUS_DONE, dst
 
 
 def _entry_for(op: Op, cfg: Config, dst: Path, digest: str | None) -> Entry:
@@ -387,21 +181,17 @@ def execute(op: Op, cfg: Config, *, checksum: bool = True) -> Result:
         # Nothing to write: the extra is served from where it seeds, on the
         # base game's entry. Publishing is where it exists at all.
         return Result(op, STATUS_DONE, op.reason)
+    if op.action in CLIENT_ACTIONS:
+        # The raw members are what the catalog names; the client's recipe
+        # does the unpacking. Nothing to write, and nothing for the manifest.
+        return Result(op, STATUS_DONE, "raw members published; the client's recipe unpacks them")
+    if op.action != ACTION_HARDLINK:
+        return Result(op, STATUS_ERROR, f"unsupported action {op.action!r}")
 
     try:
-        if op.action == ACTION_HARDLINK:
-            dst = _assert_under(Path(op.dst), cfg.games_root)
-            status = _link(Path(op.src), dst)
-        elif op.action == ACTION_EXTRACT:
-            status, dst = _extract(op, cfg)
-        elif op.action == ACTION_CONVERT:
-            status, dst = _convert(op, cfg)
-        elif op.action == ACTION_ARCHIVE:
-            status, dst = _archive(op, cfg)
-        else:
-            return Result(op, STATUS_ERROR, f"unsupported action {op.action!r}")
-
-        digest = write_sidecar(dst) if (checksum and dst.is_file()) else None
+        dst = _assert_under(Path(op.dst), cfg.games_root)
+        status = _link(Path(op.src), dst)
+        digest = write_sidecar(dst) if checksum else None
         return Result(op, status, entry=_entry_for(op, cfg, dst, digest))
     except ExecutionError as exc:
         return Result(op, STATUS_ERROR, str(exc))

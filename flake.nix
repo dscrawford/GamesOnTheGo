@@ -159,7 +159,7 @@
           # first but rebuilds as a Wii disc, which boots into nothing.
           pyisotools = pkgs.callPackage ./pkgs/pyisotools { };
 
-          # Image for the in-cluster CronJob. The archive tools (unrar, zip, rhash)
+          # Image for the in-cluster CronJob. The archive listers (unrar, 7z)
           # arrive through the wrapper's closure, so no extra PATH wiring is needed.
           #
           #   nix build .#importer-image
