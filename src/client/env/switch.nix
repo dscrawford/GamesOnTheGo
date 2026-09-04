@@ -25,6 +25,12 @@ in
   # pads-ryujinx.sh: Ryujinx's settings screen deletes a sleeping pad's entry
   # from Config.json on save, so the client keeps the last working set and puts
   # it back before a launch that would otherwise start unbound.
+  #
+  # And a pad that is bound must stay connected: with none, a game opens the
+  # Switch's controller applet, and Ryubing 1.3.3 answers one of that applet's
+  # calls (ILibraryAppletAccessor 90) with ServiceNotImplementedException —
+  # a throw at launch, a freeze mid-game when a pad drops. Seen on TOTK 1.4.3,
+  # 2026-09-04. An emulator gap; revisit when the package moves past 1.3.3.
   padEmulator = "ryujinx";
 
   preLaunch = ''
