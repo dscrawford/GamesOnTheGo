@@ -210,7 +210,7 @@ download_game() {
   log "fetching $title ($(human_size "$total"), $count file(s))"
 
   local files_base
-  files_base="$(manifest_files_url)"
+  files_base="$(manifest_files_pick)"
 
   local name size sha out url encoded server_path local_src
   while IFS=$'\t' read -r name size sha encoded server_path; do
@@ -253,7 +253,7 @@ download_game() {
       # a VPN-fronted files host changes address and port on reconnect, which
       # is also the likeliest source of the reset being retried here.
       manifest_refresh || true
-      files_base="$(manifest_files_url)"
+      files_base="$(manifest_files_pick)"
       url="$files_base/games/$platform/$id/$encoded"
       [[ "$attempt" -lt 3 ]] && warn "download interrupted — retrying (attempt $((attempt + 1)) of 3)"
     done

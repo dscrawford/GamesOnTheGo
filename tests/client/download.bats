@@ -626,3 +626,36 @@ SHIM
   [[ "$stderr" == *"copying usa.zelda.z64 from the library"* ]]
   [ "$(cat "$GOTG_GAMES_DIR/n64/usa.zelda.z64")" = rom-content ]
 }
+
+# --- more than one byte host ----------------------------------------------------
+
+@test "the first byte host that answers is used, the others left alone" {
+  add_game n64 "usa.zelda.z64" "rom-content" "Zelda"
+  gotg refresh
+  # The catalog prefers a host this machine cannot reach — a tailnet address
+  # from outside the tailnet — with the service itself behind it.
+  jq --arg s "$GOTG_SERVICE_URL" '.files_urls = ["http://127.0.0.1:9", $s] | .files_url = $s' \
+    "$GOTG_CACHE_FILE" >"$GOTG_CACHE_FILE.tmp" && mv "$GOTG_CACHE_FILE.tmp" "$GOTG_CACHE_FILE"
+
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [ -f "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
+  [[ "$stderr" != *"retrying"* ]]
+}
+
+@test "with no host answering, the first is tried and its failure is what is reported" {
+  add_game n64 "usa.zelda.z64" "rom-content" "Zelda"
+  gotg refresh
+  load_client_libs
+  jq '.files_urls = ["http://127.0.0.1:9", "http://127.0.0.1:10"] | .files_url = "http://127.0.0.1:10"' \
+    "$GOTG_CACHE_FILE" >"$GOTG_CACHE_FILE.tmp" && mv "$GOTG_CACHE_FILE.tmp" "$GOTG_CACHE_FILE"
+  run manifest_files_hosts
+  [ "${lines[0]}" = "http://127.0.0.1:9" ]
+  [ "${lines[1]}" = "http://127.0.0.1:10" ]
+  [ "${#lines[@]}" -eq 2 ]
+  run manifest_files_pick
+  [ "$output" = "http://127.0.0.1:9" ]
+  # And the override names one host only, whatever the catalog says.
+  GOTG_FILES_URL="$GOTG_SERVICE_URL/" run manifest_files_hosts
+  [ "$output" = "$GOTG_SERVICE_URL" ]
+}
