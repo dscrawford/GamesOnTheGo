@@ -57,10 +57,9 @@ HANDLERS = frozenset(
 # the dual-publish diff compares by hash rather than by presence.
 LINK_HANDLERS = frozenset({HANDLER_SINGLE_FILE, HANDLER_NO_INTRO_SET})
 
-# Members under this prefix are a game's updates and DLC, one release per
-# directory — attached to the base game's entry rather than entries of their
-# own, since none is playable alone. The catalog's conflict rule looks past
-# them: the game is the same bytes whether or not a patch has arrived since.
+# Members under this prefix are a game's updates and DLC, attached to the base
+# entry rather than entries of their own. The catalog's conflict rule ignores
+# them: a patch arriving is not a new game.
 EXTRAS_PREFIX = "extras/"
 
 

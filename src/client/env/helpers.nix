@@ -24,10 +24,9 @@ let
     ];
   };
 
-  # A Switch release with whatever updates and DLC the catalog attached to
-  # it: the game unpacked as ever, the extras unpacked beside it, and the two
-  # installed as one directory Ryujinx is then pointed at. Three handlers
-  # because the base arrives three ways — a rar set, a 7z, a loose container.
+  # A Switch release plus whatever updates and DLC the catalog attached,
+  # unpacked beside it and installed as one directory Ryujinx is pointed at.
+  # Three handlers for the three ways a base arrives: rar set, 7z, loose file.
   switchRecipe = {
     scene_archive = [
       steps.verifySfv

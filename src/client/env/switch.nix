@@ -65,12 +65,11 @@ in
       fi
     fi
 
-    # Updates and DLC. Ryujinx applies only what games/<title>/updates.json
-    # and dlc.json name, and a launch by path never runs the library screen
-    # that would write them — so they are written here, from the NCA headers
-    # of everything in the install directory. Every launch, not once: it costs
-    # milliseconds, and a re-download or a hand-added file is then never
-    # stale. An old install is a bare file, and has nothing to register.
+    # Ryujinx reads updates and DLC only from games/<title>/{updates,dlc}.json,
+    # and a launch by path skips the library screen that writes them — so they
+    # are written here from the NCA headers, every launch (milliseconds, and a
+    # re-download or hand-added file never goes stale). A bare-file install
+    # has nothing to register.
     if [ -d "$install" ] && [ -f "$XDG_CONFIG_HOME/Ryujinx/system/prod.keys" ]; then
       ${contentPython}/bin/python3 ${./switch/content.py} register \
         --keys "$XDG_CONFIG_HOME/Ryujinx/system/prod.keys" \

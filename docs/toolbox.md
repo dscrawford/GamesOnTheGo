@@ -35,13 +35,12 @@ vocabulary: `verifySfv`, `unrar`, `extract7z`, `unzip`, `pickLargest`,
 `keepExtension`, `placeBundle`, `convertRvz`. Three canned chains live in
 `helpers.nix` — `sceneArchiveRecipe`, `discArchiveRecipe` and `switchRecipe`.
 
-A catalog entry may carry updates and DLC as members under `extras/<release>/`
-(the importer attaches a release named `... Update v1.4.3` or `(DLC)` to its
-base game). `collectExtras` unpacks those beside the game and `placeBundle`
-installs the pair as `<id>/<id>.<ext>` plus `extras/`; the client resolves the
-launch target inside such a directory on its own. What the emulator then does
-with the extras is the platform file's job — `switch.nix` registers them with
-Ryujinx from the NCA headers (`switch/content.py`) before every launch.
+A catalog entry may carry updates and DLC as members under `extras/<release>/`,
+attached by the importer to their base game. `collectExtras` and `placeBundle`
+unpack them beside the game and install `<id>/<id>.<ext>` plus `extras/`; the
+client resolves the launch target inside. What the emulator does with them is
+the platform file's job — `switch.nix` registers them with Ryujinx from the NCA
+headers (`switch/content.py`) before every launch.
 
 Declare them per handler (`single_file`, `no_intro_set`, `scene_archive`,
 `single_archive`) on the environment. A port that reads a bare ROM out of a

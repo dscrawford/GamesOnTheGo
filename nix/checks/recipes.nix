@@ -298,10 +298,9 @@ pkgs.runCommand "check-recipes" { nativeBuildInputs = [ pkgs.zip ]; } ''
   grep -q '"single_archive"' ${gamecube}/share/gotg/recipe.json
   grep -q '"single_file"' ${switch}/share/gotg/recipe.json
 
-  # A Switch scene release with extras attached: the game unpacked as ever,
-  # an update (a rar set) and a DLC (a loose nsp) unpacked beside it, the
-  # whole installed as <id>/<id>.<ext> + extras/. The update's rar goes
-  # through the same unrar stub, so it "unpacks" to game.xci too.
+  # An update (rar set) and a DLC (loose nsp) attached under extras/, installed
+  # as <id>/<id>.<ext> + extras/. The update's rar goes through the same unrar
+  # stub, so it "unpacks" to game.xci too.
   raw=$TMPDIR/raw-bundle && mkdir -p $raw/extras/update_1.4.3 $raw/extras/dlc_pack
   touch $raw/group.rar $raw/group.r00 $raw/group.sfv
   touch $raw/extras/update_1.4.3/u.rar $raw/extras/update_1.4.3/u.r00

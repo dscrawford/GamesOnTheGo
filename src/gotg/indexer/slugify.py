@@ -59,10 +59,8 @@ _REV_RE = re.compile(r"^(?:rev\s*([0-9a-z.]+)|v\s*([0-9]+(?:\.[0-9]+)*))$", re.I
 _LANG_RE = re.compile(r"^[A-Z][a-z](,[A-Z][a-z])+$")
 _DATE_RE = re.compile(r"^\d{4}(-\d{2}){0,2}$")
 
-# Update and DLC releases: what they patch or extend, which of the two, and
-# the version when the name carries one. "Update" is the word every scene
-# group and No-Intro use; a title of its own that ends in it would be lost to
-# this, and none has been seen.
+# "Update"/"DLC": the words scene groups and No-Intro use for these releases.
+# A real title ending in one would be misread — none has been seen.
 ROLE_UPDATE = "update"
 ROLE_DLC = "dlc"
 _EXTRA_RE = re.compile(
@@ -144,11 +142,8 @@ def _restore_article(base: str) -> str:
 
 
 def split_extra(title: str) -> tuple[str, str, str]:
-    """('Zelda Tears of the Kingdom Update v1.4.3', ...) -> (base title, role, version).
-
-    A plain title — tags already stripped — that names an update or DLC gives
-    the title it belongs to; anything else comes back whole with no role.
-    """
+    """A plain title naming an update or DLC -> (base title, role, version);
+    anything else comes back whole with no role."""
     m = _EXTRA_RE.match(title.strip())
     if not m or not m.group("base").strip():
         return title.strip(), "", ""

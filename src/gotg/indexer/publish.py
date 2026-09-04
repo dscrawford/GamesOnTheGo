@@ -118,8 +118,7 @@ def extras_prefix(op: pl.Op) -> str:
     """Where one update or DLC release's members live on the base entry.
 
     Named by role and version, so a re-released update of the same version
-    replaces the earlier one rather than sitting beside it; a release naming
-    no version falls back to its own name.
+    replaces the earlier one; an unversioned release falls back to its own name.
     """
     tail = op.version or title_slug(Path(op.src).name.rsplit(".", 1)[0]) or "release"
     return f"{EXTRAS_PREFIX}{op.role}_{tail}/"

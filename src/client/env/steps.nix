@@ -146,10 +146,9 @@
     '';
   };
 
-  # Updates and DLC ride beside the game as extras/<release>/ — each a rar
-  # set, a 7z, or loose containers, exactly as released. Every one is
-  # unpacked into one directory of .nsp/.xci for place-bundle to carry; the
-  # cursor stays on the game. No extras/ at all is the common case and fine.
+  # Updates and DLC ride beside the game as extras/<release>/ — a rar set, a
+  # 7z, or loose containers. Each unpacks into one directory for place-bundle
+  # to carry; the cursor stays on the game. No extras/ at all is fine.
   collectExtras = {
     name = "collect-extras";
     tools.UNRAR = "${pkgs.unrar}/bin/unrar";
@@ -194,7 +193,7 @@
 
   # Terminal: the game as <id>/<id>.<ext> with its extras/ beside it — a
   # directory install, so the emulator's update and DLC registration has one
-  # place to read. The extension survives as keep-extension keeps it.
+  # place to read.
   placeBundle = {
     name = "place-bundle";
     script = ''

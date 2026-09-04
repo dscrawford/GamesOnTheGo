@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 """What a Switch container holds, and registering it with Ryujinx.
 
-Ryujinx applies an update only if games/<title id>/updates.json selects it,
-and loads DLC only from games/<title id>/dlc.json — files its own library
-screen writes when a person adds the content by hand. A launch that names a
-game file skips that screen altogether, so the client writes them itself.
-
-Both files are keyed by the base title id, and dlc.json names every DLC NCA
-by its own title id — neither is anywhere but inside the NCA headers, which
-are encrypted with the console's header key. So this reads exactly what
-Ryujinx reads to find them: the container's file table, each NCA's header,
-and the content-meta (CNMT) that carries the version. Nothing is extracted
-and nothing is decrypted past the few kilobytes those take.
+Ryujinx applies updates and DLC only through games/<title id>/updates.json
+and dlc.json, which only its library screen writes — and a launch by path
+skips that screen. The title ids those files need exist only inside the NCA
+headers, encrypted with the console's header key, so this reads exactly what
+Ryujinx reads to find them: the file table, each NCA header, and the CNMT
+that carries the version. Nothing is extracted or decrypted beyond that.
 
     content.py inspect  --keys prod.keys <container>...
     content.py register --keys prod.keys --ryujinx <config dir> <install dir>
@@ -194,13 +189,10 @@ def _nca_header(fh, entry: Entry, keys: dict[str, bytes]) -> NcaHeader | None:
 
 
 def _cnmt(fh, entry: Entry, header: NcaHeader, keys: dict[str, bytes]) -> tuple[int, int, int] | None:
-    """(meta type, title id, version) out of a Meta NCA's content-meta file.
-
-    The CNMT sits in a PFS0 in section 0, AES-CTR under a key-area key —
-    standard crypto, never a title key, which is what makes it readable
-    without the ticket. Returns None when the key set cannot open it, and the
-    caller falls back to what the header alone says.
-    """
+    """(meta type, title id, version) out of a Meta NCA's CNMT — a PFS0 in
+    section 0 under AES-CTR with a key-area key, never a title key, so no
+    ticket is needed. None when the key set cannot open it; the caller falls
+    back to the header alone."""
     index = header.key_generation - 1 if header.key_generation else 0
     kaek = keys.get(f"key_area_key_application_{index:02x}")
     if kaek is None or any(header.rights_id):
@@ -282,11 +274,10 @@ def _containers(install: Path) -> list[Path]:
 
 
 def register(install: Path, ryujinx: Path, keys: dict[str, bytes]) -> dict:
-    """Write updates.json and dlc.json for every title installed under `install`.
+    """Write updates.json and dlc.json for every title under `install`.
 
-    The install directory is the source of truth: whatever it holds is what
-    gets registered, and a container that vanished from it is dropped. Entries
-    naming files elsewhere — added by hand in Ryujinx — are kept as they are.
+    The install directory is authoritative: what vanished from it is dropped;
+    entries naming files elsewhere (added by hand in Ryujinx) are kept.
     """
     containers = [inspect(p, keys) for p in _containers(install)]
     bases = {base_id(t) for c in containers for t in c.applications}

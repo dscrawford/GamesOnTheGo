@@ -180,11 +180,11 @@ def run_scan(
 
 
 def _plan_all(paths: list[Path], cfg: Config, rules: Rules) -> list[tuple[Path, list[pl.Op]]]:
-    """Every source planned, with updates and DLC after the games they attach to.
+    """Every source planned, updates and DLC sorted after the games they attach to.
 
-    An update publishes onto its base's entry, so the base has to be there
-    first — and directory order is the release group's naming, not ours. The
-    sort is stable: everything else keeps the order it was given.
+    An update publishes onto its base's entry, which must exist first; the
+    directory order is the release groups' naming. Stable, so the rest keeps
+    its given order.
     """
     planned = [(path, plan_source(path, cfg.games_root, rules)) for path in paths]
     return sorted(planned, key=lambda item: any(op.action == pl.ACTION_ATTACH for op in item[1]))
