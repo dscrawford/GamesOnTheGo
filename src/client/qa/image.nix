@@ -93,7 +93,7 @@ let
 in
 dockerTools.buildLayeredImage {
   name = "gotg-qa";
-  tag = "0.2.0";
+  tag = "0.3.0";
   contents = [
     entrypoint
     gotg

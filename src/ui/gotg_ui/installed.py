@@ -1,10 +1,8 @@
 """Which games are here, asked of the client.
 
-The client owns what "installed" means — a member file, a recipe's directory,
-an id with whatever extension the recipe chose — and `gotg list` marks rows by
-it. Asking `gotg complete installed` keeps one definition; a second one here
-would be the copy that drifts. Filesystem-only on the client's side, so it is
-cheap enough to ask at startup and again after an uninstall.
+The client owns "installed"; asking gotg complete installed keeps one
+definition instead of a UI copy that drifts. Filesystem-only, so cheap
+enough to ask at startup and again after an uninstall.
 """
 
 from __future__ import annotations
@@ -19,11 +17,10 @@ INSTALLED_TIMEOUT = 5
 
 
 def installed_games() -> set[tuple[str, str]]:
-    """Keys of every installed game, or nothing at all when asking failed.
+    """Keys of every installed game; empty when asking failed.
 
-    Empty on failure rather than raising: the grid is still a grid with no
-    badges, and an older client that does not know the subcommand answers
-    exit 0 with no output, which lands here as "nothing installed".
+    Silent failure: the grid still draws with no badges, and an older client
+    without the subcommand answers exit 0 with no output, read the same way.
     """
     try:
         done = subprocess.run(

@@ -417,3 +417,60 @@ ready_env() {
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
+
+@test "installed never turns a catalog string into a path" {
+  # A nested member name can point game_installed_path at an existing tree;
+  # nothing installs nested, so it must not read as installed either. In the
+  # cache directly — the service refuses such a row, and the cache is what
+  # the client trusts.
+  mkdir -p "$GOTG_STATE_DIR"
+  jq -n '{version: 2, games: [{id: "nes.mario64", platform: "heroic",
+          handler: "single_file", title: "Mario",
+          files: [{name: "Prefixes/default", size_bytes: 1, sha256: null}]}]}' \
+    >"$GOTG_CACHE_FILE"
+  mkdir -p "$GOTG_GAMES_DIR/heroic/Prefixes/default"
+  gotg complete installed
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "installed sees a recipe's id.<ext> install" {
+  mkdir -p "$GOTG_STATE_DIR"
+  jq -n '{version: 2, games: [{id: "usa.sunshine", platform: "gamecube",
+          handler: "single_archive", title: "Sunshine",
+          files: [{name: "sunshine.7z", size_bytes: 1, sha256: null}]}]}' \
+    >"$GOTG_CACHE_FILE"
+  mkdir -p "$GOTG_GAMES_DIR/gamecube"
+  printf 'disc' >"$GOTG_GAMES_DIR/gamecube/usa.sunshine.rvz"
+  gotg complete installed
+  [ "$output" = "gamecube/usa.sunshine" ]
+}
+
+@test "installed excludes a row whose platform tries to escape" {
+  mkdir -p "$GOTG_STATE_DIR" "$TEST_TMP/VICTIM"
+  jq -n '{version: 2, games: [
+    {id: "usa.zelda", platform: "n64", handler: "single_file", title: "Zelda",
+     files: [{name: "usa.zelda.z64", size_bytes: 1, sha256: null}]},
+    {id: "usa.evil", platform: "../../VICTIM", handler: "single_file",
+     title: "Evil", files: [{name: "usa.evil.z64", size_bytes: 1, sha256: null}]}
+  ]}' >"$GOTG_CACHE_FILE"
+  mkdir -p "$GOTG_GAMES_DIR/n64"
+  printf 'rom' >"$GOTG_GAMES_DIR/n64/usa.zelda.z64"
+  gotg complete installed
+  [ "$status" -eq 0 ]
+  [ "$output" = "n64/usa.zelda" ]
+}
+
+@test "installed excludes a row whose id is not the shape a completion may print" {
+  mkdir -p "$GOTG_STATE_DIR"
+  jq -n '{version: 2, games: [{id: "usa.evil2$(touch /tmp/completion-pwned)",
+          platform: "n64", handler: "single_file", title: "Evil2",
+          files: [{name: "usa.evil2.z64", size_bytes: 1, sha256: null}]}]}' \
+    >"$GOTG_CACHE_FILE"
+  mkdir -p "$GOTG_GAMES_DIR/n64"
+  printf 'rom' >"$GOTG_GAMES_DIR/n64/usa.evil2.z64"
+  gotg complete installed
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -e /tmp/completion-pwned ]
+}

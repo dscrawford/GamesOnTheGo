@@ -249,3 +249,20 @@ def test_tail_survives_being_polled_throughout_a_flood(bin_env):
         p.tail(500)
     wait_done(p)
     assert p.tail(3) == ["line-3997", "line-3998", "line-3999"]
+
+
+def test_uninstall_runs_through_the_same_loader_with_dialogs_suppressed(bin_env, tmp_path):
+    bin_env(
+        f'echo "$@" > {tmp_path}/argv; echo "dialog=$GOTG_NO_DIALOG" >> {tmp_path}/argv\n'
+        'echo "uninstalled: A Game"; exit 0'
+    )
+    p = Preparer(game(), ["uninstall"])
+    for _ in range(100):
+        if not p.running:
+            break
+        time.sleep(0.05)
+    assert p.ok is True
+    argv = (tmp_path / "argv").read_text()
+    assert "uninstall n64/usa.zelda" in argv
+    assert "dialog=1" in argv
+    assert "uninstalled: A Game" in p.tail()

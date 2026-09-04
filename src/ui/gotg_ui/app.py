@@ -50,12 +50,8 @@ def _fit(font_at, text: str, width: int, size: int):
 
 
 def draw_badge(screen, tile) -> None:
-    """The mark on a game that is here: a download arrow, top-left.
-
-    Drawn, not loaded — there is no asset to ship or lose, and it scales with
-    the tile. An arrow into a tray, on a disc so it reads over art of any
-    colour.
-    """
+    """Download-arrow badge, top-left: drawn rather than a loaded asset, so it
+    scales with the tile and reads over art of any colour."""
     r = max(10, tile.width // 14)
     cx, cy = tile.x + r + 6, tile.y + r + 6
     pygame.draw.circle(screen, BACKGROUND, (cx, cy), r + 2)
@@ -476,9 +472,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         # X: search. A Deck raises the Steam keyboard over this.
                         typing = browser.search
                     elif event.button == 7:
-                        # Start: only what is here. Every face button is
-                        # taken; Start is free, and reads as "my library"
-                        # well enough on a handheld.
+                        # Start: toggles installed-only. Every face button is
+                        # taken; Start reads as "my library" on a handheld.
                         browser.toggle_installed()
 
             # Completion first, drawing second: a finished steam-add clears

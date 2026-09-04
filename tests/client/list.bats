@@ -422,3 +422,36 @@ big_catalog() {
   [[ "$stderr" == *"showing 1-50 of 55"* ]]
   [[ "$stderr" == *"gotg list --installed 2"* ]]
 }
+
+@test "--installed composes with --platform and with a pattern" {
+  big_catalog
+  mkdir -p "$GOTG_GAMES_DIR/n64" "$GOTG_GAMES_DIR/snes"
+  printf 'rom' >"$GOTG_GAMES_DIR/n64/usa.legend_of_zelda_majoras_mask.z64"
+  printf 'rom' >"$GOTG_GAMES_DIR/snes/world.super_metroid.sfc"
+  gotg list --installed --platform snes
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"world.super_metroid"* ]]
+  [[ "$output" != *"majoras_mask"* ]]
+  gotg list --installed metroid
+  [[ "$output" == *"world.super_metroid"* ]]
+  [[ "$output" != *"majoras_mask"* ]]
+  # Rows exist for n64, none of them installed: the installed message, with
+  # the platform named. (No rows at all is the plain "nothing matches".)
+  rm "$GOTG_GAMES_DIR/n64/usa.legend_of_zelda_majoras_mask.z64"
+  gotg list --installed --platform n64
+  [[ "$stderr" == *"nothing installed here on n64"* ]]
+}
+
+# The mark used to come from -e on the raw id, an existence oracle for any
+# path that could be built out of it. Only contract-shaped ids are asked about.
+@test "an id with a path separator is never marked installed by existence alone" {
+  mkdir -p "$GOTG_STATE_DIR" "$GOTG_GAMES_DIR/n64/usa.evil"
+  printf 'rom' >"$GOTG_GAMES_DIR/n64/usa.evil/pwn"
+  jq -n '{version: 2, games: [{id: "usa.evil/pwn", platform: "n64",
+          handler: "single_file", title: "Evil",
+          files: [{name: "usa.evil.z64", size_bytes: 1, sha256: null}]}]}' \
+    >"$GOTG_CACHE_FILE"
+  gotg list
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"[*]"* ]]
+}

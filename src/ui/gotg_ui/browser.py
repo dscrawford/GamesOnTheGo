@@ -33,9 +33,8 @@ class Browser:
         self.regions = [ALL, *library.regions]
         self._region_index = 0
         self.search = ""
-        # Keys of what is on disk, from the client. A set rather than a flag
-        # on Game: it changes under the grid — an uninstall from the menu —
-        # while the catalog does not.
+        # On-disk keys from the client, kept off Game: this changes under the
+        # grid (an uninstall), the catalog does not.
         self.installed: set[tuple[str, str]] = set(installed or ())
         self.installed_only = False
         self.grid = Grid(library)
@@ -82,9 +81,8 @@ class Browser:
         self._reframe()
 
     def set_installed(self, keys: set[tuple[str, str]]) -> None:
-        """What is here has changed — after an uninstall — so the badges and,
-        if it is on, the filter follow. The cursor is only moved when the
-        filter is on: with it off nothing on screen has changed shape."""
+        """Refresh after an uninstall: badges always update; the cursor only
+        moves when the filter is on, since with it off nothing changed shape."""
         self.installed = set(keys)
         if self.installed_only:
             self._reframe()

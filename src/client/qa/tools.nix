@@ -17,6 +17,9 @@ pkgs.buildEnv {
     ffmpeg
     imagemagick
     pulseaudio # pactl, against the host's pipewire-pulse
+    # glxinfo and eglinfo: what a client inside the session actually gets for
+    # GL, which the emulator's own log only says when it succeeds.
+    mesa-demos
     # Under its own name, not python3: the client carries a python3 of its own
     # (for vdf), and whichever lands first on PATH would otherwise decide
     # whether the virtual pad can be created at all. In the image the client's

@@ -1,9 +1,5 @@
-"""What is downloaded here, as the grid learns it from the client.
-
-The client owns the definition; the property held here is the seam — the
-argv, the line shape, and that every way of asking failing lands as "no
-badges" rather than a crash in the frame loop.
-"""
+"""Property under test: the seam to the client — argv, line shape, and that
+every failure mode lands as "no badges", not a crash."""
 
 from __future__ import annotations
 
@@ -42,6 +38,19 @@ def test_a_failing_client_means_no_badges_not_a_crash(tmp_path, monkeypatch):
 
 def test_a_missing_client_means_no_badges(monkeypatch, tmp_path):
     monkeypatch.setenv("GOTG_BIN", str(tmp_path / "nope"))
+    assert installed_games() == set()
+
+
+def test_a_hanging_client_means_no_badges_too(monkeypatch):
+    import subprocess
+
+    from gotg_ui import installed as installed_module
+
+    def fake_run(*args, **kwargs):
+        assert kwargs.get("timeout") == installed_module.INSTALLED_TIMEOUT
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=installed_module.INSTALLED_TIMEOUT)
+
+    monkeypatch.setattr(installed_module.subprocess, "run", fake_run)
     assert installed_games() == set()
 
 

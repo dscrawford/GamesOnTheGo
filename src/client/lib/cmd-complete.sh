@@ -79,21 +79,9 @@ complete_ready() {
   printf 'ready\n'
 }
 
-# Every installed game as platform/id, one per line — what the grid's
-# installed filter and its download badge are drawn from. Filesystem only,
-# same rules as everything else here, and the same probe `gotg list` marks
-# rows with, so the two views cannot disagree about what is here. Qualified,
-# because the grid always is.
-complete_installed() {
-  [[ -s "$GOTG_CACHE_FILE" ]] || return 0
-  local platform id name handler
-  while IFS=$'\t' read -r platform id name handler; do
-    list_row_installed "$platform" "$id" "$name" "$handler" || continue
-    printf '%s/%s\n' "$platform" "$id"
-  done < <(jq -r 'if .version != 2 then empty else
-      .games[] | [.platform, .id, (.files[0].name // ""), (.handler // "")] | @tsv
-    end' "$GOTG_CACHE_FILE" 2>/dev/null || true)
-}
+# platform/id per line, from the same listing gotg list marks rows with, so
+# the grid and list cannot disagree about what is here.
+complete_installed() { manifest_installed_keys; }
 
 # The variants of one game. The id is whatever is on the command line, which may
 # be half-typed or nonsense, so this resolves it by exact match and gives up
