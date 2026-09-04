@@ -132,9 +132,9 @@
           qa-image = pkgs.callPackage ./src/client/qa/image.nix {
             inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg qa-tools;
             # The cartridge platforms, which share one ares and so cost one
-            # emulator between them. The disc consoles are deliberately absent:
-            # each brings its own large emulator, and none of them has been
-            # graded on a cluster GPU yet.
+            # emulator between them, and the Switch — the one disc-era console
+            # whose updates and DLC the harness needs to grade. The rest are
+            # deliberately absent: each brings its own large emulator.
             environments = pkgs.lib.getAttrs [
               "env-gb"
               "env-gbc"
@@ -143,6 +143,7 @@
               "env-snes"
               "env-genesis"
               "env-n64"
+              "env-switch"
             ] envs;
           };
 
