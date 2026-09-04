@@ -32,7 +32,7 @@ _gotg() {
     sub="${COMP_WORDS[2]:-}"
     COMPREPLY=()
 
-    local commands="login refresh list info download install play configure steam saves controllers admin sync help"
+    local commands="login refresh list info download install uninstall play configure steam saves controllers admin sync help"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
         mapfile -t COMPREPLY < <(compgen -W "$commands" -- "$cur")
@@ -45,7 +45,7 @@ _gotg() {
     fi
 
     case "$cmd" in
-        info | download | install)
+        info | download | install | uninstall)
             [[ $COMP_CWORD -eq 2 ]] &&
                 mapfile -t COMPREPLY < <(_gotg_ids "$cur")
             ;;

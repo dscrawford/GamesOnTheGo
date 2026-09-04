@@ -19,8 +19,9 @@ from .controllers import assets_dir
 from .controllers import draw as draw_controllers
 from .fetch import Loader
 from .grid import Grid
+from .installed import installed_games
 from .layout import grid, tile_at
-from .menu import ACTIONS, Menu
+from .menu import Menu
 from .prepare import Preparer, is_ready
 
 BACKGROUND = (18, 18, 20)
@@ -48,7 +49,35 @@ def _fit(font_at, text: str, width: int, size: int):
     return font_at(8)
 
 
-def draw(screen, state: Grid, font_at, art=None, status: str = "", typing: str | None = None, menu=None) -> None:
+def draw_badge(screen, tile) -> None:
+    """The mark on a game that is here: a download arrow, top-left.
+
+    Drawn, not loaded — there is no asset to ship or lose, and it scales with
+    the tile. An arrow into a tray, on a disc so it reads over art of any
+    colour.
+    """
+    r = max(10, tile.width // 14)
+    cx, cy = tile.x + r + 6, tile.y + r + 6
+    pygame.draw.circle(screen, BACKGROUND, (cx, cy), r + 2)
+    pygame.draw.circle(screen, TILE_SELECTED, (cx, cy), r)
+    shaft = r // 2
+    head = r // 2
+    stroke = max(2, r // 5)
+    pygame.draw.line(screen, TEXT, (cx, cy - shaft), (cx, cy + shaft // 2), stroke)
+    pygame.draw.polygon(screen, TEXT, [(cx - head, cy), (cx + head, cy), (cx, cy + head)])
+    pygame.draw.line(screen, TEXT, (cx - head, cy + head + 2), (cx + head, cy + head + 2), stroke)
+
+
+def draw(
+    screen,
+    state: Grid,
+    font_at,
+    art=None,
+    status: str = "",
+    typing: str | None = None,
+    menu=None,
+    installed: set[tuple[str, str]] | None = None,
+) -> None:
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
     page = state.page
@@ -94,6 +123,8 @@ def draw(screen, state: Grid, font_at, art=None, status: str = "", typing: str |
             platform = font_at(14).render(game.platform, True, TEXT_DIM)
             screen.blit(platform, (tile.x + 8, tile.y + tile.height - platform.get_height() - 8))
 
+        if installed and game.key in installed:
+            draw_badge(screen, tile)
         if selected:
             pygame.draw.rect(screen, TEXT, tile.rect, width=3, border_radius=8)
         if dim is not None and index != menu.tile_index:
@@ -130,12 +161,12 @@ def menu_rects(menu: Menu, tiles, font_at) -> list[tuple[int, int, int, int]]:
     """
     tile = tiles[menu.tile_index]
     row_h = font_at(22).get_height() + 14
-    width = max(font_at(22).size(label)[0] for label, _ in ACTIONS) + 32
-    height = row_h * len(ACTIONS) + 8
+    width = max(font_at(22).size(label)[0] for label, _ in menu.actions) + 32
+    height = row_h * len(menu.actions) + 8
     gap = 10
     x = tile.x + tile.width + gap if menu.side == "right" else tile.x - gap - width
     y = tile.y + (tile.height - height) // 2
-    return [(x, y + 4 + i * row_h, width, row_h) for i in range(len(ACTIONS))]
+    return [(x, y + 4 + i * row_h, width, row_h) for i in range(len(menu.actions))]
 
 
 def draw_menu(screen, menu: Menu, tiles, font_at) -> None:
@@ -144,7 +175,7 @@ def draw_menu(screen, menu: Menu, tiles, font_at) -> None:
     height = rows[-1][1] + rows[-1][3] - y + 8
     pygame.draw.rect(screen, TILE, (x, y, rows[0][2], height), border_radius=8)
     pygame.draw.rect(screen, TEXT_DIM, (x, y, rows[0][2], height), width=1, border_radius=8)
-    for index, (label, _) in enumerate(ACTIONS):
+    for index, (label, _) in enumerate(menu.actions):
         rx, ry, rw, rh = rows[index]
         if index == menu.selected:
             pygame.draw.rect(screen, TILE_SELECTED, (rx + 4, ry, rw - 8, rh - 4), border_radius=6)
@@ -184,7 +215,7 @@ def draw_prepare(screen, font_at, game: Game, lines: list[str], failed: bool) ->
     screen.blit(label, (margin, height - margin - label.get_height()))
 
 
-def run(library: Library) -> tuple[Game, str] | None:
+def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | None:
     """Draw until somebody chooses an action or quits, and say which.
 
     Returns (game, verb) — play or configure — both of which the caller execs.
@@ -209,7 +240,11 @@ def run(library: Library) -> tuple[Game, str] | None:
             fonts[size] = pygame.font.Font(None, size)
         return fonts[size]
 
-    browser = Browser(library)
+    # Asked once, up front, and again only after an uninstall: the answer is
+    # a walk of the whole catalog against the disk, not a per-frame question.
+    browser = Browser(library, installed=installed_games())
+    if installed_only:
+        browser.toggle_installed()
     store = ArtStore()
     loader = Loader(store)
     # Decoded surfaces, keyed by (platform, id). Decoding is not free and the
@@ -260,6 +295,12 @@ def run(library: Library) -> tuple[Game, str] | None:
             # Not an exec: the shortcut is written, the grid comes back.
             preparer = Preparer(game, ["steam", "add"])
             after_prepare = None
+            return
+        if verb == "uninstall":
+            # Through the loader like steam-add, so what was removed is read
+            # rather than guessed; then the badges are asked for again.
+            preparer = Preparer(game, ["uninstall"])
+            after_prepare = "uninstall"
             return
         after_prepare = verb
         if is_ready(game):
@@ -389,7 +430,9 @@ def run(library: Library) -> tuple[Game, str] | None:
                         state.turn(-1)
                     elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
                         if state.game is not None:
-                            menu = Menu(state.game, state.selected)
+                            menu = Menu(state.game, state.selected, browser.is_installed(state.game))
+                    elif event.key == pygame.K_i:
+                        browser.toggle_installed()
                 elif event.type == pygame.MOUSEMOTION:
                     # Hover moves the cursor, so the pointer and the stick drive
                     # one selection rather than two competing highlights. A gap
@@ -404,7 +447,7 @@ def run(library: Library) -> tuple[Game, str] | None:
                         # already put the cursor there, so this cannot launch
                         # something the click was not on.
                         if over is not None and state.select(over):
-                            menu = Menu(state.game, state.selected)
+                            menu = Menu(state.game, state.selected, browser.is_installed(state.game))
                     # No button 4/5 here: SDL2 reports a wheel as MOUSEWHEEL *and*
                     # as those two for compatibility, so handling both turns the
                     # page twice for one scroll.
@@ -418,7 +461,7 @@ def run(library: Library) -> tuple[Game, str] | None:
                     # B is 1, and 4 and 5 are the shoulders.
                     if event.button == 0:
                         if state.game is not None:
-                            menu = Menu(state.game, state.selected)
+                            menu = Menu(state.game, state.selected, browser.is_installed(state.game))
                     elif event.button == 1:
                         running = False
                     elif event.button == 4:
@@ -432,6 +475,11 @@ def run(library: Library) -> tuple[Game, str] | None:
                     elif event.button == 2:
                         # X: search. A Deck raises the Steam keyboard over this.
                         typing = browser.search
+                    elif event.button == 7:
+                        # Start: only what is here. Every face button is
+                        # taken; Start is free, and reads as "my library"
+                        # well enough on a handheld.
+                        browser.toggle_installed()
 
             # Completion first, drawing second: a finished steam-add clears
             # the preparer, and this same frame must already be the grid's.
@@ -439,6 +487,9 @@ def run(library: Library) -> tuple[Game, str] | None:
                 if preparer.ok:
                     if after_prepare is None:
                         preparer = None  # steam add done — back to the grid
+                    elif after_prepare == "uninstall":
+                        browser.set_installed(installed_games())
+                        preparer = None
                     else:
                         chosen = (preparer.game, after_prepare)
                         running = False
@@ -455,7 +506,7 @@ def run(library: Library) -> tuple[Game, str] | None:
                     art.pop(game.key, None)
                 for game in state.page:
                     surface_for(game)
-                draw(screen, state, font_at, art, browser.status, typing, menu)
+                draw(screen, state, font_at, art, browser.status, typing, menu, browser.installed)
                 if menu is not None:
                     draw_menu(screen, menu, grid(*screen.get_size()), font_at)
             pygame.display.flip()

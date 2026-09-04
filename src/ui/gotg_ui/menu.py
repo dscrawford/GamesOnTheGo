@@ -23,14 +23,18 @@ ACTIONS: list[tuple[str, str]] = [
     ("Controllers", "controllers"),
     ("Add to Steam", "steam-add"),
 ]
+# Only offered for a game that is here: uninstalling nothing is not a verb,
+# and a row that does nothing is a row somebody will press.
+UNINSTALL: tuple[str, str] = ("Uninstall", "uninstall")
 
 
 class Menu:
     """Open over one tile, holding which verb the cursor is on."""
 
-    def __init__(self, game: Game, tile_index: int):
+    def __init__(self, game: Game, tile_index: int, installed: bool = False):
         self.game = game
         self.tile_index = tile_index
+        self.actions = [*ACTIONS, UNINSTALL] if installed else list(ACTIONS)
         self.selected = 0
 
     @property
@@ -44,14 +48,14 @@ class Menu:
 
     @property
     def action(self) -> str:
-        return ACTIONS[self.selected][1]
+        return self.actions[self.selected][1]
 
     def move(self, delta: int) -> None:
-        self.selected = max(0, min(len(ACTIONS) - 1, self.selected + delta))
+        self.selected = max(0, min(len(self.actions) - 1, self.selected + delta))
 
     def select(self, index: int) -> bool:
         """The pointer's way in. False for a row that is not there."""
-        if not 0 <= index < len(ACTIONS):
+        if not 0 <= index < len(self.actions):
             return False
         self.selected = index
         return True

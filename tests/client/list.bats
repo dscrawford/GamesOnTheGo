@@ -388,3 +388,37 @@ big_catalog() {
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"--page needs a number"* ]]
 }
+
+# --- --installed ---------------------------------------------------------------
+
+@test "--installed shows only what is here, and pages over that" {
+  big_catalog
+  mkdir -p "$GOTG_GAMES_DIR/n64"
+  printf 'rom' >"$GOTG_GAMES_DIR/n64/usa.legend_of_zelda_majoras_mask.z64"
+  gotg list --installed
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"usa.legend_of_zelda_majoras_mask"* ]]
+  [[ "$output" != *"usa.filler_1 "* ]]
+  [ "$(grep -c "usa\.\|world\." <<<"$output")" -eq 1 ]
+  [[ "$stderr" == *"showing only these"* ]]
+}
+
+@test "--installed with nothing here says so rather than printing a header" {
+  big_catalog
+  gotg list --installed
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"nothing installed here"* ]]
+  [[ "$output" != *"PLATFORM"* ]]
+}
+
+@test "--installed rides along to the next page" {
+  local i
+  for i in $(seq 1 60); do
+    add_manifest_entry n64 "/Games/n64/usa.filler_$i.z64" file 100 "" "Filler $i"
+  done
+  mkdir -p "$GOTG_GAMES_DIR/n64"
+  for i in $(seq 1 55); do printf 'rom' >"$GOTG_GAMES_DIR/n64/usa.filler_$i.z64"; done
+  gotg list --installed
+  [[ "$stderr" == *"showing 1-50 of 55"* ]]
+  [[ "$stderr" == *"gotg list --installed 2"* ]]
+}

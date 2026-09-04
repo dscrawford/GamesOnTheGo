@@ -10,6 +10,7 @@ nix run .#gotg-ui                      # the grid
 nix run .#gotg-ui -- --list            # page one as text, no window
 nix run .#gotg-ui -- --platform n64 --search zelda --list
 nix run .#gotg-ui -- --region usa --list        # usa plus the region-free world set
+nix run .#gotg-ui -- --installed --list         # only what is downloaded here
 nix run .#gotg-ui -- --play snes/eur.asterix   # the handoff, without the grid
 nix run .#gotg-ui -- --platform snes --refresh # forget cached art and look again
 ```
@@ -18,7 +19,8 @@ nix run .#gotg-ui -- --platform snes --refresh # forget cached art and look agai
 |---|---|
 | d-pad / arrows | move; off either side turns the page |
 | shoulders / PgUp PgDn | previous and next page |
-| A / Enter | open the action menu — Play, Configure, Add to Steam |
+| A / Enter | open the action menu — Play, Configure, Add to Steam, and Uninstall for a game that is here |
+| Start / I | only installed games — the ones badged with a download arrow |
 | Y / Tab | next platform |
 | Back / shift-Tab / R | next region — world is region-free and rides along (shift-R back) |
 | X / `/` | search — Enter applies, Escape cancels |
@@ -35,7 +37,8 @@ nix run .#gotg-ui -- --platform snes --refresh # forget cached art and look agai
 | `browser.py` | the platform filter, the search, and the cursor | no |
 | `art.py` | the picture cache, misses included | no |
 | `fetch.py` | asking the client's own art sources, off the frame loop | no |
-| `menu.py` | the action menu: three verbs, and which side has room | no |
+| `menu.py` | the action menu: the verbs, and which side has room | no |
+| `installed.py` | asking the client what is downloaded here | no |
 | `launch.py` | the handoff to `gotg play` | no |
 | `app.py` | drawing, and reading a controller | yes |
 | `__main__.py` | arguments, and the one error worth printing | no |

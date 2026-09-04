@@ -35,6 +35,8 @@ source "$GOTG_LIB/env.sh"
 source "$GOTG_LIB/launcher.sh"
 # shellcheck source=lib/cmd-play.sh
 source "$GOTG_LIB/cmd-play.sh"
+# shellcheck source=lib/cmd-uninstall.sh
+source "$GOTG_LIB/cmd-uninstall.sh"
 # shellcheck source=lib/qa-analyze.sh
 source "$GOTG_LIB/qa-analyze.sh"
 # shellcheck source=lib/cmd-qa.sh
@@ -91,10 +93,11 @@ usage: gotg <command> [args]
   refresh            re-fetch the game catalog from the server
   list [pattern] [page]  games matching a regex on id, title or platform,
                      marking the ones installed here; a bare number is the
-                     page (--platform <p>, --all, --limit N)
+                     page (--platform <p>, --installed, --all, --limit N)
   info <id>          show one game's details, its mods included
   download <id>      fetch a game without setting up a launcher
   install <id>       fetch it, build its environment, write a Steam launcher
+  uninstall <id>     remove the game and its launchers; saves stay
   play <id> [variant] fetch and build whatever is missing, then launch
   qa <id> [variant]  run it headless with a virtual pad and grade the recording
   saves <command>    move saves between machines (saves help for the rest)
@@ -124,7 +127,7 @@ command_help() {
     refresh) echo "usage: gotg refresh  — re-fetch the game catalog from the server" ;;
     list | ls)
       cat <<'EOF'
-usage: gotg list [pattern] [page] [--search <re>] [--platform <p>] [--page N] [--all] [--limit N]
+usage: gotg list [pattern] [page] [--search <re>] [--platform <p>] [--installed] [--page N] [--all] [--limit N]
 
   Lists the catalog, marking the games installed here. A bare argument is a
   pattern (a regex over id, title and platform) or, if it is a number, the
@@ -133,12 +136,14 @@ usage: gotg list [pattern] [page] [--search <re>] [--platform <p>] [--page N] [-
     gotg list zelda                       every Zelda, on any platform
     gotg list --platform nes --page 2     the second page of the NES set
     gotg list --search zelda --platform nes
+    gotg list --installed                 only what is downloaded here
     gotg list --all                       every game, no paging
 EOF
       ;;
     info | show) echo "usage: gotg info <id>    — one game's details and its mods" ;;
     download | get) echo "usage: gotg download <id>    — fetch a game without a launcher" ;;
     install) echo "usage: gotg install <id>    — fetch it, build its environment, write a Steam launcher" ;;
+    uninstall) echo "usage: gotg uninstall <id>    — remove the game's files and launchers; saves and settings stay" ;;
     play | launch) echo "usage: gotg play <id> [variant] [emulator args...]    — build whatever is missing, then launch" ;;
     configure) echo "usage: gotg configure <id> [variant]    — open that environment's own settings screen" ;;
     sync) echo "usage: gotg sync    — rebuild every already-built environment from the flake" ;;
@@ -151,7 +156,7 @@ main() {
 
   # Every leaf command answers -h/--help. The group commands handle their own.
   case "$cmd" in
-    login | refresh | list | ls | info | show | download | get | install | play | launch | configure | sync)
+    login | refresh | list | ls | info | show | download | get | install | uninstall | play | launch | configure | sync)
       case "${1:-}" in
         -h | --help) command_help "$cmd"; return 0 ;;
       esac
@@ -165,6 +170,7 @@ main() {
     info | show) cmd_info "$@" ;;
     download | get) cmd_download "$@" ;;
     install) cmd_install "$@" ;;
+    uninstall) cmd_uninstall "$@" ;;
     play | launch) cmd_play "$@" ;;
     qa) cmd_qa "$@" ;;
     saves) cmd_saves "$@" ;;

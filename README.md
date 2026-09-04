@@ -41,6 +41,8 @@ nix build ~/Documents/GOTG#gotg -o ~/.local/state/gotg/app
 
 gotg list                                        # what is on the server, and what is here
 gotg install usa.legend_of_zelda_majoras_mask    # download + build its environment + write launcher
+gotg list --installed                            # only what is downloaded here
+gotg uninstall usa.legend_of_zelda_majoras_mask  # remove its files and launchers; saves stay
 ```
 
 **Finding a game.** A real library runs to thousands of entries, so `list`

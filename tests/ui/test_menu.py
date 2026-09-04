@@ -60,3 +60,21 @@ def test_selecting_an_item_by_index_is_refused_off_the_list():
     assert m.select(4) is False
     assert m.action == "steam-add", "a refused select leaves the cursor"
     assert m.select(-1) is False
+
+
+# --- uninstall, only for a game that is here ------------------------------------
+
+
+def test_a_game_that_is_here_gets_uninstall_last():
+    m = Menu(game(), tile_index=0, installed=True)
+    assert [label for label, _ in m.actions] == ["Play Game", "Configure", "Controllers", "Add to Steam", "Uninstall"]
+    m.move(10)
+    assert m.action == "uninstall"
+
+
+def test_a_game_that_is_not_here_has_no_uninstall_to_press():
+    m = Menu(game(), tile_index=0, installed=False)
+    assert len(m.actions) == 4
+    m.move(10)
+    assert m.action == "steam-add"
+    assert m.select(4) is False

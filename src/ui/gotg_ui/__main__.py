@@ -29,6 +29,11 @@ def main(argv: list[str] | None = None) -> int:
         help="only this region — world releases are region-free and always included",
     )
     parser.add_argument(
+        "--installed",
+        action="store_true",
+        help="only games that are downloaded here",
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="print the first page and exit, without opening a window",
@@ -53,6 +58,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     library = Library(games).filter(platform=args.platform, search=args.search, region=args.region)
+    if args.installed:
+        from .installed import installed_games
+
+        here = installed_games()
+        library = Library([g for g in library.games if g.key in here], library.per_page)
 
     if args.refresh:
         # Nothing here expires on its own — a game with no art is remembered
@@ -87,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from .app import run  # imported here so --list and --play need no display
 
-    chosen = run(library)
+    chosen = run(library, installed_only=args.installed)
     if chosen is None:
         return 0
     return _play(*chosen)

@@ -8,7 +8,7 @@ happens to the cursor when the ground moves under it.
 
 from __future__ import annotations
 
-from .catalog import Library
+from .catalog import Game, Library
 from .grid import Grid
 
 # Pinned to the front of the list rather than sorted into it, so one press
@@ -18,9 +18,14 @@ ALL = "all"
 
 
 class Browser:
-    """One library, narrowed two ways, with a cursor that survives both."""
+    """One library, narrowed three ways, with a cursor that survives all of them."""
 
-    def __init__(self, library: Library, per_page: int | None = None):
+    def __init__(
+        self,
+        library: Library,
+        per_page: int | None = None,
+        installed: set[tuple[str, str]] | None = None,
+    ):
         self.library = library
         self.per_page = per_page or library.per_page
         self.platforms = [ALL, *library.platforms]
@@ -28,6 +33,11 @@ class Browser:
         self.regions = [ALL, *library.regions]
         self._region_index = 0
         self.search = ""
+        # Keys of what is on disk, from the client. A set rather than a flag
+        # on Game: it changes under the grid — an uninstall from the menu —
+        # while the catalog does not.
+        self.installed: set[tuple[str, str]] = set(installed or ())
+        self.installed_only = False
         self.grid = Grid(library)
 
     @property
@@ -64,6 +74,21 @@ class Browser:
         self.search = text
         self._reframe()
 
+    def is_installed(self, game: Game) -> bool:
+        return game.key in self.installed
+
+    def toggle_installed(self) -> None:
+        self.installed_only = not self.installed_only
+        self._reframe()
+
+    def set_installed(self, keys: set[tuple[str, str]]) -> None:
+        """What is here has changed — after an uninstall — so the badges and,
+        if it is on, the filter follow. The cursor is only moved when the
+        filter is on: with it off nothing on screen has changed shape."""
+        self.installed = set(keys)
+        if self.installed_only:
+            self._reframe()
+
     def _reframe(self) -> None:
         """Rebuild the view, and put the cursor back at the start.
 
@@ -77,7 +102,10 @@ class Browser:
             region=None if self.region == ALL else self.region,
             search=self.search or None,
         )
-        self.grid = Grid(Library(found.games, self.per_page))
+        games = found.games
+        if self.installed_only:
+            games = [g for g in games if g.key in self.installed]
+        self.grid = Grid(Library(games, self.per_page))
 
     @property
     def status(self) -> str:
@@ -93,4 +121,6 @@ class Browser:
             bits.append(f"region {self.region}+world" if self.region != "world" else "region world")
         if self.search:
             bits.append(f'"{self.search}"')
+        if self.installed_only:
+            bits.append("installed only")
         return "  ·  ".join(bits)

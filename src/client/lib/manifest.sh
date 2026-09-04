@@ -182,9 +182,26 @@ cmd_refresh() { manifest_refresh || die "catalog refresh failed"; }
 # and a screenful you can read beats a scrollback you have to hunt through.
 GOTG_LIST_LIMIT=50
 
+# Whether a catalog row is installed, from cache fields alone — no per-row
+# JSON, because this runs once per row over the whole catalog. The rules are
+# game_installed_path's: the member name, the bare id (a recipe's directory),
+# or id.<ext> for the handlers whose recipe picks the extension. Cache fields
+# become a path even for this read-only probe, so they are fenced first.
+list_row_installed() {
+  local platform="$1" id="$2" name="$3" handler="$4" matches
+  [[ "$platform" =~ $GOTG_PLATFORM_RE && "$id" =~ $GOTG_ID_RE ]] || return 1
+  [[ "$name" != *..* && "$name" != /* ]] || return 1
+  [[ -e "$GOTG_GAMES_DIR/$platform/$name" || -e "$GOTG_GAMES_DIR/$platform/$id" ]] && return 0
+  if [[ "$handler" != "single_file" && "$handler" != "no_intro_set" ]]; then
+    matches=("$GOTG_GAMES_DIR/$platform/$id".*)
+    [[ -e "${matches[0]}" ]] && return 0
+  fi
+  return 1
+}
+
 cmd_list() {
-  local pattern="" limit="$GOTG_LIST_LIMIT" platform="" page=""
-  local usage="usage: gotg list [pattern] [page] [--search <re>] [--platform <p>] [--page N] [--all|--limit N]"
+  local pattern="" limit="$GOTG_LIST_LIMIT" platform="" page="" installed=""
+  local usage="usage: gotg list [pattern] [page] [--search <re>] [--platform <p>] [--installed] [--page N] [--all|--limit N]"
 
   # --search and --page are the named spellings of the two positionals, so a
   # setter is shared: name the same slot twice, whichever way, and it is a
@@ -206,6 +223,10 @@ cmd_list() {
     case "$1" in
       --all)
         limit=0
+        shift
+        ;;
+      --installed)
+        installed=1
         shift
         ;;
       --limit)
@@ -302,6 +323,20 @@ cmd_list() {
      It is a regex, so a bare . matches any character and ( must be closed."
   fi
 
+  # Narrowed before paging, so the pages are pages of what is here.
+  if [[ -n "$installed" && -n "$rows" ]]; then
+    local platform id size name handler title kept=""
+    while IFS=$'\t' read -r platform id size name handler title; do
+      list_row_installed "$platform" "$id" "$name" "$handler" || continue
+      kept+="$platform"$'\t'"$id"$'\t'"$size"$'\t'"$name"$'\t'"$handler"$'\t'"$title"$'\n'
+    done <<<"$rows"
+    rows="${kept%$'\n'}"
+    if [[ -z "$rows" ]]; then
+      log "nothing installed here${pattern:+ matches $pattern}${platform:+ on $platform}"
+      return 0
+    fi
+  fi
+
   if [[ -z "$rows" ]]; then
     # A platform nobody has is worth naming apart from an unlucky pattern:
     # the answer to one is a different platform, to the other a wider regex.
@@ -346,31 +381,21 @@ cmd_list() {
   local next_cmd="gotg list"
   [[ -n "$pattern" ]] && next_cmd+=" $(printf '%q' "$pattern")"
   [[ -n "$platform" ]] && next_cmd+=" --platform $(printf '%q' "$platform")"
+  [[ -n "$installed" ]] && next_cmd+=" --installed"
   ((limit > 0 && limit != GOTG_LIST_LIMIT)) && next_cmd+=" --limit $limit"
   next_cmd+=" $((page + 1))"
 
   # The colour goes in its own argument so the width applies to the value and
   # not to the escape bytes, which would silently break every column.
-  local platform id size name handler title status c_status installed_glob
+  local platform id size name handler title status c_status
   printf '%s%-3s %-9s %-46s %10s  %s%s\n' \
     "$C_HEAD" "" "PLATFORM" "ID" "SIZE" "TITLE" "$C_RESET"
   while IFS=$'\t' read -r platform id size name handler title; do
     status="[ ]"
     c_status="$C_MUTED"
-    # Cache fields become a path even for this read-only probe. A recipe
-    # installs as id.<ext>, which the member name cannot predict — the same
-    # rule game_installed_path applies, without loading each row's JSON.
-    if [[ "$platform" =~ $GOTG_PLATFORM_RE && "$name" != *..* && "$name" != /* ]]; then
-      if [[ -e "$GOTG_GAMES_DIR/$platform/$name" || -e "$GOTG_GAMES_DIR/$platform/$id" ]]; then
-        status="[*]"
-        c_status="$C_OK"
-      elif [[ "$handler" != "single_file" && "$handler" != "no_intro_set" ]]; then
-        installed_glob=("$GOTG_GAMES_DIR/$platform/$id".*)
-        if [[ -e "${installed_glob[0]}" ]]; then
-          status="[*]"
-          c_status="$C_OK"
-        fi
-      fi
+    if list_row_installed "$platform" "$id" "$name" "$handler"; then
+      status="[*]"
+      c_status="$C_OK"
     fi
     printf '%s%-3s%s %s%-9s%s %s%-46s%s %10s  %s\n' \
       "$c_status" "$status" "$C_RESET" \
@@ -380,7 +405,7 @@ cmd_list() {
   done <<<"$rows"
   log ""
   # Braced: "$C_OK[*]" reads as an array subscript.
-  log "${C_OK}[*]${C_RESET} installed locally"
+  log "${C_OK}[*]${C_RESET} installed locally${installed:+ — showing only these}"
 
   # Say what was left out, and how to see it. A silent truncation reads as
   # "that is everything", which is the one thing it must not read as.

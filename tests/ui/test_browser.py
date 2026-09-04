@@ -205,3 +205,62 @@ def test_a_region_the_catalog_does_not_hold_is_refused():
     b = Browser(library_with_regions())
     b.set_region("jpn")
     assert b.region == ALL
+
+
+# --- the installed filter ------------------------------------------------------
+
+
+def _installed_browser():
+    lib = library({"snes": 25, "n64": 12})
+    here = {("snes", "usa.snes_001"), ("snes", "usa.snes_002"), ("n64", "usa.n64_000")}
+    return Browser(lib, installed=here), here
+
+
+def test_it_starts_showing_everything_with_badges_known():
+    b, here = _installed_browser()
+    assert b.installed_only is False
+    assert len(b.visible) == 37
+    assert b.is_installed(b.visible.games[1]) is True
+    assert b.is_installed(b.visible.games[5]) is False
+
+
+def test_toggling_narrows_to_what_is_here_and_resets_the_cursor():
+    b, here = _installed_browser()
+    b.grid.turn(2)
+    b.toggle_installed()
+    assert b.installed_only is True
+    assert {g.key for g in b.visible.games} == here
+    assert b.grid.page_index == 0
+    b.toggle_installed()
+    assert len(b.visible) == 37
+
+
+def test_it_composes_with_the_platform_filter():
+    b, _ = _installed_browser()
+    b.toggle_installed()
+    b.set_platform("n64")
+    assert [g.key for g in b.visible.games] == [("n64", "usa.n64_000")]
+
+
+def test_the_status_line_says_so():
+    b, _ = _installed_browser()
+    assert "installed only" not in b.status
+    b.toggle_installed()
+    assert "installed only" in b.status
+
+
+def test_an_uninstall_updates_the_view_when_the_filter_is_on():
+    b, here = _installed_browser()
+    b.toggle_installed()
+    assert len(b.visible) == 3
+    b.set_installed(here - {("snes", "usa.snes_001")})
+    assert len(b.visible) == 2
+    assert b.is_installed(b.library.games[1]) is False
+
+
+def test_an_uninstall_leaves_the_cursor_alone_when_the_filter_is_off():
+    b, here = _installed_browser()
+    b.grid.turn(2)
+    b.set_installed(set())
+    assert b.grid.page_index == 2
+    assert b.installed == set()

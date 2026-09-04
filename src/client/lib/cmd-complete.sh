@@ -19,6 +19,7 @@ cmd_complete() {
     variants) complete_variants "${2:-}" ;;
     platforms) complete_platforms ;;
     ready) complete_ready "${2:-}" "${3:-}" ;;
+    installed) complete_installed ;;
     *) return 0 ;;
   esac
 }
@@ -76,6 +77,22 @@ complete_ready() {
   # through this file's catch-all `*) return 0` and would read as ready — the
   # UI requires the word as well as the code.
   printf 'ready\n'
+}
+
+# Every installed game as platform/id, one per line — what the grid's
+# installed filter and its download badge are drawn from. Filesystem only,
+# same rules as everything else here, and the same probe `gotg list` marks
+# rows with, so the two views cannot disagree about what is here. Qualified,
+# because the grid always is.
+complete_installed() {
+  [[ -s "$GOTG_CACHE_FILE" ]] || return 0
+  local platform id name handler
+  while IFS=$'\t' read -r platform id name handler; do
+    list_row_installed "$platform" "$id" "$name" "$handler" || continue
+    printf '%s/%s\n' "$platform" "$id"
+  done < <(jq -r 'if .version != 2 then empty else
+      .games[] | [.platform, .id, (.files[0].name // ""), (.handler // "")] | @tsv
+    end' "$GOTG_CACHE_FILE" 2>/dev/null || true)
 }
 
 # The variants of one game. The id is whatever is on the command line, which may

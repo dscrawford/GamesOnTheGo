@@ -400,3 +400,20 @@ ready_env() {
   [ "$status" -eq 0 ]
   [ "$output" = "ready" ]
 }
+
+@test "installed lists what is here as platform/id, and nothing else" {
+  add_game snes world.super_metroid.sfc "rom" "Super Metroid"
+  add_game n64 usa.legend_of_zelda_majoras_mask.z64 "rom" "Majora's Mask"
+  gotg refresh
+  mkdir -p "$GOTG_GAMES_DIR/snes"
+  printf 'rom' >"$GOTG_GAMES_DIR/snes/world.super_metroid.sfc"
+  gotg complete installed
+  [ "$status" -eq 0 ]
+  [ "$output" = "snes/world.super_metroid" ]
+}
+
+@test "installed is silent with no catalog" {
+  gotg complete installed
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
