@@ -109,6 +109,15 @@ qa_cleanup() {
 #
 # The numeric test is the other half: a name can be chosen to look like a pid,
 # so anything that is not a number ends the walk rather than being followed.
+# A run directory of its own, named for when it started. Made by mktemp, not
+# by the timestamp alone: two Jobs sharing one state volume started in the
+# same second and wrote one another's verdicts.
+qa_new_rundir() {
+  local runs="$GOTG_STATE_DIR/qa/runs"
+  mkdir -p "$runs"
+  mktemp -d "$runs/$(date +%Y%m%d-%H%M%S)-XXXX"
+}
+
 qa_pid_under() {
   local pid="$1" root="$2" stat rest
   while [[ "$pid" =~ ^[0-9]+$ && "$pid" != 0 && "$pid" != 1 ]]; do
@@ -210,7 +219,7 @@ EOF
   qa_tools_ensure
 
   local rundir
-  rundir="$GOTG_STATE_DIR/qa/runs/$(date +%Y%m%d-%H%M%S)"
+  rundir="$(qa_new_rundir)"
   mkdir -p "$rundir/env-state"
 
   # Scratch launch state, set before play_prepare so every helper that derives

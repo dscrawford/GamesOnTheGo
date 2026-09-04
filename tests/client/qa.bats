@@ -211,3 +211,14 @@ make_rundir() {
   [[ "$stderr" == *"no game called 'usa.nowhere'"* ]]
   stop_saves_service
 }
+
+# --- one directory per run ---
+
+@test "two runs started in the same second get directories of their own" {
+  local a b
+  a="$(qa_new_rundir)"
+  b="$(qa_new_rundir)"
+  [ -d "$a" ] && [ -d "$b" ]
+  [ "$a" != "$b" ]
+  [[ "$a" == "$GOTG_STATE_DIR/qa/runs/"[0-9]*-* ]]
+}
