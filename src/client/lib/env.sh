@@ -42,6 +42,22 @@ flake_is_path() { [[ "$1" != *://* && "$1" != github:* && "$1" != flake:* ]]; }
 # A seam for the tests, which run where there is no nix.
 nix_bin() { printf '%s' "${GOTG_NIX:-nix}"; }
 
+# What the flake is right now, cheaply: the checkout's commit, or the url
+# flake's resolved revision. Empty when it cannot be known or the checkout
+# has uncommitted edits — either of which means "build and see". This is
+# what lets sync tell an unchanged flake apart from one worth an evaluation,
+# without paying for the evaluation to find out.
+flake_fingerprint() {
+  local flake="$1" rev
+  if flake_is_path "$flake"; then
+    [[ -z "$(git -C "$flake" status --porcelain 2>/dev/null)" ]] || return 0
+    rev="$(git -C "$flake" rev-parse HEAD 2>/dev/null)" || return 0
+  else
+    rev="$("$(nix_bin)" flake metadata --refresh --json "$flake" 2>/dev/null | jq -r '.revision // empty' 2>/dev/null)" || return 0
+  fi
+  printf '%s' "$rev"
+}
+
 # Per-game overrides are the one thing a person tweaks per machine, so a copy in
 # the config directory wins over the one shipped in the store.
 overrides_json() {

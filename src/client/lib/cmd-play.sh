@@ -127,7 +127,8 @@ play_prepare() {
 
 # Rebuild the GC roots after pulling a new version of the flake.
 cmd_sync() {
-  local flake
+  local flake force=""
+  [[ "${1:-}" != "--force" && "${1:-}" != "-f" ]] || force=1
   flake="$(gotg_flake)"
   # A URL ref answers from nix's fetch cache for up to an hour; sync exists
   # to pick up what just changed, so it pays for a fresh look at the head.
@@ -139,6 +140,22 @@ cmd_sync() {
   fi
 
   mkdir -p "$GOTG_STATE_DIR"
+  # The flake as it was the last time everything here was built from it. The
+  # same commit again is the same closure — nix would say so too, after an
+  # evaluation per environment that this is here to skip.
+  local stamp="$GOTG_STATE_DIR/sync.rev" fingerprint
+  fingerprint="$(flake_fingerprint "$flake")"
+  if [[ -z "$force" && -n "$fingerprint" && -f "$stamp" && "$(cat "$stamp")" == "$fingerprint" ]]; then
+    _sync_mark same gotg "at ${fingerprint:0:12}"
+    local root
+    for root in "$GOTG_ROOTS_DIR"/env-*; do
+      [[ -e "$root" ]] && _sync_mark same "$(basename "$root")"
+    done
+    log "${C_DIM}nothing changed since ${fingerprint:0:12}; gotg sync --force builds anyway${C_RESET}"
+    return 0
+  fi
+  rm -f "$stamp"
+
   local before after
   before="$(readlink -f "$GOTG_APP_ROOT" 2>/dev/null || true)"
   "$(nix_bin)" build "$flake#gotg" -o "$GOTG_APP_ROOT" "${refresh[@]}" || die "could not build gotg from $flake"
@@ -180,6 +197,8 @@ cmd_sync() {
 
   ((changed == 0)) || log "${C_DIM}anything already open keeps its old environment until relaunched${C_RESET}"
   ((failed == 0)) || die "$failed environment(s) did not build"
+  # Only a complete pass earns the stamp: a partial one must be paid for again.
+  [[ -z "$fingerprint" ]] || printf '%s\n' "$fingerprint" >"$stamp"
 }
 
 # ● name — green for a root that moved, dim for one that did not, yellow for

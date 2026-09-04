@@ -108,7 +108,7 @@ usage: gotg <command> [args]
                      open that environment's own emulator settings
   configure storage  where games are kept: list, add, remove, default
   steam <command>    add / remove / list non-Steam games (steam help)
-  sync               rebuild gotg and the environment GC roots after a git pull
+  sync [--force]     rebuild gotg and the environment GC roots after a git pull
   version            which gotg this is, and where it was installed from
 
 Ids look like usa.legend_of_zelda_majoras_mask. When the same id exists on more
@@ -155,7 +155,7 @@ usage: gotg configure <id> [variant]    — open that environment's own settings
                                         — where games are kept; the first is where downloads land
 EOF
       ;;
-    sync) echo "usage: gotg sync    — rebuild every already-built environment from the flake" ;;
+    sync) echo "usage: gotg sync [--force]    — rebuild every already-built environment from the flake; a flake unchanged since the last sync is skipped unless forced" ;;
   esac
 }
 
