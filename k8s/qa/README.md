@@ -8,7 +8,7 @@ service it fetches the game from.
 
 ```bash
 nix build .#qa-image
-skopeo copy docker-archive:result docker://localhost:30500/gotg-qa:0.5.8
+skopeo copy docker-archive:result docker://localhost:30500/gotg-qa:0.5.9
 ```
 
 The image carries the cartridge platforms (gb, gbc, gba, nes, snes, genesis,
