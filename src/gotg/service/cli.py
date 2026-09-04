@@ -32,6 +32,7 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
         auth_url=env.get("GOTG_AUTH_URL", "").rstrip("/"),
         files_url=env.get("GOTG_FILES_URL", "").rstrip("/"),
         files_port_file=env.get("GOTG_FILES_PORT_FILE", ""),
+        files_preferred_url=env.get("GOTG_FILES_PREFERRED_URL", "").rstrip("/"),
         legacy_user=env.get("GOTG_LEGACY_USER", "legacy"),
     ).validate()
 

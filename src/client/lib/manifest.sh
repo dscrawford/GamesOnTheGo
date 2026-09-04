@@ -76,18 +76,44 @@ manifest_ensure() {
 # Where the bytes live. The catalog names its own byte host (files_url) so a
 # deployment can keep /games off the proxied control plane; an older service
 # or cache names none, and the one service url then serves both.
-manifest_files_url() {
-  local base=""
-  # A caller that sits beside the service — a QA pod on the cluster — names
-  # it directly, rather than leaving through the VPN the catalog's byte host
-  # is fronted by and coming back in.
+manifest_files_url() { manifest_files_hosts | head -n1; }
+
+# Every byte host, one per line, in the catalog's order of preference: the
+# tailnet address first for a machine on it, the universal host behind. A
+# caller that sits beside the service — a QA pod on the cluster — names its
+# own with GOTG_FILES_URL and hears of no other.
+manifest_files_hosts() {
   if [[ "${GOTG_FILES_URL:-}" == http://* || "${GOTG_FILES_URL:-}" == https://* ]]; then
-    printf '%s' "${GOTG_FILES_URL%/}"
+    printf '%s\n' "${GOTG_FILES_URL%/}"
     return 0
   fi
-  manifest_cached && base="$(jq -r '.files_url // empty' "$GOTG_CACHE_FILE" 2>/dev/null)"
-  [[ "$base" == http://* || "$base" == https://* ]] || base=""
-  printf '%s' "${base:-$(service_url)}"
+  local hosts=""
+  manifest_cached && hosts="$(jq -r '
+    [(.files_urls // [])[], (.files_url // empty)]
+    | map(select(type == "string" and (startswith("http://") or startswith("https://"))))
+    | reduce .[] as $h ([]; if index($h) then . else . + [$h] end) | .[]' "$GOTG_CACHE_FILE" 2>/dev/null)"
+  if [[ -n "$hosts" ]]; then
+    printf '%s\n' "$hosts"
+  else
+    printf '%s\n' "$(service_url)"
+  fi
+}
+
+# The first byte host that answers, probed with a short connect timeout: a
+# tailnet address is a black hole from outside it, and one probe per download
+# beats one timeout per member. None answering falls back to the first, whose
+# failure then says which host could not be reached.
+manifest_files_pick() {
+  local host first=""
+  while IFS= read -r host; do
+    [[ -n "$host" ]] || continue
+    : "${first:=$host}"
+    if service_curl -fsS -o /dev/null --connect-timeout 3 --max-time 10 "$host/healthz" 2>/dev/null; then
+      printf '%s' "$host"
+      return 0
+    fi
+  done < <(manifest_files_hosts)
+  printf '%s' "$first"
 }
 
 # Every game as {id, platform, handler, title, files: [{name, size_bytes,

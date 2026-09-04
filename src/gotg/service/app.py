@@ -233,10 +233,17 @@ class Config:
     # port here, and it is read per catalog GET — never cached — so a client's
     # re-read after a failed download gets wherever the bytes live now.
     files_port_file: str = ""
+    # A byte host only some clients can reach — the library's NodePort on a
+    # node's tailscale address — advertised ahead of files_url in files_urls.
+    # A client tries it first and falls back; one outside the tailnet never
+    # loses the universal host.
+    files_preferred_url: str = ""
 
     def validate(self) -> Config:
         if self.files_url and not self.files_url.startswith(("http://", "https://")):
             raise ValueError(f"GOTG_FILES_URL is not an http(s) url: {self.files_url!r}")
+        if self.files_preferred_url and not self.files_preferred_url.startswith(("http://", "https://")):
+            raise ValueError(f"GOTG_FILES_PREFERRED_URL is not an http(s) url: {self.files_preferred_url!r}")
         if not self.token:
             raise ValueError(
                 "no client token set. Refusing to start: an empty token "
@@ -685,6 +692,11 @@ class Handler(BaseHTTPRequestHandler):
                 files_url = self._files_url()
                 if files_url:
                     view["files_url"] = files_url
+                # In order of preference; files_url stays the one every
+                # client can reach, so an older client keeps working.
+                hosts = [h for h in (self.config.files_preferred_url, files_url) if h]
+                if hosts:
+                    view["files_urls"] = list(dict.fromkeys(hosts))
                 self._send(200, json.dumps(view).encode(), "application/json")
             elif self.command == "PUT" and len(segments) == 2:
                 if not needs_index():

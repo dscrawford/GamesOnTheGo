@@ -1365,3 +1365,41 @@ def test_the_library_token_reads_but_never_writes(library_service, catalog, libr
 def test_a_library_token_equal_to_another_credential_is_refused():
     with pytest.raises(ValueError, match="library token"):
         Config(token=CLIENT, index_token=INDEX, library_token=INDEX).validate()
+
+
+# --- more than one byte host -----------------------------------------------------
+
+
+def test_a_preferred_byte_host_is_listed_first_and_files_url_stays_universal(catalog):
+    config = Config(
+        token=CLIENT,
+        index_token=INDEX,
+        files_url="https://files.example",
+        files_preferred_url="http://100.70.210.123:30780",
+    )
+    server = make_server("127.0.0.1", free_port(), config, None, catalog)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    try:
+        status, view = call(f"http://127.0.0.1:{server.server_port}/catalog")
+        assert status == 200
+        assert view["files_url"] == "https://files.example"
+        assert view["files_urls"] == ["http://100.70.210.123:30780", "https://files.example"]
+    finally:
+        server.shutdown()
+
+
+def test_a_preferred_host_alone_is_listed_without_a_files_url(catalog):
+    config = Config(token=CLIENT, index_token=INDEX, files_preferred_url="http://100.70.210.123:30780")
+    server = make_server("127.0.0.1", free_port(), config, None, catalog)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    try:
+        status, view = call(f"http://127.0.0.1:{server.server_port}/catalog")
+        assert "files_url" not in view
+        assert view["files_urls"] == ["http://100.70.210.123:30780"]
+    finally:
+        server.shutdown()
+
+
+def test_a_preferred_host_that_is_not_a_url_refuses_to_start():
+    with pytest.raises(ValueError, match="GOTG_FILES_PREFERRED_URL"):
+        Config(token=CLIENT, files_preferred_url="node1:30780").validate()
