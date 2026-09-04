@@ -553,3 +553,17 @@ SHIM
   [ "$status" -eq 0 ]
   [ -f "$GOTG_GAMES_DIR/switch/world.zelda/extras/dlc_pack-pack.nsp" ]
 }
+
+@test "GOTG_FILES_URL names where the bytes come from, over the catalog's own host" {
+  add_game n64 "usa.zelda.z64" "rom-content" "Zelda"
+  gotg refresh
+  # The catalog's byte host is unreachable; the override is the service itself.
+  jq '.files_url = "http://127.0.0.1:9/"' "$GOTG_CACHE_FILE" >"$GOTG_CACHE_FILE.tmp" && mv "$GOTG_CACHE_FILE.tmp" "$GOTG_CACHE_FILE"
+  GOTG_FILES_URL="$GOTG_SERVICE_URL/" gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [ -f "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
+  # And a value that is not a url is ignored rather than dialled.
+  rm "$GOTG_GAMES_DIR/n64/usa.zelda.z64"
+  GOTG_FILES_URL="not-a-url" gotg download usa.zelda
+  [ "$status" -ne 0 ]
+}

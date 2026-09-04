@@ -75,6 +75,13 @@ manifest_ensure() {
 # or cache names none, and the one service url then serves both.
 manifest_files_url() {
   local base=""
+  # A caller that sits beside the service — a QA pod on the cluster — names
+  # it directly, rather than leaving through the VPN the catalog's byte host
+  # is fronted by and coming back in.
+  if [[ "${GOTG_FILES_URL:-}" == http://* || "${GOTG_FILES_URL:-}" == https://* ]]; then
+    printf '%s' "${GOTG_FILES_URL%/}"
+    return 0
+  fi
   manifest_cached && base="$(jq -r '.files_url // empty' "$GOTG_CACHE_FILE" 2>/dev/null)"
   [[ "$base" == http://* || "$base" == https://* ]] || base=""
   printf '%s' "${base:-$(service_url)}"

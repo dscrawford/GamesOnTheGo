@@ -33,7 +33,7 @@ spec:
         kubernetes.io/hostname: node3
       containers:
         - name: qa
-          image: localhost:30500/gotg-qa:0.5.2
+          image: localhost:30500/gotg-qa:0.5.3
           args: ["@GAME@", "--duration", "60", "--boot-wait", "25"]
           resources:
             limits:
@@ -49,6 +49,10 @@ spec:
           env:
             - name: GOTG_GAMES_DIR
               value: /state/games
+            # The bytes come from the library service next door, not from the
+            # VPN-fronted host the catalog names for the outside world.
+            - name: GOTG_FILES_URL
+              value: http://gotg-library.default.svc
           securityContext:
             # /dev/uinput is the virtual pad, and containerd's device cgroup
             # denies it to an unprivileged container however the node's file
