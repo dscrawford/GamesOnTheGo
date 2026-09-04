@@ -108,7 +108,7 @@ let
 in
 dockerTools.buildLayeredImage {
   name = "gotg-qa";
-  tag = "0.5.8";
+  tag = "0.5.9";
   contents = [
     entrypoint
     xwaylandSoftware
