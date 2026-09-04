@@ -15,8 +15,13 @@
 
 cmd_configure() {
   local want="${1:-}" variant=""
-  [[ -n "$want" ]] || die "usage: gotg configure <id> [variant]"
+  [[ -n "$want" ]] || die "usage: gotg configure <id> [variant] | gotg configure storage ..."
   shift
+  # Not a game: where games go. A word without a dot is never an id.
+  if [[ "$want" == "storage" ]]; then
+    cmd_configure_storage "$@"
+    return
+  fi
 
   # Same shape as `gotg play <id> <variant>`: a bare word is the variant, and
   # anything starting with a dash is not.

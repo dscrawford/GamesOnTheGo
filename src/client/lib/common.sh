@@ -16,8 +16,13 @@ GOTG_APP_ROOT="$GOTG_STATE_DIR/app"
 GOTG_SAVES_DIR="$GOTG_STATE_DIR/saves"
 
 # Where games land. One directory per platform, mirroring the server layout.
+# This is the default of possibly several — see storage.sh, which reads the
+# rest from the config once it is loaded. Set in the environment, it is the
+# only one.
+GOTG_GAMES_DIR_EXPLICIT="${GOTG_GAMES_DIR:-}"
+GOTG_PARTIAL_DIR_EXPLICIT="${GOTG_PARTIAL_DIR:-}"
 GOTG_GAMES_DIR="${GOTG_GAMES_DIR:-$HOME/Games}"
-GOTG_PARTIAL_DIR="$GOTG_GAMES_DIR/.gotg-partial"
+GOTG_PARTIAL_DIR="${GOTG_PARTIAL_DIR:-$GOTG_GAMES_DIR/.gotg-partial}"
 
 # The entry-id contract, shared with the importer.
 GOTG_ID_RE='^[a-z]{3,5}\.[a-z0-9][a-z0-9_]*$'

@@ -241,7 +241,7 @@ download_game() {
         _run_recipe "$game" "$handler" "$staged" "$dest"
       else
         local member
-        member="$staged/$(jq -r '.files[0].name' <<<"$game")"
+        member="$staged/$(game_base_member "$game")"
         _install_file "$member" "$dest"
       fi
       ;;
@@ -267,7 +267,7 @@ download_game() {
 # anyone's back.
 _warn_without_extras() {
   local game="$1" legacy
-  legacy="$(game_legacy_path "$game")" || return 0
+  legacy="$(game_legacy_path "$game" "$(game_games_dir "$game")")" || return 0
   [[ -f "$legacy" ]] || return 0
   warn "$(manifest_field "$game" id) is installed without its updates and DLC — uninstall and install again to fetch them"
 }
@@ -302,8 +302,10 @@ cmd_download() {
   manifest_ensure
   local game
   game="$(manifest_find "$want")"
-  if game_is_installed "$game"; then
-    log "already installed: $(game_local_path "$game")"
+  local here
+  if here="$(game_installed_path "$game")"; then
+    log "already installed: $here"
+    _warn_without_extras "$game"
     return 0
   fi
   download_game "$game"

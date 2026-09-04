@@ -18,7 +18,7 @@ def game(id="usa.zelda", platform="n64"):
 
 
 def test_the_verbs_in_order():
-    assert [label for label, _ in ACTIONS] == ["Play Game", "Configure", "Controllers", "Add to Steam"]
+    assert [label for label, _ in ACTIONS] == ["Play Game", "Configure", "Controllers", "Storage", "Add to Steam"]
 
 
 def test_opening_holds_the_game_and_starts_on_play():
@@ -34,6 +34,8 @@ def test_moving_walks_and_clamps():
     assert m.action == "configure"
     m.move(1)
     assert m.action == "controllers"
+    m.move(1)
+    assert m.action == "storage"
     m.move(1)
     assert m.action == "steam-add"
     m.move(1)
@@ -55,9 +57,9 @@ def test_the_panel_lands_on_the_open_side_of_the_tile(tile_index, side):
 
 def test_selecting_an_item_by_index_is_refused_off_the_list():
     m = Menu(game(), tile_index=0)
-    assert m.select(3) is True
+    assert m.select(4) is True
     assert m.action == "steam-add"
-    assert m.select(4) is False
+    assert m.select(5) is False
     assert m.action == "steam-add", "a refused select leaves the cursor"
     assert m.select(-1) is False
 
@@ -67,14 +69,21 @@ def test_selecting_an_item_by_index_is_refused_off_the_list():
 
 def test_a_game_that_is_here_gets_uninstall_last():
     m = Menu(game(), tile_index=0, installed=True)
-    assert [label for label, _ in m.actions] == ["Play Game", "Configure", "Controllers", "Add to Steam", "Uninstall"]
+    assert [label for label, _ in m.actions] == [
+        "Play Game",
+        "Configure",
+        "Controllers",
+        "Storage",
+        "Add to Steam",
+        "Uninstall",
+    ]
     m.move(10)
     assert m.action == "uninstall"
 
 
 def test_a_game_that_is_not_here_has_no_uninstall_to_press():
     m = Menu(game(), tile_index=0, installed=False)
-    assert len(m.actions) == 4
+    assert len(m.actions) == 5
     m.move(10)
     assert m.action == "steam-add"
-    assert m.select(4) is False
+    assert m.select(5) is False

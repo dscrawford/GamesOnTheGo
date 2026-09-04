@@ -19,8 +19,9 @@ nix run .#gotg-ui -- --platform snes --refresh # forget cached art and look agai
 |---|---|
 | d-pad / arrows | move; off either side turns the page |
 | shoulders / PgUp PgDn | previous and next page |
-| A / Enter | open the action menu — Play, Configure, Add to Steam, and Uninstall for a game that is here |
+| A / Enter | open the action menu — Play, Configure, Controllers, Storage, Add to Steam, and Uninstall for a game that is here |
 | Start / I | only installed games — the ones badged with a download arrow |
+| S (or Storage in the menu) | where games are kept: each directory with its device's free space; A makes one the download target, Y adds one, X forgets one |
 | Y / Tab | next platform |
 | Back / shift-Tab / R | next region — world is region-free and rides along (shift-R back) |
 | X / `/` | search — Enter applies, Escape cancels |
@@ -39,6 +40,7 @@ nix run .#gotg-ui -- --platform snes --refresh # forget cached art and look agai
 | `fetch.py` | asking the client's own art sources, off the frame loop | no |
 | `menu.py` | the action menu: the verbs, and which side has room | no |
 | `installed.py` | asking the client what is downloaded here | no |
+| `storage.py` | the games directories and their free space, through `gotg configure storage` | no |
 | `launch.py` | the handoff to `gotg play` | no |
 | `app.py` | drawing, and reading a controller | yes |
 | `__main__.py` | arguments, and the one error worth printing | no |

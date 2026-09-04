@@ -52,6 +52,13 @@ _gotg() {
         play | configure)
             if [[ $COMP_CWORD -eq 2 ]]; then
                 mapfile -t COMPREPLY < <(_gotg_ids "$cur")
+                [[ "$cmd" == configure ]] && mapfile -t -O "${#COMPREPLY[@]}" COMPREPLY < <(compgen -W storage -- "$cur")
+            elif [[ "$cmd" == configure && "$sub" == storage ]]; then
+                if [[ $COMP_CWORD -eq 3 ]]; then
+                    mapfile -t COMPREPLY < <(compgen -W "list add remove default" -- "$cur")
+                else
+                    mapfile -t COMPREPLY < <(compgen -d -- "$cur")
+                fi
             elif [[ $COMP_CWORD -eq 3 ]]; then
                 mapfile -t COMPREPLY < <(compgen -W "$(gotg complete variants "$sub")" -- "$cur")
             fi

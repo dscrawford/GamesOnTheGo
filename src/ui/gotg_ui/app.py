@@ -23,6 +23,7 @@ from .installed import installed_games
 from .layout import grid, tile_at
 from .menu import Menu
 from .prepare import Preparer, is_ready
+from .storage import Storage, human
 
 BACKGROUND = (18, 18, 20)
 TILE = (38, 38, 44)
@@ -179,6 +180,47 @@ def draw_menu(screen, menu: Menu, tiles, font_at) -> None:
         screen.blit(text, (rx + 16, ry + (rh - text.get_height()) // 2 - 2))
 
 
+def draw_storage(screen, font_at, storage: Storage, typing: str | None) -> None:
+    """The storage screen: every games directory, the device's room, the way out."""
+    width, height = screen.get_size()
+    screen.fill(BACKGROUND)
+    margin = height // 16
+    screen.blit(font_at(30).render("Storage — where games are kept", True, TEXT), (margin, margin))
+
+    y = margin + font_at(30).get_height() + margin // 2
+    row_h = font_at(22).get_height() + 16
+    if not storage.rows:
+        empty = font_at(22).render("no games directory known — could not ask the client", True, TEXT_DIM)
+        screen.blit(empty, (margin, y))
+    for index, row in enumerate(storage.rows):
+        selected = index == storage.selected
+        if selected:
+            band = (margin - 8, y - 4, width - 2 * margin + 16, row_h)
+            pygame.draw.rect(screen, TILE_SELECTED, band, border_radius=6)
+        mark = "downloads land here" if row.get("default") else ""
+        if not row.get("exists", True):
+            room = "missing"
+        else:
+            room = f"{human(int(row.get('free_bytes', 0)))} free of {human(int(row.get('total_bytes', 0)))}"
+        path = font_at(22).render(str(row["path"])[:90], True, TEXT if selected else TEXT_DIM)
+        screen.blit(path, (margin, y + 4))
+        note = font_at(18).render(f"{room}    {mark}", True, TEXT if selected else TEXT_DIM)
+        screen.blit(note, (width - margin - note.get_width(), y + 8))
+        y += row_h
+
+    if typing is not None:
+        prompt = font_at(22).render(f"add a directory: {typing}_", True, TEXT)
+        screen.blit(prompt, (margin, y + row_h))
+    if storage.message:
+        note = font_at(18).render(storage.message[:160], True, TEXT)
+        screen.blit(note, (margin, height - margin * 2 - note.get_height()))
+    hint = (
+        "A / Enter — downloads go here   ·   Y / + — add a directory   ·   X / Delete — forget   ·   B / Escape — back"
+    )
+    label = font_at(18).render(hint, True, TEXT_DIM)
+    screen.blit(label, (margin, height - margin - label.get_height()))
+
+
 def draw_prepare(screen, font_at, game: Game, lines: list[str], failed: bool) -> None:
     """The loader screen: heading, `gotg install`'s output verbatim, the way out.
 
@@ -271,6 +313,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # action, and nothing underneath it should keep moving.
     controllers: str | None = None
     controller_art: dict = {}
+    # The storage screen, and the path being typed to add to it.
+    storage: Storage | None = None
+    storage_typing: str | None = None
     # The loader phase: a verb that needs work spawns the client and the grid
     # gives way to its output until it finishes, fails, or is cancelled.
     preparer: Preparer | None = None
@@ -280,12 +325,16 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     running = True
 
     def pick(game: Game | None, verb: str = "play") -> None:
-        nonlocal chosen, running, preparer, after_prepare, controllers
+        nonlocal chosen, running, preparer, after_prepare, controllers, storage
         if game is None:
             return
         if verb == "controllers":
             # A screen in this program, not a verb for the client.
             controllers = game.platform
+            return
+        if verb == "storage":
+            storage = Storage()
+            storage.refresh()
             return
         if verb == "steam-add":
             # Not an exec: the shortcut is written, the grid comes back.
@@ -326,6 +375,51 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             preparer.cancel()
                         preparer = None
                         prepare_failed = False
+                    continue
+
+                # The storage screen owns its input: a list to walk, three
+                # verbs, and a path typed to add — every key is text then.
+                if storage is not None:
+                    if storage_typing is not None:
+                        if event.type != pygame.KEYDOWN:
+                            continue
+                        if event.key == pygame.K_ESCAPE:
+                            storage_typing = None
+                        elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                            storage.add(storage_typing)
+                            storage_typing = None
+                        elif event.key == pygame.K_BACKSPACE:
+                            storage_typing = storage_typing[:-1]
+                        elif event.unicode and event.unicode.isprintable():
+                            storage_typing += event.unicode
+                        continue
+                    if event.type == pygame.KEYDOWN:
+                        if event.key in (pygame.K_ESCAPE, pygame.K_b):
+                            storage = None
+                        elif event.key == pygame.K_UP:
+                            storage.move(-1)
+                        elif event.key == pygame.K_DOWN:
+                            storage.move(1)
+                        elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                            storage.make_default()
+                        elif event.key in (pygame.K_DELETE, pygame.K_x):
+                            storage.remove()
+                        elif event.key in (pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_EQUALS, pygame.K_y):
+                            storage_typing = ""
+                    elif event.type == pygame.JOYHATMOTION:
+                        dx, dy = event.value
+                        if dy:
+                            storage.move(-dy)
+                    elif event.type == pygame.JOYBUTTONDOWN:
+                        if event.button == 0:
+                            storage.make_default()
+                        elif event.button == 1:
+                            storage = None
+                        elif event.button == 2:
+                            storage.remove()
+                        elif event.button == 3:
+                            # Y: add. A Deck raises the Steam keyboard over this.
+                            storage_typing = ""
                     continue
 
                 # Same for the controller diagram: it is a whole screen, so
@@ -429,6 +523,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             menu = Menu(state.game, state.selected, browser.is_installed(state.game))
                     elif event.key == pygame.K_i:
                         browser.toggle_installed()
+                    elif event.key == pygame.K_s:
+                        storage = Storage()
+                        storage.refresh()
                 elif event.type == pygame.MOUSEMOTION:
                     # Hover moves the cursor, so the pointer and the stick drive
                     # one selection rather than two competing highlights. A gap
@@ -492,6 +589,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     prepare_failed = True
             if preparer is not None:
                 draw_prepare(screen, font_at, preparer.game, preparer.tail(28), prepare_failed)
+            elif storage is not None:
+                draw_storage(screen, font_at, storage, storage_typing)
             elif controllers is not None:
                 draw_controllers(screen, assets_dir(), controllers, font_at, controller_art)
             else:

@@ -25,6 +25,8 @@ source "$GOTG_LIB/color.sh"
 source "$GOTG_LIB/common.sh"
 # shellcheck source=lib/config.sh
 source "$GOTG_LIB/config.sh"
+# shellcheck source=lib/storage.sh
+source "$GOTG_LIB/storage.sh"
 # shellcheck source=lib/manifest.sh
 source "$GOTG_LIB/manifest.sh"
 # shellcheck source=lib/download.sh
@@ -104,6 +106,7 @@ usage: gotg <command> [args]
   controllers <cmd>  what SDL sees, and where its inputs land
   configure <id> [variant]
                      open that environment's own emulator settings
+  configure storage  where games are kept: list, add, remove, default
   steam <command>    add / remove / list non-Steam games (steam help)
   sync               rebuild gotg and the environment GC roots after a git pull
   version            which gotg this is, and where it was installed from
@@ -145,7 +148,13 @@ EOF
     install) echo "usage: gotg install <id>    — fetch it, build its environment, write a Steam launcher" ;;
     uninstall) echo "usage: gotg uninstall <id>    — remove the game's files and launchers; saves and settings stay" ;;
     play | launch) echo "usage: gotg play <id> [variant] [emulator args...]    — build whatever is missing, then launch" ;;
-    configure) echo "usage: gotg configure <id> [variant]    — open that environment's own settings screen" ;;
+    configure)
+      cat <<'EOF'
+usage: gotg configure <id> [variant]    — open that environment's own settings screen
+       gotg configure storage [list [--json] | add <dir> | remove <dir> | default <dir>]
+                                        — where games are kept; the first is where downloads land
+EOF
+      ;;
     sync) echo "usage: gotg sync    — rebuild every already-built environment from the flake" ;;
   esac
 }
@@ -153,6 +162,8 @@ EOF
 main() {
   local cmd="${1:-}"
   [[ $# -gt 0 ]] && shift || true
+  # Before anything names a path: the games directory may be configured.
+  storage_init
 
   # Every leaf command answers -h/--help. The group commands handle their own.
   case "$cmd" in

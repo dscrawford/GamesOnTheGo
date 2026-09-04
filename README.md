@@ -398,6 +398,8 @@ is set in the emulator's own settings screen:
 
 ```bash
 gotg configure usa.super_mario_sunshine bse
+gotg configure storage add /run/media/deck/card/Games   # a second games directory
+gotg configure storage default /run/media/deck/card/Games
 ```
 
 A launch cannot double as this. `gotg play` starts Dolphin in batch mode so the

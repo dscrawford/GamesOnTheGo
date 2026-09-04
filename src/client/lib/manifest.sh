@@ -135,6 +135,12 @@ game_has_extras() {
   jq -e '[.files[]?.name | startswith("extras/")] | any' <<<"$1" >/dev/null 2>&1
 }
 
+# The member that is the game itself. Not files[0]: the service lists members
+# by name, and "extras/" sorts before most things.
+game_base_member() {
+  jq -r '[.files[]? | select(.name | startswith("extras/") | not)][0].name // empty' <<<"$1"
+}
+
 # The single-file handlers install their one member as it is named — unless
 # an unzip override or attached extras hand the game to a recipe instead.
 game_is_placed_file() {
@@ -150,19 +156,22 @@ game_is_placed_file() {
 # Single-file entries land under their canonical member name. Everything a
 # recipe refines, and every tree fetched in place, lands as or under the id —
 # `unzip` overrides included, which keep their old shape.
-game_local_path() {
-  local game="$1" platform name
+game_local_path() { game_path_in "$1" "$GOTG_GAMES_DIR"; }
+
+# The same, under one particular games directory.
+game_path_in() {
+  local game="$1" root="$2" platform name
   platform="$(manifest_field "$game" platform)"
   validate_platform "$platform"
   if [[ "$(override_field "$game" unzip)" == "true" ]]; then
     name="$(manifest_field "$game" id)"
   elif game_is_placed_file "$game"; then
-    name="$(jq -r '.files[0].name' <<<"$game")"
+    name="$(game_base_member "$game")"
     validate_filename "$name"
   else
     name="$(manifest_field "$game" id)"
   fi
-  printf '%s/%s/%s' "$GOTG_GAMES_DIR" "$platform" "$name"
+  printf '%s/%s/%s' "$root" "$platform" "$name"
 }
 
 # A refined artifact keeps the id but the recipe picks the extension: resolve
@@ -170,9 +179,21 @@ game_local_path() {
 # glob is only for the recipe handlers whose base *is* the bare id; a
 # single-file game's base already carries its extension, and globbing there
 # would mistake a leftover .sav sidecar for the game itself.
+#
+# Every games directory is searched, in order: a game is wherever it was
+# downloaded to, and the default directory is only where the next one goes.
 game_installed_path() {
-  local game="$1" base
-  base="$(game_local_path "$game")"
+  local game="$1" root
+  while IFS= read -r root; do
+    [[ -n "$root" ]] || continue
+    _game_installed_in "$game" "$root" && return 0
+  done < <(storage_dirs)
+  return 1
+}
+
+_game_installed_in() {
+  local game="$1" root="$2" base
+  base="$(game_path_in "$game" "$root")"
   if [[ -e "$base" ]]; then
     printf '%s' "$base"
     return 0
@@ -187,22 +208,23 @@ game_installed_path() {
   # A single-file game installed before its updates arrived: still the game,
   # at the name it was placed under, and playable without them.
   local legacy
-  if legacy="$(game_legacy_path "$game")" && [[ -f "$legacy" ]]; then
+  if legacy="$(game_legacy_path "$game" "$root")" && [[ -f "$legacy" ]]; then
     printf '%s' "$legacy"
     return 0
   fi
   return 1
 }
 
-# Where a single-file entry that has since gained extras was installed.
+# Where a single-file entry that has since gained extras was installed, under
+# one games directory.
 game_legacy_path() {
-  local game="$1" handler name
+  local game="$1" root="${2:-$GOTG_GAMES_DIR}" handler name
   handler="$(manifest_field "$game" handler)"
   [[ "$handler" == "single_file" || "$handler" == "no_intro_set" ]] || return 1
   game_has_extras "$game" || return 1
-  name="$(jq -r '.files[0].name' <<<"$game")"
+  name="$(game_base_member "$game")"
   validate_filename "$name"
-  printf '%s/%s/%s' "$GOTG_GAMES_DIR" "$(manifest_field "$game" platform)" "$name"
+  printf '%s/%s/%s' "$root" "$(manifest_field "$game" platform)" "$name"
 }
 
 game_is_installed() { game_installed_path "$1" >/dev/null; }
@@ -226,8 +248,9 @@ GOTG_LIST_LIMIT=50
 # Only contract-shaped platform and id ever leave, as complete_ids does.
 manifest_installed_keys() {
   [[ -s "$GOTG_CACHE_FILE" ]] || return 0
-  local disk
-  disk="$(find "$GOTG_GAMES_DIR" -mindepth 2 -maxdepth 2 -printf '%P\n' 2>/dev/null)" || disk=""
+  local disk roots=()
+  mapfile -t roots < <(storage_dirs)
+  disk="$(find "${roots[@]}" -mindepth 2 -maxdepth 2 -printf '%P\n' 2>/dev/null)" || disk=""
   jq -r --arg disk "$disk" --arg plat_re "$GOTG_PLATFORM_RE" --arg id_re "$GOTG_ID_RE" '
     ($disk | split("\n") | map(select(length > 0))) as $entries
     | (INDEX($entries[]; .)) as $exact
@@ -236,7 +259,8 @@ manifest_installed_keys() {
     | if .version != 2 then empty else
         .games[]
         | .platform as $plat | .id as $id
-        | (.files[0].name // "") as $name | (.handler // "") as $handler
+        | (([.files[]? | select((.name | type) == "string" and (.name | startswith("extras/") | not))][0].name) // "") as $name
+        | (.handler // "") as $handler
         | select(($plat | type) == "string" and ($id | type) == "string")
         | select(($plat | test($plat_re)) and ($id | test($id_re)))
         | select(

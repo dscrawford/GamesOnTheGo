@@ -15,10 +15,13 @@ launcher_path() {
   # A variant is a different way to run the same game — a mod, a port, a frame
   # rate — so it gets a launcher of its own rather than overwriting the plain
   # one. Both can then sit in Steam at once.
+  # Beside the game, in whichever games directory holds it.
+  local root
+  root="$(game_games_dir "$game")"
   if [[ -n "$variant" ]]; then
-    printf '%s/%s/play-%s-%s.sh' "$GOTG_GAMES_DIR" "$platform" "$id" "$variant"
+    printf '%s/%s/play-%s-%s.sh' "$root" "$platform" "$id" "$variant"
   else
-    printf '%s/%s/play-%s.sh' "$GOTG_GAMES_DIR" "$platform" "$id"
+    printf '%s/%s/play-%s.sh' "$root" "$platform" "$id"
   fi
 }
 

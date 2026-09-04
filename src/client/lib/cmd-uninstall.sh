@@ -22,7 +22,7 @@ cmd_uninstall() {
 
   local removed=""
   local path root
-  root="$GOTG_GAMES_DIR/$platform"
+  root="$(game_games_dir "$game")/$platform"
   if path="$(game_installed_path "$game")"; then
     # "Under the platform directory" is true by construction and proves
     # nothing: files[0].name is the catalog's to choose and may hold slashes,
