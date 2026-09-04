@@ -33,7 +33,7 @@ spec:
         kubernetes.io/hostname: node3
       containers:
         - name: qa
-          image: localhost:30500/gotg-qa:0.5.4
+          image: localhost:30500/gotg-qa:0.5.5
           args: ["@GAME@", "--duration", "60", "--boot-wait", "25"]
           resources:
             limits:
@@ -50,9 +50,12 @@ spec:
             - name: GOTG_GAMES_DIR
               value: /state/games
             # The bytes come from the library service next door, not from the
-            # VPN-fronted host the catalog names for the outside world.
+            # VPN-fronted host the catalog names for the outside world — and
+            # when the library volume is mounted below, straight from it.
             - name: GOTG_FILES_URL
               value: http://gotg-library.default.svc
+            - name: GOTG_LIBRARY_MOUNT
+              value: /data
           securityContext:
             # /dev/uinput is the virtual pad, and containerd's device cgroup
             # denies it to an unprivileged container however the node's file
@@ -81,6 +84,12 @@ spec:
             # default 64M would truncate a minute of lossless video.
             - name: shm
               mountPath: /dev/shm
+            # The library itself, read-only, at the path the catalog names.
+            # With it, members are copied rather than streamed; the pod's
+            # token has to be the library one for the catalog to say where.
+            - name: library
+              mountPath: /data
+              readOnly: true
       volumes:
         - name: state
           persistentVolumeClaim:
@@ -104,3 +113,7 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: 2Gi
+        - name: library
+          persistentVolumeClaim:
+            claimName: jellyfin-data
+            readOnly: true

@@ -562,8 +562,53 @@ SHIM
   GOTG_FILES_URL="$GOTG_SERVICE_URL/" gotg download usa.zelda
   [ "$status" -eq 0 ]
   [ -f "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
-  # And a value that is not a url is ignored rather than dialled.
+  # And a value that is not a url is ignored rather than dialled: the
+  # catalog's host is used, which the retry's refresh puts back.
   rm "$GOTG_GAMES_DIR/n64/usa.zelda.z64"
   GOTG_FILES_URL="not-a-url" gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$stderr" != *"not-a-url"* ]]
+}
+
+# --- the library, mounted -----------------------------------------------------
+
+@test "with the library mounted, members are copied from it and still verified" {
+  add_game n64 "usa.zelda.z64" "rom-content" "Zelda"
+  # The library token sees server paths; a mount at the library's own path
+  # is where the copy comes from. The byte host is made unreachable to prove
+  # nothing was streamed.
+  write_api_config library-token
+  GOTG_LIBRARY_MOUNT="$SERVICE_LIBRARY_DIR" gotg refresh
+  [ "$status" -eq 0 ]
+  run jq -r '.games[0].files[0].path' "$GOTG_CACHE_FILE"
+  [ "$output" = "$SERVICE_LIBRARY_DIR/n64/usa.zelda.z64" ]
+  jq '.files_url = "http://127.0.0.1:9/"' "$GOTG_CACHE_FILE" >"$GOTG_CACHE_FILE.tmp" && mv "$GOTG_CACHE_FILE.tmp" "$GOTG_CACHE_FILE"
+
+  GOTG_FILES_URL="http://127.0.0.1:9" GOTG_LIBRARY_MOUNT="$SERVICE_LIBRARY_DIR" gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"copying usa.zelda.z64 from the library"* ]]
+  [ "$(cat "$GOTG_GAMES_DIR/n64/usa.zelda.z64")" = rom-content ]
+
+  # A library copy that does not match the catalog is refused, not installed.
+  gotg uninstall usa.zelda
+  printf 'tampered' >"$SERVICE_LIBRARY_DIR/n64/usa.zelda.z64"
+  GOTG_FILES_URL="http://127.0.0.1:9" GOTG_LIBRARY_MOUNT="$SERVICE_LIBRARY_DIR" gotg download usa.zelda
   [ "$status" -ne 0 ]
+  [[ "$stderr" == *"does not match the catalog"* ]]
+  [ ! -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
+}
+
+@test "a client token gets no paths, and a path outside the mount is streamed" {
+  add_game n64 "usa.zelda.z64" "rom-content" "Zelda"
+  GOTG_LIBRARY_MOUNT="$SERVICE_LIBRARY_DIR" gotg refresh
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"403"* ]]
+
+  write_api_config library-token
+  GOTG_LIBRARY_MOUNT="$TEST_TMP/elsewhere" gotg refresh
+  [ "$status" -eq 0 ]
+  GOTG_LIBRARY_MOUNT="$TEST_TMP/elsewhere" gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$stderr" != *"copying"* ]]
+  [ -f "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
 }

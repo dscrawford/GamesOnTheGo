@@ -28,6 +28,7 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
         igdb_client_secret=env.get("IGDB_CLIENT_SECRET", ""),
         index_token=env.get("GOTG_INDEX_TOKEN", ""),
         admin_token=env.get("GOTG_ADMIN_TOKEN", ""),
+        library_token=env.get("GOTG_LIBRARY_TOKEN", ""),
         auth_url=env.get("GOTG_AUTH_URL", "").rstrip("/"),
         files_url=env.get("GOTG_FILES_URL", "").rstrip("/"),
         files_port_file=env.get("GOTG_FILES_PORT_FILE", ""),

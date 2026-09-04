@@ -208,6 +208,11 @@ class Config:
     # Mints and revokes per-person tokens, valid only under /admin — an admin
     # token that could also read saves would be one more shared secret.
     admin_token: str = ""
+    # Reads everything a client can, and the catalog with server paths: for a
+    # pod that has the library mounted and copies members from disk instead
+    # of streaming them. Read-only, so a game running in that pod cannot use
+    # it to rewrite the catalog.
+    library_token: str = ""
     # Where /steamgriddb answers are kept, so a fleet of clients costs one
     # upstream question per asset against the shared key's quota. Empty means
     # no cache, which is every deployment before the volume existed.
@@ -247,6 +252,11 @@ class Config:
             raise ValueError(
                 "the admin token equals another credential. Refusing to start: "
                 "minting tokens must need more than holding one."
+            )
+        if self.library_token and self.library_token in (self.token, self.index_token, self.admin_token):
+            raise ValueError(
+                "the library token equals another credential. Refusing to start: "
+                "seeing server paths must not come with any other power."
             )
         return self
 
@@ -375,8 +385,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _principal(self) -> str | None:
         """Who this bearer is: "legacy" (the shared env token), "indexer",
-        "admin", a per-person token's name, or None. The names the store can
-        mint exclude the three sentinels by NAME_RE, so they cannot collide.
+        "admin", "library", a per-person token's name, or None. The names the
+        store can mint exclude the sentinels by RESERVED_NAMES, so they cannot
+        collide.
         """
         # compare_digest rather than ==: a plain comparison returns early on the
         # first wrong byte, which leaks the secret a character at a time.
@@ -389,6 +400,8 @@ class Handler(BaseHTTPRequestHandler):
             return "indexer"
         if self.config.admin_token and hmac.compare_digest(bearer, self.config.admin_token.encode()):
             return "admin"
+        if self.config.library_token and hmac.compare_digest(bearer, self.config.library_token.encode()):
+            return "library"
         if self.token_store is not None:
             name = self.token_store.verify(bearer.decode("latin-1"))
             if name:
@@ -659,7 +672,13 @@ class Handler(BaseHTTPRequestHandler):
                 if full and not self._is_index():
                     self._problem(403, "the full catalog view needs the index token")
                     return
-                view = self.catalog.view(full=full)
+                # Server paths for the pod that has the library mounted; a
+                # client's view never carries them.
+                paths = "paths=1" in query
+                if paths and not (self._is_index() or self._principal() == "library"):
+                    self._problem(403, "server paths need the library token")
+                    return
+                view = self.catalog.view(full=full, paths=paths)
                 # The catalog names its own byte host, so clients need no
                 # files configuration — and a moving host (a VPN-fronted one
                 # changes address on reconnect) costs a re-read, not a rewrite.

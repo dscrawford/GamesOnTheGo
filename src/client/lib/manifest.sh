@@ -35,10 +35,13 @@ manifest_refresh() {
     warn "no service configured — run: gotg login"
     return 1
   }
-  local payload
+  # With the library mounted here, the catalog is asked for its server paths
+  # too: what the download copies from disk instead of streaming.
+  local payload query=""
+  [[ -z "${GOTG_LIBRARY_MOUNT:-}" ]] || query="?paths=1"
   payload="$(service_curl -fsS --max-time "${GOTG_API_TIMEOUT:-120}" \
     --max-filesize "${GOTG_CATALOG_MAX_BYTES:-104857600}" \
-    "$(service_url)/catalog" 2>&1)" || {
+    "$(service_url)/catalog$query" 2>&1)" || {
     # The reason is in the captured output: a refused token file, a TLS error.
     [[ -n "$payload" ]] && warn "$payload"
     warn "could not fetch the catalog from $(service_url)/catalog."

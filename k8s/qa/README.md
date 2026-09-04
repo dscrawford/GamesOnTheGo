@@ -8,7 +8,7 @@ service it fetches the game from.
 
 ```bash
 nix build .#qa-image
-skopeo copy docker-archive:result docker://localhost:30500/gotg-qa:0.5.4
+skopeo copy docker-archive:result docker://localhost:30500/gotg-qa:0.5.5
 ```
 
 The image carries the cartridge platforms (gb, gbc, gba, nes, snes, genesis,
@@ -24,6 +24,11 @@ kubectl -n default create secret generic gotg-qa-config \
   --from-file=config.json="$HOME/.config/gotg/config.json" \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
+
+The pod's `api.json` should carry the service's *library* token
+(`GOTG_LIBRARY_TOKEN` on the library deployment): read-only like a client's,
+plus the catalog's server paths. With the library volume mounted at `/data`
+(the Job does), a run copies members from disk instead of streaming them.
 
 ## A run
 

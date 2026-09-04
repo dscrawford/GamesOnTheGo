@@ -30,7 +30,7 @@ CODE_RE = re.compile(r"^gotgi_[A-Za-z0-9_-]{40,50}$")
 # platform slug's, sized for a person-and-device ("daniel-deck").
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 # The principals the service mints without this store.
-RESERVED_NAMES = frozenset({"legacy", "indexer", "admin"})
+RESERVED_NAMES = frozenset({"legacy", "indexer", "admin", "library"})
 
 INVITE_TTL = 7 * 24 * 3600
 LAST_USED_INTERVAL = 60

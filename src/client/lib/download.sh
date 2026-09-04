@@ -113,6 +113,21 @@ _download_with_progress() {
   fi
 }
 
+# A member's server path, when it lies inside the library mounted here
+# (GOTG_LIBRARY_MOUNT) and is a plain file. Anything else is a download.
+_library_member() {
+  local path="$1" mount="${GOTG_LIBRARY_MOUNT:-}"
+  [[ -n "$mount" && -n "$path" ]] || return 1
+  mount="${mount%/}"
+  case "$path" in
+    "$mount"/?*) ;;
+    *) return 1 ;;
+  esac
+  [[ "$path" != *"/../"* && "$path" != *"/./"* ]] || return 1
+  [[ -f "$path" && ! -L "$path" ]] || return 1
+  printf '%s' "$path"
+}
+
 # The importer writes bare-hex sidecars, so the manifest digest and the sidecar
 # agree; either is enough to catch a truncated or corrupted transfer.
 _verify_checksum() {
@@ -189,13 +204,21 @@ download_game() {
   local files_base
   files_base="$(manifest_files_url)"
 
-  local name size sha out url encoded
-  while IFS=$'\t' read -r name size sha encoded; do
+  local name size sha out url encoded server_path local_src
+  while IFS=$'\t' read -r name size sha encoded server_path; do
     validate_filename "$name"
     [[ "$sha" == "null" || "$sha" =~ ^[0-9a-f]{64}$ ]] ||
       die "invalid sha256 in catalog for $name"
     out="$staged/$name"
     mkdir -p "$(dirname "$out")"
+    # The library is mounted here: the member is copied from it, and verified
+    # exactly as a download would be — the catalog's hash is the contract.
+    if local_src="$(_library_member "$server_path")"; then
+      log "copying $name from the library at $GOTG_LIBRARY_MOUNT"
+      cp --reflink=auto -- "$local_src" "$out" || die "could not copy $name from $local_src"
+      (_verify_checksum "$out" "$sha") || die "the library's copy of $name does not match the catalog"
+      continue
+    fi
     url="$files_base/games/$platform/$id/$encoded"
     local fetched="" dl_status attempt
     for attempt in 1 2 3; do
@@ -229,7 +252,7 @@ download_game() {
     [[ -n "$fetched" ]] ||
       die "download failed for $id (partials kept at $staged; run again to resume)"
   done < <(jq -r '.files[] | [.name, .size_bytes, (.sha256 // "null"),
-    (.name | split("/") | map(@uri) | join("/"))] | @tsv' <<<"$game")
+    (.name | split("/") | map(@uri) | join("/")), (.path // "")] | @tsv' <<<"$game")
 
   case "$handler" in
     single_file | no_intro_set)

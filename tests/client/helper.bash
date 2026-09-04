@@ -56,6 +56,7 @@ _start_saves_service_once() {
     GOTG_CATALOG_DB="$TEST_TMP/service-state/catalog.db" \
     GOTG_INDEX_TOKEN="index-token" \
     GOTG_ADMIN_TOKEN="admin-token" \
+    GOTG_LIBRARY_TOKEN="library-token" \
     GOTG_TOKENS_DB="$TEST_TMP/service-state/tokens.db" \
     PORT="$SERVICE_PORT" \
     "${GOTG_SERVICE_BIN:-gotg-proxy}" >"$TEST_TMP/service.log" 2>&1 &

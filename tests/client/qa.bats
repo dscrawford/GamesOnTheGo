@@ -200,10 +200,14 @@ make_rundir() {
   gotg refresh
   add_game n64 "usa.new.z64" "rom" "New"
 
-  # The lookup is the first thing qa does; past it the run wants a compositor
-  # this test has no business starting, so the message is what is checked.
+  # The lookup is the first thing qa does; past it the run wants a pad
+  # device and a compositor this test has no business starting, so the
+  # messages are what is checked.
   gotg qa usa.new --duration 1
   [[ "$stderr" != *"no game called 'usa.new'"* ]]
   [[ "$stderr" == *"catalog updated"* ]]
+  gotg qa usa.nowhere --duration 1
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"no game called 'usa.nowhere'"* ]]
   stop_saves_service
 }

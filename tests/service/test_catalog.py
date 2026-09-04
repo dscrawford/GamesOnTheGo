@@ -1305,3 +1305,63 @@ def test_a_different_base_behind_the_same_extras_is_still_a_conflict(catalog, li
 def _file(name, path):
     st = path.stat()
     return {"name": name, "path": str(path), "size_bytes": st.st_size, "mtime": int(st.st_mtime), "sha256": None}
+
+
+# --- the library principal: paths for the pod that has the volume ----------------
+
+LIBRARY = "library-token"
+
+
+@pytest.fixture
+def library_service(catalog):
+    config = Config(token=CLIENT, index_token=INDEX, library_token=LIBRARY)
+    server = make_server("127.0.0.1", free_port(), config, None, catalog)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+def _seed(catalog, library):
+    game = library / "usa.zelda.z64"
+    game.write_bytes(b"rom")
+    row = {"handler": "single_file", "title": "Zelda", "files": [_file("usa.zelda.z64", game)]}
+    catalog.upsert("n64", "usa.zelda", row)
+    return game
+
+
+def test_paths_are_for_the_library_token_and_the_indexer_only(library_service, catalog, library):
+    game = _seed(catalog, library)
+
+    status, body = call(f"{library_service}/catalog?paths=1", token=CLIENT)
+    assert status == 403
+
+    status, body = call(f"{library_service}/catalog?paths=1", token=LIBRARY)
+    assert status == 200
+    assert body["games"][0]["files"][0]["path"] == str(game)
+    assert "mtime" not in body["games"][0]["files"][0]
+    assert "seen_at" not in body["games"][0], "paths is not the indexer's full view"
+
+    status, body = call(f"{library_service}/catalog?paths=1", token=INDEX)
+    assert status == 200 and body["games"][0]["files"][0]["path"] == str(game)
+
+    # Without asking, the library token sees what a client sees.
+    status, body = call(f"{library_service}/catalog", token=LIBRARY)
+    assert status == 200 and "path" not in body["games"][0]["files"][0]
+
+
+def test_the_library_token_reads_but_never_writes(library_service, catalog, library):
+    game = _seed(catalog, library)
+    row = {"handler": "single_file", "title": "Zelda", "files": [_file("usa.zelda.z64", game)]}
+    status, _ = call(f"{library_service}/catalog/n64/usa.zelda", method="PUT", token=LIBRARY, body=row)
+    assert status == 403
+    status, _ = call(f"{library_service}/catalog?full=1", token=LIBRARY)
+    assert status == 403
+    request = urllib.request.Request(f"{library_service}/games/n64/usa.zelda/usa.zelda.z64")
+    request.add_header("Authorization", f"Bearer {LIBRARY}")
+    with urllib.request.urlopen(request, timeout=10) as response:
+        assert response.status == 200 and response.read() == b"rom"
+
+
+def test_a_library_token_equal_to_another_credential_is_refused():
+    with pytest.raises(ValueError, match="library token"):
+        Config(token=CLIENT, index_token=INDEX, library_token=INDEX).validate()
