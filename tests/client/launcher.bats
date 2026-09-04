@@ -408,3 +408,50 @@ teardown() {
   [[ "$stderr" == *"● ares"*"not an environment name"* ]]
   [[ "$stderr" == *"● env-n64"* ]]
 }
+
+# --- sync skips a flake that has not changed ---
+
+commit_flake() {
+  git -C "$GOTG_FLAKE" init -q 2>/dev/null || true
+  git -C "$GOTG_FLAKE" -c user.name=t -c user.email=t@t add -A
+  git -C "$GOTG_FLAKE" -c user.name=t -c user.email=t@t commit -q -m "${1:-flake}" --allow-empty
+}
+
+@test "a second sync on the same commit builds nothing" {
+  stub_nix
+  fake_env env-n64
+  commit_flake
+  gotg sync
+  [ "$status" -eq 0 ]
+  local builds
+  builds="$(grep -c "^build " "$NIX_LOG")"
+  [ "$builds" -eq 2 ]
+
+  gotg sync
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"nothing changed since"* ]]
+  [[ "$stderr" == *"● env-n64"*"same"* ]]
+  [ "$(grep -c "^build " "$NIX_LOG")" -eq 2 ]
+
+  # A new commit, or a dirty checkout, or --force: built again.
+  commit_flake again
+  gotg sync
+  [ "$(grep -c "^build " "$NIX_LOG")" -eq 4 ]
+  gotg sync --force
+  [ "$(grep -c "^build " "$NIX_LOG")" -eq 6 ]
+  echo edit >>"$GOTG_FLAKE/flake.nix"
+  gotg sync
+  [ "$(grep -c "^build " "$NIX_LOG")" -eq 8 ]
+}
+
+@test "a sync that failed does not stamp the flake as done" {
+  stub_nix fail-env
+  fake_env env-broken
+  commit_flake
+  gotg sync
+  [ "$status" -ne 0 ]
+  [ ! -f "$GOTG_STATE_DIR/sync.rev" ]
+  gotg sync
+  [ "$status" -ne 0 ]
+  [[ "$stderr" != *"nothing changed"* ]]
+}
