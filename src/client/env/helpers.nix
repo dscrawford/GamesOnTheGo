@@ -72,6 +72,7 @@ let
   mods = [
     (import ./mods/sunshine.nix { inherit pkgs; })
     (import ./mods/luigis-mansion-2.nix { inherit pkgs; })
+    (import ./mods/totk-ultracam.nix { inherit pkgs lib; })
   ];
 
 in
