@@ -34,11 +34,11 @@ in
   # from Config.json on save, so the client keeps the last working set and puts
   # it back before a launch that would otherwise start unbound.
   #
-  # And a pad that is bound must stay connected: with none, a game opens the
-  # Switch's controller applet, and Ryubing 1.3.3 answers one of that applet's
-  # calls (ILibraryAppletAccessor 90) with ServiceNotImplementedException —
-  # a throw at launch, a freeze mid-game when a pad drops. Seen on TOTK 1.4.3,
-  # 2026-09-04. An emulator gap; revisit when the package moves past 1.3.3.
+  # And a pad that is bound should stay connected: with none, a game opens the
+  # Switch's controller applet, which Ryubing 1.3.3 cannot show. With
+  # ignore_missing_services pinned below the emulator no longer aborts on that
+  # applet's unimplemented call, but the game still waits on a screen that
+  # never opens. Seen on TOTK 1.4.3, 2026-09-04.
   padEmulator = "ryujinx";
 
   preLaunch = ''
@@ -69,9 +69,16 @@ in
     # straight to the game and straight back out of it, on a machine where
     # nothing but the game is on screen. The update check is doubly dead weight
     # here — the nix build cannot update itself, only the flake can.
+    #
+    # ignore_missing_services: a service command Ryujinx has not implemented
+    # answers "success" with a warning instead of throwing. Without it, Tears
+    # of the Kingdom 1.4.3 aborts on its first save (prepo 10107, telemetry)
+    # and any game opening the controller applet aborts on ILibraryAppletAccessor
+    # 90 — both calls a real console answers and neither one the game needs.
     if [ -f "$gotg_ryujinx_config" ]; then
       if ${pkgs.jq}/bin/jq --argjson fs "$([ -n "$gotg_fullscreen" ] && echo true || echo false)" \
-        '.update_checker_type = "Off" | .show_confirm_exit = false | .start_fullscreen = $fs' \
+        '.update_checker_type = "Off" | .show_confirm_exit = false | .start_fullscreen = $fs
+         | .ignore_missing_services = true' \
         "$gotg_ryujinx_config" >"$gotg_ryujinx_config.gotg"; then
         mv "$gotg_ryujinx_config.gotg" "$gotg_ryujinx_config"
       else
