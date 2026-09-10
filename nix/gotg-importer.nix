@@ -11,15 +11,15 @@
   coreutils,
 }:
 
-runCommand "gotg-importer-0.5.6"
+runCommand "gotg-importer-0.5.7"
   {
     nativeBuildInputs = [ makeWrapper ];
     inherit venv;
-    # Bumped for publishing raw members only, no unpacking here. The image tag
+    # Bumped for archive sets (the Redump GameCube 7z set). The image tag
     # comes from here, so leaving it would push over the tag the cluster is
     # currently running — the CronJob pins a digest, so nothing would break,
     # but the way back to the previous build would be gone.
-    passthru.version = "0.5.6";
+    passthru.version = "0.5.7";
     meta = {
       description = "Indexes completed game torrents into the GOTG catalog and /Games";
       mainProgram = "gotg-importer";

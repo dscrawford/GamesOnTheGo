@@ -26,6 +26,10 @@ from .scan import VOLUME_RE, WIIU_DECRYPTED_DIRS, Source
 # Internal verdicts only — these never become catalog rows.
 HANDLER_EXCLUDED = "excluded"
 HANDLER_MANUAL = "manual"
+# A DAT set whose games are one archive each (a Redump disc set as .7z per
+# title): every member is its own single_archive entry, chosen 1G1R like a
+# No-Intro set. Named in rules.yaml dat_dirs; the catalog never sees the name.
+HANDLER_ARCHIVE_SET = "archive_set"
 
 _HEX8_RE = re.compile(r"^[0-9a-f]{8}(\.(app|h3))?$", re.I)
 _TMD_RE = re.compile(r"^(title\.tmd|tmd(\.[0-9a-f]+)?)$", re.I)
@@ -146,10 +150,10 @@ def classify(source: Source, rules: Rules) -> Classification:
     if platform:
         return Classification(HANDLER_NO_INTRO_SET, platform)
 
-    zips = len(source.with_ext("zip"))
+    zips = len(source.with_ext("zip")) + len(source.with_ext("7z"))
     if zips >= rules.min_set_files:
-        # A DAT set of zipped ROMs: the archives hide the extension, so only the
-        # directory name can identify the platform.
+        # A DAT set of archived ROMs: the archives hide the extension, so only
+        # the directory name can identify the platform.
         return Classification(
             HANDLER_MANUAL,
             reason=f"{zips} zipped ROMs but directory name is unmapped; add it to rules.yaml dat_dirs",

@@ -12,7 +12,7 @@ from pathlib import Path
 from . import classify as cl
 from . import plan as pl
 from .rules import Rules
-from .scan import Source, scan
+from .scan import SINGLE_ARCHIVE_EXTS, Source, scan
 
 
 def _rom_files(source: Source, rules: Rules) -> list[str]:
@@ -39,8 +39,10 @@ def plan_source(path: Path | str, games_root: Path | str, rules: Rules) -> list[
     source = scan(Path(path))
     verdict = cl.classify(source, rules)
     ops = _plan_classified(source, verdict, games_root, rules)
+    # An archive set is a set here and a single archive per game on the wire.
+    handler = cl.HANDLER_SINGLE_ARCHIVE if verdict.handler == cl.HANDLER_ARCHIVE_SET else verdict.handler
     for op in ops:
-        op.handler = verdict.handler
+        op.handler = handler
     return ops
 
 
@@ -103,6 +105,12 @@ def _plan_classified(source, verdict, games_root: Path | str, rules: Rules) -> l
     if verdict.handler == cl.HANDLER_NO_INTRO_SET:
         return pl.plan_no_intro_set(
             verdict.platform, games_root, str(source.path), _rom_files(source, rules), one_g_one_r=True
+        )
+
+    if verdict.handler == cl.HANDLER_ARCHIVE_SET:
+        archives = [name for name in source.files if cl._ext(name) in SINGLE_ARCHIVE_EXTS]
+        return pl.plan_archive_set(
+            verdict.platform, games_root, str(source.path), archives, rules.target_for(verdict.platform).ext
         )
 
     if verdict.handler == cl.HANDLER_SINGLE_FILE:

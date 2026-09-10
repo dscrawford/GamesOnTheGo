@@ -52,6 +52,13 @@ dat_dirs:
   "Sega - Mega Drive - Genesis":
     platform: genesis
     handler: no_intro_set
+  # A Redump set, one .7z per disc — 682 of them on 2026-09-05, which the
+  # importer walked past for four days as "no recognizable game payload".
+  # archive_set: each archive is its own single_archive entry, chosen 1G1R,
+  # and the client converts it to RVZ on install.
+  "Nintendo - GameCube":
+    platform: gamecube
+    handler: archive_set
 
 # Single-file extension -> platform, for loose ROM torrents.
 extensions:
