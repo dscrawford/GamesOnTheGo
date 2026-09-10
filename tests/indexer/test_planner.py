@@ -396,3 +396,48 @@ def test_a_scene_update_with_an_underscore_version_keeps_every_group(roots):
 
     assert (first.action, first.entry_id, first.version) == (ACTION_ATTACH, "world.game", "1.2.1")
     assert (second.action, second.version) == (ACTION_ATTACH, "1.9.0")
+
+
+# --- a Redump set: one archive per disc, chosen 1G1R ----------------------------
+
+
+def test_an_archive_set_plans_one_conversion_per_kept_game(roots):
+    src, games = roots
+    make_dir(
+        src,
+        "Nintendo - GameCube",
+        files=(
+            "007 - Nightfire (USA).7z",
+            "007 - Nightfire (Europe).7z",
+            "1080 Avalanche (USA).7z",
+            "1080 Avalanche (USA) (Rev 1).7z",
+            "Battalion Wars (USA) (Beta).7z",
+            "Luigi's Mansion (USA).7z",
+        ),
+    )
+
+    from gotg.indexer.rules import load
+
+    # The shipped rules: the built-in defaults name no target format, and the
+    # conversion to RVZ is exactly what rules.yaml adds.
+    ops = plan_source(src / "Nintendo - GameCube", games, load())
+    kept = sorted(
+        (o.entry_id, o.action, o.handler, o.src.rsplit("/", 1)[-1]) for o in ops if o.action == ACTION_CONVERT
+    )
+    assert kept == [
+        ("usa.007_nightfire", ACTION_CONVERT, "single_archive", "007 - Nightfire (USA).7z"),
+        ("usa.1080_avalanche_rev1", ACTION_CONVERT, "single_archive", "1080 Avalanche (USA) (Rev 1).7z"),
+        ("usa.luigis_mansion", ACTION_CONVERT, "single_archive", "Luigi's Mansion (USA).7z"),
+    ]
+    # The beta has no retail sibling: skipped, said so, never a catalog row.
+    skipped = [o for o in ops if o.action == ACTION_SKIP]
+    assert [o.src.rsplit("/", 1)[-1] for o in skipped] == ["Battalion Wars (USA) (Beta).7z"]
+    assert all(o.dst.endswith(".rvz") for o in ops if o.action == ACTION_CONVERT)
+    assert not list(games.iterdir())
+
+
+def test_an_archive_set_without_a_target_format_keeps_the_archive_name(roots):
+    from gotg.indexer.plan import plan_archive_set
+
+    ops = plan_archive_set("snes", "/g", "/t/set", ["Chrono Trigger (USA).7z"], target_ext="")
+    assert [(o.action, o.dst) for o in ops] == [(ACTION_EXTRACT, "/g/snes/usa.chrono_trigger.7z")]

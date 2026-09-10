@@ -24,6 +24,8 @@ DAT_DIR_PLATFORM = {
     # NES aftermarket/homebrew set is excluded by decision (2026-07-26).
     "Nintendo - Nintendo Entertainment System (Headered) (Aftermarket)": ("nes", "excluded"),
     "Sega - Mega Drive - Genesis": ("genesis", "no_intro_set"),
+    # A Redump set: one .7z per disc, converted to RVZ on the client.
+    "Nintendo - GameCube": ("gamecube", "archive_set"),
 }
 
 # Single-file extension -> platform (for loose ROM torrents).
@@ -156,6 +158,41 @@ def plan_single_archive(platform: str, games_root: str, src_file: str,
     dst = f"{games_root}/{platform}/{parsed.entry_id}.{ext}"
     return Op(action, platform, src_file, dst, parsed.entry_id,
               title=_display_title(parsed), type="file")
+
+
+def plan_archive_set(platform: str, games_root: str, src_dir: str,
+                     filenames: list[str], target_ext: str = "") -> list[Op]:
+    """Plan a set of per-game archives: 1G1R across the set, one archive each.
+
+    The member names say nothing (a Redump .7z holds an .iso, an .rvz, or a
+    .gcm — the client's recipe finds out), so no archive is listed: the
+    conversion is decided by the platform's target format alone, and a
+    platform with none keeps the archive's own name for the destination.
+    """
+    parsed = [(fn, parse(fn)) for fn in filenames]
+    groups: dict[str, list[tuple[str, ParsedRom]]] = collections.defaultdict(list)
+    for fn, p in parsed:
+        groups[p.slug].append((fn, p))
+
+    ops: list[Op] = []
+    for slug, members in groups.items():
+        winner = select_1g1r([p for _, p in members])
+        if winner is None:
+            fn0, p0 = members[0]
+            ops.append(Op(ACTION_SKIP, platform, f"{src_dir}/{fn0}", "", p0.entry_id, reason="no retail dump"))
+            continue
+        for fn, p in members:
+            if p is not winner:
+                continue
+            if not p.valid:
+                ops.append(Op(ACTION_MANUAL, platform, f"{src_dir}/{fn}", "", p.entry_id,
+                              reason="invalid/low-confidence id"))
+                continue
+            action = ACTION_CONVERT if target_ext else ACTION_EXTRACT
+            ext = target_ext or p.ext
+            ops.append(Op(action, platform, f"{src_dir}/{fn}", f"{games_root}/{platform}/{p.entry_id}.{ext}",
+                          p.entry_id, title=_display_title(p), type="file"))
+    return ops
 
 
 def _ext_of(name: str) -> str:

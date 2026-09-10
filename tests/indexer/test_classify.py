@@ -183,3 +183,22 @@ def test_an_archive_that_could_not_be_listed_is_not_a_game():
     rather than inventing a platform from the wrapper's extension."""
     source = Source(path=Path("/t/Thing.7z"), is_dir=False)
     assert classify(source, rules).handler == HANDLER_MANUAL
+
+
+# --- a DAT set of one archive per game -----------------------------------------
+
+
+def test_a_mapped_archive_set_is_an_archive_set():
+    from gotg.indexer.classify import HANDLER_ARCHIVE_SET
+
+    games = tuple(f"Game {i} (USA).7z" for i in range(20))
+    verdict = classify(src("Nintendo - GameCube", files=games), RULES)
+    assert verdict.handler == HANDLER_ARCHIVE_SET
+    assert verdict.platform == "gamecube"
+
+
+def test_an_unmapped_7z_set_is_reported_like_a_zipped_one():
+    games = tuple(f"Game {i} (USA).7z" for i in range(20))
+    verdict = classify(src("Some - Console", files=games), RULES)
+    assert verdict.handler == HANDLER_MANUAL
+    assert "unmapped" in verdict.reason and "dat_dirs" in verdict.reason

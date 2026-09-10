@@ -410,3 +410,20 @@ def test_dry_run_prints_attach_lines(cfg, capsys):
     assert out.startswith("attach    switch")
     assert "[world.big_game]" in out and "update v1.1 for world.big_game" in out
     assert "attach=1" in stats.summary()
+
+
+def test_scan_finds_a_mapped_archive_set(cfg, capsys):
+    """682 GameCube discs as one .7z each sat behind 'no recognizable game
+    payload' for four days: a mapped archive set is a game source."""
+    from gotg.indexer.plan import ACTION_CONVERT
+    from gotg.indexer.rules import load
+
+    make_set(cfg, "Nintendo - GameCube", [f"Game {i} (USA).7z" for i in range(6)])
+    rules = load()
+
+    found, ignored = discover(cfg.source_root, rules)
+    assert [p.name for p in found] == ["Nintendo - GameCube"]
+
+    stats = run_paths(found, cfg, rules, dry_run=True)
+    assert stats.actions[ACTION_CONVERT] == 6
+    assert "usa.game_3" in capsys.readouterr().out
