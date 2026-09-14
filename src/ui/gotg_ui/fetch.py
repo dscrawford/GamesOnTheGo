@@ -9,9 +9,9 @@ that matters most: most of a 5674-game library has no art anywhere, and
 hearing that once is the difference between a grid that draws and a grid that
 spends its first minute asking upstreams about games nothing has.
 
-Because the index is one request, the grid does not have to be lazy about it
-either: what the service holds is pulled in the background at startup, so
-scrolling finds the pictures already on disk.
+Tiles are still filled in lazily, one at a time as they scroll into view.
+What changed is not when the grid asks but who it asks: the answer is
+already in the service, so the ask is cheap and nobody upstream hears it.
 
 The upstream sources stay as a fallback, for a game imported since the last
 warm and for a deployment with no art cache at all. They are the client's own
@@ -27,7 +27,6 @@ at all.
 
 from __future__ import annotations
 
-import itertools
 import json
 import os
 import queue
@@ -69,24 +68,6 @@ def service() -> tuple[str, str]:
 # How long a request to our own service may take before the grid gives up on
 # it. Short: this is a machine we run, and a tile is not worth a stall.
 SERVICE_TIMEOUT = 10
-
-
-def service_index(url: str, token: str) -> dict:
-    """Everything the service has art for, in one request.
-
-    {"art": {"n64/usa.zelda": {...}}, "misses": [...]}, or empty for a
-    deployment that holds no art cache — which is not an error, just a fleet
-    that has never been warmed.
-    """
-    if not (url and token):
-        return {}
-    request = urllib.request.Request(f"{url}/art")
-    request.add_header("Authorization", f"Bearer {token}")
-    try:
-        with urllib.request.urlopen(request, timeout=SERVICE_TIMEOUT) as response:  # noqa: S310
-            return json.loads(response.read())
-    except (urllib.error.URLError, OSError, ValueError):
-        return {}
 
 
 def service_art(game: Game, url: str, token: str) -> tuple[bytes | None, bool]:
@@ -208,50 +189,31 @@ def fetch_one(
     return fetch_upstream(game, url, token, names_cache)
 
 
-# What a queued request is for. Interactive work — a tile that is on screen
-# now — jumps the whole prefetch sweep, which is thousands of entries long.
-NOW, LATER = 0, 1
-
-
 class Loader:
     """The workers that fill the cache behind the grid.
 
-    Two threads, a priority queue and a set of what is already in flight. The
-    frame loop only ever calls want() and done(), neither of which blocks.
+    Two threads, a queue and a set of what is already in flight. The frame
+    loop only ever calls want() and done(), neither of which blocks.
 
-    Startup asks the service for its whole index and queues everything in it
-    that this machine does not have yet, at the low priority — so the grid
-    stops being lazy without a scroll ever waiting on a download.
+    Lazily, per tile, as it always was: what makes that cheap now is not
+    asking sooner, it is that the answer is already sitting in the service —
+    a picture, or the fact that nobody has one — so a tile scrolling into
+    view costs a request to a machine we run rather than a search upstream.
     """
 
-    def __init__(self, store: ArtStore, workers: int = 2, *, prefetch: bool = True):
+    def __init__(self, store: ArtStore, workers: int = 2):
         self.store = store
         self.url, self.token = service()
         # Beside the pictures, so one state directory holds the whole cache.
         self.names_cache = store.root.parent / "libretro"
         self.names_cache.mkdir(parents=True, exist_ok=True)
-        # (priority, sequence, game, may-ask-upstream). The sequence keeps the
-        # queue from ever comparing two Games, which are not orderable, and
-        # keeps each priority first-come-first-served.
-        self.queue: queue.PriorityQueue = queue.PriorityQueue()
+        self.queue: queue.Queue = queue.Queue()
         self.ready: queue.Queue = queue.Queue()
-        self._sequence = itertools.count()
         self._seen: set[tuple[str, str]] = set()
         self._lock = threading.Lock()
-        # A lock of its own, because priming makes a request: the frame loop
-        # takes _lock in want(), and a ten-second timeout held under that one
-        # would be ten seconds of a frozen grid.
-        self._prime_lock = threading.Lock()
-        # What the service says it has. Empty until the priming thread
-        # answers, and empty forever against a service with no art cache.
-        self.index: dict = {}
-        self.primed = threading.Event()
-        self.prefetch_enabled = prefetch and os.environ.get("GOTG_ART_PREFETCH", "1") != "0"
         self.threads = [threading.Thread(target=self._work, daemon=True) for _ in range(workers)]
         for thread in self.threads:
             thread.start()
-
-    # --- what the frame loop calls -----------------------------------------
 
     def want(self, game: Game) -> Path | None:
         """The cached picture if there is one, and otherwise a request.
@@ -273,7 +235,7 @@ class Loader:
             if game.key in self._seen or self.store.is_miss(game):
                 return None
             self._seen.add(game.key)
-        self._put(NOW, game, upstream=True)
+        self.queue.put(game)
         return None
 
     def done(self) -> list[Game]:
@@ -285,70 +247,24 @@ class Loader:
             except queue.Empty:
                 return found
 
-    def prefetch(self, games: list[Game]) -> None:
-        """Pull everything the service already holds for this library.
-
-        Off the frame loop and behind the index, so the grid is drawing long
-        before this finishes — and it never touches an upstream, so a sweep of
-        the whole catalog costs nothing but our own bandwidth.
-        """
-        if not self.prefetch_enabled:
-            return
-        threading.Thread(target=self._prefetch, args=(list(games),), daemon=True).start()
-
-    # --- the workers -------------------------------------------------------
-
-    def _put(self, priority: int, game: Game, *, upstream: bool) -> None:
-        self.queue.put((priority, next(self._sequence), game, upstream))
-
-    def _prime(self) -> dict:
-        """The service's index, fetched once. Every caller waits on the same
-        request rather than each making its own."""
-        if not self.primed.is_set():
-            with self._prime_lock:
-                if not self.primed.is_set():
-                    self.index = service_index(self.url, self.token)
-                    self.primed.set()
-        return self.index
-
-    def _prefetch(self, games: list[Game]) -> None:
-        index = self._prime()
-        have = index.get("art", {})
-        if not have:
-            return
-        for game in games:
-            if f"{game.platform}/{game.id}" not in have:
-                # Either the service has nothing, or it has a recorded miss.
-                # Both are answers, and neither is worth a request.
-                continue
-            try:
-                if self.store.get(game) is not None:
-                    continue
-            except ValueError:
-                continue
-            with self._lock:
-                if game.key in self._seen:
-                    continue
-                self._seen.add(game.key)
-            self._put(LATER, game, upstream=False)
-
     def _work(self) -> None:
         while True:
-            _, _, game, upstream = self.queue.get()
+            game = self.queue.get()
             if game is None:
                 return
-            body, answered = fetch_one(game, self.url, self.token, self.names_cache, upstream=upstream)
+            body, answered = fetch_one(game, self.url, self.token, self.names_cache)
             try:
                 if body is not None:
                     self.store.put(game, body)
                     self.ready.put(game)
                 elif answered:
                     self.store.put_miss(game)
-                # And when nobody said no — the service has not looked at this
-                # one yet — nothing is written down. The game stays in _seen,
-                # so it is not asked about again this session: want() runs per
-                # tile per frame, and forgetting it here would be sixty
-                # requests a second for as long as the tile is on screen.
+                # And when nobody said no — a throttled or unreachable source,
+                # rather than one that looked — nothing is written down. The
+                # game stays in _seen, so it is not asked about again this
+                # session: want() runs per tile per frame, and forgetting it
+                # here would be sixty requests a second for as long as the
+                # tile is on screen.
             except (OSError, ValueError):
                 # A full disk or a source that answered with an error page.
                 # Neither is worth stopping the grid for.

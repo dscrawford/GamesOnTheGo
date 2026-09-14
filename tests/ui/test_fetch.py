@@ -16,7 +16,7 @@ import pytest
 
 from gotg_ui.art import ArtStore
 from gotg_ui.catalog import Game
-from gotg_ui.fetch import LATER, Loader, fetch_one, service_art
+from gotg_ui.fetch import Loader, fetch_one, service_art
 
 PICTURE = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
@@ -114,9 +114,9 @@ def test_never_looked_at_is_not_an_answer(art_service):
     assert service_art(game, art_service, "client-token") == (None, False)
 
 
-def test_a_sweep_never_reaches_an_upstream(art_service, monkeypatch):
-    # The whole point of the cache: a background pass over five thousand games
-    # must not become five thousand SteamGridDB searches.
+def test_the_upstreams_can_be_kept_out_of_it(art_service, monkeypatch):
+    # The sweep is gone, but the switch it rode on stays: a caller that wants
+    # the service and only the service must be able to say so.
     def explode(*args, **kwargs):
         raise AssertionError("the upstreams were asked during a prefetch")
 
@@ -129,38 +129,6 @@ def test_a_tile_on_screen_may_still_ask_an_upstream(art_service, monkeypatch):
     monkeypatch.setattr("gotg_ui.fetch.fetch_upstream", lambda *a, **k: (PICTURE, True))
     game = Game(id="usa.other_game", platform="switch", title="Other", handler="single_file")
     assert fetch_one(game, art_service, "client-token", upstream=True) == (PICTURE, True)
-
-
-def test_prefetch_queues_what_the_service_holds(art_service, tmp_path):
-    _Art.index["art"] = {"n64/usa.zelda": {"ext": ".png", "bytes": 4}}
-    _Art.pictures["n64/usa.zelda"] = PICTURE
-    games = [
-        Game(id="usa.zelda", platform="n64", title="Zelda", handler="single_file"),
-        Game(id="usa.some_game", platform="switch", title="Some", handler="single_file"),
-    ]
-    loader = Loader(ArtStore(tmp_path / "art"), workers=0)
-    loader._prefetch(games)
-    queued = [loader.queue.get_nowait() for _ in range(loader.queue.qsize())]
-    assert [item[2].key for item in queued] == [("n64", "usa.zelda")]
-    assert queued[0][0] == LATER, "a sweep waits behind anything on screen"
-    assert queued[0][3] is False, "and asks nobody but us"
-
-
-def test_a_tile_on_screen_jumps_the_sweep(art_service, tmp_path):
-    _Art.index["art"] = {f"n64/usa.game_{n}": {"ext": ".png", "bytes": 4} for n in range(3)}
-    games = [Game(id=f"usa.game_{n}", platform="n64", title="G", handler="single_file") for n in range(3)]
-    loader = Loader(ArtStore(tmp_path / "art"), workers=0)
-    loader._prefetch(games)
-    urgent = Game(id="usa.on_screen", platform="n64", title="Now", handler="single_file")
-    loader.want(urgent)
-    assert loader.queue.get_nowait()[2].key == urgent.key
-
-
-def test_a_service_with_no_art_cache_prefetches_nothing(tmp_path, monkeypatch):
-    monkeypatch.setenv("GOTG_API_FILE", str(tmp_path / "absent.json"))
-    loader = Loader(ArtStore(tmp_path / "art"), workers=0)
-    loader._prefetch([Game(id="usa.zelda", platform="n64", title="Z", handler="single_file")])
-    assert loader.queue.qsize() == 0
 
 
 def test_a_throttled_upstream_is_not_a_local_miss(art_service, monkeypatch, tmp_path):

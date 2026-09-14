@@ -285,10 +285,6 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
         browser.toggle_installed()
     store = ArtStore()
     loader = Loader(store)
-    # Not lazily, and not from an upstream: whatever the service already holds
-    # for this library is pulled in the background now, so a scroll three
-    # pages down finds its pictures on disk.
-    loader.prefetch(library.games)
     # Decoded surfaces, keyed by (platform, id). Decoding is not free and the
     # same ten tiles are redrawn sixty times a second.
     art: dict[tuple[str, str], object] = {}
