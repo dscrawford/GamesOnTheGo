@@ -249,8 +249,10 @@ run instead, and a key the upstream refuses stops the run outright rather than
 writing thousands of misses on the strength of a credential problem.
 
 After a warm, a grid is `GET /art/<platform>/<id>` against our own service and
-no upstream hears from a client at all — so the picker stops being lazy about
-it and pulls what the service holds in the background at startup. Writing to
+no upstream hears from a client at all. Tiles still fill in lazily, one at a
+time as they scroll into view — what changed is not when the picker asks but
+who it asks, and a machine we run answers in milliseconds whether it has the
+picture or knows nobody does. Writing to
 the cache takes the index token, the same credential the indexer writes the
 catalog with: what lands there is drawn by every other machine. And the proxy
 paces what does go out (`GOTG_UPSTREAM_RATE`, two requests a second by

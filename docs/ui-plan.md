@@ -100,9 +100,9 @@ cache and the save archives.
 this (`/art`, warmed by `gotg admin art warm`), so the first place a tile is
 asked for is our own endpoint: one request for the whole index at startup,
 then a download per picture, and no upstream touched. The sources below stay
-as the fallback for a game imported since the last warm. Which also retires
-the laziness: what the service holds is pulled in the background when the
-picker opens, so paging ahead finds its pictures already on disk.
+as the fallback for a game imported since the last warm. The fetching stays
+lazy — a tile asks when it scrolls into view — because the ask is now a
+round trip to our own service rather than a search upstream.
 
 **Permanently includes the misses.** Most of 5674 games will have no art
 anywhere, and a cache that only remembers successes re-asks the network for
