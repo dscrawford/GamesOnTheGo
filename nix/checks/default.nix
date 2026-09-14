@@ -28,5 +28,6 @@
   environments = import ./environments.nix { inherit pkgs; };
   fullscreen = import ./fullscreen.nix { inherit pkgs; };
   aresSystem = import ./ares-system.nix { inherit pkgs; };
+  killswitch = import ./killswitch.nix { inherit pkgs; };
   ruff = import ./ruff.nix { inherit pkgs; };
 }

@@ -52,6 +52,8 @@ cmd_play() {
   play_prepare "$want" "$variant"
 
   log "launching $(manifest_field "$PLAY_GAME" title) with $PLAY_ATTR"
+  # "$$" survives the exec below, so what the watcher holds is the emulator.
+  killswitch_start "$$"
   exec "$(env_bin "$PLAY_ATTR")" "$PLAY_TARGET" "$@"
 }
 
