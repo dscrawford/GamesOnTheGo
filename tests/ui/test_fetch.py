@@ -16,6 +16,7 @@ import pytest
 
 from gotg_ui.art import ArtStore
 from gotg_ui.catalog import Game
+from gotg_ui import fetch
 from gotg_ui.fetch import Loader, fetch_one, service_art
 
 PICTURE = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
@@ -114,33 +115,12 @@ def test_never_looked_at_is_not_an_answer(art_service):
     assert service_art(game, art_service, "client-token") == (None, False)
 
 
-def test_the_upstreams_can_be_kept_out_of_it(art_service, monkeypatch):
-    # The sweep is gone, but the switch it rode on stays: a caller that wants
-    # the service and only the service must be able to say so.
-    def explode(*args, **kwargs):
-        raise AssertionError("the upstreams were asked during a prefetch")
-
-    monkeypatch.setattr("gotg_ui.fetch.fetch_upstream", explode)
-    game = Game(id="usa.other_game", platform="switch", title="Other", handler="single_file")
-    assert fetch_one(game, art_service, "client-token", upstream=False) == (None, False)
-
-
-def test_a_tile_on_screen_may_still_ask_an_upstream(art_service, monkeypatch):
-    monkeypatch.setattr("gotg_ui.fetch.fetch_upstream", lambda *a, **k: (PICTURE, True))
-    game = Game(id="usa.other_game", platform="switch", title="Other", handler="single_file")
-    assert fetch_one(game, art_service, "client-token", upstream=True) == (PICTURE, True)
-
-
-def test_a_throttled_upstream_is_not_a_local_miss(art_service, monkeypatch, tmp_path):
-    # A 429 has not said "nobody has art for this game", and writing that down
-    # would blank the tile on this machine for good.
-    class Throttled:
-        def fetch(self, kind):
-            return None
-
-        def note(self):
-            return {"skipped": "http 429"}
-
-    monkeypatch.setattr("gotg_ui.fetch.sources_for", lambda *a, **k: [Throttled()])
+def test_the_grid_asks_nobody_but_the_service(art_service):
+    # No SteamGridDB, no libretro, not even through the proxy: the service is
+    # the source of truth, and a game it has not been warmed for simply draws
+    # its title until a warm run settles it.
+    assert not hasattr(fetch, "sources_for"), "the upstream sources belong to the warmer now"
+    assert not hasattr(fetch, "fetch_upstream")
     game = Game(id="usa.other_game", platform="switch", title="Other", handler="single_file")
     assert fetch_one(game, art_service, "client-token") == (None, False)
+    assert _Art.seen == ["/art/switch/usa.other_game"]

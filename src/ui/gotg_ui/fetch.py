@@ -1,28 +1,21 @@
 """Getting a tile picture, off the frame loop.
 
-**The service first, and usually only the service.** Every picture the fleet
-has ever resolved lives in the GOTG service's own art cache, warmed by `gotg
-admin art warm`, so the ordinary path for a tile is one request to a machine
-we run — no SteamGridDB, no libretro, no per-laptop rate limit to respect.
-The service also answers "nobody has art for this one", which is the answer
-that matters most: most of a 5674-game library has no art anywhere, and
-hearing that once is the difference between a grid that draws and a grid that
-spends its first minute asking upstreams about games nothing has.
+**The service is the only place this asks.** Every picture the fleet has is
+in the GOTG service's art cache, put there by `gotg admin art warm`, and so
+is every *absence*: a game nobody has art for is recorded as a miss, once,
+for everybody. That is the design rather than a shortcut — one answer per
+game, held in one place, instead of nine thousand games re-resolved on every
+laptop that opens the picker. When the answer is wrong, it is fixed in the
+one place too: `gotg admin art search` and `gotg admin art set` curate the
+cache, and every grid picks the correction up.
 
-Tiles are still filled in lazily, one at a time as they scroll into view.
-What changed is not when the grid asks but who it asks: the answer is
-already in the service, so the ask is cheap and nobody upstream hears it.
+Which means no upstream is reached from here at all: no SteamGridDB, no
+libretro, no per-machine rate limit to respect, and a tile whose game has
+never been warmed simply draws its title until the next warm reaches it.
 
-The upstream sources stay as a fallback, for a game imported since the last
-warm and for a deployment with no art cache at all. They are the client's own
-— src/client/steam/artwork.py, on PYTHONPATH from the wrapper — so the grid
-asks SteamGridDB and libretro-thumbnails the same way `gotg steam art` does,
-through the GOTG service that holds the real key. A second implementation
-would be a second thing to keep in step with an API neither of us controls.
-
-Imported lazily and behind a guard: the model half of this program has to run
-in a venv that has neither the client nor pygame, which is how the tests run
-at all.
+Tiles fill in lazily, one at a time as they scroll into view — cheap now not
+because the grid asks sooner but because of who it asks: a machine we run,
+answering in milliseconds whether it has the picture or knows nobody does.
 """
 
 from __future__ import annotations
@@ -38,13 +31,6 @@ from pathlib import Path
 
 from .art import ArtStore
 from .catalog import Game
-
-# Portrait first, then the wide capsule — and the fallback is not politeness.
-# libretro files box art by its shape, and a cartridge box is landscape: "a
-# 512x357 N64 box filed as a 600x900 tile would pillarbox it down the middle".
-# This library is ~5670 cartridge games, so asking only for grids_portrait
-# would find nothing for almost all of it whenever SteamGridDB has no match.
-KINDS = ("grids_portrait", "grids")
 
 
 def service() -> tuple[str, str]:
@@ -94,99 +80,15 @@ def service_art(game: Game, url: str, token: str) -> tuple[bytes | None, bool]:
         return None, False
 
 
-def sources_for(game: Game, url: str, token: str, names_cache: Path | None = None):
-    """The same two the Steam path uses, in the same order.
-
-    SteamGridDB first, through the service that holds the real key, then
-    libretro-thumbnails which needs none — so a machine with no key still gets
-    pictures for everything No-Intro names.
-    """
-    import artwork  # noqa: PLC0415 — the client's, from PYTHONPATH
-    import libretro  # noqa: PLC0415
-
-    found = []
-    if url and token:
-        # /steamgriddb, not the bare service url: the proxy *is* the API under
-        # that prefix, and the source cannot tell the difference — which is
-        # the whole point of it being a reverse proxy. cmd-steam.sh passes the
-        # same thing.
-        # prefer_thumb: a tile is a couple of hundred pixels and there are ten
-        # of them, so the full 600x900 is a download and a decode spent on
-        # nothing.
-        found.append(artwork.SteamGridDBSource(f"{url}/steamgriddb", token, [game.title], prefer_thumb=True))
-    found.append(
-        artwork.LibretroSource(
-            base_url=os.environ.get("GOTG_LIBRETRO_URL") or libretro.DEFAULT_BASE_URL,
-            playlists_file=artwork.DEFAULT_PLAYLISTS,
-            platform=game.platform,
-            name=game.title,
-            game_id=game.id,
-            # libretro answers with one name index per platform; without
-            # somewhere to keep it that index is refetched for every game on
-            # the page.
-            cache_dir=names_cache,
-        )
-    )
-    return found
-
-
-# What a source says when it did not get an answer, as opposed to getting the
-# answer "no" — substrings of artwork.py's and libretro.py's own notes. The
-# warmer keeps the same list for the same reason (steam/warm.py); neither can
-# import the other, since one runs in the client's python and one in the UI's.
-TRANSIENT = ("unreachable", "http 429", "http 500", "http 502", "http 504", "refused")
-
-
-def fetch_upstream(game: Game, url: str, token: str, names_cache: Path | None = None) -> tuple[bytes | None, bool]:
-    """(the picture, whether "none" was an answer). Never raises: a grid that
-    fell over because a picture would not download is worse than a grid of
-    titles.
-
-    The second half keeps a bad minute from becoming a permanent blank. A
-    throttled or unreachable source has not said "nobody has art for this",
-    and writing that down locally would cost the tile its picture for good.
-    """
-    try:
-        import artwork  # noqa: PLC0415
-
-        sources = sources_for(game, url, token, names_cache)
-        facade = artwork.Artwork(sources=sources)
-        for kind in KINDS:
-            found = facade.fetch(kind)
-            if found:
-                return found[0], True
-        skipped = " ".join(str(source.note().get("skipped", "")) for source in sources)
-        return None, not any(mark in skipped for mark in TRANSIENT)
-    except Exception:  # noqa: BLE001 — an unreachable source is not a crash
-        return None, False
-
-
-def fetch_one(
-    game: Game,
-    url: str,
-    token: str,
-    names_cache: Path | None = None,
-    *,
-    upstream: bool = True,
-) -> tuple[bytes | None, bool]:
+def fetch_one(game: Game, url: str, token: str) -> tuple[bytes | None, bool]:
     """One picture, and whether "none" was a real answer.
 
-    The service is asked first and is usually the end of it. Only a game it
-    has never been asked to look at reaches the upstreams, and only when the
-    caller allows it — a background sweep of five thousand games must never
-    turn into five thousand SteamGridDB searches, which is the entire thing
-    the art cache exists to prevent.
+    Only the service is asked. "No" from it is the fleet's answer and is
+    written down locally as well, so this machine does not ask again next
+    launch; "not yet looked at" is nobody's answer and is left alone for a
+    warm run to settle.
     """
-    body, answered = service_art(game, url, token)
-    if body is not None:
-        return body, True
-    if answered:
-        # The service looked and there is nothing. Written down locally too,
-        # so this machine does not ask again next launch.
-        return None, True
-    if not upstream:
-        return None, False
-    return fetch_upstream(game, url, token, names_cache)
+    return service_art(game, url, token)
 
 
 class Loader:
@@ -195,18 +97,15 @@ class Loader:
     Two threads, a queue and a set of what is already in flight. The frame
     loop only ever calls want() and done(), neither of which blocks.
 
-    Lazily, per tile, as it always was: what makes that cheap now is not
-    asking sooner, it is that the answer is already sitting in the service —
-    a picture, or the fact that nobody has one — so a tile scrolling into
-    view costs a request to a machine we run rather than a search upstream.
+    Lazily, per tile, as it always was: what makes that cheap is that the
+    answer is already sitting in the service — a picture, or the fact that
+    nobody has one — so a tile scrolling into view costs one request to a
+    machine we run and nothing upstream at all.
     """
 
     def __init__(self, store: ArtStore, workers: int = 2):
         self.store = store
         self.url, self.token = service()
-        # Beside the pictures, so one state directory holds the whole cache.
-        self.names_cache = store.root.parent / "libretro"
-        self.names_cache.mkdir(parents=True, exist_ok=True)
         self.queue: queue.Queue = queue.Queue()
         self.ready: queue.Queue = queue.Queue()
         self._seen: set[tuple[str, str]] = set()
@@ -252,7 +151,7 @@ class Loader:
             game = self.queue.get()
             if game is None:
                 return
-            body, answered = fetch_one(game, self.url, self.token, self.names_cache)
+            body, answered = fetch_one(game, self.url, self.token)
             try:
                 if body is not None:
                     self.store.put(game, body)

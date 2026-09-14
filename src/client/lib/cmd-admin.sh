@@ -38,6 +38,17 @@ usage: gotg admin <command> [args]
                                 Needs GOTG_INDEX_TOKEN
   art status                    how much of the catalog has a picture, a
                                 recorded miss, or has never been looked at
+  art search <title> [--assets N] [--limit N]
+                                what SteamGridDB has under that name, through
+                                the service's proxy — the first half of fixing
+                                a tile that came out wrong
+  art set <platform>/<id> <file|url>
+                                this picture is the one, for everybody
+  art miss <platform>/<id>      record that nobody has art for it
+  art show <platform>/<id> [--out <file>]
+                                what the cache holds for it, and which kind of
+                                nothing when it holds none
+  art forget <platform>/<id>    drop it, so the next warm looks again
   scan [--since <when>] [--all] [--json]
                                 what the library has gained since you last ran
                                 this (+), and which games the bytes have gone
@@ -417,12 +428,21 @@ admin_art_status() {
   jq -r '"art:    \(.art | length)\nmisses: \(.misses | length)"' <<<"$index"
 }
 
+# Curating: the cache is the source of truth, so a wrong picture and a wrong
+# miss are both wrong for the whole fleet, and both are fixed here.
+admin_art_curate() {
+  admin_index_token
+  GOTG_INDEX_TOKEN="$GOTG_INDEX_TOKEN" python3 \
+    "${GOTG_ART_CURATE:-$GOTG_ROOT/steam/curate.py}" --service "$(admin_url)" "$@"
+}
+
 admin_art() {
   local verb="${1:-}"
   [[ $# -gt 0 ]] && shift || true
   case "$verb" in
     warm) admin_art_warm "$@" ;;
     status) admin_art_status "$@" ;;
+    search | set | miss | show | forget) admin_art_curate "$verb" "$@" ;;
     *)
       printf 'error: unknown art command: %s\n\n' "$verb" >&2
       admin_usage >&2
