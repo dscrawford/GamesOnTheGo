@@ -51,8 +51,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from ..catalog import CatalogStore, Conflict, SweepRefused
+from ..contract import ENTRY_ID_RE, PLATFORM_RE
 from ..saves import SavesStore
 from ..tokens import TOKEN_RE, Absent, Claimed, TokenStore, default_user
+from .artcache import CONTENT_TYPES, ArtCache, extension_for
 
 USER_AGENT = "gotg-proxy/0.5.5"
 
@@ -73,6 +75,11 @@ MAX_BODY = 64 * 1024
 # A catalog entry lists every member file of a game; decrypted WiiU trees run
 # to five figures of rows.
 CATALOG_MAX_BODY = 8 * 1024 * 1024
+
+# A tile picture. SteamGridDB's 600x900 grids run to a few hundred kilobytes
+# and the thumbnails the warmer prefers are a tenth of that; a megabyte is
+# already an upload that is not a tile.
+ART_MAX_BODY = 4 * 1024 * 1024
 
 # The one body read before anybody is authenticated: {"code": …} around a
 # 49-character code.
@@ -185,6 +192,45 @@ def path_climbs(rest: str) -> bool:
     return any(segment == ".." for segment in decoded.split("/"))
 
 
+class RateLimiter:
+    """A token bucket in front of one upstream, shared by every thread.
+
+    The proxy holds one key for a fleet, and warming the whole library is
+    thousands of questions in a row: without a pace somewhere, one warm run
+    is a burst against a quota that is not ours to spend, and the answer to
+    that is a banned key rather than a slower client.
+
+    Slots are *reserved* rather than waited for under the lock — the caller
+    is told how long to sleep and sleeps on its own thread — so a paced
+    request costs the proxy one idle thread, never the bucket.
+    """
+
+    def __init__(self, rate: float, burst: float):
+        self.rate = max(rate, 0.0)
+        self.burst = max(burst, 1.0)
+        self.tokens = self.burst
+        self.updated = time.monotonic()
+        self.lock = threading.Lock()
+
+    def reserve(self, wait: float) -> tuple[bool, float]:
+        """(may it go, how long first). Refused when the wait would be longer
+        than `wait`, which is a caller who should hear 429 and come back
+        rather than hold a thread open for a minute."""
+        if not self.rate:
+            return True, 0.0
+        now = time.monotonic()
+        with self.lock:
+            self.tokens = min(self.burst, self.tokens + (now - self.updated) * self.rate)
+            self.updated = now
+            delay = 0.0 if self.tokens >= 1.0 else (1.0 - self.tokens) / self.rate
+            if delay > wait:
+                return False, delay
+            # Into the negative on purpose: the slot is taken now and paid for
+            # by the sleep, so two threads cannot reserve the same one.
+            self.tokens -= 1.0
+        return True, delay
+
+
 IGDB_URL = "https://api.igdb.com"
 IGDB_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 
@@ -238,6 +284,18 @@ class Config:
     # A client tries it first and falls back; one outside the tailnet never
     # loses the universal host.
     files_preferred_url: str = ""
+    # Where the fleet's tile pictures live — see artcache.py. Empty means this
+    # deployment serves no art, which /art says with a 503.
+    art_dir: str = ""
+    # How hard anybody may lean on an upstream through this proxy, in requests
+    # per second, with a burst for the ordinary case of one client opening a
+    # grid. Cache hits are not counted: they cost the upstream nothing.
+    upstream_rate: float = 2.0
+    upstream_burst: float = 10.0
+    # The longest a paced request will sit on a thread before being told 429
+    # instead. Long enough that a warmer simply runs slower, short enough that
+    # a burst cannot pin every thread in the pool.
+    upstream_wait: float = 5.0
 
     def validate(self) -> Config:
         if self.files_url and not self.files_url.startswith(("http://", "https://")):
@@ -326,6 +384,8 @@ class Handler(BaseHTTPRequestHandler):
     streams: threading.BoundedSemaphore
     scans: threading.BoundedSemaphore
     token_store: TokenStore | None
+    art: ArtCache | None
+    limits: dict[str, RateLimiter]
     auth_cache: dict
     auth_cache_lock: threading.Lock
     auth_cache_ttl: float
@@ -478,6 +538,29 @@ class Handler(BaseHTTPRequestHandler):
         except (urllib.error.URLError, OSError, ValueError) as error:
             self._problem(502, f"upstream unreachable: {error}")
 
+    def _paced(self, upstream: str) -> bool:
+        """Wait for this upstream's turn, or answer 429 and say so.
+
+        Every call that actually leaves the cluster passes through here; a
+        cache hit does not, because it costs the upstream nothing and
+        throttling it would only make the cache useless.
+        """
+        limiter = self.limits.get(upstream)
+        if limiter is None:
+            return True
+        allowed, delay = limiter.reserve(self.config.upstream_wait)
+        if not allowed:
+            self._send(
+                429,
+                json.dumps({"error": f"{upstream} is being asked too fast; retry shortly"}).encode(),
+                "application/json",
+                {"Retry-After": str(max(1, int(delay + 0.999)))},
+            )
+            return False
+        if delay:
+            time.sleep(delay)
+        return True
+
     def _steamgriddb(self, rest: str) -> None:
         if not self.config.steamgriddb_key:
             self._problem(503, "this proxy holds no steamgriddb key")
@@ -485,6 +568,8 @@ class Handler(BaseHTTPRequestHandler):
         url = f"{self.config.steamgriddb_url}/api/v2/{strip_prefix(rest, 'api/v2/')}"
         headers = {"Authorization": f"Bearer {self.config.steamgriddb_key}"}
         if not self.config.upstream_cache_dir or self.command != "GET":
+            if not self._paced("steamgriddb"):
+                return
             self._forward(url, headers, None)
             return
 
@@ -501,6 +586,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, payload, kind, {"X-Gotg-Cache": "hit"})
             return
 
+        if not self._paced("steamgriddb"):
+            return
         request = urllib.request.Request(url)
         request.add_header("User-Agent", USER_AGENT)
         for name, value in headers.items():
@@ -529,11 +616,131 @@ class Handler(BaseHTTPRequestHandler):
         except (urllib.error.URLError, OSError, ValueError, KeyError) as error:
             self._problem(502, f"could not mint an igdb token: {error}")
             return
+        if not self._paced("igdb"):
+            return
         self._forward(
             f"{self.config.igdb_url}/v4/{strip_prefix(rest, 'v4/')}",
             {"Client-ID": self.config.igdb_client_id, "Authorization": f"Bearer {token}"},
             body,
         )
+
+    # --- the fleet's tile pictures -------------------------------------------
+
+    def _art(self, rest: str, body: bytes | None) -> None:
+        """`/art` — every tile picture the fleet has resolved, held once.
+
+            GET    /art                        the whole index, in one answer
+            GET    /art/<platform>/<id>        the picture
+            PUT    /art/<platform>/<id>        the warmer, with the index token
+            PUT    /art/<platform>/<id>?miss=1 nothing has this one
+            DELETE /art/<platform>/<id>        forget it, so a warm looks again
+
+        Reading is open to any client token — the pictures are not secret and
+        the whole point is that a laptop gets them from here instead of from
+        an upstream. Writing is the index token's, for the same reason catalog
+        writes are: a client that could put bytes here could put anything
+        every other client then draws.
+        """
+        if self.art is None:
+            self._problem(503, "this service holds no art cache")
+            return
+        parts = urllib.parse.urlsplit("/" + rest)
+        segments = [urllib.parse.unquote(segment) for segment in parts.path.strip("/").split("/") if segment]
+
+        if not segments:
+            if self.command not in ("GET", "HEAD"):
+                self._problem(405, "the art index is a GET")
+                return
+            self._send(200, json.dumps(self.art.index()).encode(), "application/json")
+            return
+        if len(segments) != 2:
+            self._problem(404, "a picture lives at /art/<platform>/<id>")
+            return
+        platform, game_id = segments
+        # Checked here as well as in the cache: the cache raises, and a
+        # traceback per malformed path is a worse answer than a 400.
+        if not PLATFORM_RE.match(platform) or not ENTRY_ID_RE.match(game_id):
+            self._problem(400, "that is not a platform and an entry id")
+            return
+
+        try:
+            if self.command in ("GET", "HEAD"):
+                self._art_get(platform, game_id)
+            elif self.command == "PUT":
+                miss = urllib.parse.parse_qs(parts.query).get("miss", ["0"])[0] not in ("0", "")
+                self._art_put(platform, game_id, body, miss=miss)
+            elif self.command == "DELETE":
+                self._art_delete(platform, game_id)
+            else:
+                self._problem(405, f"{self.command} is not something /art answers")
+        except ValueError as error:
+            self._problem(400, str(error))
+        except OSError as error:
+            print(f"art cache error: {error}", file=sys.stderr)
+            self._problem(500, "art cache error")
+
+    def _art_get(self, platform: str, game_id: str) -> None:
+        found = self.art.get(platform, game_id)
+        if found is None:
+            # The two kinds of nothing are worth telling apart: "miss" is an
+            # answer — somebody looked and there is no art anywhere — and a
+            # client that hears it stops asking. "absent" only means nobody
+            # has warmed this one yet.
+            miss = self.art.is_miss(platform, game_id)
+            self._send(
+                404,
+                json.dumps({"error": f"no art for {platform}/{game_id}", "miss": miss}).encode(),
+                "application/json",
+                {"X-Gotg-Art": "miss" if miss else "absent"},
+            )
+            return
+        path, extension = found
+        fd = open_contained(path, self.art.root)
+        if fd is None:
+            self._problem(404, f"no art for {platform}/{game_id}")
+            return
+        with open(fd, "rb", closefd=True) as handle:
+            payload = handle.read()
+        # A strong ETag over bytes this small costs microseconds and saves the
+        # whole body on every prefetch after the first. The art itself never
+        # changes in place — a new picture is a new warm — so it is also
+        # immutable for as long as the client cares to keep it.
+        etag = f'"{hashlib.sha256(payload).hexdigest()}"'
+        headers = {"ETag": etag, "Cache-Control": "public, max-age=604800", "X-Gotg-Art": "hit"}
+        if self.headers.get("If-None-Match") == etag:
+            self._send(304, b"", CONTENT_TYPES[extension], headers)
+            return
+        self._send(200, payload, CONTENT_TYPES[extension], headers)
+
+    def _art_put(self, platform: str, game_id: str, body: bytes | None, *, miss: bool) -> None:
+        if not self._is_index():
+            self._problem(403, "writing art needs the index token")
+            return
+        if miss:
+            self.art.put_miss(platform, game_id)
+            self._send(200, json.dumps({"stored": f"{platform}/{game_id}", "miss": True}).encode(), "application/json")
+            return
+        if not body:
+            self._problem(400, "a picture, or ?miss=1 to record that there is none")
+            return
+        if extension_for(body) is None:
+            # From the bytes, never the Content-Type: the cache is served back
+            # to every client's grid, so what goes in is a picture or nothing.
+            self._problem(415, "that is not a png, jpeg or webp")
+            return
+        path = self.art.put(platform, game_id, body)
+        self._send(
+            200,
+            json.dumps({"stored": f"{platform}/{game_id}", "ext": path.suffix, "bytes": len(body)}).encode(),
+            "application/json",
+        )
+
+    def _art_delete(self, platform: str, game_id: str) -> None:
+        if not self._is_index():
+            self._problem(403, "forgetting art needs the index token")
+            return
+        dropped = self.art.forget(platform, game_id)
+        self._send(200, json.dumps({"forgot": f"{platform}/{game_id}", "had": dropped}).encode(), "application/json")
 
     # --- the saves store ----------------------------------------------------
 
@@ -969,6 +1176,8 @@ class Handler(BaseHTTPRequestHandler):
             max_body = self.store.max_bytes
         elif prefix == "catalog" and self.command == "PUT":
             max_body = CATALOG_MAX_BODY
+        elif prefix == "art" and self.command == "PUT":
+            max_body = ART_MAX_BODY
 
         try:
             length = int(self.headers.get("Content-Length") or 0)
@@ -994,6 +1203,8 @@ class Handler(BaseHTTPRequestHandler):
             self._saves(rest, body, self._saves_user(principal))
         elif prefix == "catalog":
             self._catalog(rest, body)
+        elif prefix == "art":
+            self._art(rest, body)
         elif prefix == "games":
             self._games(rest)
         elif prefix == "files":
@@ -1204,6 +1415,7 @@ def make_server(
     files_dir: Path | None = None,
     stream_slots: int = 4,
     token_store: TokenStore | None = None,
+    art: ArtCache | None = None,
     auth_cache_ttl: float = 60.0,
     auth_neg_ttl: float = 5.0,
 ) -> ThreadingHTTPServer:
@@ -1220,6 +1432,12 @@ def make_server(
             "streams": threading.BoundedSemaphore(stream_slots),
             "scans": threading.BoundedSemaphore(1),
             "token_store": token_store,
+            "art": art,
+            # One bucket per upstream: they are different quotas, and a warm
+            # run against SteamGridDB must not throttle an IGDB lookup.
+            "limits": {
+                name: RateLimiter(config.upstream_rate, config.upstream_burst) for name in ("steamgriddb", "igdb")
+            },
             "auth_cache": {},
             "auth_cache_lock": threading.Lock(),
             "auth_cache_ttl": auth_cache_ttl,

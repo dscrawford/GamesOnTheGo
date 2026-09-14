@@ -561,3 +561,65 @@ def test_without_a_cache_dir_nothing_changes(proxy):
     assert "X-Gotg-Cache" not in headers
     call_with_headers(f"{proxy}/steamgriddb/grids/game/42")
     assert len(Upstream.seen) == 2
+
+
+# --- the pace on the way out ------------------------------------------------
+#
+# One key, a fleet of clients and a warm run that walks 5674 games: without a
+# ceiling here, the proxy is a loaded gun pointed at somebody else's quota.
+
+
+def paced(upstream, tmp_path, **overrides):
+    config = Config(
+        token="client-token",
+        steamgriddb_key="sg-key",
+        steamgriddb_url=upstream,
+        upstream_rate=1.0,
+        upstream_burst=1.0,
+        upstream_wait=0.0,
+        **overrides,
+    )
+    server = make_server("127.0.0.1", free_port(), config)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_port}"
+
+
+def test_past_the_pace_a_caller_is_told_to_come_back(upstream, tmp_path):
+    server, proxy = paced(upstream, tmp_path)
+    try:
+        assert call(f"{proxy}/steamgriddb/search/autocomplete/zelda")[0] == 200
+        status, body = call(f"{proxy}/steamgriddb/search/autocomplete/mario")
+    finally:
+        server.shutdown()
+    assert status == 429
+    assert len(Upstream.seen) == 1, "the refused question never left the cluster"
+
+
+def test_a_throttled_answer_says_how_long_to_wait(upstream, tmp_path):
+    server, proxy = paced(upstream, tmp_path)
+    try:
+        call(f"{proxy}/steamgriddb/search/autocomplete/zelda")
+        request = urllib.request.Request(f"{proxy}/steamgriddb/search/autocomplete/mario")
+        request.add_header("Authorization", "Bearer client-token")
+        try:
+            urllib.request.urlopen(request, timeout=10)
+            raise AssertionError("expected a 429")
+        except urllib.error.HTTPError as error:
+            assert int(error.headers["Retry-After"]) >= 1
+            error.close()
+    finally:
+        server.shutdown()
+
+
+def test_a_cached_answer_is_never_throttled(upstream, tmp_path):
+    # It costs the upstream nothing, and throttling it would make the cache
+    # useless exactly when the fleet needs it most.
+    server, proxy = paced(upstream, tmp_path, upstream_cache_dir=str(tmp_path / "artcache"))
+    try:
+        assert call(f"{proxy}/steamgriddb/grids/game/42")[0] == 200
+        for _ in range(5):
+            status, _ = call(f"{proxy}/steamgriddb/grids/game/42")
+            assert status == 200
+    finally:
+        server.shutdown()
+    assert len(Upstream.seen) == 1
