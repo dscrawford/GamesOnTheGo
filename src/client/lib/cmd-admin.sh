@@ -29,6 +29,15 @@ usage: gotg admin <command> [args]
                                 same image, same mounts. Needs kubectl and the
                                 cluster, not the admin token. Prints what the
                                 run flagged and its summary line
+  art warm [--rate <n>] [--limit <n>] [--platform <p>] [--refresh]
+                                resolve tile pictures for the whole catalog
+                                and store them in the service, so no client
+                                ever asks SteamGridDB again. Slow on purpose
+                                (default 0.5 games/second) and resumable: a
+                                second run only looks at what is still unknown.
+                                Needs GOTG_INDEX_TOKEN
+  art status                    how much of the catalog has a picture, a
+                                recorded miss, or has never been looked at
   scan [--since <when>] [--all] [--json]
                                 what the library has gained since you last ran
                                 this (+), and which games the bytes have gone
@@ -359,6 +368,69 @@ admin_import() {
   log "done — gotg refresh picks up whatever arrived; gotg admin scan says what that was"
 }
 
+# --- the art cache ------------------------------------------------------------
+#
+# Warming is an operator's job rather than a client's, for the same reason
+# catalog writes are: what lands in the cache is drawn by every other machine's
+# grid, so it is written with the index token and nothing else.
+
+admin_index_token() {
+  [[ -n "${GOTG_INDEX_TOKEN:-}" ]] || die "GOTG_INDEX_TOKEN is not set.
+     export GOTG_INDEX_TOKEN=\"\$(kubectl get secret gotg-api -o jsonpath='{.data.index-token}' | base64 -d)\""
+}
+
+# libretro lists a whole system's thumbnail names in one index, so a run that
+# keeps them asks for six lists instead of six thousand. Under the state
+# directory, beside the UI's own copy.
+admin_art_names_cache() { printf '%s' "${GOTG_ART_NAMES_CACHE:-$GOTG_STATE_DIR/ui/libretro}"; }
+
+admin_art_warm() {
+  # --help before the credential check: asking what the flags are is not an
+  # operation that needs one.
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      -h | --help) python3 "${GOTG_ART_WARM:-$GOTG_ROOT/steam/warm.py}" --help; return 0 ;;
+    esac
+  done
+  admin_index_token
+  local url
+  url="$(admin_url)"
+  mkdir -p "$(admin_art_names_cache)"
+  # The token reaches the warmer in its environment, never in argv.
+  GOTG_INDEX_TOKEN="$GOTG_INDEX_TOKEN" python3 \
+    "${GOTG_ART_WARM:-$GOTG_ROOT/steam/warm.py}" \
+    --service "$url" --names-cache "$(admin_art_names_cache)" "$@"
+}
+
+# Reading the index is a client's right, not an admin's: the admin token opens
+# /admin and nothing else, so this asks with the ordinary api.json credential.
+admin_art_status() {
+  service_have || die "no service configured — run: gotg login"
+  local index
+  index="$(service_curl -sS --max-time 60 "$(service_url)/art")" || die "could not reach the service"
+  # An error body has no .art, and `null | length` is 0 — which would report an
+  # empty cache for a service that has no cache at all, or would not say who we
+  # are. Distinguished here rather than counted blindly.
+  jq -e 'has("art")' <<<"$index" >/dev/null ||
+    die "the service did not answer with an art index: $(jq -r '.error // .' <<<"$index")"
+  jq -r '"art:    \(.art | length)\nmisses: \(.misses | length)"' <<<"$index"
+}
+
+admin_art() {
+  local verb="${1:-}"
+  [[ $# -gt 0 ]] && shift || true
+  case "$verb" in
+    warm) admin_art_warm "$@" ;;
+    status) admin_art_status "$@" ;;
+    *)
+      printf 'error: unknown art command: %s\n\n' "$verb" >&2
+      admin_usage >&2
+      exit 1
+      ;;
+  esac
+}
+
 cmd_admin() {
   local sub="${1:-}"
   [[ $# -gt 0 ]] && shift
@@ -368,6 +440,7 @@ cmd_admin() {
     revoke) admin_revoke "$@" ;;
     import) admin_import "$@" ;;
     scan) admin_scan "$@" ;;
+    art) admin_art "$@" ;;
     help | --help | -h | "") admin_usage ;;
     *)
       printf 'error: unknown admin command: %s\n\n' "$sub" >&2

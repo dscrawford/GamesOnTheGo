@@ -130,9 +130,18 @@ _gotg() {
             ;;
         admin)
             case $COMP_CWORD in
-                2) mapfile -t COMPREPLY < <(compgen -W "invite tokens revoke import scan" -- "$cur") ;;
+                2) mapfile -t COMPREPLY < <(compgen -W "invite tokens revoke import scan art" -- "$cur") ;;
+                3)
+                    case "$sub" in
+                        art) mapfile -t COMPREPLY < <(compgen -W "warm status" -- "$cur") ;;
+                        invite) mapfile -t COMPREPLY < <(compgen -W "--ttl --user" -- "$cur") ;;
+                        scan) mapfile -t COMPREPLY < <(compgen -W "--since --all --json" -- "$cur") ;;
+                        import) mapfile -t COMPREPLY < <(compgen -W "--follow --timeout" -- "$cur") ;;
+                    esac
+                    ;;
                 *)
                     case "$sub" in
+                        art) mapfile -t COMPREPLY < <(compgen -W "--rate --limit --platform --refresh --dry-run --verbose" -- "$cur") ;;
                         invite) mapfile -t COMPREPLY < <(compgen -W "--ttl --user" -- "$cur") ;;
                         scan) mapfile -t COMPREPLY < <(compgen -W "--since --all --json" -- "$cur") ;;
                         import) mapfile -t COMPREPLY < <(compgen -W "--follow --timeout" -- "$cur") ;;
