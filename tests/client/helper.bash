@@ -55,6 +55,7 @@ _start_saves_service_once() {
     GOTG_LIBRARY_ROOTS="$SERVICE_LIBRARY_DIR" \
     GOTG_CATALOG_DB="$TEST_TMP/service-state/catalog.db" \
     GOTG_INDEX_TOKEN="index-token" \
+    GOTG_ART_DIR="$TEST_TMP/service-art" \
     GOTG_ADMIN_TOKEN="admin-token" \
     GOTG_LIBRARY_TOKEN="library-token" \
     GOTG_TOKENS_DB="$TEST_TMP/service-state/tokens.db" \
