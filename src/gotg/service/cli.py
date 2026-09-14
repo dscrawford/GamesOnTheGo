@@ -16,6 +16,26 @@ from ..catalog import CatalogStore
 from ..saves import DEFAULT_KEEP, DEFAULT_MAX_BYTES, SavesStore
 from ..tokens import TokenStore
 from .app import Config, make_server
+from .artcache import ArtCache
+
+
+def _number(env: Mapping[str, str], name: str, fallback: float) -> float:
+    """A float from the environment, or a refusal to start.
+
+    Not a silent fallback: an operator who typed GOTG_UPSTREAM_RATE=2O meant
+    to pace the upstream, and a service that quietly kept the default would
+    lean on somebody else's quota at ten times the rate they asked for.
+    """
+    raw = env.get(name, "")
+    if not raw:
+        return fallback
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ValueError(f"{name} is not a number: {raw!r}") from None
+    if value < 0:
+        raise ValueError(f"{name} cannot be negative: {raw!r}")
+    return value
 
 
 def config_from_env(env: Mapping[str, str] | None = None) -> Config:
@@ -24,6 +44,10 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
         token=env.get("GOTG_PROXY_TOKEN", ""),
         steamgriddb_key=env.get("STEAMGRIDDB_API_KEY", ""),
         upstream_cache_dir=env.get("GOTG_UPSTREAM_CACHE_DIR", ""),
+        art_dir=env.get("GOTG_ART_DIR", ""),
+        upstream_rate=_number(env, "GOTG_UPSTREAM_RATE", 2.0),
+        upstream_burst=_number(env, "GOTG_UPSTREAM_BURST", 10.0),
+        upstream_wait=_number(env, "GOTG_UPSTREAM_WAIT", 5.0),
         igdb_client_id=env.get("IGDB_CLIENT_ID", ""),
         igdb_client_secret=env.get("IGDB_CLIENT_SECRET", ""),
         index_token=env.get("GOTG_INDEX_TOKEN", ""),
@@ -78,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         catalog = catalog_from_env()
         store = store_from_env()
         token_store = token_store_from_env()
+        art = ArtCache(Path(config.art_dir)) if config.art_dir else None
         # A catalog row grants read on its path, so the library must not be
         # able to name what the service itself writes.
         if store and catalog:
@@ -85,6 +110,12 @@ def main(argv: list[str] | None = None) -> int:
             for root in catalog.roots:
                 if saves_root.is_relative_to(root):
                     raise ValueError(f"the saves directory {store.root} is inside library root {root}")
+        # Same rule, same reason.
+        if art and catalog:
+            art_root = Path(os.path.realpath(art.root))
+            for root in catalog.roots:
+                if art_root.is_relative_to(root):
+                    raise ValueError(f"the art directory {art.root} is inside library root {root}")
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -106,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
         files_dir=files_dir,
         stream_slots=stream_slots,
         token_store=token_store,
+        art=art,
     )
     held = [name for name, on in (("steamgriddb", config.steamgriddb_key), ("igdb", config.igdb_client_id)) if on]
     saves = f"saves under {store.root}" if store else "no saves store"
@@ -117,7 +149,8 @@ def main(argv: list[str] | None = None) -> int:
         tokens = f"tokens asked of {config.auth_url}"
     else:
         tokens = "legacy token only"
-    print(f"gotg service on :{port}, holding credentials for: {creds}; {saves}; {games}; {tokens}")
+    pictures = f"art cached at {art.root}" if art else "no art cache"
+    print(f"gotg service on :{port}, holding credentials for: {creds}; {saves}; {games}; {tokens}; {pictures}")
     server.serve_forever()
     return 0
 
