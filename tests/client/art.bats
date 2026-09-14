@@ -177,3 +177,82 @@ warm() { run "$GOTG_BIN" admin art warm --rate 0 "$@"; }
   [ "$status" -eq 0 ]
   [[ "$output" == *"art:    1"* ]]
 }
+
+# --- curating, because the cache is the source of truth ----------------------
+#
+# One answer per game, held in one place and drawn by every grid — which makes
+# a wrong answer wrong everywhere, and fixable in exactly one place.
+
+curate() { run "$GOTG_BIN" admin art "$@"; }
+
+@test "search asks SteamGridDB through the service and reports the matches" {
+  curate search "Some Game"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].name' <<<"$output")" = "The Top Match" ]
+}
+
+@test "search can list the assets behind a match" {
+  curate search "Some Game" --assets 2
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.[0].assets[].url] | length' <<<"$output")" -gt 0 ]
+}
+
+@test "an admin can put the right picture in for everybody" {
+  add_game n64 usa.some_game.z64 "rom" "Some Game"
+  printf '\x89PNG\r\n\x1a\nhand-picked' >"$TEST_TMP/pick.png"
+  curate set n64/usa.some_game "$TEST_TMP/pick.png"
+  [ "$status" -eq 0 ]
+
+  code="$(client_art n64/usa.some_game "$TEST_TMP/tile")"
+  [ "$code" = "200" ]
+  run cmp -s "$TEST_TMP/tile" "$TEST_TMP/pick.png"
+  [ "$status" -eq 0 ]
+}
+
+@test "a hand-picked file that is not a picture is refused before the wire" {
+  printf 'not a picture' >"$TEST_TMP/nope.txt"
+  curate set n64/usa.some_game "$TEST_TMP/nope.txt"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not a png, jpeg or webp"* ]]
+}
+
+@test "an admin can record a miss on a game whose only matches are wrong" {
+  curate miss n64/usa.some_game
+  [ "$status" -eq 0 ]
+  run curl -sS -D - -o /dev/null -H "Authorization: Bearer test-token" \
+    "$GOTG_SERVICE_URL/art/n64/usa.some_game"
+  [[ "$output" == *"X-Gotg-Art: miss"* ]]
+}
+
+@test "show tells a held picture from the two kinds of nothing" {
+  curate show n64/usa.some_game
+  [ "$(jq -r '.miss' <<<"$output")" = "false" ]
+
+  curate miss n64/usa.some_game
+  curate show n64/usa.some_game
+  [ "$(jq -r '.miss' <<<"$output")" = "true" ]
+
+  printf '\x89PNG\r\n\x1a\npic' >"$TEST_TMP/pick.png"
+  curate set n64/usa.some_game "$TEST_TMP/pick.png"
+  curate show n64/usa.some_game
+  [ "$(jq -r '.held' <<<"$output")" = "n64/usa.some_game" ]
+}
+
+@test "forgetting a bad answer lets the next warm look again" {
+  restart_sgdb --no-match
+  restart_libretro --empty
+  add_game n64 usa.obscure_game.z64 "rom" "Obscure Game"
+  warm
+  [ "$(jq -r '.misses' <<<"$output")" = "1" ]
+
+  curate forget n64/usa.obscure_game
+  [ "$status" -eq 0 ]
+  warm --dry-run
+  [[ "$output" == *"would warm 1 of"* ]]
+}
+
+@test "curating needs the index token" {
+  GOTG_INDEX_TOKEN="" run "$GOTG_BIN" admin art show n64/usa.some_game
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"GOTG_INDEX_TOKEN"* ]]
+}

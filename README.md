@@ -248,11 +248,27 @@ shared, so a timeout or a 429 must never produce one. Those defer to the next
 run instead, and a key the upstream refuses stops the run outright rather than
 writing thousands of misses on the strength of a credential problem.
 
-After a warm, a grid is `GET /art/<platform>/<id>` against our own service and
-no upstream hears from a client at all. Tiles still fill in lazily, one at a
-time as they scroll into view — what changed is not when the picker asks but
-who it asks, and a machine we run answers in milliseconds whether it has the
-picture or knows nobody does. Writing to
+**The cache is the source of truth, and the picker asks nothing else.** A
+grid is `GET /art/<platform>/<id>` and that is the whole of it — no
+SteamGridDB, no libretro, not even through the proxy. Tiles still fill in
+lazily as they scroll into view; what changed is who answers, and a machine
+we run answers in milliseconds whether it has the picture or knows nobody
+does. A game no warm has reached yet simply draws its title until one does.
+
+Which makes a wrong answer wrong for everybody, so it is fixed in the one
+place too:
+
+```bash
+gotg admin art search "Luigi's Mansion" --assets 3   # what SteamGridDB has, via the proxy
+gotg admin art set gamecube/usa.luigis_mansion https://.../cover.png
+gotg admin art set gamecube/usa.luigis_mansion ~/Pictures/cover.png
+gotg admin art show gamecube/usa.luigis_mansion      # held, or which kind of nothing
+gotg admin art miss switch/world.some_game           # nobody has one; stop looking
+gotg admin art forget gamecube/usa.luigis_mansion    # drop it, the next warm re-looks
+```
+
+Unlike the warmer, `set` is not best-effort: somebody typed a path, so a path
+that cannot be used is an error rather than a warning to read past. Writing to
 the cache takes the index token, the same credential the indexer writes the
 catalog with: what lands there is drawn by every other machine. And the proxy
 paces what does go out (`GOTG_UPSTREAM_RATE`, two requests a second by

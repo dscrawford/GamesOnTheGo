@@ -96,13 +96,15 @@ Cached at `$GOTG_STATE_DIR/ui/art/<platform>/<id>.<ext>` — under the state
 directory rather than the store, so it survives a rebuild, same as the catalog
 cache and the save archives.
 
-**And now, mostly, from us.** The service keeps the fleet's copy of all of
-this (`/art`, warmed by `gotg admin art warm`), so the first place a tile is
-asked for is our own endpoint: one request for the whole index at startup,
-then a download per picture, and no upstream touched. The sources below stay
-as the fallback for a game imported since the last warm. The fetching stays
-lazy — a tile asks when it scrolls into view — because the ask is now a
-round trip to our own service rather than a search upstream.
+**And now, only from us.** The service keeps the fleet's copy of all of this
+(`/art`, warmed by `gotg admin art warm`), and it is the only place the grid
+asks: a picture, a recorded miss, or nothing yet. The sources below still do
+the resolving, but they do it in the warmer, once, rather than on every
+machine — so what is described from here down is where a picture *comes
+from*, not what the picker talks to. Fetching stays lazy, a tile at a time,
+because the ask is a round trip to our own service rather than a search
+upstream. When an answer is wrong it is wrong for everybody, which is what
+`gotg admin art search|set|miss|forget` exists to fix.
 
 **Permanently includes the misses.** Most of 5674 games will have no art
 anywhere, and a cache that only remembers successes re-asks the network for

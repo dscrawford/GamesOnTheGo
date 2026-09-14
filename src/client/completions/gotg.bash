@@ -133,7 +133,7 @@ _gotg() {
                 2) mapfile -t COMPREPLY < <(compgen -W "invite tokens revoke import scan art" -- "$cur") ;;
                 3)
                     case "$sub" in
-                        art) mapfile -t COMPREPLY < <(compgen -W "warm status" -- "$cur") ;;
+                        art) mapfile -t COMPREPLY < <(compgen -W "warm status search set miss show forget" -- "$cur") ;;
                         invite) mapfile -t COMPREPLY < <(compgen -W "--ttl --user" -- "$cur") ;;
                         scan) mapfile -t COMPREPLY < <(compgen -W "--since --all --json" -- "$cur") ;;
                         import) mapfile -t COMPREPLY < <(compgen -W "--follow --timeout" -- "$cur") ;;
