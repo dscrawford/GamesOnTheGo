@@ -14,9 +14,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
+from gotg_ui import fetch
 from gotg_ui.art import ArtStore
 from gotg_ui.catalog import Game
-from gotg_ui import fetch
 from gotg_ui.fetch import Loader, fetch_one, service_art
 
 PICTURE = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
@@ -70,6 +70,13 @@ class _Art(BaseHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802
         _Art.seen.append(self.path)
+        # gotg.dcraw.net is Cloudflare-proxied, and Cloudflare answers the
+        # default Python-urllib/3.x with a 403 whatever the token says. A mock
+        # that answered anything would never have caught it — and it did not:
+        # every tile was silently blank until this was put here.
+        if self.headers.get("User-Agent", "").startswith("Python-urllib"):
+            self._send(403, b"error code: 1010\n", "text/plain")
+            return
         if self.path == "/art":
             self._send(200, json.dumps(_Art.index).encode(), "application/json")
             return
@@ -124,3 +131,11 @@ def test_the_grid_asks_nobody_but_the_service(art_service):
     game = Game(id="usa.other_game", platform="switch", title="Other", handler="single_file")
     assert fetch_one(game, art_service, "client-token") == (None, False)
     assert _Art.seen == ["/art/switch/usa.other_game"]
+
+
+def test_the_grid_identifies_itself(art_service):
+    # Not cosmetic: without a User-Agent the edge answers 403, which is not an
+    # answer, so the tile stays blank and nothing says why.
+    game = Game(id="usa.zelda", platform="n64", title="Zelda", handler="single_file")
+    _Art.pictures["n64/usa.zelda"] = PICTURE
+    assert service_art(game, art_service, "client-token") == (PICTURE, True)

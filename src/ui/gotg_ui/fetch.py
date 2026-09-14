@@ -55,20 +55,33 @@ def service() -> tuple[str, str]:
 # it. Short: this is a machine we run, and a tile is not worth a stall.
 SERVICE_TIMEOUT = 10
 
+# Identify ourselves, which is not cosmetic: gotg.dcraw.net is Cloudflare-
+# proxied, and Cloudflare answers the default Python-urllib/3.x with a 403
+# (error 1010) whatever the token says. The same bug cost a working
+# SteamGridDB source once already — and here it is worse, because a 403 is
+# not an answer, so every tile silently stayed blank.
+USER_AGENT = "gotg-ui/0.1.0"
+
+
+def _ask(url: str, token: str) -> urllib.request.Request:
+    request = urllib.request.Request(url)
+    request.add_header("Authorization", f"Bearer {token}")
+    request.add_header("User-Agent", USER_AGENT)
+    return request
+
 
 def service_art(game: Game, url: str, token: str) -> tuple[bytes | None, bool]:
     """(the picture, whether that was an answer).
 
     (bytes, True)  the service had it
     (None,  True)  the service knows nobody has art for this game
-    (None,  False) the service has not been asked to look yet, or is not
-                   reachable — the caller may try the upstreams itself
+    (None,  False) the service has not been asked to look yet, or could not
+                   be reached — nobody's answer, so nothing is written down
     """
     if not (url and token):
         return None, False
     where = f"{urllib.parse.quote(game.platform)}/{urllib.parse.quote(game.id)}"
-    request = urllib.request.Request(f"{url}/art/{where}")
-    request.add_header("Authorization", f"Bearer {token}")
+    request = _ask(f"{url}/art/{where}", token)
     try:
         with urllib.request.urlopen(request, timeout=SERVICE_TIMEOUT) as response:  # noqa: S310
             return response.read(), True
