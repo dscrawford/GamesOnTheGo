@@ -24,6 +24,10 @@ pkgs.runCommand "check-client-tests"
       ffmpeg # qa.bats synthesizes its fixtures and runs the analyzers
       imagemagick # qa.bats: the golden-frame phash comparison
       packages.gotg-proxy
+      # The watcher itself, so its own process handling — a target already
+      # gone, a target that exits while it waits — is tested against the real
+      # binary rather than a stand-in.
+      packages.gotg-killswitch
     ];
     GOTG_BIN = pkgs.lib.getExe packages.gotg;
   }

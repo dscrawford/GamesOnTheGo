@@ -7,6 +7,7 @@
   jq,
   unzip,
   gotg-pads,
+  gotg-killswitch,
   gnutar,
   zstd,
   zenity,
@@ -40,6 +41,7 @@ let
     procps # `gotg steam` has to know whether Steam is running
     (python3.withPackages (ps: [ ps.vdf ])) # binary shortcuts.vdf
     gotg-pads # reports what SDL sees, for generated bindings
+    gotg-killswitch # the controller way out of a running game
     gnutar # save bundles, and the archive a pull takes before it overwrites
     zstd
     util-linux # flock, for the per-game download lock

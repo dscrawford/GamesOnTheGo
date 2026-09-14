@@ -35,6 +35,8 @@ source "$GOTG_LIB/download.sh"
 source "$GOTG_LIB/env.sh"
 # shellcheck source=lib/launcher.sh
 source "$GOTG_LIB/launcher.sh"
+# shellcheck source=lib/killswitch.sh
+source "$GOTG_LIB/killswitch.sh"
 # shellcheck source=lib/cmd-play.sh
 source "$GOTG_LIB/cmd-play.sh"
 # shellcheck source=lib/cmd-uninstall.sh

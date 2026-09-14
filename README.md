@@ -319,6 +319,27 @@ The identity string it binds by is built the same way the emulator builds it,
 and compared as a string — which is why `list` prints it: that is what tells you
 whether a controller is the same one a binding was written for.
 
+**Every game can be stopped from the controller.** Hold **both shoulders (or
+both triggers) and Start for three seconds** and the game shuts down. Emulated
+games have no Quit a pad can reach — a Switch title wants the Home button, an
+N64 ROM wants a keyboard that is not in the room, and a game that has hung
+wants neither — so on the couch the way out had been to get up and find one.
+
+Every part of the combination is about not firing by accident: two shoulders is
+a grip somebody stumbles into, two shoulders and Start is not, and three
+seconds of it is nobody's slip. It is not a chord any of these consoles used,
+and it is not intercepted — the emulator still sees every button, so a game
+that happens to read all three carries on reading them.
+
+It works with every emulator because it watches the controller rather than the
+emulator: several processes can read the same evdev device, so `gotg play`
+starts `gotg-killswitch` beside the game and it costs the game nothing. The
+game is asked to stop first (SIGTERM, so it writes its save) and killed only if
+it will not go. `GOTG_KILLSWITCH=0` turns it off for a launch;
+`GOTG_KILLSWITCH_HOLD_MS` retunes the three seconds. A machine with no
+controller support at all keeps playing games — it just says it has no kill
+switch.
+
 **Making a device readable is the host's job, not this project's.** An ordinary
 pad needs nothing at all. One that talks raw HID — the current Steam Controller
 has no evdev node — needs the steam-devices udev rules, which
