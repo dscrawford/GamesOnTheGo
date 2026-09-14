@@ -220,6 +220,43 @@ outright with `--as tile|capsule|hero|logo|icon`. Unlike the two automatic
 sources this one is not best-effort: somebody typed a path, so a path that
 cannot be used is an error rather than a warning to read past.
 
+**The pictures are resolved once, for everybody.** The grid on a Deck used to
+ask SteamGridDB about each game as its tile scrolled into view: the same
+questions, from every machine, against one shared key — and for most of a
+5674-game library the answer is "nobody has art for this", which is the
+expensive thing to keep re-learning. So the service keeps an art cache of its
+own — a volume at `GOTG_ART_DIR` — and one operator run fills it:
+
+```bash
+export GOTG_INDEX_TOKEN="$(kubectl get secret gotg-api -o jsonpath='{.data.index-token}' | base64 -d)"
+gotg admin art warm                 # the whole catalog, ~0.5 games/second, resumable
+gotg admin art warm --limit 500     # or a chunk at a time, from a timer
+gotg admin art status               # how many have a picture, how many a recorded miss
+```
+
+Deliberately slow. The pace is one game at a time with a delay between them,
+because SteamGridDB's key is not ours to spend and libretro's server is
+donated bandwidth — a run that takes three hours and resumes beats one that
+takes ten minutes and gets the key banned. Everything the service already
+knows is skipped, so a second run only looks at what is new, and `--limit`
+turns one long warm into a series of short ones.
+
+**A miss is only written down when it was really a miss.** The cache records
+"nobody has this" as well as the pictures, which is what stops the fleet
+re-asking about the 4000 games nothing has — and that record is permanent and
+shared, so a timeout or a 429 must never produce one. Those defer to the next
+run instead, and a key the upstream refuses stops the run outright rather than
+writing thousands of misses on the strength of a credential problem.
+
+After a warm, a grid is `GET /art/<platform>/<id>` against our own service and
+no upstream hears from a client at all — so the picker stops being lazy about
+it and pulls what the service holds in the background at startup. Writing to
+the cache takes the index token, the same credential the indexer writes the
+catalog with: what lands there is drawn by every other machine. And the proxy
+paces what does go out (`GOTG_UPSTREAM_RATE`, two requests a second by
+default, cache hits exempt), so no client can lean on the shared key however
+enthusiastically it asks.
+
 **Requests identify themselves as `gotg/0.1.0`**, which is not cosmetic:
 `www.steamgriddb.com` is behind Cloudflare, and Cloudflare answers the default
 `Python-urllib/3.x` with a 403 whatever the API key says. Against a mock that

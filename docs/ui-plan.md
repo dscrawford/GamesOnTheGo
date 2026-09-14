@@ -96,6 +96,14 @@ Cached at `$GOTG_STATE_DIR/ui/art/<platform>/<id>.<ext>` — under the state
 directory rather than the store, so it survives a rebuild, same as the catalog
 cache and the save archives.
 
+**And now, mostly, from us.** The service keeps the fleet's copy of all of
+this (`/art`, warmed by `gotg admin art warm`), so the first place a tile is
+asked for is our own endpoint: one request for the whole index at startup,
+then a download per picture, and no upstream touched. The sources below stay
+as the fallback for a game imported since the last warm. Which also retires
+the laziness: what the service holds is pulled in the background when the
+picker opens, so paging ahead finds its pictures already on disk.
+
 **Permanently includes the misses.** Most of 5674 games will have no art
 anywhere, and a cache that only remembers successes re-asks the network for
 every one of them on every launch — which on this library is the difference
