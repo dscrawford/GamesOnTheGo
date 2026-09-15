@@ -6,7 +6,7 @@
 { base, helpers, ... }:
 base
 // {
-  title = "Tears of the Kingdom 120fps";
+  title = "Tears of the Kingdom (120fps)";
   preLaunch =
     (base.preLaunch or "")
     + (helpers.totkUltraCam {

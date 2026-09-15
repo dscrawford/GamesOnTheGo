@@ -69,7 +69,7 @@ in
   # vanilla Emerald playthrough, and the built ROM lives here too.
   isolate = true;
 
-  title = "Pokémon Emerald Rogue";
+  title = "Pokémon Emerald (rogue)";
 
   # Every arm-none-eabi binary is prefixed, so both toolchains share one PATH
   # without the cross linker shadowing the host one. Checked, not assumed.

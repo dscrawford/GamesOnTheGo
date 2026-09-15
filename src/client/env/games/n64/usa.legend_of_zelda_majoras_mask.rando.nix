@@ -4,5 +4,5 @@
 # the vanilla file slots.
 { ... }:
 {
-  title = "Majora's Mask Randomizer";
+  title = "Majora's Mask (rando)";
 }
