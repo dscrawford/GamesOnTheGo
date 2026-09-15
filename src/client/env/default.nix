@@ -26,6 +26,9 @@ let
     ryubing = pkgs.callPackage ../../../pkgs/ryubing { };
     pyisotools = pkgs.callPackage ../../../pkgs/pyisotools { };
     wiimms-szs-tools = pkgs.callPackage ../../../pkgs/wiimms-szs-tools { };
+    # Only the Four Swords Adventures split-screen variants name this, so only
+    # they build it — sway, gamescope and bwrap are not the client's problem.
+    splitscreen = pkgs.callPackage ../../../pkgs/splitscreen { };
   };
 
   nixNames =

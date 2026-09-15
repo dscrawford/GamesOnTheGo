@@ -117,6 +117,15 @@
           gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini" \
             Display Fullscreen "$([ -n "$gotg_fullscreen" ] && echo True || echo False)"
 
+          # An NKit-processed disc opens a modal warning before the game, with a
+          # "don't show this again" box — which is fine at a desk and is a
+          # session that never starts on a sofa, or inside a split-screen frame
+          # where nothing has told the dialog where to go. The library is
+          # largely NKit RVZ, so this is answered once here rather than per
+          # environment by whoever finds it.
+          gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini" \
+            Interface SkipNKitWarning True
+
           # Vulkan rather than Dolphin's OpenGL default: the Mesa/RDNA2
           # handhelds this targets run markedly faster on it.
           gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini" \

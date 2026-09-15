@@ -575,7 +575,34 @@ gotg play usa.super_mario_sunshine bsmso  # + Better Super Mario Sunshine Online
 gotg play world.luigis_mansion_2_hd 60fps   # Luigi's Mansion 2 HD, unlocked to 60
 gotg play world.luigis_mansion_2_hd 120fps  # the same patch at a 120Hz refresh rate
 gotg play usa.legend_of_zelda_majoras_mask rando   # 2ship's own randomizer, its saves apart
+gotg play usa.legend_of_zelda_four_swords_adventures 2p   # two players, a GBA screen each
 ```
+
+**Four Swords Adventures wants a Game Boy Advance per player.** The interesting
+screen moves between the television and the little one depending on where you
+are standing, and Dolphin will emulate those GBAs — but it opens each as a
+window of its own, so the game arrives as five windows to arrange by hand every
+launch and to keep arranged while playing. The `2p`, `3p` and `4p` variants put
+them in one window instead:
+
+![Two-player Four Swords Adventures: GBA1 top left, GBA2 below it, the game on the right](docs/four-swords-2p.png)
+
+| | layout | ports |
+|---|---|---|
+| plain | the game, no GBA at all | port 1 is an ordinary GameCube controller |
+| `2p` | both GBAs down the left quarter, game on the rest | ports 1-2 become GBAs |
+| `3p` | two GBAs left, one top right, game between them | ports 1-3 |
+| `4p` | two GBAs left, two right, game between them | ports 1-4 |
+
+Controllers are seated in gotg's own order — the one `gotg controllers order`
+sets and every other emulator here already uses — so player one's pad drives
+the GBA in player one's corner. The frame is
+[SplitScreenWrapper](https://github.com/dscrawford/SplitScreenWrapper), pinned
+by revision and named by these three environments and nothing else: a machine
+that never launches one never builds sway, gamescope or bubblewrap for it. The
+GBA's BIOS is fetched on demand from the Game Boy Advance directory on the
+server, since that is whose file it is — one copy, whichever platform turns out
+to need it.
 
 Not every variant rebuilds a disc. The Switch one installs a `.pchtxt` into the
 emulator's mod directory and pins VSync to the Switch's own 60Hz — because the

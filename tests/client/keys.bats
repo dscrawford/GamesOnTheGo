@@ -99,3 +99,36 @@ keys_dir() { printf '%s/env-switch/config/Ryujinx/system' "$GOTG_STATE_DIR/env";
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
+
+# --- somebody else's platform ------------------------------------------------
+
+@test "a manifest may take a file from another platform's directory" {
+  # Four Swords Adventures is a GameCube game that will not emulate its Game
+  # Boy Advances without the GBA's own BIOS, and there is one copy of that,
+  # under gba — not one per platform that turns out to want it.
+  mkdir -p "$GOTG_ROOTS_DIR/env-gamecube-fsa/share/gotg"
+  jq -n '{platform: "gba", into: "bios", files: ["bios.zip"]}' \
+    >"$GOTG_ROOTS_DIR/env-gamecube-fsa/share/gotg/keys.json"
+  mkdir -p "$SERVICE_FILES_DIR/gba"
+  printf 'PK\003\004 not really a zip\n' >"$SERVICE_FILES_DIR/gba/bios.zip"
+
+  run keys_ensure env-gamecube-fsa gamecube
+  [ "$status" -eq 0 ]
+  [ -s "$GOTG_STATE_DIR/env/env-gamecube-fsa/bios/bios.zip" ]
+}
+
+@test "the byte host serves the keys, not the control plane" {
+  # /files lives beside /games, off the proxied control plane — a deployment
+  # that splits them answers for keys on the host the catalog names, and the
+  # control plane 503s for a service that is working perfectly.
+  fake_keys_env
+  serve_keys
+  # A catalog naming a byte host, and a control plane that has no files at all.
+  gotg refresh
+  jq '. + {files_url: $url}' --arg url "$GOTG_SERVICE_URL" "$GOTG_CACHE_FILE" >"$GOTG_CACHE_FILE.tmp"
+  mv "$GOTG_CACHE_FILE.tmp" "$GOTG_CACHE_FILE"
+
+  run keys_ensure env-switch switch
+  [ "$status" -eq 0 ]
+  [ -s "$(keys_dir)/prod.keys" ]
+}
