@@ -266,3 +266,16 @@ def test_uninstall_runs_through_the_same_loader_with_dialogs_suppressed(bin_env,
     assert "uninstall n64/usa.zelda" in argv
     assert "dialog=1" in argv
     assert "uninstalled: A Game" in p.tail()
+
+
+def test_a_variant_is_asked_about_and_installed_by_name(bin_env, tmp_path):
+    # A mod is its own environment: the one built for the plain game says
+    # nothing about whether this one is ready, and installing it is its own run.
+    log = tmp_path / "argv"
+    bin_env(f'printf "%s\\n" "$*" >>{log}; echo ready')
+    assert is_ready(game(), "bse")
+    assert log.read_text().strip().endswith("n64/usa.zelda bse")
+
+    p = Preparer(game(), None, "bse")
+    wait_done(p)
+    assert log.read_text().strip().splitlines()[-1] == "install n64/usa.zelda bse"

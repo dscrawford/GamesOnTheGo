@@ -103,3 +103,17 @@ def test_the_grid_never_needs_the_client_to_guess():
     on_three = [command_for(game("eur.asterix", p)) for p in ("gb", "nes", "snes")]
     assert len({tuple(c) for c in on_three}) == 3, "three platforms, three different commands"
     assert [c[2] for c in on_three] == ["gb/eur.asterix", "nes/eur.asterix", "snes/eur.asterix"]
+
+
+def test_a_variant_rides_after_the_id():
+    # The client takes it there for every verb: play, configure, steam add and
+    # uninstall all read `<id> [variant]`.
+    game = Game(id="usa.zelda", platform="n64", title="Z", handler="single_file")
+    assert command_for(game, "play", "rando")[-2:] == ["n64/usa.zelda", "rando"]
+    assert command_for(game, "configure", "rando")[1] == "configure"
+
+
+def test_no_variant_is_the_command_it_always_was():
+    game = Game(id="usa.zelda", platform="n64", title="Z", handler="single_file")
+    assert command_for(game, "play") == command_for(game, "play", None)
+    assert len(command_for(game, "play")) == 3

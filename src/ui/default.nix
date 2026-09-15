@@ -54,7 +54,10 @@ stdenvNoCC.mkDerivation {
     # copied: the grid asks SteamGridDB and libretro-thumbnails exactly as
     # `gotg steam art` does, and a second implementation would be a second
     # thing to keep in step with an API neither of us controls.
-    # GOTG_UI_DATA is the client's own table directory, which is where
+    # GOTG_UI_ENV is the client's environment files, which is where a game's
+    # variants are: a mod is a file there rather than a catalog row, so the
+    # menu reads the same directory `gotg play <id> <variant>` resolves
+    # against. GOTG_UI_DATA is the client's own table directory, which is where
     # ares-pads.json lives — the file `gotg pads` writes the bindings from. The
     # diagram reads that one rather than a copy, so what it draws and what the
     # emulator is given cannot disagree. GOTG_DATA wins when the client
@@ -63,6 +66,7 @@ stdenvNoCC.mkDerivation {
       --add-flags "-m gotg_ui" \
       --set PYTHONPATH "$out/share/gotg-ui:${gotg}/share/gotg/steam" \
       --set GOTG_UI_DATA "${gotg}/share/gotg/data" \
+      --set GOTG_UI_ENV "${gotg}/share/gotg/env" \
       --set GOTG_UI_ASSETS "$out/share/gotg-ui/assets" \
       --prefix PATH : ${lib.makeBinPath [ gotg ]}
 
