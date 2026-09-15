@@ -613,6 +613,9 @@ and settings sit apart from the plain launch and from each other:
 | Tears of the Kingdom | `60fps`, `120fps`, `enhanced` | the same mod; `enhanced` is 120 at 1440p with larger shadows |
 | Luigi's Mansion 2 HD | `60fps`, `120fps` | a pchtxt over the swap interval |
 | Skyward Sword HD | `120fps` | already 60, so the plain launch is that |
+| Kirby and the Forgotten Land | `60fps` | a static pchtxt; 60 is its ceiling, not a step to 120 |
+| Paper Mario: The Thousand-Year Door | `60fps` | a pchtxt, a replaced battle file and a 30/60 cheat |
+| Super Mario RPG | `120fps` | already 60, so the plain launch is that; the patch is WIP |
 
 The two Zelda engines tie physics to the frame, which is why the patch matters
 more than the cap: UltraCam decouples the game's logic from the frame rate, so
@@ -626,6 +629,21 @@ it is experimental. It also only patches **v1.0.1**: Ryujinx matches a pchtxt
 to the running executable by the build id inside it, so on a 1.0.0 dump the mod
 loads, matches nothing, and the game runs at its usual 60 — which is what "this
 variant did nothing" looks like.
+
+Kirby's is *static*: the patch presents a frame per vblank but the game's logic
+still assumes a fixed rate, so the emulated display stays at 60 and there is no
+120fps variant to pair it with — raise the refresh rate under this one and the
+game runs fast rather than smooth. Its author has a dynamic version in progress
+with no date on it.
+
+Paper Mario is three files, not one — an executable patch, a replaced battle
+file and a cheat — and the cheat is the part to know about. Two stretches of
+the game come apart at 60: Punie's escort in Chapter 2, where her AI can stop
+following, and the Pianta Parlor paper game, which runs at double speed. Hold
+**ZL and press D-pad Down** to drop back to 30 for those, **D-pad Up** to
+return. It ships switched on, and switched on is how Ryujinx finds it: the
+enabled list is written once per game, so toggling it off in Ryujinx's own
+cheat manager sticks.
 
 **From the picker, a game's variants are a menu.** `gotg-ui` reads the same
 environment files `gotg play <id> <variant>` resolves against, so a game with

@@ -29,6 +29,15 @@ let
       "SkipNKitWarning"
     ];
     wiiu = [ ];
+    switch = [
+      # Ryujinx writes its own default config on a first run, and every frame
+      # rate variant edits that config — so a variant that replaced this rather
+      # than adding to it would have nothing to edit on a fresh machine.
+      "gotg_ryujinx_config"
+      # A service Ryujinx has not implemented answers instead of throwing:
+      # without it Tears of the Kingdom dies on its first save.
+      "ignore_missing_services"
+    ];
   };
 
   checkOne =
