@@ -52,6 +52,12 @@ killswitch_start() {
   # polls the pid and exits on its own when the game is gone. stderr is
   # inherited, which under Steam is the per-game log, the one place somebody
   # looks to find out why a session ended.
-  "$bin" --pid "$pid" --hold-ms "$hold" &
+  # The hold draws itself over the game. Somewhere with no display, or with a
+  # compositor that will not float a window over a fullscreen one, can turn
+  # that off and keep the switch.
+  local -a picture=()
+  [[ "${GOTG_KILLSWITCH_OVERLAY:-1}" != "0" ]] || picture=(--no-overlay)
+
+  "$bin" --pid "$pid" --hold-ms "$hold" "${picture[@]}" &
   log "${C_DIM}hold L + R and Start for $((hold / 1000))s to stop the game${C_RESET}"
 }

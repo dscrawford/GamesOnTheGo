@@ -34,6 +34,7 @@
 #include <unistd.h>
 
 #include "killswitch.h"
+#include "overlay.h"
 #include "procstat.h"
 
 #define DEFAULT_HOLD_MS 3000
@@ -46,6 +47,15 @@
 // (a poll is microseconds) but the wakeup itself, every one of which keeps a
 // core out of a deeper idle state for the length of a session.
 #define DEFAULT_POLL_MS 100
+
+// While the combo is held there is something on screen closing towards the
+// kill, so the loop runs at a frame rate for those three seconds and goes back
+// to idling the moment it is let go.
+#define DRAW_MS 33
+
+// How long the finished ring stays up before the game goes, so the last thing
+// seen is the switch firing rather than the picture vanishing mid-hold.
+#define LINGER_MS 400
 
 // Past halfway is "pulled". A trigger's resting position is not always a clean
 // zero, and nobody holds a trigger at 40% for three seconds by accident.
@@ -204,18 +214,19 @@ static bool number(const char *text, uint64_t *out) {
 }
 
 static void usage(FILE *where) {
-    fputs("usage: gotg-killswitch --pid <pid> [--hold-ms N] [--grace-ms N] [--poll-ms N] [--quiet]\n"
+    fputs("usage: gotg-killswitch --pid <pid> [--hold-ms N] [--grace-ms N] [--poll-ms N] [--quiet] [--no-overlay]\n"
           "\n"
           "Watches every controller SDL can see. When both shoulders (or both\n"
           "triggers) and Start are held together for the hold time, the process\n"
           "is asked to stop, and killed if it will not. Exits on its own when\n"
-          "that process is gone.\n",
+          "that process is gone. The hold draws itself over the game unless\n"
+          "--no-overlay says otherwise.\n",
           where);
 }
 
 int main(int argc, char **argv) {
     uint64_t target = 0, hold_ms = DEFAULT_HOLD_MS, grace_ms = DEFAULT_GRACE_MS, poll_ms = DEFAULT_POLL_MS;
-    bool quiet = false;
+    bool quiet = false, draw = true;
 
     for (int i = 1; i < argc; i++) {
         const char *arg = argv[i];
@@ -226,6 +237,10 @@ int main(int argc, char **argv) {
         }
         if (strcmp(arg, "--quiet") == 0) {
             quiet = true;
+            continue;
+        }
+        if (strcmp(arg, "--no-overlay") == 0) {
+            draw = false;
             continue;
         }
         if (strcmp(arg, "--pid") == 0) slot = &target;
@@ -297,6 +312,7 @@ int main(int argc, char **argv) {
         SDL_free(ids);
     }
 
+    overlay *drawn = NULL;
     while (!stop) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -305,9 +321,13 @@ int main(int argc, char **argv) {
         }
 
         uint64_t now = SDL_GetTicks();
+        // The furthest along any one pad is, since the picture is of a hold
+        // rather than of a controller.
+        float progress = 0.0f;
+        bool fire = false;
         for (int i = 0; i < MAX_PADS; i++) {
             if (!pads[i].pad) continue;
-            bool fire = ks_step(&pads[i].state, read_pad(pads[i].pad), now);
+            if (ks_step(&pads[i].state, read_pad(pads[i].pad), now)) fire = true;
 
             // One line when a hold starts, so the log of a session that ended
             // this way says why — and so somebody testing the combo can see
@@ -319,18 +339,42 @@ int main(int argc, char **argv) {
             }
             if (!pads[i].state.holding) pads[i].announced = false;
 
-            if (fire) {
-                stop_game(pid, grace_ms, poll_ms);
-                close_all();
-                SDL_Quit();
-                return 0;
+            if (hold_ms) {
+                float held = (float)ks_held_ms(&pads[i].state, now) / (float)hold_ms;
+                if (held > progress) progress = held;
+            } else if (pads[i].state.holding) {
+                progress = 1.0f;
             }
         }
 
+        // Opened on the first hold rather than at startup: a session that
+        // never reaches for the kill switch never has a window made for it,
+        // and a machine with no display is one that simply does not draw.
+        if (draw && progress > 0.0f && !drawn) drawn = overlay_open();
+        if (drawn && progress > 0.0f) {
+            overlay_draw(drawn, fire ? 1.0f : progress);
+        } else if (drawn) {
+            overlay_close(drawn);
+            drawn = NULL;
+        }
+
+        if (fire) {
+            // Let the closed ring be seen. The game is about to vanish, and a
+            // picture that vanished with it would leave nothing to have
+            // understood.
+            if (drawn) SDL_Delay(LINGER_MS);
+            stop_game(pid, grace_ms, poll_ms);
+            overlay_close(drawn);
+            close_all();
+            SDL_Quit();
+            return 0;
+        }
+
         if (!proc_alive(pid)) break;
-        SDL_Delay((Uint32)poll_ms);
+        SDL_Delay((Uint32)(progress > 0.0f ? DRAW_MS : poll_ms));
     }
 
+    overlay_close(drawn);
     close_all();
     SDL_Quit();
     return 0;
