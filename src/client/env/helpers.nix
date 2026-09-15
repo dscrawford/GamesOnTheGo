@@ -73,6 +73,8 @@ let
     (import ./mods/sunshine.nix { inherit pkgs; })
     (import ./mods/luigis-mansion-2.nix { inherit pkgs; })
     (import ./mods/totk-ultracam.nix { inherit pkgs lib; })
+    (import ./mods/botw-ultracam.nix { inherit pkgs lib; })
+    (import ./mods/skyward-sword.nix { inherit pkgs lib; })
     (import ./mods/four-swords-split.nix { inherit pkgs lib; })
   ];
 
