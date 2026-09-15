@@ -25,6 +25,8 @@ from .menu import Menu
 from .prepare import Preparer, is_ready
 from .storage import Storage, human
 from .variants import variants_for
+from .versions import names as version_names
+from .versions import versions_for
 
 BACKGROUND = (18, 18, 20)
 TILE = (38, 38, 44)
@@ -306,7 +308,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             art[game.key] = None
         return art[game.key]
 
-    chosen: tuple[Game, str, str | None] | None = None
+    chosen: tuple[Game, str, str | None, str | None] | None = None
     typing: str | None = None
     menu: Menu | None = None
     # Which platform's bindings are being looked at, or None for the grid.
@@ -325,7 +327,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     after_prepare: str | None = None
     running = True
 
-    def pick(game: Game | None, verb: str = "play", variant: str | None = None) -> None:
+    def pick(game: Game | None, verb: str = "play", variant: str | None = None, version: str | None = None) -> None:
         nonlocal chosen, running, preparer, after_prepare, controllers, storage
         if game is None:
             return
@@ -341,7 +343,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             # Not an exec: the shortcut is written, the grid comes back. A mod
             # gets its own Steam entry, which is what the client does with a
             # variant anyway — its own launcher, its own artwork.
-            preparer = Preparer(game, ["steam", "add"], variant)
+            preparer = Preparer(game, ["steam", "add"], variant, version)
             after_prepare = None
             return
         if verb == "uninstall":
@@ -357,10 +359,10 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
         # Readiness is per variant: a mod is its own environment, and the one
         # built for the plain game says nothing about whether this one is.
         if is_ready(game, variant):
-            chosen = (game, verb, variant)
+            chosen = (game, verb, variant, version)
             running = False
         else:
-            preparer = Preparer(game, None, variant)
+            preparer = Preparer(game, None, variant, version)
 
     try:
         while running:
@@ -446,7 +448,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         if event.key in (pygame.K_ESCAPE, pygame.K_b):
                             # Out of the variants first, then out of the menu.
                             if menu.expanded:
-                                menu.close_variants()
+                                menu.close_list()
                             else:
                                 menu = None
                         elif event.key == pygame.K_UP:
@@ -457,7 +459,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             verb = menu.confirm()
                             if verb is not None:
                                 picked, menu = menu, None
-                                pick(picked.game, verb, picked.variant)
+                                pick(picked.game, verb, picked.variant, picked.version)
                     elif event.type == pygame.JOYHATMOTION:
                         dx, dy = event.value
                         if dy:
@@ -467,12 +469,12 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             verb = menu.confirm()
                             if verb is not None:
                                 picked, menu = menu, None
-                                pick(picked.game, verb, picked.variant)
+                                pick(picked.game, verb, picked.variant, picked.version)
                         elif event.button == 1:
                             # B backs out of the variants first, and only then
                             # out of the menu: one button, one step at a time.
                             if menu.expanded:
-                                menu.close_variants()
+                                menu.close_list()
                             else:
                                 menu = None
                     elif event.type == pygame.MOUSEMOTION:
@@ -492,7 +494,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             verb = menu.confirm()
                             if verb is not None:
                                 picked, menu = menu, None
-                                pick(picked.game, verb, picked.variant)
+                                pick(picked.game, verb, picked.variant, picked.version)
                     continue
 
                 # While typing, every key is text. Nothing below runs, or the
@@ -548,6 +550,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 state.selected,
                                 browser.is_installed(state.game),
                                 variants_for(state.game),
+                                version_names(versions_for(state.game)),
                             )
                     elif event.key == pygame.K_i:
                         browser.toggle_installed()
@@ -573,6 +576,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 state.selected,
                                 browser.is_installed(state.game),
                                 variants_for(state.game),
+                                version_names(versions_for(state.game)),
                             )
                     # No button 4/5 here: SDL2 reports a wheel as MOUSEWHEEL *and*
                     # as those two for compatibility, so handling both turns the
@@ -592,6 +596,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 state.selected,
                                 browser.is_installed(state.game),
                                 variants_for(state.game),
+                                version_names(versions_for(state.game)),
                             )
                     elif event.button == 1:
                         running = False
@@ -621,7 +626,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         browser.set_installed(installed_games())
                         preparer = None
                     else:
-                        chosen = (preparer.game, after_prepare, preparer.variant)
+                        chosen = (preparer.game, after_prepare, preparer.variant, preparer.version)
                         running = False
                 else:
                     prepare_failed = True

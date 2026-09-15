@@ -30,7 +30,9 @@ def gotg_bin() -> str:
     return os.environ.get("GOTG_BIN") or "gotg"
 
 
-def command_for(game: Game, verb: str = "play", variant: str | None = None) -> list[str]:
+def command_for(
+    game: Game, verb: str = "play", variant: str | None = None, version: str | None = None
+) -> list[str]:
     """`gotg <verb> <platform>/<id> [variant]`.
 
     Qualified, always. Ids are unique per platform and not globally — the
@@ -43,13 +45,20 @@ def command_for(game: Game, verb: str = "play", variant: str | None = None) -> l
     read `<id> [variant]`.
     """
     command = [gotg_bin(), verb, f"{game.platform}/{game.id}"]
-    return [*command, variant] if variant else command
+    if variant:
+        command.append(variant)
+    # A flag rather than a position: the variant is the environment's name and
+    # the version is the game's, and only one of them can be guessed from
+    # where it sits.
+    if version:
+        command += ["--version", version]
+    return command
 
 
-def play(game: Game, verb: str = "play", variant: str | None = None) -> None:
+def play(game: Game, verb: str = "play", variant: str | None = None, version: str | None = None) -> None:
     """Replace this process with the client's verb — the game, or its
     emulator's settings screen. Returns only on failure."""
-    command = command_for(game, verb, variant)
+    command = command_for(game, verb, variant, version)
     try:
         os.execvp(command[0], command)
     except OSError as error:

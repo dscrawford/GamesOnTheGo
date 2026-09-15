@@ -55,6 +55,14 @@
   # not portable across emulator versions, so a state pulled from another
   # machine may simply refuse to load.
   saveStates ? false,
+  # The newest version of the game this environment was built against, for an
+  # environment that is a mod rather than an emulator. A Switch exefs mod is
+  # machine code written against one executable: on a newer update it patches
+  # nothing, or patches the wrong thing and crashes minutes later with nothing
+  # on screen to say why. Stated here, the client picks the newest update at or
+  # below it — and refuses the launch when the library has nothing that old,
+  # which is a sentence rather than a mystery.
+  gameVersionMax ? null,
   # The ares console section whose controller bindings can be generated —
   # "SuperFamicom", "Nintendo64". Null leaves an environment's bindings alone.
   # ares creates a section the first time that console is run, so the name is
@@ -224,7 +232,8 @@ let
     excludes = saveExcludes;
     legacy = legacyPaths;
   }
-  // lib.optionalAttrs (title != null) { inherit title; };
+  // lib.optionalAttrs (title != null) { inherit title; }
+  // lib.optionalAttrs (gameVersionMax != null) { inherit gameVersionMax; };
 
   app = pkgs.writeShellApplication {
     name = "gotg-play";

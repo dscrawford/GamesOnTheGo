@@ -65,9 +65,16 @@ class Preparer:
     and never blocks.
     """
 
-    def __init__(self, game: Game, argv: list[str] | None = None, variant: str | None = None):
+    def __init__(
+        self,
+        game: Game,
+        argv: list[str] | None = None,
+        variant: str | None = None,
+        version: str | None = None,
+    ):
         self.game = game
         self.variant = variant
+        self.version = version
         # Default is the install; the menu also runs `steam add` through the
         # same loader, since both are long, narrated, and cancellable.
         self.argv = argv or ["install"]
@@ -80,7 +87,13 @@ class Preparer:
             # (log/warn), nix reports on stderr, and the loader wants one
             # stream in order.
             self.process = subprocess.Popen(  # noqa: S603 — argv is ours, shell=False
-                [gotg_bin(), *self.argv, f"{game.platform}/{game.id}", *([variant] if variant else [])],
+                [
+                    gotg_bin(),
+                    *self.argv,
+                    f"{game.platform}/{game.id}",
+                    *([variant] if variant else []),
+                    *(["--version", version] if version else []),
+                ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 env=env,

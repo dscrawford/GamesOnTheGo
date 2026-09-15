@@ -92,8 +92,15 @@ in
     # re-download or hand-added file never goes stale). A bare-file install
     # has nothing to register.
     if [ -d "$install" ] && [ -f "$XDG_CONFIG_HOME/Ryujinx/system/prod.keys" ]; then
+      # GOTG_GAME_VERSION is the update `gotg play` settled on — asked for on
+      # the command line, or the newest one a mod in this environment can take.
+      # Without it the newest installed wins, which is what the emulator would
+      # have done anyway.
+      gotg_version=""
+      [ -z "''${GOTG_GAME_VERSION:-}" ] || gotg_version="--select=$GOTG_GAME_VERSION"
       ${contentPython}/bin/python3 ${./switch/content.py} register \
         --keys "$XDG_CONFIG_HOME/Ryujinx/system/prod.keys" \
+        ''${gotg_version:+"$gotg_version"} \
         --ryujinx "$XDG_CONFIG_HOME/Ryujinx" "$install" ||
         echo "gotg: could not register this game's updates and DLC; launching without them" >&2
     fi

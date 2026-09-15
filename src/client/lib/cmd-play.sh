@@ -49,7 +49,31 @@ cmd_play() {
     shift
   fi
 
-  play_prepare "$want" "$variant"
+  # --version picks which update of the game to run. Pulled out of the
+  # arguments rather than passed through: everything after them belongs to the
+  # emulator, and a Switch update is not an emulator's business.
+  local want_version=""
+  local -a rest=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --version)
+        want_version="${2:-}"
+        [[ -n "$want_version" ]] || die "usage: gotg play <id> [variant] --version <version>"
+        shift 2
+        ;;
+      --version=*)
+        want_version="${1#--version=}"
+        shift
+        ;;
+      *)
+        rest+=("$1")
+        shift
+        ;;
+    esac
+  done
+  set -- "${rest[@]+"${rest[@]}"}"
+
+  play_prepare "$want" "$variant" "$want_version"
 
   log "launching $(manifest_field "$PLAY_GAME" title) with $PLAY_ATTR"
   # "$$" survives the exec below, so what the watcher holds is the emulator.
@@ -61,7 +85,7 @@ cmd_play() {
 # qa. Leaves PLAY_GAME, PLAY_ATTR and PLAY_TARGET set, and the GOTG_* launch
 # variables exported.
 play_prepare() {
-  local want="$1" variant="${2:-}"
+  local want="$1" variant="${2:-}" want_version="${3:-}"
 
   # Prefer the cached catalog: a game already installed here must still launch
   # when the server is unreachable.
@@ -124,7 +148,15 @@ play_prepare() {
   # is told is which file to run, where that came from, and where to keep what
   # it writes — that last one from env_state_dir, so the CLI and the wrapper
   # agree on it rather than each computing their own.
+  # Which update to run, if this game has any: what was asked for, what the
+  # environment's mod can take, or the newest. The environment does the
+  # registering; all it is told is the answer.
+  local version
+  version="$(versions_resolve "$game" "$attr" "$want_version")"
+  [[ -z "$version" ]] || log "version: $version"
+
   export GOTG_TARGET="$PLAY_TARGET" GOTG_INSTALL="$install" GOTG_ENV_STATE="$env_state"
+  export GOTG_GAME_VERSION="$version"
 }
 
 # Rebuild the GC roots after pulling a new version of the flake.

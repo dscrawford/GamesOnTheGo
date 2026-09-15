@@ -37,14 +37,20 @@ ACTIONS: list[tuple[str, str]] = [
 # and a row that does nothing is a row somebody will press.
 UNINSTALL: tuple[str, str] = ("Uninstall", "uninstall")
 
-# The row that opens the variants, and the one that comes back from them.
-# Their verbs never leave this program: the menu handles both itself.
+# The rows that open a list, and the one that comes back from them. Their
+# verbs never leave this program: the menu handles them itself.
 MODS = "mods"
-BACK = "mods-back"
+VERSIONS = "versions"
+BACK = "back"
 
 # What the plain game is called in a list of mods. Not "none": the row is a
 # thing to choose, and every other row in that list is a name.
 PLAIN = "the game as it shipped"
+
+# What "let the client decide" is called in a list of versions — the newest
+# installed, or the newest a chosen mod was built for. It is the right answer
+# often enough to be the default, and naming it beats an empty row.
+AUTOMATIC = "automatic"
 
 
 class Menu:
@@ -56,46 +62,69 @@ class Menu:
         tile_index: int,
         installed: bool = False,
         variants: tuple[str, ...] | Sequence[str] = (),
+        versions: tuple[str, ...] | Sequence[str] = (),
     ):
         self.game = game
         self.tile_index = tile_index
         self.installed = installed
         self.variants = tuple(variants)
+        # Newest first, as the client lists them — a version list reads like a
+        # changelog, and the one somebody wants is usually at the top.
+        self.versions = tuple(versions)
         # Which variant the verbs act on; None is the game as it shipped.
         self.variant: str | None = None
-        self.expanded = False
+        # Which version; None leaves the choice to the client, which knows
+        # what a mod can take.
+        self.version: str | None = None
+        # Which list is open, if any.
+        self.expanded: str | None = None
         self.selected = 0
 
     @property
     def actions(self) -> list[tuple[str, str]]:
-        """The rows as they stand: the verbs, or the variants while open."""
-        if self.expanded:
+        """The rows as they stand: the verbs, or whichever list is open."""
+        if self.expanded == MODS:
             rows = [("Back", BACK), (PLAIN, "variant:")]
             return rows + [(name, f"variant:{name}") for name in self.variants]
+        if self.expanded == VERSIONS:
+            rows = [("Back", BACK), (AUTOMATIC, "version:")]
+            return rows + [(name, f"version:{name}") for name in self.versions]
 
         verbs = [*ACTIONS, UNINSTALL] if self.installed else list(ACTIONS)
-        if not self.variants:
-            return verbs
-        # First, because it decides what every row under it means.
-        return [(f"Mods: {self.variant or PLAIN}", MODS), *verbs]
+        # Above the verbs, because they decide what every row under them means.
+        # A game with one version has nothing to choose, so it gets no row.
+        chooser = []
+        if self.variants:
+            chooser.append((f"Mods: {self.variant or PLAIN}", MODS))
+        if len(self.versions) > 1:
+            chooser.append((f"Version: {self.version or AUTOMATIC}", VERSIONS))
+        return chooser + verbs
 
-    def open_variants(self) -> None:
-        self.expanded = True
+    def open_list(self, which: str) -> None:
+        self.expanded = which
         # On whichever is current, so a second visit starts where the first
         # left off rather than at the top.
-        names = [None, *self.variants]
-        self.selected = names.index(self.variant) + 1 if self.variant in names else 1
+        if which == MODS:
+            names = [None, *self.variants]
+            current = self.variant
+        else:
+            names = [None, *self.versions]
+            current = self.version
+        self.selected = names.index(current) + 1 if current in names else 1
 
-    def close_variants(self) -> None:
-        """Back out of the variant list without choosing one."""
-        self.expanded = False
+    def close_list(self) -> None:
+        """Back out of an open list without choosing from it."""
+        self.expanded = None
         self.selected = 0
 
     def choose(self, verb: str) -> None:
-        """Take a `variant:` row. The menu stays open and goes back to the
-        verbs, because choosing a mod is not doing anything to it yet."""
-        self.variant = verb[len("variant:") :] or None
-        self.expanded = False
+        """Take a `variant:` or `version:` row. The menu stays open and goes
+        back to the verbs, because choosing is not yet doing."""
+        if verb.startswith("variant:"):
+            self.variant = verb[len("variant:") :] or None
+        else:
+            self.version = verb[len("version:") :] or None
+        self.expanded = None
         self.selected = 0
 
     @property
@@ -111,22 +140,17 @@ class Menu:
     def action(self) -> str:
         return self.actions[self.selected][1]
 
-    @property
-    def picks_a_variant(self) -> bool:
-        """Whether confirming this row stays inside the menu."""
-        return self.action == MODS or self.action == BACK or self.action.startswith("variant:")
-
     def confirm(self) -> str | None:
         """Take the current row. Returns the verb for the client to run, or
         None when the row was about the menu itself."""
         verb = self.action
-        if verb == MODS:
-            self.open_variants()
+        if verb in (MODS, VERSIONS):
+            self.open_list(verb)
             return None
         if verb == BACK:
-            self.close_variants()
+            self.close_list()
             return None
-        if verb.startswith("variant:"):
+        if verb.startswith(("variant:", "version:")):
             self.choose(verb)
             return None
         return verb
