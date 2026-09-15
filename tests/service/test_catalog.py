@@ -1403,3 +1403,72 @@ def test_a_preferred_host_alone_is_listed_without_a_files_url(catalog):
 def test_a_preferred_host_that_is_not_a_url_refuses_to_start():
     with pytest.raises(ValueError, match="GOTG_FILES_PREFERRED_URL"):
         Config(token=CLIENT, files_preferred_url="node1:30780").validate()
+
+
+# --- saying "still here" without rewriting anything ---------------------------
+
+
+def test_touch_advances_seen_at_without_changing_the_entry(catalog, library):
+    """An import that changed nothing still has to say it looked: seen_at is
+    what the sweep reads to decide a game has vanished. Saying it for thousands
+    of entries in one request is the difference between an import that takes a
+    minute and one that takes many."""
+    catalog.upsert("n64", "usa.zelda", entry(library))
+    before = catalog.view(full=True)["games"][0]
+
+    assert catalog.touch([("n64", "usa.zelda")], when="2099-01-01T00:00:00Z") == 1
+
+    after = catalog.view(full=True)["games"][0]
+    assert after["seen_at"] == "2099-01-01T00:00:00Z"
+    assert after["files"] == before["files"], "the row itself is untouched"
+    assert after["imported_at"] == before["imported_at"], "and it is not newly imported"
+
+
+def test_a_touched_entry_is_not_swept(catalog, library):
+    catalog.upsert("n64", "usa.zelda", entry(library))
+    catalog.touch([("n64", "usa.zelda")], when="2099-01-01T00:00:00Z")
+    assert catalog.sweep("2098-01-01T00:00:00Z")["vanished"] == []
+
+
+def test_touching_what_is_not_there_is_not_an_error(catalog, library):
+    catalog.upsert("n64", "usa.zelda", entry(library))
+    assert catalog.touch([("n64", "usa.never_imported")]) == 0
+    assert catalog.touch([]) == 0
+
+
+def test_touch_refuses_a_timestamp_it_cannot_compare(catalog, library):
+    # seen_at is compared lexicographically; a non-ISO stamp makes the sweep's
+    # comparison nonsense rather than wrong-looking.
+    catalog.upsert("n64", "usa.zelda", entry(library))
+    with pytest.raises(ValueError):
+        catalog.touch([("n64", "usa.zelda")], when="yesterday")
+
+
+def test_wire_seen_marks_many_at_once(service, library):
+    call(f"{service}/catalog/n64/usa.zelda", method="PUT", token=INDEX, body=entry(library))
+
+    # A client's token cannot say what the importer saw.
+    status, _ = call(f"{service}/catalog/seen", method="POST", token=CLIENT, body={"games": ["n64/usa.zelda"]})
+    assert status == 403
+
+    status, body = call(
+        f"{service}/catalog/seen",
+        method="POST",
+        token=INDEX,
+        body={"games": ["n64/usa.zelda", "gb/usa.never_imported"]},
+    )
+    assert status == 200
+    assert body == {"seen": 1, "asked": 2}
+
+    # Nothing vanished, and nothing was rewritten.
+    status, report = call(
+        f"{service}/catalog/sweep?confirm=1", method="POST", token=INDEX, body={"since": "2000-01-01T00:00:00Z"}
+    )
+    assert report["vanished"] == []
+
+
+@pytest.mark.parametrize("body", [{"games": "n64/usa.zelda"}, {"games": [7]}, {}, {"games": ["../etc/passwd"]}])
+def test_wire_seen_refuses_what_is_not_a_list_of_entry_ids(service, body):
+    # The ids become a WHERE clause and a log line; the contract is the fence.
+    status, _ = call(f"{service}/catalog/seen", method="POST", token=INDEX, body=body)
+    assert status == 400

@@ -96,6 +96,21 @@ class CatalogAPI:
             raise PublishError(f"PUT {platform}/{game_id} failed (HTTP {status}): {body.get('error', '')}")
         return body
 
+    def touch(self, keys: list[tuple[str, str]]) -> int:
+        """Say "still here" for entries this run did not change.
+
+        One request for all of them: the rows are identical to what is stored,
+        and re-PUTting each one to advance a timestamp is what made an import
+        of an unchanged library take minutes.
+        """
+        if not keys:
+            return 0
+        games = [f"{platform}/{game_id}" for platform, game_id in keys]
+        status, body = self._call("POST", "/catalog/seen", {"games": games})
+        if status != 200:
+            raise PublishError(f"could not mark {len(games)} entries as seen (HTTP {status})")
+        return int(body.get("seen", 0))
+
     def sweep(self, since: str) -> dict:
         status, body = self._call("POST", "/catalog/sweep", {"since": since})
         if status == 409:
@@ -162,12 +177,43 @@ def _members(op: pl.Op) -> list[_Member]:
     return []
 
 
+def _rows_match(stored: dict | None, handler: str, title: str, files: list[dict]) -> bool:
+    """Whether the catalog already holds exactly this entry.
+
+    Compared field by field rather than by a hash of the payload: the stored
+    view is the service's own shape, and a key it stops sending would
+    otherwise read as "everything changed" and quietly undo the skip.
+    """
+    if stored is None:
+        return False
+    if stored.get("handler") != handler or stored.get("title") != title:
+        return False
+
+    def key(rows) -> list[tuple]:
+        return sorted(
+            (
+                str(row.get("name")),
+                str(row.get("path")),
+                int(row.get("size_bytes") or 0),
+                int(row.get("mtime") or 0),
+                row.get("sha256"),
+            )
+            for row in rows
+        )
+
+    return key(stored.get("files", [])) == key(files)
+
+
 class Publisher:
     def __init__(self, api: CatalogAPI, *, allow_unhashed: bool = False):
         self.api = api
         self.allow_unhashed = allow_unhashed
         # (platform, id, name) -> stored file row, for the hash skip.
         self.published_this_run: set[tuple[str, str]] = set()
+        # Entries this run found unchanged. They still have to be marked as
+        # seen, or the sweep reports the whole untouched library as vanished —
+        # but that is one request at the end rather than one PUT each.
+        self.unchanged: set[tuple[str, str]] = set()
         self.known: dict[tuple[str, str, str], dict] = {}
         # (platform, id) -> the whole stored entry: what an update attaches to,
         # and where a base being republished finds the extras it already has.
@@ -268,9 +314,22 @@ class Publisher:
         else:
             payload = {"handler": op.handler, "title": op.title or op.entry_id, "files": files + _kept_extras(stored)}
 
+        if _rows_match(stored, payload["handler"], payload["title"], payload["files"]):
+            # Identical to what is stored. Nothing to write; it still has to be
+            # said to have been seen, which happens once for all of these.
+            self.unchanged.add(key)
+            self.published_this_run.add(key)
+            return
+
         self.api.put(op.platform, op.entry_id, payload)
         self.rows[key] = {"platform": op.platform, "id": op.entry_id, **payload}
         self.published_this_run.add(key)
+
+    def touch(self) -> int:
+        """Mark everything this run found unchanged as seen. One request."""
+        seen = self.api.touch(sorted(self.unchanged))
+        self.unchanged.clear()
+        return seen
 
     def sweep(self, since: str) -> None:
         report = self.api.sweep(since)
@@ -340,24 +399,23 @@ def publish_games_root(publisher: Publisher, entries: dict, cfg) -> tuple[int, i
             sha = entry.sha256
             if not sha and not publisher.allow_unhashed:
                 sha = ex.sha256_file(local)
-            publisher.api.put(
-                entry.platform,
-                entry.game_id,
+            handler = "single_file"
+            title = entry.title or entry.game_id
+            files = [
                 {
-                    "handler": "single_file",
-                    "title": entry.title or entry.game_id,
-                    "files": [
-                        {
-                            "name": local.name,
-                            "path": str(local),
-                            "size_bytes": st.st_size,
-                            "mtime": int(st.st_mtime),
-                            "sha256": sha,
-                        }
-                    ]
-                    + _kept_extras(publisher.rows.get(key)),
-                },
-            )
+                    "name": local.name,
+                    "path": str(local),
+                    "size_bytes": st.st_size,
+                    "mtime": int(st.st_mtime),
+                    "sha256": sha,
+                }
+            ] + _kept_extras(publisher.rows.get(key))
+            if _rows_match(publisher.rows.get(key), handler, title, files):
+                # The common case by a mile: most of the library is hardlinks
+                # nobody has touched since the day they were made.
+                publisher.unchanged.add(key)
+                continue
+            publisher.api.put(entry.platform, entry.game_id, {"handler": handler, "title": title, "files": files})
             published += 1
         except (OSError, PublishError) as error:
             log.error("games-root publish %s: %s", entry.game_id, error)
