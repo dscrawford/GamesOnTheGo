@@ -344,29 +344,6 @@ FLAT_PAD='[{"name": "Xbox 360 Controller", "guid": "030000005e0400008e0200001001
   [ "$(jq -r '.input_config[0].motion.enable_motion' "$(config_path)")" = "true" ]
 }
 
-# --- a Steam Controller without Steam ---
-
-STEAM_PAD='[{"id": "0-00000003-28de-0000-ff11-000001000000", "name": "Steam Controller (0)", "player_index": "Player1", "backend": "GamepadSDL2"}]'
-
-@test "a Steam Controller bound with no Steam running is warned about before the launch" {
-  fake_ryujinx_env
-  write_ryujinx_config "$STEAM_PAD"
-  GOTG_STEAM_RUNNING=0 run pads_configure env-switch
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Steam is not running"* ]]
-  [[ "$output" == *"gotg controllers order --set"* ]]
-  GOTG_STEAM_RUNNING=1 run pads_configure env-switch
-  [[ "$output" != *"Steam is not running"* ]]
-}
-
-@test "a pad that needs no Steam draws no warning about Steam" {
-  fake_ryujinx_env
-  write_ryujinx_config "$BOUND"
-  GOTG_STEAM_RUNNING=0 run pads_configure env-switch
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"Steam is not running"* ]]
-}
-
 # --- a pad the environment has never been told about ------------------------
 
 @test "a new variant takes the pad the platform already has bound" {
@@ -475,4 +452,116 @@ STEAM_PAD='[{"id": "0-00000003-28de-0000-ff11-000001000000", "name": "Steam Cont
   [ "$status" -eq 0 ]
   [ -s "$(variant_snap_path)" ]
   [ -z "$(ls "$(dirname "$(variant_snap_path)")"/*.part 2>/dev/null)" ]
+}
+
+# --- the id a binding is made of -------------------------------------------
+#
+# Ryujinx matches a player to a pad by that id and nothing else. It used to be
+# unsafe to compute — the emulator carried SDL 2.30.0 while the launcher ran
+# SDL3, and the two disagree about a GUID — and is not any more, because
+# pkgs/ryubing points the emulator at the launcher's own SDL.
+
+PUCK='[{"name": "Steam Controller", "identity": "03002854de2800000413000002006800",
+        "guid": "03002854de2800000413000002006800", "slot": 0,
+        "gamepad": true, "motion": true, "map": {"a": {"type": "button", "index": 0}}}]'
+
+# What the same pad looked like through Steam's virtual gamepad, which is what
+# a config written before the emulator could read the puck still names.
+VIRTUAL='[{"id": "0-00000003-28de-0000-ff11-000001000000", "name": "Steam Controller (0)",
+           "player_index": "Player1", "backend": "GamepadSDL2"}]'
+
+@test "the id is SDL's guid the way Ryujinx renders it" {
+  # Measured against the running emulator: this exact string in the config is
+  # what stopped Paper Mario opening its controller applet.
+  run pads_ryujinx_id 03002854de2800000413000002006800 0
+  [ "$status" -eq 0 ]
+  [ "$output" = "0-00000003-28de-0000-0413-000002006800" ]
+}
+
+@test "a guid that is not one is not turned into an id" {
+  run pads_ryujinx_id "not-a-guid" 0
+  [ "$status" -ne 0 ]
+  run pads_ryujinx_id 03002854de2800000413000002006800 "; rm -rf /"
+  [ "$status" -ne 0 ]
+}
+
+@test "a binding naming a pad that is not here is pointed at the one that is" {
+  fake_ryujinx_env
+  fake_pads "$PUCK"
+  write_ryujinx_config "$VIRTUAL"
+  run --separate-stderr pads_configure env-switch
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.input_config[0].id' "$(config_path)")" = "0-00000003-28de-0000-0413-000002006800" ]
+  [ "$(jq -r '.input_config[0].name' "$(config_path)")" = "Steam Controller (0)" ]
+}
+
+@test "a binding that already names an attached pad is left alone" {
+  # Ryujinx wrote it; it works; nothing here knows better.
+  fake_ryujinx_env
+  fake_pads "$PUCK"
+  write_ryujinx_config \
+    '[{"id": "0-00000003-28de-0000-0413-000002006800", "name": "Mine (0)",
+       "player_index": "Player1", "backend": "GamepadSDL2"}]'
+  pads_configure env-switch
+  [ "$(jq -r '.input_config[0].name' "$(config_path)")" = "Mine (0)" ]
+}
+
+@test "with no pad attached a binding keeps its seat" {
+  # A pad that is merely asleep still owns player one: its id is the id it
+  # will have when it wakes.
+  fake_ryujinx_env
+  fake_pads '[]'
+  write_ryujinx_config "$VIRTUAL"
+  run pads_configure env-switch
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.input_config[0].id' "$(config_path)")" = "0-00000003-28de-0000-ff11-000001000000" ]
+}
+
+@test "a keyboard is not a pad to repoint" {
+  fake_ryujinx_env
+  fake_pads "$PUCK"
+  write_ryujinx_config "$DEFAULT"
+  run pads_configure env-switch
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.input_config[0].backend' "$(config_path)")" = "WindowKeyboard" ]
+  [ "$(jq -r '.input_config[0].id' "$(config_path)")" = "0" ]
+}
+
+@test "a second player bound to something absent is not touched" {
+  # Player two's seat is nobody's question here, and guessing at it would
+  # reshuffle a two-pad setup on a launch with one pad plugged in.
+  fake_ryujinx_env
+  fake_pads "$PUCK"
+  write_ryujinx_config \
+    '[{"id": "0-00000003-28de-0000-ff11-000001000000", "name": "Gone (0)",
+       "player_index": "Player2", "backend": "GamepadSDL2"}]'
+  pads_configure env-switch
+  [ "$(jq -r '.input_config[0].id' "$(config_path)")" = "0-00000003-28de-0000-ff11-000001000000" ]
+}
+
+@test "the remembered bindings are repointed with the live ones" {
+  # A snapshot is what a launch restores before the emulator has read
+  # anything, so a memory of a device that is not here is the same failure one
+  # launch later.
+  fake_ryujinx_env
+  fake_pads "$PUCK"
+  mkdir -p "$(dirname "$(snap_path)")"
+  printf '%s\n' "$VIRTUAL" >"$(snap_path)"
+  write_ryujinx_config "$VIRTUAL"
+  run pads_configure env-switch
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].id' "$(snap_path)")" = "0-00000003-28de-0000-0413-000002006800" ]
+}
+
+@test "an environment with only a stale memory is repaired before it ever runs" {
+  # Kirby and Super Mario RPG were exactly this: seeded from a sibling, no
+  # config yet, and the platform's preLaunch about to restore an id for a
+  # device that no longer exists.
+  fake_ryujinx_env
+  fake_pads "$PUCK"
+  mkdir -p "$(dirname "$(snap_path)")"
+  printf '%s\n' "$VIRTUAL" >"$(snap_path)"
+  run pads_configure env-switch
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].id' "$(snap_path)")" = "0-00000003-28de-0000-0413-000002006800" ]
 }

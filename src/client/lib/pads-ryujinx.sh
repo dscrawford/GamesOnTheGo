@@ -15,11 +15,14 @@
 # `gotg configure` become the thing restored, and no settings-screen accident
 # survives past the next launch.
 #
-# Deliberately not generated from SDL the way ares and dolphin bindings are:
-# the id Ryujinx stores renders SDL's GUID through .NET's own byte order with
-# its first four hex digits zeroed, and a wrong id is a pad that silently has
-# no buttons. Copying an id Ryujinx itself wrote sidesteps every one of those
-# details.
+# The bindings themselves are still Ryujinx's to write — a mapping copied from
+# the emulator is a mapping that works — but the *id* is now ours to compute
+# when nothing here has one. That was not safe while the emulator carried its
+# own SDL 2.30.0 and the launcher ran SDL3: two SDL majors do not agree about a
+# device's GUID, and a wrong id is a pad that silently has no buttons.
+# pkgs/ryubing points the emulator's libSDL2 at sdl2-compat, so both sides now
+# ask the same library the same question, and pads_ryujinx_id renders the
+# answer the way Ryujinx does.
 
 pads_ryujinx_config() { printf '%s/config/Ryujinx/Config.json' "$(env_state_dir "$1")"; }
 
@@ -28,6 +31,7 @@ pads_ryujinx_snapshot() { printf '%s/input-config.json' "$(env_state_dir "$1")";
 pads_ryujinx_configure() {
   local attr="$1"
   pads_ryujinx_seed "$attr"
+  pads_ryujinx_rebind "$attr"
   pads_ryujinx_keep "$attr"
   # Twice around the keep, so the snapshot carries the motion block from this
   # launch rather than from the next one: a config restored a launch later
@@ -36,29 +40,9 @@ pads_ryujinx_configure() {
   if pads_ryujinx_motion "$attr"; then
     pads_ryujinx_keep "$attr"
   fi
-  pads_ryujinx_warn_steam "$attr"
   # Never fatal, like every other binding writer: no pad attached, or one SDL
   # cannot read, is a launch without motion rather than no launch.
   return 0
-}
-
-# A Steam Controller is a gamepad only while Steam runs; without it the puck
-# stays in lizard mode and Ryujinx sees no pad at all. A Switch game then
-# opens its "connect a controller" screen, which Ryujinx cannot show — it
-# throws twenty seconds in. Said before the launch, where it can be acted on.
-pads_ryujinx_warn_steam() {
-  local attr="$1" config
-  config="$(pads_ryujinx_config "$attr")"
-  [[ -f "$config" ]] || return 0
-  jq -e '[.input_config[]? | .id // "" | test("28de")] | any' "$config" >/dev/null 2>&1 || return 0
-  if [[ -n "${GOTG_STEAM_RUNNING:-}" ]]; then
-    [[ "$GOTG_STEAM_RUNNING" == "1" ]] && return 0
-  elif pgrep -x steam >/dev/null 2>&1; then
-    return 0
-  fi
-  warn "Steam is not running: the Steam Controller stays a keyboard and Ryujinx will find no pad,
-         so the game will stop on its controller screen. Start Steam, or bind another pad:
-         gotg controllers order --set <pad> && gotg controllers apply <id>"
 }
 
 # Ryujinx's untouched default: a keyboard bound as player 1 and no pad at all.
@@ -152,6 +136,97 @@ pads_ryujinx_sibling() {
 pads_ryujinx_has_pad() {
   [[ -s "$1" ]] || return 1
   jq -e '[.[]? | .backend // "" | . != "WindowKeyboard"] | any' "$1" >/dev/null 2>&1
+}
+
+# The id Ryujinx stores for a pad, from the identity SDL hands the launcher.
+#
+# Two renderings meet here. SDL's GUID is a byte string; .NET's Guid prints its
+# first three fields in the machine's own byte order, so the bytes come back
+# shuffled — and Ryujinx zeroes SDL's CRC16 of the device name first, so that
+# renaming a pad cannot orphan its bindings. The slot is what SDL calls the
+# device index, and Ryujinx puts it in front.
+#
+# Verified against the running emulator: with this id in the config and nothing
+# else changed, Paper Mario stopped opening its controller applet and went
+# straight into the game.
+pads_ryujinx_id() {
+  local guid="$1" slot="$2" b=() i
+  [[ "$guid" =~ ^[0-9a-fA-F]{32}$ ]] || return 1
+  [[ "$slot" =~ ^[0-9]+$ ]] || return 1
+  for ((i = 0; i < 32; i += 2)); do b+=("${guid:i:2}"); done
+  printf '%s-0000%s%s-%s%s-%s%s-%s%s-%s%s%s%s%s%s' "$slot" \
+    "${b[1]}" "${b[0]}" "${b[5]}" "${b[4]}" "${b[7]}" "${b[6]}" \
+    "${b[8]}" "${b[9]}" "${b[10]}" "${b[11]}" "${b[12]}" "${b[13]}" "${b[14]}" "${b[15]}"
+}
+
+# A binding that names a pad which is not here, when one is.
+#
+# Ryujinx matches a player to a pad by that id and nothing else, so a binding
+# left over from a different device is a player with no buttons and no message
+# — which is what a Steam Controller bound through Steam's virtual gamepad
+# became the moment the emulator could read the puck itself.
+#
+# Only when the stored id matches *nothing* attached. A pad that is merely
+# asleep keeps its seat: its id is still the id it will have when it wakes, and
+# stealing player one from it would be this function inventing a preference.
+#
+# The remembered bindings are repointed with the live ones. A snapshot is what
+# a launch restores before the emulator has read anything, so a memory of a
+# device that is not here is the same failure one launch later.
+# shellcheck disable=SC2016  # a jq program: $attached and friends are jq's
+GOTG_RYUJINX_REPOINT='
+  map(
+    if .backend == "GamepadSDL2"
+       and (.player_index // "Player1") == "Player1"
+       and ((.id // "") as $id | any($attached[]; . == $id) | not)
+    then .id = $want
+       | .name = (if $name == "" then .name else "\($name) (\($slot))" end)
+    else . end
+  )'
+
+pads_ryujinx_rebind() {
+  local attr="$1" pads seated attached guid slot name want
+
+  pads="$("$(pads_bin)" 2>/dev/null)" || return 0
+  seated="$(pads_seating "$pads" 2>/dev/null)" || return 0
+  [[ -n "$seated" && "$seated" != "[]" ]] || return 0
+
+  # Every attached pad's id, so that a config already naming one of them is
+  # left alone whichever seat it took.
+  attached="[]"
+  while IFS=$'\t' read -r guid slot; do
+    [[ -n "$guid" ]] || continue
+    want="$(pads_ryujinx_id "$guid" "$slot")" || continue
+    attached="$(jq -c --arg id "$want" '. + [$id]' <<<"$attached")"
+  done < <(jq -r '.[] | "\(.identity)\t\(.slot)"' <<<"$seated")
+  [[ "$attached" != "[]" ]] || return 0
+
+  IFS=$'\t' read -r guid slot name < <(
+    jq -r '.[0] | "\(.identity)\t\(.slot)\t\(.name // "")"' <<<"$seated"
+  )
+  want="$(pads_ryujinx_id "$guid" "$slot")" || return 0
+
+  pads_ryujinx_repoint "$(pads_ryujinx_config "$attr")" \
+    ".input_config |= $GOTG_RYUJINX_REPOINT" "$attached" "$want" "$name" "$slot" &&
+    log "player one was bound to a controller that is not here; pointed it at $name"
+  pads_ryujinx_repoint "$(pads_ryujinx_snapshot "$attr")" \
+    "$GOTG_RYUJINX_REPOINT" "$attached" "$want" "$name" "$slot" || true
+  return 0
+}
+
+# Apply that filter to one file, in place, and say whether anything moved.
+pads_ryujinx_repoint() {
+  local file="$1" filter="$2" attached="$3" want="$4" name="$5" slot="$6" updated
+  [[ -s "$file" ]] || return 1
+
+  updated="$(
+    jq --argjson attached "$attached" --arg want "$want" --arg name "$name" \
+      --arg slot "$slot" "$filter" "$file" 2>/dev/null
+  )" || return 1
+  [[ -n "$updated" ]] || return 1
+  jq -e --slurpfile before "$file" '. != $before[0]' <<<"$updated" >/dev/null 2>&1 || return 1
+
+  printf '%s\n' "$updated" >"$file.part" && mv "$file.part" "$file"
 }
 
 pads_ryujinx_keep() {

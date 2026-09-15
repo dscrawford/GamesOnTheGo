@@ -21,12 +21,39 @@
 # entry offset collisions"); no stable release carries it as of 2026-09-04
 # (stable is 1.3.3, Canary 1.3.351). Drop this override once nixpkgs' ryubing
 # is past that.
-{ ryubing }:
+#
+# And the SDL it ships cannot see the controller people have.
+#
+# Ryujinx bundles its own libSDL2.so — SDL 2.30.0, from the Ryujinx.SDL2-CS
+# package — and .NET loads it in preference to anything on the system, because
+# the app's deps.json names it and NATIVE_DLL_SEARCH_DIRECTORIES is searched
+# before the loader's path. The current Steam Controller is a hidapi device
+# with no evdev node at all, and 2.30.0 has never heard of it: its gamepad
+# database knows Valve products 1102, 1142, 1201, 1202 and 11fc, and the puck
+# is 1304. So the emulator saw no pad, the game stopped on its controller
+# screen, and the only way through was to run Steam — whose virtual gamepad
+# (28de:11ff) is a device SDL 2.30.0 does know.
+#
+# nixpkgs' SDL2 is sdl2-compat, the SDL2 API over SDL3, and SDL3 drives the
+# puck directly. Measured with a probe against each library in turn, hint on:
+# 2.30.0 enumerated nothing, sdl2-compat enumerated the puck as a gamepad. So
+# the bundled file becomes a link to that one, and the emulator sees what the
+# launcher sees — which is the whole point, since gotg's own pad tools are
+# SDL3 and were reading a device the emulator could not.
+{ ryubing, SDL2 }:
 ryubing.overrideAttrs (old: {
   pname = "ryubing-jit2g";
   postPatch = (old.postPatch or "") + ''
     substituteInPlace src/ARMeilleure/Translation/Cache/JitCache.cs \
       --replace-fail "CacheSize = 256 * 1024 * 1024" "CacheSize = 2047 * 1024 * 1024"
+  '';
+  postInstall = (old.postInstall or "") + ''
+    native=("$out"/lib/*/runtimes/linux-x64/native/libSDL2.so)
+    [ -e "''${native[0]}" ] || {
+      echo "no bundled libSDL2.so to replace — has the layout changed?" >&2
+      exit 1
+    }
+    ln -sf ${SDL2}/lib/libSDL2-2.0.so.0 "''${native[0]}"
   '';
   # The suite takes as long as the build and asserts nothing about this.
   doCheck = false;
