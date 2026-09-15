@@ -24,17 +24,28 @@ keys_manifest() { printf '%s/%s/share/gotg/keys.json' "$GOTG_ROOTS_DIR" "$1"; }
 #
 #   $1 platform   $2 file name   $3 where to write it
 keys_fetch() {
-  local platform="$1" file="$2" dest="$3" host
-  while IFS= read -r host; do
-    [[ -n "$host" ]] || continue
-    if service_curl -fsS --max-time "${GOTG_API_TIMEOUT:-120}" \
-      "$host/files/$platform/$(jq -rn --arg n "$file" '$n | @uri')" \
-      >"$dest" 2>/dev/null && [[ -s "$dest" ]]; then
-      return 0
-    fi
-    rm -f "$dest"
-  done < <(manifest_files_hosts)
-  return 1
+  local platform="$1" file="$2" dest="$3" host refreshed=0
+  while :; do
+    while IFS= read -r host; do
+      [[ -n "$host" ]] || continue
+      if service_curl -fsS --max-time "${GOTG_API_TIMEOUT:-120}" \
+        "$host/files/$platform/$(jq -rn --arg n "$file" '$n | @uri')" \
+        >"$dest" 2>/dev/null && [[ -s "$dest" ]]; then
+        return 0
+      fi
+      rm -f "$dest"
+    done < <(manifest_files_hosts)
+
+    # Every host in the cached catalog refused. The byte host is the catalog's
+    # to name and moves: it sits behind a VPN whose forwarded port is
+    # reassigned on every reconnect, so a cache from before one names a port
+    # nothing is listening on. Downloads already re-read the catalog between
+    # attempts for exactly this; without it here, a reconnect is a console
+    # that cannot decrypt a game until somebody thinks to run `gotg refresh`.
+    ((refreshed == 0)) || return 1
+    refreshed=1
+    manifest_refresh >/dev/null 2>&1 || return 1
+  done
 }
 
 #   $1 environment attribute   $2 the platform whose directory holds them
