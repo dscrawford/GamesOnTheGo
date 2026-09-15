@@ -11,6 +11,9 @@ base
 # take, and the client runs the newest update at or below it rather than
 # whatever is newest.
   gameVersionMax = "1.4.2";
+  # And no lower than 1.1.0: the same subsdk3 that lacks 1.4.3's hooks was
+  # never given 1.0.0's either, so the launch-day dump fails the same way.
+  gameVersionMin = "1.1.0";
 
   preLaunch =
     (base.preLaunch or "")

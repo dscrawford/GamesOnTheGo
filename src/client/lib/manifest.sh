@@ -568,11 +568,22 @@ cmd_info() {
   # reachable as `gotg play <id> <mod>`. Silence when there are none: a
   # "mods: none" line answers a question nobody asked.
   local -a mods=()
-  mapfile -t mods < <(env_variant_names \
-    "$(manifest_field "$game" platform)" "$(manifest_field "$game" id)")
+  mapfile -t mods < <(versions_variants_runnable "$game")
   if ((${#mods[@]} > 0)); then
     local joined
     printf -v joined '%s, ' "${mods[@]}"
     printf '%smods:     %s %s\n' "$C_MUTED" "$C_RESET" "${joined%, }"
   fi
+
+  # And the ones no version here can run, each with what it wants. This is the
+  # only place that says so: they are left out of completion and out of the
+  # picker's menu, and a mod that vanishes without a word is worse than one
+  # that never worked.
+  local -a ruled=() name
+  mapfile -t ruled < <(versions_variants_disabled "$game")
+  for name in "${ruled[@]}"; do
+    [[ -n "$name" ]] || continue
+    printf '%sdisabled: %s %s (%s)\n' "$C_MUTED" "$C_RESET" "$name" \
+      "$(versions_variant_why "$(env_attr "$game" "$name")")"
+  done
 }

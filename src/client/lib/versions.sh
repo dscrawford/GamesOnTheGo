@@ -9,8 +9,11 @@
 # with nothing on screen to say why.
 #
 # So a version becomes something to choose: `gotg play <id> --version 1.4.2`,
-# a row in the picker's menu, or a ceiling a mod states for itself and the
-# client respects without being asked.
+# a row in the picker's menu, or a window a mod states for itself and the
+# client respects without being asked. A window and not a ceiling, because a
+# patch can be too new for a dump as easily as too old for one: UltraCam's
+# shipped subsdk3 hooks Tears of the Kingdom 1.1.0 through 1.4.2, and on 1.0.0
+# it finds nothing to hook exactly as it does on 1.4.3.
 #
 # Read from the file names rather than the containers. The importer names an
 # update for its version — extras/update_1.4.3-… — and reading a name costs
@@ -60,15 +63,26 @@ versions_has() {
   return 1
 }
 
-# The newest version at or below a ceiling, or nothing.
-#
-# A mod states the newest version it was built against; this is what the client
-# does about it. Compared with sort -V so 1.4.10 is above 1.4.9 and below 1.5.
-versions_at_most() {
-  local game="$1" ceiling="$2" version
+# Is the first version no newer than the second? Compared with sort -V, so
+# 1.4.10 is above 1.4.9 and below 1.5, which no string comparison gets right.
+versions_le() {
+  [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$1" ]]
+}
+
+# Is one version inside a mod's window? An empty end is an open one.
+versions_inside() {
+  local version="$1" floor="$2" ceiling="$3"
+  [[ -z "$ceiling" ]] || versions_le "$version" "$ceiling" || return 1
+  [[ -z "$floor" ]] || versions_le "$floor" "$version" || return 1
+  return 0
+}
+
+# The newest version installed inside a mod's window, or nothing.
+versions_within() {
+  local game="$1" floor="$2" ceiling="$3" version
   while IFS= read -r version; do
     [[ -n "$version" ]] || continue
-    if [[ "$(printf '%s\n%s\n' "$version" "$ceiling" | sort -V | head -n1)" == "$version" ]]; then
+    if versions_inside "$version" "$floor" "$ceiling"; then
       printf '%s' "$version"
       return 0
     fi
@@ -76,15 +90,55 @@ versions_at_most() {
   return 1
 }
 
-# What an environment says about the game version it was built for, read off
+# The newest version at or below a ceiling, or nothing — the open-floored case
+# of the above, kept because a ceiling alone is what most mods state.
+versions_at_most() { versions_within "$1" "" "$2"; }
+
+# A window in the words an error message wants: "1.4.2 or older", "1.6.0 or
+# newer", "1.1.0 to 1.4.2", "exactly 1.6.0". Empty when a mod states neither
+# end, which is every environment that is not version-specific.
+versions_window_words() {
+  local floor="$1" ceiling="$2"
+  if [[ -n "$floor" && -n "$ceiling" ]]; then
+    if [[ "$floor" == "$ceiling" ]]; then
+      printf 'exactly %s' "$floor"
+    else
+      printf '%s to %s' "$floor" "$ceiling"
+    fi
+  elif [[ -n "$ceiling" ]]; then
+    printf '%s or older' "$ceiling"
+  elif [[ -n "$floor" ]]; then
+    printf '%s or newer' "$floor"
+  fi
+}
+
+# What an environment says about the game versions it was built for, read off
 # its built manifest like everything else on this path — never a nix
 # evaluation. Empty when it says nothing, which is every environment that is
 # not a version-specific mod.
-versions_env_ceiling() {
-  local attr="$1" manifest
+#
+# Unbuilt is unknown, not unbounded: there is no manifest to read until the
+# environment exists, so a variant nobody has built yet states no window and is
+# treated as able to run. It is judged the moment it is built, which is also
+# the first moment it could have been wrong.
+versions_env_ceiling() { versions_env_field "$1" gameVersionMax; }
+versions_env_floor() { versions_env_field "$1" gameVersionMin; }
+
+versions_env_field() {
+  local attr="$1" field="$2" manifest
   manifest="$GOTG_ROOTS_DIR/$attr/share/gotg/saves.json"
   [[ -f "$manifest" ]] || return 0
-  jq -r '.gameVersionMax // empty' "$manifest" 2>/dev/null
+  jq -r --arg f "$field" '.[$f] // empty' "$manifest" 2>/dev/null
+}
+
+# Both ends at once, one per line — and read with `mapfile` rather than packed
+# into one line and split. A tab-separated pair looks like the obvious thing
+# here and is a trap: tab is IFS whitespace, so `read -r floor ceiling` on a
+# line that begins with one *skips* the empty first field and puts the ceiling
+# in the floor. Which is a mod with a ceiling of 1.4.2 quietly becoming a mod
+# that demands 1.4.2 or newer.
+versions_env_window() {
+  printf '%s\n%s\n' "$(versions_env_floor "$1")" "$(versions_env_ceiling "$1")"
 }
 
 # The version a launch should run: what was asked for, what the mod can take,
@@ -94,31 +148,104 @@ versions_env_ceiling() {
 # launch that silently ran a different version than the one asked for is how
 # somebody spends an evening wondering why a mod does nothing.
 versions_resolve() {
-  local game="$1" attr="$2" want="${3:-}" ceiling newest fit
+  local game="$1" attr="$2" want="${3:-}" floor ceiling words newest fit
+  local -a window
   newest="$(versions_newest "$game")"
   [[ -n "$newest" ]] || return 0
+
+  mapfile -t window < <(versions_env_window "$attr")
+  floor="${window[0]}"
+  ceiling="${window[1]}"
+  words="$(versions_window_words "$floor" "$ceiling")"
 
   if [[ -n "$want" ]]; then
     versions_has "$game" "$want" ||
       die "no version $want of $(manifest_field "$game" title) here.
      Installed: $(versions_names "$game" | tr '\n' ' ')"
+    # An explicit ask is still an ask of a particular mod. Honouring it against
+    # a version the mod cannot patch would hand back exactly the crash this
+    # whole file exists to prevent, and hand it back on request.
+    versions_inside "$want" "$floor" "$ceiling" ||
+      die "$attr is built for $words, and $want is not.
+     Run it without the mod, or pick a version it can take:
+       gotg versions $(manifest_field "$game" id)"
     printf '%s' "$want"
     return 0
   fi
 
-  ceiling="$(versions_env_ceiling "$attr")"
-  [[ -n "$ceiling" ]] || { printf '%s' "$newest"; return 0; }
+  [[ -n "$words" ]] || { printf '%s' "$newest"; return 0; }
 
-  if fit="$(versions_at_most "$game" "$ceiling")"; then
+  if fit="$(versions_within "$game" "$floor" "$ceiling")"; then
     [[ "$fit" == "$newest" ]] ||
-      warn "$attr is built for $ceiling or older; running $fit rather than $newest"
+      warn "$attr is built for $words; running $fit rather than $newest"
     printf '%s' "$fit"
     return 0
   fi
-  die "$attr needs version $ceiling or older, and the oldest here is $(versions_names "$game" | tail -n1).
+  die "$attr needs version $words, and what is here is $(versions_names "$game" | tr '\n' ' ').
      The mod would load, patch nothing, and the game would crash a minute in —
      so this refuses rather than letting that happen.
-     Add an older update to the library, or play without the mod."
+     Add an update it can take to the library, or play without the mod."
+}
+
+# --- a mod a version window rules out ---------------------------------------
+
+# Whether this environment can run at all on what is installed.
+#
+# A mod that states a window and finds nothing inside it is not broken, it is
+# *disabled*: there is no launch it could do and nothing the player can press
+# to fix it. So it stops being offered — in completion, in the picker's menu —
+# rather than sitting there as a row that answers with a paragraph.
+#
+# Judged only for a game that is here. An uninstalled game has no updates to
+# read yet, and hiding a mod of it would be guessing at bytes that have not
+# arrived.
+versions_variant_runnable() {
+  local game="$1" attr="$2" floor ceiling
+  local -a window
+  mapfile -t window < <(versions_env_window "$attr")
+  floor="${window[0]}"
+  ceiling="${window[1]}"
+  [[ -n "$floor$ceiling" ]] || return 0
+  game_is_installed "$game" || return 0
+
+  # No updates installed at all means the base game, which no `update_` file
+  # names: too old for a floor, and under any ceiling.
+  if [[ -z "$(versions_newest "$game")" ]]; then
+    [[ -z "$floor" ]]
+    return
+  fi
+  versions_within "$game" "$floor" "$ceiling" >/dev/null
+}
+
+# Why it cannot, in a few words — for the one place that says so out loud.
+versions_variant_why() {
+  local attr="$1" floor ceiling
+  local -a window
+  mapfile -t window < <(versions_env_window "$attr")
+  floor="${window[0]}"
+  ceiling="${window[1]}"
+  printf 'needs %s' "$(versions_window_words "$floor" "$ceiling")"
+}
+
+# One game's variants, split by whether they can run. Both walk the same list
+# so the two answers cannot drift apart.
+versions_variants_runnable() { _versions_variants "$1" runnable; }
+versions_variants_disabled() { _versions_variants "$1" disabled; }
+
+_versions_variants() {
+  local game="$1" which="$2" platform id name attr
+  platform="$(manifest_field "$game" platform)"
+  id="$(manifest_field "$game" id)"
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    attr="$(env_attr "$game" "$name" 2>/dev/null)" || continue
+    if versions_variant_runnable "$game" "$attr"; then
+      [[ "$which" == runnable ]] && printf '%s\n' "$name"
+    else
+      [[ "$which" == disabled ]] && printf '%s\n' "$name"
+    fi
+  done < <(env_variant_names "$platform" "$id")
+  return 0
 }
 
 # --- the command ------------------------------------------------------------
@@ -128,7 +255,8 @@ cmd_versions() {
   [[ -n "$want" ]] || die "usage: gotg versions <id> [variant]"
   manifest_cached || manifest_ensure
 
-  local game attr names newest ceiling running
+  local game attr names newest floor ceiling words running
+  local -a window
   game="$(manifest_find "$want")"
   attr="$(env_attr "$game" "$variant")"
   mapfile -t names < <(versions_names "$game")
@@ -138,7 +266,10 @@ cmd_versions() {
   fi
 
   newest="$(versions_newest "$game")"
-  ceiling="$(versions_env_ceiling "$attr")"
+  mapfile -t window < <(versions_env_window "$attr")
+  floor="${window[0]}"
+  ceiling="${window[1]}"
+  words="$(versions_window_words "$floor" "$ceiling")"
   # The `|| true` belongs out here: versions_resolve dies when a mod cannot
   # take any version installed, and an exit inside $( ) never reaches an || on
   # its inside — it kills the subshell, and the status falls out to the
@@ -156,7 +287,7 @@ cmd_versions() {
       printf '%s%s\n' "$mark" "$version"
     fi
   done
-  [[ -z "$ceiling" ]] ||
-    log "${C_DIM}$attr is built for $ceiling or older${C_RESET}"
+  [[ -z "$words" ]] ||
+    log "${C_DIM}$attr is built for $words${C_RESET}"
   log "${C_DIM}* is what a launch runs; gotg play $want${variant:+ $variant} --version <version> picks another${C_RESET}"
 }

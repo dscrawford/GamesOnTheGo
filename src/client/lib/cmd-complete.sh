@@ -17,6 +17,7 @@ cmd_complete() {
   case "${1:-}" in
     ids) complete_ids ;;
     variants) complete_variants "${2:-}" ;;
+    disabled) complete_disabled "${2:-}" ;;
     versions) complete_versions "${2:-}" "${3:-}" ;;
     platforms) complete_platforms ;;
     ready) complete_ready "${2:-}" "${3:-}" ;;
@@ -84,9 +85,6 @@ complete_ready() {
 # the grid and list cannot disagree about what is here.
 complete_installed() { manifest_installed_keys; }
 
-# The variants of one game. The id is whatever is on the command line, which may
-# be half-typed or nonsense, so this resolves it by exact match and gives up
-# quietly rather than going through manifest_find, which is allowed to die.
 # The versions of one game that are installed here, newest first, and which
 # one a launch would run. One line each: "<version>" with a leading "*" on the
 # one that would run. Pure filesystem, like everything else in this file, so
@@ -112,13 +110,38 @@ complete_versions() {
 }
 
 complete_variants() {
-  local id="$1" platform
-  [[ -n "$id" ]] || return 0
-  manifest_cached || return 0
+  local game
+  game="$(_complete_game "$1")" || return 0
+  [[ -n "$game" ]] || return 0
+  # The ones a version window rules out are left off: a mod with nothing here
+  # it can patch has no launch to complete to, and offering it would complete
+  # to a paragraph explaining why not.
+  versions_variants_runnable "$game" 2>/dev/null || true
+}
 
-  platform="$(manifest_games 2>/dev/null |
-    jq -r --arg i "$id" 'select(.id == $i) | .platform' 2>/dev/null | head -1)"
-  [[ -n "$platform" ]] || return 0
+# The other half, for the picker: which of a game's variants cannot run here.
+# Usually nothing, which is why it is the short list of the two to send.
+complete_disabled() {
+  local game
+  game="$(_complete_game "$1")" || return 0
+  [[ -n "$game" ]] || return 0
+  versions_variants_disabled "$game" 2>/dev/null || true
+}
 
-  env_variant_names "$platform" "$id" 2>/dev/null || true
+# The catalog entry behind whatever is on the command line, which may be
+# half-typed or nonsense: resolved by exact match, qualified or not, and given
+# up on quietly rather than through manifest_find, which is allowed to die.
+_complete_game() {
+  local want="$1" platform="" id
+  [[ -n "$want" ]] || return 1
+  manifest_cached || return 1
+  if [[ "$want" == */* ]]; then
+    platform="${want%%/*}"
+    id="${want#*/}"
+  else
+    id="$want"
+  fi
+  manifest_games 2>/dev/null |
+    jq -c --arg i "$id" --arg p "$platform" \
+      'select(.id == $i and ($p == "" or .platform == $p))' 2>/dev/null | head -1
 }

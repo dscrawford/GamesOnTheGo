@@ -375,7 +375,14 @@ steam_add() {
   game="$(manifest_find "$want")"
   # env_attr validates the variant, so a typo is caught here rather than
   # becoming a Steam entry that fails at launch.
-  env_attr "$game" "$variant" >/dev/null
+  local attr
+  attr="$(env_attr "$game" "$variant")"
+  # And neither does a mod no version here can run. It would add cleanly, take
+  # its place in the library with artwork, and refuse the moment it is pressed
+  # — from inside Steam, where the sentence explaining why has nowhere to go.
+  versions_variant_runnable "$game" "$attr" ||
+    die "$(steam_display_name "$game" "$variant") $(versions_variant_why "$attr"),
+     and that is not what is installed. See: gotg versions $(manifest_field "$game" id)"
 
   launcher="$(launcher_path "$game" "$variant")"
   [[ -f "$launcher" ]] || launcher="$(launcher_write "$game" "$variant")"

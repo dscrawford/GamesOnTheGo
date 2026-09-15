@@ -80,6 +80,16 @@ env_with_ceiling() {
   mv "$manifest.tmp" "$manifest"
 }
 
+# The same, for a mod that states both ends of the window it was built for.
+env_with_window() {
+  : >"$GOTG_ENV_DIR/games/switch/world.zelda.60fps.nix"
+  fake_env "$1"
+  local manifest="$GOTG_ROOTS_DIR/$1/share/gotg/saves.json"
+  jq --arg lo "$2" --arg hi "$3" \
+    '. + {gameVersionMin: $lo, gameVersionMax: $hi}' "$manifest" >"$manifest.tmp"
+  mv "$manifest.tmp" "$manifest"
+}
+
 # --- what is here -----------------------------------------------------------
 
 @test "a game with no updates has no versions to choose between" {
@@ -156,6 +166,125 @@ env_with_ceiling() {
   installed_with 1.4.3
   run versions_env_ceiling env-switch
   [ -z "$output" ]
+  run versions_env_floor env-switch
+  [ -z "$output" ]
+}
+
+# --- the other end of the window --------------------------------------------
+
+@test "a mod too new for a dump is refused the same as one too old" {
+  # UltraCam's exefs hooks 1.1.0 and up: on the launch-day dump it finds
+  # nothing to hook, which fails exactly the way 1.4.3 does.
+  installed_with 1.0.0
+  env_with_window env-switch-world_zelda-60fps 1.1.0 1.4.2
+  run ! versions_resolve "$GAME" env-switch-world_zelda-60fps
+  [[ "$output" == *"needs version 1.1.0 to 1.4.2"* ]]
+}
+
+@test "a mod takes the newest version inside its window, not merely under it" {
+  installed_with 1.0.0 1.2.1 1.4.2 1.4.3
+  env_with_window env-switch-world_zelda-60fps 1.1.0 1.4.2
+  run --separate-stderr versions_resolve "$GAME" env-switch-world_zelda-60fps
+  [ "$output" = "1.4.2" ]
+}
+
+@test "a mod built for one version runs that one" {
+  installed_with 1.5.0 1.6.0
+  env_with_window env-switch-world_zelda-60fps 1.6.0 1.6.0
+  run --separate-stderr versions_resolve "$GAME" env-switch-world_zelda-60fps
+  [ "$output" = "1.6.0" ]
+}
+
+@test "a mod built for one version says so in those words" {
+  installed_with 1.5.0
+  env_with_window env-switch-world_zelda-60fps 1.6.0 1.6.0
+  run ! versions_resolve "$GAME" env-switch-world_zelda-60fps
+  [[ "$output" == *"needs version exactly 1.6.0"* ]]
+}
+
+@test "asking for a version by name does not get past what the mod can take" {
+  # The one route around the window, and the one that would hand back the
+  # crash on request.
+  installed_with 1.4.2 1.4.3
+  env_with_ceiling env-switch-world_zelda-60fps 1.4.2
+  run ! versions_resolve "$GAME" env-switch-world_zelda-60fps 1.4.3
+  [[ "$output" == *"built for 1.4.2 or older"* ]]
+}
+
+# --- a mod nothing here can run is disabled ---------------------------------
+
+@test "a mod with a window nothing here fits is not offered" {
+  installed_with 1.4.3
+  env_with_ceiling env-switch-world_zelda-60fps 1.4.2
+  run versions_variant_runnable "$GAME" env-switch-world_zelda-60fps
+  [ "$status" -ne 0 ]
+
+  gotg complete variants world.zelda
+  [ -z "$output" ]
+
+  gotg complete disabled switch/world.zelda
+  [ "$output" = "60fps" ]
+}
+
+@test "a mod that can run is offered, and is not in the disabled list" {
+  installed_with 1.4.2 1.4.3
+  env_with_ceiling env-switch-world_zelda-60fps 1.4.2
+  run versions_variant_runnable "$GAME" env-switch-world_zelda-60fps
+  [ "$status" -eq 0 ]
+
+  gotg complete variants world.zelda
+  [ "$output" = "60fps" ]
+
+  gotg complete disabled switch/world.zelda
+  [ -z "$output" ]
+}
+
+@test "a mod with no window is never disabled" {
+  installed_with 1.4.3
+  : >"$GOTG_ENV_DIR/games/switch/world.zelda.60fps.nix"
+  fake_env env-switch-world_zelda-60fps
+  run versions_variant_runnable "$GAME" env-switch-world_zelda-60fps
+  [ "$status" -eq 0 ]
+}
+
+@test "a mod nobody has built yet is not judged" {
+  # There is no manifest to read until it is built, and hiding a mod on a
+  # window it has not stated would be a guess.
+  installed_with 1.4.3
+  : >"$GOTG_ENV_DIR/games/switch/world.zelda.60fps.nix"
+  gotg complete variants world.zelda
+  [ "$output" = "60fps" ]
+}
+
+@test "a floor rules out a game with no updates at all" {
+  # The base game is what no update file names; a mod that needs 1.1.0 cannot
+  # have it.
+  installed_with
+  env_with_window env-switch-world_zelda-60fps 1.1.0 1.4.2
+  run versions_variant_runnable "$GAME" env-switch-world_zelda-60fps
+  [ "$status" -ne 0 ]
+}
+
+@test "info names the mods that cannot run, and what they want" {
+  # The only place that says so: they are gone from completion and from the
+  # picker, and a mod that vanishes without a word is worse than one that
+  # never worked.
+  installed_with 1.4.3
+  env_with_ceiling env-switch-world_zelda-60fps 1.4.2
+  gotg info world.zelda
+  [[ "$output" == *"disabled:"* ]]
+  [[ "$output" == *"60fps"* ]]
+  [[ "$output" == *"needs 1.4.2 or older"* ]]
+}
+
+@test "a mod nothing here can run does not go into Steam either" {
+  installed_with 1.4.3
+  env_with_ceiling env-switch-world_zelda-60fps 1.4.2
+  export GOTG_STEAM_SHORTCUTS="$TEST_TMP/steam/shortcuts.vdf"
+  mkdir -p "$(dirname "$GOTG_STEAM_SHORTCUTS")"
+  gotg steam add world.zelda 60fps
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"needs 1.4.2 or older"* ]]
 }
 
 # --- on the command line ----------------------------------------------------
