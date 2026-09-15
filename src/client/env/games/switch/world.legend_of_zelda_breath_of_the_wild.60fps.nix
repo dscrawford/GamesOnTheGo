@@ -9,7 +9,7 @@
 { base, helpers, ... }:
 base
 // {
-  title = "Breath of the Wild 60fps";
+  title = "Breath of the Wild (60fps)";
   preLaunch =
     (base.preLaunch or "")
     + (helpers.botwUltraCam {

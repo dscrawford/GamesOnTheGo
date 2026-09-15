@@ -111,9 +111,14 @@ steam_grid_dir() { printf '%s/grid' "$(dirname "$(steam_shortcuts_file)")"; }
 
 # What the Steam entry is called, which also feeds the artwork search. A
 # variant environment may carry its own title in its built manifest —
-# "Majora's Mask Randomizer" — read off the GC root like everything else on
-# this path, never a nix evaluation. Without one, the catalog title with the
-# variant in parentheses.
+# "Majora's Mask (rando)" — read off the GC root like everything else on this
+# path, never a nix evaluation. Without one, the catalog title.
+#
+# A mod always ends up named "<game> (<mod>)". Environments write their titles
+# that way, and this puts the parentheses on whatever forgot to: a Steam
+# library sorts by name, so the whole point is that a game's mods sit next to
+# it and say which mod they are. Without the guarantee here that convention
+# holds only until the next environment somebody adds.
 steam_display_name() {
   local game="$1" variant="${2:-}" name
   name="$(sanitize_title "$(manifest_field "$game" title)")"
@@ -126,11 +131,13 @@ steam_display_name() {
   if [[ -f "$root/share/gotg/saves.json" ]]; then
     title="$(jq -r '.title // empty' "$root/share/gotg/saves.json")"
   fi
-  if [[ -n "$title" ]]; then
-    printf '%s' "$(sanitize_title "$title")"
-  else
-    printf '%s (%s)' "$name" "$variant"
-  fi
+  [[ -n "$title" ]] && name="$(sanitize_title "$title")"
+  # Already named for this mod — "(rando)" — is left alone, so a title that
+  # says it in its own words does not end up saying it twice.
+  case "$name" in
+    *"($variant)"*) printf '%s' "$name" ;;
+    *) printf '%s (%s)' "$name" "$variant" ;;
+  esac
 }
 
 # The fetched icon's path: grid art is keyed on the unsigned 32-bit appid,

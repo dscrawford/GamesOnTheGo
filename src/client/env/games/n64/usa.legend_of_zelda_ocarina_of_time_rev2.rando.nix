@@ -5,5 +5,5 @@
 # live apart from the vanilla playthrough next door.
 { ... }:
 {
-  title = "Ocarina of Time Randomizer";
+  title = "Ocarina of Time (rando)";
 }

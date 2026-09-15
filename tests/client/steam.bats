@@ -221,7 +221,10 @@ EOF
   [ "$(jq 'length' <<<"$output")" -eq 2 ]
 }
 
-@test "a variant environment's own title names the Steam entry" {
+@test "a variant environment's own title names the Steam entry, and says which mod" {
+  # A Steam library sorts by name, so a mod sits beside the game it is a mod
+  # of and has to say which mod it is. The environment chooses the words; the
+  # parentheses are not its to forget.
   export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
   export GOTG_ENV_DIR="$TEST_TMP/env"
   mkdir -p "$GOTG_ENV_DIR/games/gamecube"
@@ -231,7 +234,20 @@ EOF
   gotg steam add usa.super_mario_sunshine hd
   [ "$status" -eq 0 ]
   run helper list
-  [ "$(jq -r '.[0].name' <<<"$output")" = "Sunshine HD Remaster" ]
+  [ "$(jq -r '.[0].name' <<<"$output")" = "Sunshine HD Remaster (hd)" ]
+}
+
+@test "a title that already names the mod is not made to say it twice" {
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  export GOTG_ENV_DIR="$TEST_TMP/env"
+  mkdir -p "$GOTG_ENV_DIR/games/gamecube"
+  : >"$GOTG_ENV_DIR/games/gamecube/usa.super_mario_sunshine.hd.nix"
+  fake_env env-gamecube-usa_super_mario_sunshine-hd "[]" "[]" "Super Mario Sunshine (hd)"
+
+  gotg steam add usa.super_mario_sunshine hd
+  [ "$status" -eq 0 ]
+  run helper list
+  [ "$(jq -r '.[0].name' <<<"$output")" = "Super Mario Sunshine (hd)" ]
 }
 
 @test "a variant without a title of its own keeps the parenthesised default" {

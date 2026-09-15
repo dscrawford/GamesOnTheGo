@@ -10,7 +10,7 @@
 { base, helpers, ... }:
 base
 // {
-  title = "Skyward Sword HD 120fps";
+  title = "Skyward Sword HD (120fps)";
   preLaunch =
     (base.preLaunch or "")
     + (helpers.ryujinxMod {
