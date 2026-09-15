@@ -595,22 +595,39 @@ In the picker it is a row above the verbs, beside the mods row and behaving the
 same way: open it, choose, and Play, Configure and Add to Steam carry that
 choice. A game with one update has nothing to choose, so it gets no row.
 
-**A mod can state the newest version it was built for**, and the client obeys
-it without being asked: `gameVersionMax = "1.4.2"` in the environment makes a
-launch pick the newest update at or below that, saying so when it is not the
-newest one you have. When nothing in the library is old enough it refuses the
-launch outright, in words — because the alternative is what happened before
-this existed: UltraCam loaded against Tears of the Kingdom 1.4.3, patched
-nothing it recognised, and the game died with a null dereference half a minute
-into play with nothing on screen to say why.
+**A mod can state the versions it was built for**, and the client obeys
+without being asked: `gameVersionMax = "1.4.2"` and `gameVersionMin = "1.1.0"`
+in the environment make a launch pick the newest update inside that window,
+saying so when it is not the newest one you have. Both ends, because a patch
+can be too new for a dump as easily as too old for one — UltraCam's exefs hooks
+Tears of the Kingdom 1.1.0 through 1.4.2 and finds nothing to hook on either
+side of that. The alternative is what happened before this existed: UltraCam
+loaded against 1.4.3, patched nothing it recognised, and the game died with a
+null dereference half a minute into play with nothing on screen to say why.
+
+**A mod nothing here can run is disabled, not broken.** When no installed
+version is inside its window there is no launch behind it and nothing to press
+that would help, so it stops being offered: gone from tab completion, gone from
+the picker's mod menu, and refused by `gotg steam add` rather than becoming a
+library entry that fails from inside Steam. `gotg info` is where it is still
+named, with what it wants:
+
+```
+mods:      60fps, 120fps
+disabled:  enhanced (needs 1.4.2 or older)
+```
+
+Add an update it can take and it comes back on its own. Until an environment is
+built there is nothing to read, so a mod nobody has built yet is never hidden —
+it is judged the first moment it could have been wrong.
 
 **Frame rates, per Switch game.** Each one is its own environment, so its saves
 and settings sit apart from the plain launch and from each other:
 
 | game | variants | how |
 |---|---|---|
-| Breath of the Wild | `60fps`, `120fps` | UltraCam (MaxLastBreath), v1.6.0 |
-| Tears of the Kingdom | `60fps`, `120fps`, `enhanced` | the same mod; `enhanced` is 120 at 1440p with larger shadows |
+| Breath of the Wild | `60fps`, `120fps` | UltraCam (MaxLastBreath); the game at exactly 1.6.0 |
+| Tears of the Kingdom | `60fps`, `120fps`, `enhanced` | the same mod, 1.1.0 to 1.4.2; `enhanced` is 120 at 1440p with larger shadows |
 | Luigi's Mansion 2 HD | `60fps`, `120fps` | a pchtxt over the swap interval |
 | Skyward Sword HD | `120fps` | already 60, so the plain launch is that |
 | Kirby and the Forgotten Land | `60fps` | a static pchtxt; 60 is its ceiling, not a step to 120 |
@@ -623,6 +640,12 @@ more than the cap: UltraCam decouples the game's logic from the frame rate, so
 the emulated display is set to a matching custom refresh rate — on a 60 Hz
 panel that means tearing or a wasted half, which is the one reason to prefer
 `60fps`.
+
+Both state the versions they were built for, and are disabled on a library
+outside that: UltraCam's Breath of the Wild exefs was built against 1.6.0 and
+nothing else, and its Tears of the Kingdom one hooks 1.1.0 through 1.4.2. If
+these variants are not in your menu, `gotg info` on the game says which update
+they want.
 
 Skyward Sword's is Fl4sh9174's patch and comes with its author's warning that
 it is experimental. It also only patches **v1.0.1**: Ryujinx matches a pchtxt

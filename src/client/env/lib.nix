@@ -63,6 +63,12 @@
   # below it — and refuses the launch when the library has nothing that old,
   # which is a sentence rather than a mystery.
   gameVersionMax ? null,
+  # The oldest, for the same reason in the other direction. A patch that hooks
+  # an address a later update introduced finds nothing to hook on an earlier
+  # one, and fails exactly the way it fails on a version too new: quietly, and
+  # then not quietly. Stating one end without the other says a mod is open in
+  # that direction, which is usually true and worth being explicit about.
+  gameVersionMin ? null,
   # The ares console section whose controller bindings can be generated —
   # "SuperFamicom", "Nintendo64". Null leaves an environment's bindings alone.
   # ares creates a section the first time that console is run, so the name is
@@ -233,7 +239,8 @@ let
     legacy = legacyPaths;
   }
   // lib.optionalAttrs (title != null) { inherit title; }
-  // lib.optionalAttrs (gameVersionMax != null) { inherit gameVersionMax; };
+  // lib.optionalAttrs (gameVersionMax != null) { inherit gameVersionMax; }
+  // lib.optionalAttrs (gameVersionMin != null) { inherit gameVersionMin; };
 
   app = pkgs.writeShellApplication {
     name = "gotg-play";
