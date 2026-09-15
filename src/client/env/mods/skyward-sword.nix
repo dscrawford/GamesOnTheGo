@@ -7,10 +7,13 @@
 # to test it enough" — which is repeated here because a frame-rate patch on a
 # motion-controlled game is exactly where an untested one shows.
 #
-# Only v1.0.1 is patched. Ryujinx matches a pchtxt to the running executable by
-# the build id inside the file (@nsobid), so on a 1.0.0 dump nothing is applied
-# and the game runs as it shipped — no error, no 120, which is the failure to
-# expect if this variant seems to do nothing.
+# Only v1.0.1 is patched, and that is the whole reason the variant states it.
+# Ryujinx matches a pchtxt to the running executable by the build id inside the
+# file (@nsobid), so on a 1.0.0 dump nothing is applied and the game runs as it
+# shipped — no error, no 120, nothing to see. A headless run proved it: the mod
+# loaded, VSync went to 120, and not one patch line matched. So the variant
+# declares 1.0.1 at both ends and the client disables it rather than letting it
+# look like it worked.
 { pkgs, lib }:
 let
   rev = "a398d55b625129365a975c3ab0b9ef25012d5fff";
@@ -26,16 +29,19 @@ let
   };
 in
 {
-  # The first of the two 120 FPS files. The sibling "1.0.1v2.pchtxt" is a
-  # shorter rewrite of the same idea; this is the one the archive names for the
-  # version, and picking by name rather than by "the newest looking" keeps what
-  # is installed something a person can check against the archive.
+  # Both 120 FPS files, not a pick between them. They are not a patch and a
+  # revision of it: "1.0.1.pchtxt" and "1.0.1v2.pchtxt" carry different build
+  # ids for the same 1.0.1, so they are two dumps, and Ryujinx applies whichever
+  # one matches the executable actually loaded. Shipping one was choosing which
+  # dump the variant works on, by hand, without knowing which one is here.
   #
   # Copied out to a name of our own rather than referenced where it lands: the
   # archive's directories are "[120FPS v1.0.1]", and a store path with a space
   # and a bracket in it is one that has to be quoted correctly by every line
   # that ever touches it.
-  skywardSword120Patch =
-    pkgs.runCommand "skyward-sword-hd-120fps.pchtxt" { }
-      ''cp ${lib.escapeShellArg "${mods}/[120FPS v1.0.1]/exefs/1.0.1.pchtxt"} $out'';
+  skywardSword120Mod = pkgs.runCommand "skyward-sword-hd-120fps" { } ''
+    cp -R --no-preserve=mode ${lib.escapeShellArg "${mods}/[120FPS v1.0.1]"} $out
+    test -f $out/exefs/1.0.1.pchtxt
+    test -f $out/exefs/1.0.1v2.pchtxt
+  '';
 }
