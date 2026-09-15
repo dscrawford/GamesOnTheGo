@@ -48,25 +48,32 @@
         files = [ "bios.zip" ];
       };
 
-      preLaunch = ''
-        # ares takes the BIOS as the zip it travels in; Dolphin wants the file
-        # inside it. Unpacked once, here, rather than kept on the server twice.
-        if [ ! -s "$state/bios/gba_bios.bin" ] && [ -s "$state/bios/bios.zip" ]; then
-          ${pkgs.unzip}/bin/unzip -o -j "$state/bios/bios.zip" gba_bios.bin -d "$state/bios" >/dev/null ||
-            echo "gotg: could not unpack the GBA BIOS; the GBAs will not boot" >&2
-        fi
+      # Added to the platform's rather than replacing it. The platform's is
+      # where Dolphin is told to read a pad it does not have focus on, which
+      # backend to draw with, and not to stop on the NKit dialog — every one of
+      # which this launch wants at least as much as a plain one, and all of
+      # which a bare `preLaunch =` silently drops.
+      preLaunch =
+        (base.preLaunch or "")
+        + ''
+          # ares takes the BIOS as the zip it travels in; Dolphin wants the file
+          # inside it. Unpacked once, here, rather than kept on the server twice.
+          if [ ! -s "$state/bios/gba_bios.bin" ] && [ -s "$state/bios/bios.zip" ]; then
+            ${pkgs.unzip}/bin/unzip -o -j "$state/bios/bios.zip" gba_bios.bin -d "$state/bios" >/dev/null ||
+              echo "gotg: could not unpack the GBA BIOS; the GBAs will not boot" >&2
+          fi
 
-        # Written on every launch rather than kept: it names this launch's disc
-        # and this environment's directories, and a stale one would point a
-        # four-player session at whatever was played last.
-        mkdir -p "$state/splitscreen"
-        ${split}/bin/splitscreen-fsa \
-          --players ${toString players} \
-          --gc "$target" \
-          --gba-bios "$state/bios/gba_bios.bin" \
-          --dolphin ${lib.escapeShellArg dolphin} \
-          --config-dir "$state/config" \
-          -o "$state/splitscreen/session.json" >/dev/null
-      '';
+          # Written on every launch rather than kept: it names this launch's disc
+          # and this environment's directories, and a stale one would point a
+          # four-player session at whatever was played last.
+          mkdir -p "$state/splitscreen"
+          ${split}/bin/splitscreen-fsa \
+            --players ${toString players} \
+            --gc "$target" \
+            --gba-bios "$state/bios/gba_bios.bin" \
+            --dolphin ${lib.escapeShellArg dolphin} \
+            --config-dir "$state/config" \
+            -o "$state/splitscreen/session.json" >/dev/null
+        '';
     };
 }
