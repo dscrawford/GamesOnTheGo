@@ -132,3 +132,31 @@ keys_dir() { printf '%s/env-switch/config/Ryujinx/system' "$GOTG_STATE_DIR/env";
   [ "$status" -eq 0 ]
   [ -s "$(keys_dir)/prod.keys" ]
 }
+
+@test "a catalog naming a byte host that has moved is re-read, not given up on" {
+  # The real failure: the files host sits behind a VPN whose forwarded port is
+  # reassigned on reconnect, so a cache from before one names a port nothing
+  # answers on. Without the re-read, a reconnect is a console that cannot
+  # decrypt a game until somebody thinks to run `gotg refresh`.
+  fake_keys_env
+  serve_keys
+  gotg refresh
+  jq '. + {files_url: "http://127.0.0.1:1"}' "$GOTG_CACHE_FILE" >"$GOTG_CACHE_FILE.tmp"
+  mv "$GOTG_CACHE_FILE.tmp" "$GOTG_CACHE_FILE"
+
+  run keys_ensure env-switch switch
+  [ "$status" -eq 0 ]
+  [ -s "$(keys_dir)/prod.keys" ]
+}
+
+@test "and a host that is simply down is a warning, not an endless retry" {
+  fake_keys_env
+  # Nothing served, so every host fails on both passes.
+  gotg refresh
+  jq '. + {files_url: "http://127.0.0.1:1"}' "$GOTG_CACHE_FILE" >"$GOTG_CACHE_FILE.tmp"
+  mv "$GOTG_CACHE_FILE.tmp" "$GOTG_CACHE_FILE"
+
+  run --separate-stderr keys_ensure env-switch switch
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"no prod.keys"* ]]
+}

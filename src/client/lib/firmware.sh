@@ -149,19 +149,27 @@ firmware_fetch() {
   # The byte host, in the catalog's order of preference — the same hosts a
   # game download uses. /files is served beside /games rather than on the
   # proxied control plane, which answers for it with a 503.
-  local host got=0
-  while IFS= read -r host; do
-    [[ -n "$host" ]] || continue
-    if service_curl -fsS \
-      --max-time "${GOTG_FIRMWARE_FETCH_SECONDS:-900}" \
-      --max-filesize "$(firmware_max_bytes)" \
-      "$host/files/$platform/$(jq -rn --arg n "$file" '$n | @uri')" >"$zip" 2>/dev/null &&
-      [[ -s "$zip" ]]; then
-      got=1
-      break
-    fi
-    rm -f "$zip"
-  done < <(manifest_files_hosts)
+  local host got=0 refreshed=0
+  while ((got == 0)); do
+    while IFS= read -r host; do
+      [[ -n "$host" ]] || continue
+      if service_curl -fsS \
+        --max-time "${GOTG_FIRMWARE_FETCH_SECONDS:-900}" \
+        --max-filesize "$(firmware_max_bytes)" \
+        "$host/files/$platform/$(jq -rn --arg n "$file" '$n | @uri')" >"$zip" 2>/dev/null &&
+        [[ -s "$zip" ]]; then
+        got=1
+        break
+      fi
+      rm -f "$zip"
+    done < <(manifest_files_hosts)
+    ((got == 1)) && break
+    # Same reason as keys_fetch: the VPN-fronted byte host changes port on
+    # reconnect, and a cached catalog names where it used to be.
+    ((refreshed == 0)) || break
+    refreshed=1
+    manifest_refresh >/dev/null 2>&1 || break
+  done
   if ((got == 0)); then
     rm -f "$zip"
     return 1
