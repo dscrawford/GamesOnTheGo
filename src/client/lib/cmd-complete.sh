@@ -17,6 +17,7 @@ cmd_complete() {
   case "${1:-}" in
     ids) complete_ids ;;
     variants) complete_variants "${2:-}" ;;
+    versions) complete_versions "${2:-}" "${3:-}" ;;
     platforms) complete_platforms ;;
     ready) complete_ready "${2:-}" "${3:-}" ;;
     installed) complete_installed ;;
@@ -86,6 +87,30 @@ complete_installed() { manifest_installed_keys; }
 # The variants of one game. The id is whatever is on the command line, which may
 # be half-typed or nonsense, so this resolves it by exact match and gives up
 # quietly rather than going through manifest_find, which is allowed to die.
+# The versions of one game that are installed here, newest first, and which
+# one a launch would run. One line each: "<version>" with a leading "*" on the
+# one that would run. Pure filesystem, like everything else in this file, so
+# the picker can ask the moment a menu opens.
+complete_versions() {
+  local want="$1" variant="${2:-}" game attr running version
+  [[ -n "$want" ]] || return 0
+  manifest_cached || return 0
+  game="$(manifest_find "$want" 2>/dev/null)" || return 0
+  [[ -n "$game" ]] || return 0
+  attr="$(env_attr "$game" "$variant" 2>/dev/null)" || attr=""
+  # Outside the substitution: versions_resolve dies for a mod no installed
+  # version suits, and an exit inside $( ) does not reach an || in there.
+  running="$(versions_resolve "$game" "$attr" 2>/dev/null)" || running=""
+  while IFS= read -r version; do
+    [[ -n "$version" ]] || continue
+    if [[ "$version" == "$running" ]]; then
+      printf '*%s\n' "$version"
+    else
+      printf '%s\n' "$version"
+    fi
+  done < <(versions_names "$game")
+}
+
 complete_variants() {
   local id="$1" platform
   [[ -n "$id" ]] || return 0

@@ -579,6 +579,31 @@ gotg play usa.legend_of_zelda_four_swords_adventures 2p   # two players, a GBA s
 gotg play world.legend_of_zelda_breath_of_the_wild 60fps   # and 120fps
 ```
 
+**Versions are a choice too.** A Switch game is a base and a pile of updates,
+and which update runs decides what the game *is* — an exefs mod is machine code
+written against one executable. So every update in the library is a version you
+can pick:
+
+```bash
+gotg versions world.legend_of_zelda_tears_of_the_kingdom   # what is here, and which one runs
+gotg play world.legend_of_zelda_tears_of_the_kingdom --version 1.4.2
+```
+
+![The picker's version menu: Back, automatic, 1.4.3, 1.4.2](docs/ui-versions-menu.png)
+
+In the picker it is a row above the verbs, beside the mods row and behaving the
+same way: open it, choose, and Play, Configure and Add to Steam carry that
+choice. A game with one update has nothing to choose, so it gets no row.
+
+**A mod can state the newest version it was built for**, and the client obeys
+it without being asked: `gameVersionMax = "1.4.2"` in the environment makes a
+launch pick the newest update at or below that, saying so when it is not the
+newest one you have. When nothing in the library is old enough it refuses the
+launch outright, in words — because the alternative is what happened before
+this existed: UltraCam loaded against Tears of the Kingdom 1.4.3, patched
+nothing it recognised, and the game died with a null dereference half a minute
+into play with nothing on screen to say why.
+
 **Frame rates, per Switch game.** Each one is its own environment, so its saves
 and settings sit apart from the plain launch and from each other:
 

@@ -285,7 +285,7 @@ def _is_extra(path: Path, install: Path) -> bool:
     return "extras" in path.relative_to(install).parts
 
 
-def register(install: Path, ryujinx: Path, keys: dict[str, bytes]) -> dict:
+def register(install: Path, ryujinx: Path, keys: dict[str, bytes], select: str | None = None) -> dict:
     """Write updates.json and dlc.json for every title under `install`.
 
     The install directory is authoritative: what vanished from it is dropped;
@@ -324,7 +324,7 @@ def register(install: Path, ryujinx: Path, keys: dict[str, bytes]) -> dict:
 
         games = ryujinx / "games" / f"{base:016x}"
         games.mkdir(parents=True, exist_ok=True)
-        selected = _write_updates(games / "updates.json", install, patch_sets)
+        selected = _write_updates(games / "updates.json", install, patch_sets, select)
         _write_dlc(games / "dlc.json", install, dlc_by_container)
         report[f"{base:016x}"] = {
             "update": selected,
@@ -354,14 +354,33 @@ def _write_json(path: Path, payload) -> None:
     tmp.replace(path)
 
 
-def _write_updates(path: Path, install: Path, patches: list[tuple[int, str]]) -> str | None:
+def _pick(patches: list[tuple[int, str]], want: str | None) -> str | None:
+    """Which update file to run.
+
+    `want` is a version as a person says it — "1.4.2" — matched against the
+    file's own name, because that is where the importer puts it. A version
+    nobody has is not an error here: the caller asked the client for it, and
+    the client checked before we were told.
+    """
+    if not patches:
+        return None
+    if want:
+        for version, path in reversed(patches):
+            name = Path(path).name
+            if f"update_{want}" in name or f"_{want}-" in name or str(version) == want:
+                return path
+        print(f"switch-content: no update named {want}; using the newest", file=sys.stderr)
+    return patches[-1][1]
+
+
+def _write_updates(path: Path, install: Path, patches: list[tuple[int, str]], want: str | None = None) -> str | None:
     existing = _load_json(path, {})
     kept = [p for p in existing.get("paths", []) if isinstance(p, str) and not _under(p, install) and Path(p).is_file()]
     paths = kept + [p for _, p in patches]
     # Ryujinx keeps the person's own choice among files it manages itself;
-    # among what the client installed the latest version wins, which is the
-    # whole reason the update was fetched.
-    selected = patches[-1][1] if patches else existing.get("selected")
+    # among what the client installed, the asked-for version wins and the
+    # newest is the default — which is the whole reason the update was fetched.
+    selected = _pick(patches, want) or existing.get("selected")
     if selected not in paths:
         selected = paths[-1] if paths else None
     if not paths:
@@ -408,6 +427,7 @@ def main(argv: list[str] | None = None) -> int:
     reg = sub.add_parser("register", help="write Ryujinx's updates.json and dlc.json for an install")
     reg.add_argument("--keys", type=Path, required=True)
     reg.add_argument("--ryujinx", type=Path, required=True, help="Ryujinx's config directory")
+    reg.add_argument("--select", help="the update version to run, as its file names it (1.4.2)")
     reg.add_argument("install", type=Path)
     args = parser.parse_args(argv)
 
@@ -416,7 +436,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "inspect":
             print(json.dumps([inspect(p, keys).as_json() for p in args.containers], indent=2))
         else:
-            report = register(args.install, args.ryujinx, keys)
+            report = register(args.install, args.ryujinx, keys, args.select)
             for base, what in report.items():
                 update = Path(what["update"]).name if what["update"] else "none"
                 print(f"{base}: update {update}, {what['dlc']} DLC", file=sys.stderr)
