@@ -89,11 +89,18 @@ in
             echo "installed UltraCam ($name)" >&2
           fi
         done
-        config="$ryujinx/sdcard/UltraCam/TOTK/Config"
+        # "Config" is the file, not a folder holding one. The optimizer joins
+        # the SD card with PatchInfo's ModConfig ("UltraCam/TOTK/Config"),
+        # creates that path's *dirname*, and writes the ini there — so the
+        # settings live in a file with no extension. Written as a directory
+        # instead, the mod finds no config at all and faults a few seconds into
+        # the game, inside subsdk3, with nothing in the log that says why.
+        config="$ryujinx/sdcard/UltraCam/TOTK"
         mkdir -p "$config"
+        [ -d "$config/Config" ] && rm -rf "$config/Config"
         # Written on every launch: the frame rate is the variant, not a
         # preference the mod's own menu should be able to lose.
-        cp --no-preserve=mode ${mainIni} "$config/Main.ini"
+        cp --no-preserve=mode ${mainIni} "$config/Config"
 
         if [ -f "$ryujinx/Config.json" ]; then
           if ${pkgs.jq}/bin/jq '.dram_size = ${toString dram} | ${vsync}' \
