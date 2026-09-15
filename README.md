@@ -331,6 +331,18 @@ seconds of it is nobody's slip. It is not a chord any of these consoles used,
 and it is not intercepted — the emulator still sees every button, so a game
 that happens to read all three carries on reading them.
 
+**The hold draws itself.** Three seconds is long enough to let go and conclude
+nothing is happening, so a red ring closes clockwise over the game while the
+combination is held, around an X that goes from faint to solid as it fills.
+Letting go takes it away; the closed ring stays up for a moment so the last
+thing on screen is the switch firing rather than the game disappearing
+mid-hold. The window is borderless, takes no focus, and exists only while the
+combination is held — and under gamescope it asks for the same
+`GAMESCOPE_EXTERNAL_OVERLAY` treatment mangoapp uses, which is what puts it
+over a game rather than behind one. `GOTG_KILLSWITCH_OVERLAY=0` keeps the
+switch and drops the picture, for a compositor that will not float a window
+above a fullscreen game.
+
 It works with every emulator because it watches the controller rather than the
 emulator: several processes can read the same evdev device, so `gotg play`
 starts `gotg-killswitch` beside the game and it costs the game nothing. The

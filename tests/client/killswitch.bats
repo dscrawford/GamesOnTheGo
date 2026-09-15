@@ -113,6 +113,20 @@ wait_for_watcher() {
   [[ "$(cat "$WATCHER_LOG")" == *"--hold-ms 3000"* ]]
 }
 
+@test "the overlay can be turned off for a display that will not float it" {
+  fake_watcher
+  GOTG_KILLSWITCH_OVERLAY=0 gotg play usa.zelda
+  wait_for_watcher
+  [[ "$(cat "$WATCHER_LOG")" == *"--no-overlay"* ]]
+}
+
+@test "and is on by default" {
+  fake_watcher
+  gotg play usa.zelda
+  wait_for_watcher
+  [[ "$(cat "$WATCHER_LOG")" != *"--no-overlay"* ]]
+}
+
 @test "the launch says how to use it" {
   fake_watcher
   gotg play usa.zelda
