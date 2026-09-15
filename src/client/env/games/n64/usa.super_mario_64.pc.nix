@@ -79,9 +79,13 @@ let
     name = "gotg-sm64coopdx";
     text = ''
       port="''${1:?state directory required}/coopdx"
+      shift
       export LD_LIBRARY_PATH="${lib.makeLibraryPath buildDeps}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
       cd "$port"
-      exec ./sm64coopdx
+      # Anything after the state directory belongs to the port: a plain launch
+      # passes none, and a co-op one passes which save path, which controller
+      # and whether this copy is hosting.
+      exec ./sm64coopdx "$@"
     '';
   };
 in

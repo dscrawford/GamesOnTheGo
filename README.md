@@ -704,6 +704,24 @@ them in one window instead:
 
 ![Two-player Four Swords Adventures: GBA1 top left, GBA2 below it, the game on the right](docs/four-swords-2p.png)
 
+**Super Mario 64 is the same trick with a plainer layout.** sm64coopdx is a
+networked co-op port — every player runs their own copy and they meet over a
+socket — which on one sofa means four windows to arrange and a lobby to join by
+typing an address. The `pc-2p`, `pc-3p` and `pc-4p` variants launch the copies,
+join them to each other on a port picked for that launch, and put the windows
+in one frame: two side by side, three or four in a 2x2.
+
+```bash
+gotg play usa.super_mario_64 pc          # one player
+gotg play usa.super_mario_64 pc-3p       # three, one window each
+```
+
+Each player gets their own save directory and their own controller — the
+number coopdx reads is the one `gotg controllers order` already pinned, so the
+seat order is the same here as everywhere else. No sandbox is involved, which
+is why a pad with no evdev node of its own (the current Steam Controller) can
+still take a seat.
+
 | | layout | ports |
 |---|---|---|
 | plain | the game, no GBA at all | port 1 is an ordinary GameCube controller |
