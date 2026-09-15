@@ -107,8 +107,6 @@ steam_shortcuts_file() {
   die "no Steam account found. Looked in ${candidates[*]}"
 }
 
-# Steam discards changes made behind its back, so this is a hard stop rather
-# than a warning: carrying on would report success and change nothing.
 # Is Steam up, and therefore holding the shortcut file hostage?
 #
 # The question only matters for Steam's own file. Pointed at another one — which
@@ -130,23 +128,55 @@ steam_pending_file() {
 
 # Remember a change Steam is currently in no position to accept.
 #
-# Keyed on the game and variant rather than appended blindly: asking twice for
-# the same entry is one entry, and an add followed by a remove is a remove. The
-# last word wins, which is what somebody changing their mind expects.
+# Keyed on the game, the variant *and* the operation, rather than appended
+# blindly: asking for the same thing twice is one entry. Keyed on the operation
+# too because the first version was not, and `steam art X` behind a queued
+# `steam add X` replaced it — so the add never happened and the art then failed
+# for a game that was not in Steam. Two different things to do to one entry are
+# two entries, in the order they were asked for.
+#
+# The exception is a remove, which cancels an add or an artwork fetch that has
+# not happened yet: changing your mind should not leave the queue adding a game
+# in order to take it straight back out.
 steam_queue() {
-  local op="$1" want="$2" variant="${3:-}" file
+  local op="$1" want="$2" variant="${3:-}" file tmp
   file="$(steam_pending_file)"
-  mkdir -p "$(dirname "$file")"
+  steam_queue_lock
   [[ -f "$file" ]] || printf '[]\n' >"$file"
+  tmp="$(mktemp "$file.XXXXXX")"
   if jq --arg op "$op" --arg id "$want" --arg variant "$variant" \
-    '[ .[] | select(.id != $id or .variant != $variant) ]
+    'def mine: .id == $id and .variant == $variant;
+     [ .[] | select((mine | not) or ($op != "remove" and .op != $op)) ]
      + [ { op: $op, id: $id, variant: $variant } ]' \
-    "$file" >"$file.part" 2>/dev/null; then
-    mv "$file.part" "$file"
+    "$file" >"$tmp"; then
+    mv "$tmp" "$file"
+    steam_queue_unlock
   else
-    rm -f "$file.part"
+    # Loudly, because the whole promise of queueing is that the change is not
+    # lost. A pending file that has stopped being JSON — hand-edited, or a
+    # machine that went down mid-write — would otherwise take every change from
+    # here on while printing the same reassuring paragraph about it waiting.
+    rm -f "$tmp"
+    steam_queue_unlock
+    die "could not record this in $file — it is no longer readable as JSON.
+     Look at it, or remove it and ask again: rm $file"
   fi
 }
+
+# One writer at a time. The queue is a file rewritten in place and two runs can
+# want it at once — the picker adds one game per press, and a person with two
+# terminals is not doing anything strange. The same flock the download and
+# firmware caches use, on a lock file of its own so that the losing run waits
+# rather than writing over the winner.
+steam_queue_lock() {
+  local file
+  file="$(steam_pending_file)"
+  mkdir -p "$(dirname "$file")"
+  exec 9>"$file.lock"
+  flock -w 10 9 || die "another gotg is writing the Steam queue; try again"
+}
+
+steam_queue_unlock() { exec 9>&-; }
 
 # Apply everything that was waiting, now that Steam is not.
 #
@@ -155,40 +185,63 @@ steam_queue() {
 # that retries it forever would say it at the start of every command from here
 # on.
 #
-# Each is run in a subshell, because these die on failure and one bad entry is
-# not a reason to abandon the rest — and each is *checked* before it is run,
-# which is the part that took a measurement to get right. A subshell on the
-# left of `||` has errexit switched off for the whole of it, and `set -e`
-# inside does not bring it back (tested). So a queued add whose game had gone
-# walked past the death of `manifest_find` — which dies inside a command
-# substitution, killing only the substitution — and failed again further down
-# with a different message. Resolving the id here means the one thing that goes
-# stale in a queue is answered before anything can limp on it.
+# Each runs in a subshell so one bad entry does not abort the rest, and each is
+# *checked* before it runs. A subshell on the left of `||` has errexit switched
+# off for the whole of it, and `set -e` inside does not bring it back — measured,
+# not assumed. Without the check, a queued add whose game had gone walked past
+# the death of `manifest_find` — which dies inside a command substitution,
+# killing only that — and failed again further down, saying something else.
 steam_flush() {
   local file rows=() row op id variant
   file="$(steam_pending_file)"
   [[ -s "$file" ]] || return 0
   ! steam_running || return 0
 
-  mapfile -t rows < <(jq -c '.[]?' "$file" 2>/dev/null)
-  rm -f "$file"
-  ((${#rows[@]} > 0)) || return 0
+  # Claimed under the lock so that two runs cannot both take the same rows and
+  # apply everything twice. Only objects: a file that has stopped being a list
+  # of records would otherwise reach the reads below as a bare number and take
+  # the whole command down with a jq error.
+  steam_queue_lock
+  mapfile -t rows < <(
+    jq -c '.[]? | select(type == "object" and (.op | type) == "string")' \
+      "$file" 2>/dev/null
+  )
+  if ((${#rows[@]} == 0)); then
+    # The file existed and was not empty, so something was in it and is now
+    # going in the bin. Said out loud: a change nobody can see disappearing is
+    # the failure this whole queue exists to avoid.
+    warn "the Steam queue in $file held nothing readable; discarding it"
+    rm -f "$file"
+    steam_queue_unlock
+    return 0
+  fi
 
-  # Once, for the whole queue: every operation below wants a catalog, and
-  # `manifest_find` is the check that each entry is still a game.
+  # Before the file is dropped, not after: manifest_ensure dies when there is no
+  # catalog cached and no network to fetch one, and a queue deleted on the way
+  # into that death is three changes the person made and will never see again.
   manifest_ensure
+  rm -f "$file"
+  steam_queue_unlock
 
   log "Steam is closed; applying $(steam_count "${#rows[@]}") that waited for it."
   for row in "${rows[@]}"; do
-    op="$(jq -r '.op' <<<"$row")"
-    id="$(jq -r '.id' <<<"$row")"
-    variant="$(jq -r '.variant // ""' <<<"$row")"
+    # One jq for the three fields, not three: the row is a few dozen bytes and
+    # the cost is entirely in spawning. Ordered so that no empty field can come
+    # first — a tab is IFS whitespace, so `read` would skip a leading empty one
+    # and shift every value left, and `op` is the one field that is never empty.
+    IFS=$'\t' read -r op id variant < <(
+      jq -r '[.op, .id, (.variant // "")] | @tsv' <<<"$row"
+    )
 
     if ! (manifest_find "$id" >/dev/null 2>&1); then
-      warn "queued $op of $id: not in the catalog any more, so it was dropped"
+      warn "queued $(printable "$op") of $(printable "$id"): not in the catalog any more, so it was dropped"
       continue
     fi
 
+    # Each of these asks whether Steam is running again, which this function has
+    # already answered — and that is worth the pgrep: Steam starting *during* a
+    # long flush puts the entries still to come back in the queue rather than
+    # writing them into a file that is about to be overwritten.
     case "$op" in
       add) (steam_add "$id" ${variant:+"$variant"}) || warn "queued add of $id failed" ;;
       remove) (steam_remove "$id" ${variant:+"$variant"}) || warn "queued remove of $id failed" ;;
@@ -198,6 +251,17 @@ steam_flush() {
 }
 
 steam_count() { [[ "$1" == 1 ]] && printf '1 change' || printf '%s changes' "$1"; }
+
+# `add` gets this from env_attr, which also insists the file exists — but a
+# variant being removed may have had its environment deleted already, and one
+# having artwork fetched need not have been built. Both still turn into a
+# launcher path, and the queue now writes such a value down and reads it back
+# later, so it is checked against the same rule env.sh uses.
+steam_variant_ok() {
+  local variant="${1:-}"
+  [[ -z "$variant" ]] || [[ "$variant" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
+    die "invalid variant name: $(printable "$variant")"
+}
 
 # What a command should do when Steam is up: remember it, say so, and stop.
 # Returns 0 when it queued — the caller is done — and 1 when there is nothing in
@@ -217,14 +281,21 @@ steam_defer() {
 
 # What is waiting, for somebody who wants to know rather than guess.
 steam_pending() {
-  local file
+  local file line
   file="$(steam_pending_file)"
   if [[ ! -s "$file" ]] || [[ "$(jq -r 'length' "$file" 2>/dev/null)" == "0" ]]; then
     log "nothing is waiting for Steam."
     return 0
   fi
-  jq -r '.[] | "  \(.op)  \(.id)\(if .variant == "" then "" else " " + .variant end)"' \
-    "$file" 2>/dev/null
+  # Through printable, like every other string this did not choose: jq -r
+  # decodes \u001b, and a pending file is a file somebody can edit.
+  while IFS= read -r line; do
+    printable "$line"
+  done < <(
+    jq -r '.[]? | select(type == "object")
+           | "  \(.op)  \(.id)\(if (.variant // "") == "" then "" else " " + .variant end)"' \
+      "$file" 2>/dev/null
+  )
   log ""
   log "Applied when Steam is closed and any gotg steam command runs."
 }
@@ -480,10 +551,22 @@ steam_art() {
   done
 
   manifest_ensure
-  ! steam_defer art "$want" "$variant" || return 0
+  steam_variant_ok "$variant"
 
   local game launcher name appid
   game="$(manifest_find "$want")"
+
+  # Queued after the game is resolved, so a name that is not one is answered
+  # here rather than minutes later — and never when a picture was named, since
+  # the queue remembers the game and the variant and nothing else. Coming back
+  # to fetch whatever the internet offers, when somebody asked for the file in
+  # their pictures folder, is worse than saying no.
+  if steam_running && ((${#opts[@]} > 0)); then
+    die "artwork chosen by hand cannot wait for Steam: it would come back as
+     whatever the search finds. Close Steam and run this again."
+  fi
+  ! steam_defer art "$want" "$variant" || return 0
+
   launcher="$(launcher_path "$game" "$variant")"
   name="$(steam_display_name "$game" "$variant")"
 
@@ -561,6 +644,7 @@ steam_remove() {
   fi
 
   manifest_ensure
+  steam_variant_ok "$variant"
 
   local game launcher result
   game="$(manifest_find "$want")"

@@ -272,10 +272,9 @@ EOF
 
 # --- a change asked for while Steam is running ------------------------------
 #
-# Steam holds the shortcut list in memory and writes its own copy back when it
-# exits, so an edit made underneath it is not racing — it is being overwritten
-# later, by design. The command takes the request anyway and applies it the
-# moment Steam is gone.
+# Queued rather than refused, and applied once Steam is gone; cmd-steam.sh says
+# why it cannot simply be written. These pin the queue's own behaviour: what is
+# validated up front, what survives, and what is dropped.
 
 pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
 
@@ -302,8 +301,6 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
 }
 
 @test "a typo is refused while Steam runs rather than queued" {
-  # The point of validating first: a name that is not a game is answered now,
-  # in context, not saved up and reported minutes later.
   export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
   GOTG_STEAM_RUNNING=1 gotg steam add not_a_game
   [ "$status" -ne 0 ]
@@ -344,7 +341,6 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
 }
 
 @test "help does not empty the queue" {
-  # Reading the usage is not a reason to write to Steam's file.
   export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
   GOTG_STEAM_RUNNING=1 gotg steam add usa.super_mario_sunshine
   GOTG_STEAM_RUNNING=0 gotg steam help
@@ -353,8 +349,6 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
 }
 
 @test "a queued entry that stopped being addable does not jam the queue" {
-  # It says so once and is dropped: a queue that retried forever would repeat
-  # itself at the start of every command from here on.
   export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
   GOTG_STEAM_RUNNING=1 gotg steam add usa.super_mario_sunshine
   GOTG_STEAM_RUNNING=1 gotg steam add usa.legend_of_zelda_majoras_mask
@@ -368,3 +362,141 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   [ ! -f "$(pending_file)" ]
   [ "$(helper list | jq -r '.[0].name')" = "Majora's Mask" ]
 }
+
+# --- a queue file that is not what steam_queue left there --------------------
+
+@test "queuing over a file that is no longer JSON says so instead of losing it" {
+  # The one failure this feature cannot afford: a change accepted with a
+  # reassuring paragraph and written nowhere.
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  mkdir -p "$GOTG_STATE_DIR"
+  printf '{ this is not json' >"$(pending_file)"
+
+  GOTG_STEAM_RUNNING=1 gotg steam add usa.legend_of_zelda_majoras_mask
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"no longer readable as JSON"* ]]
+  [[ "$stderr" != *"waiting for it"* ]]
+}
+
+@test "an unreadable queue is discarded out loud, not quietly" {
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  mkdir -p "$GOTG_STATE_DIR"
+  printf '{ this is not json' >"$(pending_file)"
+
+  GOTG_STEAM_RUNNING=0 gotg steam list
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"nothing readable"* ]]
+  [ ! -f "$(pending_file)" ]
+}
+
+@test "a queue holding something that is not a record does not take the command down" {
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  GOTG_STEAM_RUNNING=1 gotg steam add usa.legend_of_zelda_majoras_mask
+  jq '. + [5]' "$(pending_file)" >"$(pending_file).t" && mv "$(pending_file).t" "$(pending_file)"
+
+  GOTG_STEAM_RUNNING=0 gotg steam list
+  [ "$status" -eq 0 ]
+  [ "$(helper list | jq -r 'length')" = "1" ]
+}
+
+# --- what the queue does with two requests about one game -------------------
+
+@test "artwork queued behind an add does not replace it" {
+  # Keyed on the operation as well as the game: these are two things to do, not
+  # one person changing their mind, and dropping the add left the art to fail
+  # for a game that was never put in Steam.
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  GOTG_STEAM_RUNNING=1 gotg steam add usa.legend_of_zelda_majoras_mask
+  GOTG_STEAM_RUNNING=1 gotg steam art usa.legend_of_zelda_majoras_mask
+  [ "$(jq -r 'length' "$(pending_file)")" = "2" ]
+  [ "$(jq -r '.[0].op' "$(pending_file)")" = "add" ]
+  [ "$(jq -r '.[1].op' "$(pending_file)")" = "art" ]
+}
+
+@test "a remove cancels an add that has not happened yet" {
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  GOTG_STEAM_RUNNING=1 gotg steam add usa.legend_of_zelda_majoras_mask
+  GOTG_STEAM_RUNNING=1 gotg steam remove usa.legend_of_zelda_majoras_mask
+  [ "$(jq -r 'length' "$(pending_file)")" = "1" ]
+  [ "$(jq -r '.[0].op' "$(pending_file)")" = "remove" ]
+}
+
+# --- art, which cannot always wait ------------------------------------------
+
+@test "a typo in steam art is refused while Steam runs, as it is for add" {
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  GOTG_STEAM_RUNNING=1 gotg steam art not_a_game_at_all
+  [ "$status" -ne 0 ]
+  [ ! -f "$(pending_file)" ]
+}
+
+@test "a picture chosen by hand is refused rather than queued" {
+  # The queue remembers the game and the variant and nothing else, so a queued
+  # --from would come back as whatever the search finds — which is not what was
+  # asked for, and worse than saying no.
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  GOTG_STEAM_RUNNING=1 gotg steam art usa.legend_of_zelda_majoras_mask --from /tmp/mine.png
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"cannot wait for Steam"* ]]
+  [ ! -f "$(pending_file)" ]
+}
+
+@test "a variant that could never name a launcher is refused by remove and art" {
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  gotg steam remove usa.super_mario_sunshine ../../../etc/passwd
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"invalid variant name"* ]]
+
+  gotg steam art usa.super_mario_sunshine ../../../etc/passwd
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"invalid variant name"* ]]
+}
+
+# --- the queue outlives what goes wrong around it ---------------------------
+
+@test "a flush that cannot reach a catalog keeps the queue for next time" {
+  # manifest_ensure dies when there is no cache and nothing answers — an
+  # ordinary offline moment — and it used to die after the file was deleted.
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  GOTG_STEAM_RUNNING=1 gotg steam add usa.legend_of_zelda_majoras_mask
+  [ -s "$(pending_file)" ]
+
+  # No cache, and the service moved: manifest_ensure has nowhere to go.
+  rm -f "$GOTG_CACHE_FILE"
+  cp "$GOTG_CONFIG_DIR/api.json" "$TEST_TMP/api.json.real"
+  jq '.url = "http://127.0.0.1:1"' "$TEST_TMP/api.json.real" >"$GOTG_CONFIG_DIR/api.json"
+
+  GOTG_STEAM_RUNNING=0 gotg steam list
+  [ "$status" -ne 0 ]
+  [ -s "$(pending_file)" ]
+
+  cp "$TEST_TMP/api.json.real" "$GOTG_CONFIG_DIR/api.json"
+  GOTG_STEAM_RUNNING=0 gotg steam list
+  [ "$status" -eq 0 ]
+  [ "$(helper list | jq -r 'length')" = "1" ]
+}
+
+@test "two adds at once both survive" {
+  # A read-modify-write with no lock reproducibly lost one of these.
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  GOTG_STEAM_RUNNING=1 "$GOTG_BIN" steam add usa.legend_of_zelda_majoras_mask >/dev/null 2>&1 &
+  local first=$!
+  GOTG_STEAM_RUNNING=1 "$GOTG_BIN" steam add usa.super_mario_sunshine >/dev/null 2>&1 &
+  local second=$!
+  wait "$first"
+  wait "$second"
+
+  jq -e '.' "$(pending_file)" >/dev/null
+  [ "$(jq -r 'length' "$(pending_file)")" = "2" ]
+}
+
+@test "an unknown subcommand still empties the queue before it complains" {
+  # Deliberate: only the help spellings are exempt, and a typo is not one.
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  GOTG_STEAM_RUNNING=1 gotg steam add usa.legend_of_zelda_majoras_mask
+  GOTG_STEAM_RUNNING=0 gotg steam bogus-command
+  [ "$status" -ne 0 ]
+  [ ! -f "$(pending_file)" ]
+  [ "$(helper list | jq -r 'length')" = "1" ]
+}
+
