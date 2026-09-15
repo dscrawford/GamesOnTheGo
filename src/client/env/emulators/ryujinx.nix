@@ -42,7 +42,7 @@
         mods="$XDG_CONFIG_HOME/Ryujinx/mods/contents/${titleId}/${name}/exefs"
         if [ ! -f "$mods/${gameVersion}.pchtxt" ]; then
           mkdir -p "$mods"
-          cp --no-preserve=mode ${patch} "$mods/${gameVersion}.pchtxt"
+          cp --no-preserve=mode ${lib.escapeShellArg patch} "$mods/${gameVersion}.pchtxt"
           echo "installed the ${name} patch" >&2
         fi
 

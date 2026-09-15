@@ -576,7 +576,31 @@ gotg play world.luigis_mansion_2_hd 60fps   # Luigi's Mansion 2 HD, unlocked to 
 gotg play world.luigis_mansion_2_hd 120fps  # the same patch at a 120Hz refresh rate
 gotg play usa.legend_of_zelda_majoras_mask rando   # 2ship's own randomizer, its saves apart
 gotg play usa.legend_of_zelda_four_swords_adventures 2p   # two players, a GBA screen each
+gotg play world.legend_of_zelda_breath_of_the_wild 60fps   # and 120fps
 ```
+
+**Frame rates, per Switch game.** Each one is its own environment, so its saves
+and settings sit apart from the plain launch and from each other:
+
+| game | variants | how |
+|---|---|---|
+| Breath of the Wild | `60fps`, `120fps` | UltraCam (MaxLastBreath), v1.6.0 |
+| Tears of the Kingdom | `60fps`, `120fps`, `enhanced` | the same mod; `enhanced` is 120 at 1440p with larger shadows |
+| Luigi's Mansion 2 HD | `60fps`, `120fps` | a pchtxt over the swap interval |
+| Skyward Sword HD | `120fps` | already 60, so the plain launch is that |
+
+The two Zelda engines tie physics to the frame, which is why the patch matters
+more than the cap: UltraCam decouples the game's logic from the frame rate, so
+120 is a ceiling the game may sit below without running fast or slow. Above 60
+the emulated display is set to a matching custom refresh rate — on a 60 Hz
+panel that means tearing or a wasted half, which is the one reason to prefer
+`60fps`.
+
+Skyward Sword's is Fl4sh9174's patch and comes with its author's warning that
+it is experimental. It also only patches **v1.0.1**: Ryujinx matches a pchtxt
+to the running executable by the build id inside it, so on a 1.0.0 dump the mod
+loads, matches nothing, and the game runs at its usual 60 — which is what "this
+variant did nothing" looks like.
 
 **From the picker, a game's variants are a menu.** `gotg-ui` reads the same
 environment files `gotg play <id> <variant>` resolves against, so a game with
