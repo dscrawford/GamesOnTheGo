@@ -294,12 +294,26 @@ randomly, which is why an entry it created will not reproduce under the formula.
 `gotg steam add` reports both the shortcut id and the long form Big Picture
 artwork uses.
 
-**Steam has to be closed.** It rewrites its shortcut file when it exits, so a
-change made while it is running is thrown away without a word — which is why
-this refuses rather than reporting a success that will not survive. The file is
-binary, and every non-Steam game you have lives in it, so the previous version
-is kept beside it before each write and entries that are not ours are left
-alone.
+**Steam has to be closed — but you do not have to wait for it.** Steam holds
+the shortcut list in memory and hands its own copy back when it exits, so a
+change made underneath it is not racing, it is being overwritten later by
+design. Asked for anyway, the change is *queued*: the command validates it,
+says so, and applies it the next time a `gotg steam` command runs with Steam
+closed.
+
+```bash
+gotg steam add world.super_mario_rpg 120fps   # Steam is up: queued
+gotg steam pending                            # what is waiting
+# ...close Steam...
+gotg steam list                               # the queue is applied first
+```
+
+**Then restart Steam.** It reads that file once, at startup, so an already-open
+Steam will not show a game that was added while it ran.
+
+The file is binary, and every non-Steam game you have lives in it, so the
+previous version is kept beside it before each write and entries that are not
+ours are left alone.
 
 ### Controllers
 

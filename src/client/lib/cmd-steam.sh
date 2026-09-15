@@ -12,8 +12,19 @@
 # the difference between working and silently doing nothing —
 #
 #   STEAM REWRITES THAT FILE WHEN IT EXITS. Anything written while it is running
-#   is discarded without a word. So this refuses to touch it while Steam is up,
-#   which is the whole reason it is a command and not a line in the README.
+#   is discarded without a word — which is the whole reason this is a command
+#   and not a line in the README.
+#
+# That rule cannot be worked around, only waited out: Steam holds the shortcut
+# list in memory and hands its own copy back on the way out, so an edit made
+# underneath it is not racing, it is being overwritten later by design. The one
+# route that does work while Steam runs is Steam's own API, which needs the
+# client started with CEF debugging on — not something to require of somebody
+# who just wants a game in their library.
+#
+# So a change asked for while Steam is up is *queued* rather than refused or
+# quietly thrown away, and applied the moment Steam is gone. The command
+# succeeds either way; what differs is when the file is touched.
 
 steam_usage() {
   cat <<'EOF'
@@ -24,20 +35,35 @@ usage: gotg steam <command> [args]
   art <id> [variant]     fetch its artwork again, --force to replace
                          --from <file|url> to choose the picture yourself
   list                   every non-Steam game Steam knows about
+  pending                what is waiting for Steam to close, if anything
 
-Steam must be closed: it rewrites its shortcut file on exit, so a change made
-while it is running is thrown away.
+Steam rewrites its shortcut file when it exits, so a change made while it is
+running would be thrown away. Asked for anyway, it is queued and applied the
+next time one of these commands runs with Steam closed.
+
+Steam reads that file once, at startup: restart Steam for a change to show up
+in your library.
 EOF
 }
 
 cmd_steam() {
   local verb="${1:-}"
   [[ $# -gt 0 ]] && shift || true
+  # Before anything else, because the whole point of the queue is that it
+  # empties itself at the first moment it can, rather than waiting to be
+  # remembered. Help is exempt: reading the usage is not a reason to write to
+  # Steam's file.
+  case "$verb" in
+    help | --help | -h | "") : ;;
+    *) steam_flush ;;
+  esac
+
   case "$verb" in
     add) steam_add "$@" ;;
     remove | rm) steam_remove "$@" ;;
     art | artwork) steam_art "$@" ;;
     list | ls) steam_list "$@" ;;
+    pending | queue) steam_pending "$@" ;;
     help | --help | -h | "") steam_usage ;;
     *)
       printf 'error: unknown steam command: %s\n\n' "$verb" >&2
@@ -83,14 +109,124 @@ steam_shortcuts_file() {
 
 # Steam discards changes made behind its back, so this is a hard stop rather
 # than a warning: carrying on would report success and change nothing.
-steam_require_closed() {
-  # The guard exists to protect Steam's own file. Pointed at another one — which
-  # is what GOTG_STEAM_SHORTCUTS is for — there is nothing for Steam to
-  # overwrite, so whether it is running stops mattering.
-  [[ -z "${GOTG_STEAM_SHORTCUTS:-}" ]] || return 0
-  pgrep -x steam >/dev/null 2>&1 || return 0
-  die "Steam is running, and it overwrites its shortcuts when it exits.
-     Close Steam, run this again, then start it."
+# Is Steam up, and therefore holding the shortcut file hostage?
+#
+# The question only matters for Steam's own file. Pointed at another one — which
+# is what GOTG_STEAM_SHORTCUTS is for — there is nothing for Steam to overwrite,
+# so whether it is running stops mattering. GOTG_STEAM_RUNNING answers for both,
+# which is how the queue is tested without a Steam to start.
+steam_running() {
+  case "${GOTG_STEAM_RUNNING:-}" in
+    1) return 0 ;;
+    0) return 1 ;;
+  esac
+  [[ -z "${GOTG_STEAM_SHORTCUTS:-}" ]] || return 1
+  pgrep -x steam >/dev/null 2>&1
+}
+
+steam_pending_file() {
+  printf '%s' "${GOTG_STEAM_PENDING_FILE:-$GOTG_STATE_DIR/steam-pending.json}"
+}
+
+# Remember a change Steam is currently in no position to accept.
+#
+# Keyed on the game and variant rather than appended blindly: asking twice for
+# the same entry is one entry, and an add followed by a remove is a remove. The
+# last word wins, which is what somebody changing their mind expects.
+steam_queue() {
+  local op="$1" want="$2" variant="${3:-}" file
+  file="$(steam_pending_file)"
+  mkdir -p "$(dirname "$file")"
+  [[ -f "$file" ]] || printf '[]\n' >"$file"
+  if jq --arg op "$op" --arg id "$want" --arg variant "$variant" \
+    '[ .[] | select(.id != $id or .variant != $variant) ]
+     + [ { op: $op, id: $id, variant: $variant } ]' \
+    "$file" >"$file.part" 2>/dev/null; then
+    mv "$file.part" "$file"
+  else
+    rm -f "$file.part"
+  fi
+}
+
+# Apply everything that was waiting, now that Steam is not.
+#
+# The queue is cleared before the work rather than after: a change that fails —
+# a game since uninstalled, a mod since disabled — has said so once, and a queue
+# that retries it forever would say it at the start of every command from here
+# on.
+#
+# Each is run in a subshell, because these die on failure and one bad entry is
+# not a reason to abandon the rest — and each is *checked* before it is run,
+# which is the part that took a measurement to get right. A subshell on the
+# left of `||` has errexit switched off for the whole of it, and `set -e`
+# inside does not bring it back (tested). So a queued add whose game had gone
+# walked past the death of `manifest_find` — which dies inside a command
+# substitution, killing only the substitution — and failed again further down
+# with a different message. Resolving the id here means the one thing that goes
+# stale in a queue is answered before anything can limp on it.
+steam_flush() {
+  local file rows=() row op id variant
+  file="$(steam_pending_file)"
+  [[ -s "$file" ]] || return 0
+  ! steam_running || return 0
+
+  mapfile -t rows < <(jq -c '.[]?' "$file" 2>/dev/null)
+  rm -f "$file"
+  ((${#rows[@]} > 0)) || return 0
+
+  # Once, for the whole queue: every operation below wants a catalog, and
+  # `manifest_find` is the check that each entry is still a game.
+  manifest_ensure
+
+  log "Steam is closed; applying $(steam_count "${#rows[@]}") that waited for it."
+  for row in "${rows[@]}"; do
+    op="$(jq -r '.op' <<<"$row")"
+    id="$(jq -r '.id' <<<"$row")"
+    variant="$(jq -r '.variant // ""' <<<"$row")"
+
+    if ! (manifest_find "$id" >/dev/null 2>&1); then
+      warn "queued $op of $id: not in the catalog any more, so it was dropped"
+      continue
+    fi
+
+    case "$op" in
+      add) (steam_add "$id" ${variant:+"$variant"}) || warn "queued add of $id failed" ;;
+      remove) (steam_remove "$id" ${variant:+"$variant"}) || warn "queued remove of $id failed" ;;
+      art) (steam_art "$id" ${variant:+"$variant"}) || warn "queued art for $id failed" ;;
+    esac
+  done
+}
+
+steam_count() { [[ "$1" == 1 ]] && printf '1 change' || printf '%s changes' "$1"; }
+
+# What a command should do when Steam is up: remember it, say so, and stop.
+# Returns 0 when it queued — the caller is done — and 1 when there is nothing in
+# the way and the real work should go ahead.
+steam_defer() {
+  local op="$1" want="$2" variant="${3:-}"
+  steam_running || return 1
+  steam_queue "$op" "$want" "$variant"
+  log "Steam is running, so this is waiting for it."
+  log ""
+  log "It rewrites its shortcut file when it exits, so writing now would be"
+  log "undone the moment you close it. Close Steam and run any gotg steam"
+  log "command — the queue is applied first. Then start Steam: it reads that"
+  log "file once, at startup, so it has to be restarted to see the change."
+  return 0
+}
+
+# What is waiting, for somebody who wants to know rather than guess.
+steam_pending() {
+  local file
+  file="$(steam_pending_file)"
+  if [[ ! -s "$file" ]] || [[ "$(jq -r 'length' "$file" 2>/dev/null)" == "0" ]]; then
+    log "nothing is waiting for Steam."
+    return 0
+  fi
+  jq -r '.[] | "  \(.op)  \(.id)\(if .variant == "" then "" else " " + .variant end)"' \
+    "$file" 2>/dev/null
+  log ""
+  log "Applied when Steam is closed and any gotg steam command runs."
 }
 
 # Invoked through python rather than by its shebang: /usr/bin/env does not
@@ -344,6 +480,8 @@ steam_art() {
   done
 
   manifest_ensure
+  ! steam_defer art "$want" "$variant" || return 0
+
   local game launcher name appid
   game="$(manifest_find "$want")"
   launcher="$(launcher_path "$game" "$variant")"
@@ -368,7 +506,6 @@ steam_add() {
     shift
   fi
 
-  steam_require_closed
   manifest_ensure
 
   local game launcher
@@ -383,6 +520,11 @@ steam_add() {
   versions_variant_runnable "$game" "$attr" ||
     die "$(steam_display_name "$game" "$variant") $(versions_variant_why "$attr"),
      and that is not what is installed. See: gotg versions $(manifest_field "$game" id)"
+
+  # Everything above is worth doing while Steam is up: a typo, a game that is
+  # not here, a mod no version suits are all answered now rather than saved up
+  # and reported minutes later, out of context.
+  ! steam_defer add "$want" "$variant" || return 0
 
   launcher="$(launcher_path "$game" "$variant")"
   [[ -f "$launcher" ]] || launcher="$(launcher_write "$game" "$variant")"
@@ -405,7 +547,8 @@ steam_add() {
   steam_attach_icon "$launcher" "$(steam_icon_path "$new_appid")"
 
   log ""
-  log "Start Steam and it will be in your library."
+  log "Restart Steam and it will be in your library — it reads its shortcut"
+  log "file once, at startup, so a Steam that is already open will not see it."
 }
 
 steam_remove() {
@@ -417,12 +560,13 @@ steam_remove() {
     shift
   fi
 
-  steam_require_closed
   manifest_ensure
 
   local game launcher result
   game="$(manifest_find "$want")"
   launcher="$(launcher_path "$game" "$variant")"
+
+  ! steam_defer remove "$want" "$variant" || return 0
 
   result="$(steam_helper --file "$(steam_shortcuts_file)" remove --exe "$launcher")" ||
     die "could not rewrite the Steam shortcuts"

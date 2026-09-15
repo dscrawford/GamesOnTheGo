@@ -455,3 +455,15 @@ commit_flake() {
   [ "$status" -ne 0 ]
   [[ "$stderr" != *"nothing changed"* ]]
 }
+
+@test "install points at the command, not at Steam's file picker" {
+  # `gotg steam add` is that flow, artwork and all; printing the six manual
+  # steps here taught the long way round to everybody who read it.
+  add_game n64 "usa.zelda.z64" "rom" "Zelda"
+  gotg refresh
+  gotg install usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"gotg steam add usa.zelda"* ]]
+  [[ "$stderr" != *"Add a Non-Steam Game"* ]]
+}
+
