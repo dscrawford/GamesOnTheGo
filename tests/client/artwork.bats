@@ -358,7 +358,9 @@ EOF
   local listing
   listing="$(python3 "$(dirname "$GOTG_BIN")/../share/gotg/steam/shortcuts.py" \
     --file "$SHORTCUTS" list)"
-  [ "$(jq -r '.[0].name' <<<"$listing")" = "Sunshine HD Remaster" ]
+  # The mod's own title, with the mod named after it the way every other
+  # variant's Steam entry is.
+  [ "$(jq -r '.[0].name' <<<"$listing")" = "Sunshine HD Remaster (hd)" ]
 }
 
 @test "art does not rewrite the appid or name of a shortcut it did not create" {
