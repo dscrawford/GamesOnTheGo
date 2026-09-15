@@ -578,6 +578,19 @@ gotg play usa.legend_of_zelda_majoras_mask rando   # 2ship's own randomizer, its
 gotg play usa.legend_of_zelda_four_swords_adventures 2p   # two players, a GBA screen each
 ```
 
+**From the picker, a game's variants are a menu.** `gotg-ui` reads the same
+environment files `gotg play <id> <variant>` resolves against, so a game with
+mods grows one row above its verbs naming which of them they act on — open it,
+choose, and Play, Configure and Add to Steam all carry that choice. A mod added
+to Steam gets its own entry, its own launcher and its own artwork, because that
+is what the client does with a variant anyway.
+
+![The picker's mod menu on Four Swords Adventures: Back, the game as it shipped, 2p, 3p, 4p](docs/ui-mods-menu.png)
+
+Uninstall is the one row that stays about the game: `gotg uninstall` takes its
+bytes and every launcher with them, mods included, so offering it per mod would
+promise something it does not do.
+
 **Four Swords Adventures wants a Game Boy Advance per player.** The interesting
 screen moves between the television and the little one depending on where you
 are standing, and Dolphin will emulate those GBAs — but it opens each as a

@@ -32,7 +32,7 @@ TAIL_LINES = 200
 READY_TIMEOUT = 3
 
 
-def is_ready(game: Game) -> bool:
+def is_ready(game: Game, variant: str | None = None) -> bool:
     """Whether launching would do work. Filesystem-only on the client's side —
     no nix evaluation, no network — so the grid can afford to ask on every
     pick. The wrapper pins the exact client on PATH, so the two halves of this
@@ -44,7 +44,7 @@ def is_ready(game: Game) -> bool:
     """
     try:
         done = subprocess.run(
-            [gotg_bin(), "complete", "ready", f"{game.platform}/{game.id}"],
+            [gotg_bin(), "complete", "ready", f"{game.platform}/{game.id}", *([variant] if variant else [])],
             capture_output=True,
             timeout=READY_TIMEOUT,
         )
@@ -65,8 +65,9 @@ class Preparer:
     and never blocks.
     """
 
-    def __init__(self, game: Game, argv: list[str] | None = None):
+    def __init__(self, game: Game, argv: list[str] | None = None, variant: str | None = None):
         self.game = game
+        self.variant = variant
         # Default is the install; the menu also runs `steam add` through the
         # same loader, since both are long, narrated, and cancellable.
         self.argv = argv or ["install"]
@@ -79,7 +80,7 @@ class Preparer:
             # (log/warn), nix reports on stderr, and the loader wants one
             # stream in order.
             self.process = subprocess.Popen(  # noqa: S603 — argv is ours, shell=False
-                [gotg_bin(), *self.argv, f"{game.platform}/{game.id}"],
+                [gotg_bin(), *self.argv, f"{game.platform}/{game.id}", *([variant] if variant else [])],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 env=env,

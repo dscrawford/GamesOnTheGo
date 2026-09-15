@@ -126,3 +126,12 @@ immediately and a worker fills it in.
    one correction: the plan said `grids_portrait` and a cartridge box is
    landscape, so libretro files it as `grids`. Both are asked for.*
 4. Platform filter and search. *Done — in the grid, and on the command line.*
+5. Mods. *Done.* A game's variants are files the client already resolves
+   (`env/games/<platform>/<id>.<variant>.nix`), so the menu reads that
+   directory rather than asking the client — `gotg complete variants` filters
+   the whole catalog through jq to find a platform this program already knows,
+   and the grid asks the moment a menu opens. The row sits above the verbs
+   because it decides what they mean: choose a mod, then Play, Configure or
+   Add to Steam act on it. Uninstall does not take one — `gotg uninstall`
+   removes the game's bytes and every launcher with them, so pretending it
+   could remove one mod would be a lie in a menu.
