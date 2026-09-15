@@ -30,7 +30,10 @@ cmd_install() {
   log "installed: $(manifest_field "$game" title)"
   log "launcher:  $launcher"
   log ""
-  log "Add it to Steam with Games -> Add a Non-Steam Game -> Browse, and pick that file."
+  # Not the six steps through Games -> Add a Non-Steam Game any more: that is
+  # what `gotg steam add` is, artwork and all, and repeating the manual route
+  # here taught the long way round to everybody who read it.
+  log "Put it in Steam with: gotg steam add $(manifest_field "$game" id)"
 }
 
 cmd_play() {
