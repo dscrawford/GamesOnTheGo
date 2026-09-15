@@ -78,6 +78,10 @@
   #
   #   { into = "config/Ryujinx/system"; files = [ "prod.keys" ]; }
   #
+  # `platform` names whose directory to take them from, for the file that is
+  # not this platform's own: a GameCube game emulating Game Boy Advances wants
+  # the GBA's BIOS, and there is one copy of that, under gba.
+  #
   # Not baked into the derivation on purpose. They are neither redistributable
   # nor stable — keys track console firmware — so a store path holding them
   # would be both wrong and stale.

@@ -146,11 +146,23 @@ firmware_fetch() {
   # A firmware zip is a few hundred megabytes on hotel Wi-Fi, so the timeout
   # is its own; the size cap is the other half of not trusting the far end —
   # see firmware_unpack for the decompressed half.
-  if ! service_curl -fsS \
-    --max-time "${GOTG_FIRMWARE_FETCH_SECONDS:-900}" \
-    --max-filesize "$(firmware_max_bytes)" \
-    "$(service_url)/files/$platform/$(jq -rn --arg n "$file" '$n | @uri')" >"$zip" 2>/dev/null ||
-    [[ ! -s "$zip" ]]; then
+  # The byte host, in the catalog's order of preference — the same hosts a
+  # game download uses. /files is served beside /games rather than on the
+  # proxied control plane, which answers for it with a 503.
+  local host got=0
+  while IFS= read -r host; do
+    [[ -n "$host" ]] || continue
+    if service_curl -fsS \
+      --max-time "${GOTG_FIRMWARE_FETCH_SECONDS:-900}" \
+      --max-filesize "$(firmware_max_bytes)" \
+      "$host/files/$platform/$(jq -rn --arg n "$file" '$n | @uri')" >"$zip" 2>/dev/null &&
+      [[ -s "$zip" ]]; then
+      got=1
+      break
+    fi
+    rm -f "$zip"
+  done < <(manifest_files_hosts)
+  if ((got == 0)); then
     rm -f "$zip"
     return 1
   fi
