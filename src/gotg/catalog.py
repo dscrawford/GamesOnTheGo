@@ -255,6 +255,27 @@ class CatalogStore:
             cursor = self._write.execute("DELETE FROM entry WHERE platform = ? AND id = ?", (platform, game_id))
             return cursor.rowcount > 0
 
+    def touch(self, keys: list[tuple[str, str]], when: str | None = None) -> int:
+        """Mark entries as seen without rewriting them.
+
+        An import run that changed nothing still has to say it looked: seen_at
+        is what the sweep reads to decide a game has vanished, so an entry left
+        untouched is an entry reported missing. Re-PUTting thousands of
+        identical rows to say that is most of an import's wall clock — this is
+        the same statement in one request.
+        """
+        stamp = when or _now()
+        if not _ISO_RE.fullmatch(stamp):
+            raise ValueError(f"when must be an ISO UTC timestamp, got {stamp!r}")
+        if not keys:
+            return 0
+        with self._write_lock, self._write:
+            cursor = self._write.executemany(
+                "UPDATE entry SET seen_at = ? WHERE platform = ? AND id = ?",
+                [(stamp, platform, game_id) for platform, game_id in keys],
+            )
+            return max(cursor.rowcount, 0)
+
     def sweep(self, since: str, *, confirm: bool = False) -> dict:
         if not _ISO_RE.fullmatch(since):
             raise ValueError(f"since must be an ISO UTC timestamp, got {since!r}")

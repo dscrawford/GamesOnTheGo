@@ -918,6 +918,28 @@ class Handler(BaseHTTPRequestHandler):
                     force="force=1" in query,
                 )
                 self._send(200, json.dumps(entry).encode(), "application/json")
+            elif self.command == "POST" and segments == ["seen"]:
+                if not needs_index():
+                    return
+                payload = json.loads(body) if body else {}
+                games = payload.get("games") if isinstance(payload, dict) else None
+                if not isinstance(games, list) or not all(isinstance(g, str) for g in games):
+                    self._problem(400, 'a touch is {"games": ["<platform>/<id>", ...]}')
+                    return
+                # An import that changed nothing still has to say it looked:
+                # seen_at is what the sweep reads to decide a game has
+                # vanished. Saying it for thousands of entries in one request
+                # is the difference between an import that takes a minute and
+                # one that takes many.
+                keys = []
+                for game in games:
+                    platform, _, game_id = game.partition("/")
+                    if not PLATFORM_RE.match(platform) or not ENTRY_ID_RE.match(game_id):
+                        self._problem(400, f"not a platform and an entry id: {game}")
+                        return
+                    keys.append((platform, game_id))
+                seen = self.catalog.touch(keys)
+                self._send(200, json.dumps({"seen": seen, "asked": len(keys)}).encode(), "application/json")
             elif self.command == "POST" and segments == ["sweep"]:
                 if not needs_index():
                     return
@@ -1174,7 +1196,10 @@ class Handler(BaseHTTPRequestHandler):
         max_body = MAX_BODY
         if prefix == "saves" and self.command == "PUT" and self.store is not None:
             max_body = self.store.max_bytes
-        elif prefix == "catalog" and self.command == "PUT":
+        elif prefix == "catalog" and self.command in ("PUT", "POST"):
+            # PUT: a decrypted WiiU tree runs to five figures of file rows.
+            # POST: /catalog/seen names every unchanged entry in one request,
+            # which for this library is a few hundred kilobytes of ids.
             max_body = CATALOG_MAX_BODY
         elif prefix == "art" and self.command == "PUT":
             max_body = ART_MAX_BODY

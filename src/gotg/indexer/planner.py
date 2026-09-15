@@ -34,9 +34,22 @@ def _scene_inner_name(source: Source, rules: Rules) -> str:
     return rars[0] if rars else source.name
 
 
-def plan_source(path: Path | str, games_root: Path | str, rules: Rules) -> list[pl.Op]:
-    """Plan every operation for one completed torrent payload."""
-    source = scan(Path(path))
+def plan_source(
+    path: Path | str,
+    games_root: Path | str,
+    rules: Rules,
+    *,
+    source: Source | None = None,
+) -> list[pl.Op]:
+    """Plan every operation for one completed torrent payload.
+
+    `source` is the probe, when the caller already has one. A scan is a
+    directory walk and, for a scene release, an `unrar l` per payload — so a
+    full import that discovers every path and then plans every path was paying
+    for all of that twice, once to decide the payload was a game and again to
+    decide what to do with it.
+    """
+    source = source if source is not None else scan(Path(path))
     verdict = cl.classify(source, rules)
     ops = _plan_classified(source, verdict, games_root, rules)
     # An archive set is a set here and a single archive per game on the wire.

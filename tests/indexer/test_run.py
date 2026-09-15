@@ -6,15 +6,18 @@ extract, after thousands of games had already imported successfully.
 
 import json
 import re
+from pathlib import Path
 
 import pytest
 
+from gotg.indexer import scan as sc
 from gotg.indexer.config import load as load_config
 from gotg.indexer.execute import STATUS_ERROR, Result, cleanup_staging
 from gotg.indexer.plan import ACTION_HARDLINK, Op
 from gotg.indexer.planner import plan_source
 from gotg.indexer.publish import Collision, PublishError
 from gotg.indexer.rules import defaults
+from gotg.indexer.rules import load as load_rules
 from gotg.indexer.run import discover, run_paths, run_scan
 
 RULES = defaults()
@@ -143,7 +146,7 @@ def test_scan_finds_games_and_walks_past_everything_else(tmp_path):
 
     found, ignored = discover(root, load_rules())
 
-    names = {p.name for p in found}
+    names = {path.name for path, _ in found}
     assert "usa.zelda.z64" in names
     assert "Nintendo - Nintendo 64 (BigEndian)" in names
     assert ignored == 2
@@ -154,16 +157,29 @@ ISO_UTC = r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z"
 
 
 class FakePublisher:
-    """The two methods run.py touches, recorded, with injectable failures."""
+    """The methods run.py touches, recorded, with injectable failures."""
 
-    def __init__(self, publish_error=None, sweep_error=None):
+    def __init__(self, publish_error=None, sweep_error=None, touch_error=None):
         self.publish_error = publish_error
         self.sweep_error = sweep_error
+        self.touch_error = touch_error
         self.published = []
         self.swept = []
+        self.touched = []
         self.published_this_run = set()
+        self.unchanged = set()
         self.allow_unhashed = True
         self.api = self
+
+    def touch(self):
+        """What a run says about entries it found unchanged: one call, at the
+        end, naming all of them."""
+        if self.touch_error:
+            raise self.touch_error
+        self.touched.append(sorted(self.unchanged))
+        seen = len(self.unchanged)
+        self.unchanged.clear()
+        return seen
 
     def put(self, platform, game_id, payload):
         self.published.append(game_id)
@@ -302,7 +318,7 @@ def test_a_mapped_zipped_set_is_found_and_planned(cfg):
     # Game Boy: 1926 real games sat unimported because this line was missing.
     zipped_set(cfg, "Nintendo - Game Boy")
     paths, ignored = discover(cfg.source_root, RULES)
-    assert [p.name for p in paths] == ["Nintendo - Game Boy"]
+    assert [path.name for path, _ in paths] == ["Nintendo - Game Boy"]
     assert ignored == 0
 
     ops = plan_source(cfg.source_root / "Nintendo - Game Boy", cfg.games_root, RULES)
@@ -353,7 +369,7 @@ def test_the_retail_nes_set_imports_and_the_aftermarket_one_does_not(cfg):
     zipped_set(cfg, "Nintendo - Nintendo Entertainment System (Headered) (Aftermarket)")
 
     paths, _ = discover(cfg.source_root, RULES)
-    assert sorted(p.name for p in paths) == [
+    assert sorted(path.name for path, _ in paths) == [
         "Nintendo - Nintendo Entertainment System (Headered)",
         "Nintendo - Nintendo Entertainment System (Headered) (Aftermarket)",
     ]
@@ -422,8 +438,39 @@ def test_scan_finds_a_mapped_archive_set(cfg, capsys):
     rules = load()
 
     found, ignored = discover(cfg.source_root, rules)
-    assert [p.name for p in found] == ["Nintendo - GameCube"]
+    assert [path.name for path, _ in found] == ["Nintendo - GameCube"]
 
-    stats = run_paths(found, cfg, rules, dry_run=True)
+    stats = run_paths([path for path, _ in found], cfg, rules, dry_run=True, sources=dict(found))
     assert stats.actions[ACTION_CONVERT] == 6
     assert "usa.game_3" in capsys.readouterr().out
+
+
+# --- what a run costs when nothing changed -----------------------------------
+
+
+def test_a_payload_is_probed_once_not_twice(cfg, monkeypatch):
+    """Discovery and planning share one probe.
+
+    A scan is a directory walk and, for a scene release, an `unrar l` per
+    payload. Doing it again to plan what discovery already looked at was half
+    of this phase — and the half nobody could see, since both passes produce
+    the same answer.
+    """
+    zipped_set(cfg, "Nintendo - Game Boy")
+    rules = load_rules()
+
+    probes = []
+    real = sc.scan
+    monkeypatch.setattr(sc, "scan", lambda path, **kw: (probes.append(Path(path)), real(path, **kw))[1])
+
+    paths, _ = discover(cfg.source_root, rules)
+    run_paths([path for path, _ in paths], cfg, rules, dry_run=True, sources=dict(paths))
+
+    assert probes.count(cfg.source_root / "Nintendo - Game Boy") == 1
+
+
+def test_planning_without_a_probe_still_takes_one(cfg):
+    # --bootstrap names paths nobody has looked at yet.
+    zipped_set(cfg, "Nintendo - Game Boy")
+    ops = run_paths([cfg.source_root / "Nintendo - Game Boy"], cfg, load_rules(), dry_run=True)
+    assert ops.actions

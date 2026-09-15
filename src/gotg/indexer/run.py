@@ -10,6 +10,7 @@ from __future__ import annotations
 import collections
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -108,8 +109,13 @@ def process_source(
     return results
 
 
-def discover(root: Path, rules: Rules) -> tuple[list[Path], int]:
-    """Game payloads directly under ``root``, and how many entries were ignored.
+def discover(root: Path, rules: Rules) -> tuple[list[tuple[Path, sc.Source]], int]:
+    """Game payloads directly under ``root``, each with its probe, and how many
+    entries were ignored.
+
+    The probe comes back with the path because planning needs the same one: a
+    scan is a directory walk and an `unrar l` per scene release, and doing it
+    again to plan what discovery already looked at is half of this phase.
 
     The source tree is shared with film and television, so anything that names no
     known game format is passed over silently. That is the whole difference from
@@ -124,7 +130,7 @@ def discover(root: Path, rules: Rules) -> tuple[list[Path], int]:
     counted quietly: 1926 Game Boy games sat behind this number until somebody
     went looking.
     """
-    found: list[Path] = []
+    found: list[tuple[Path, sc.Source]] = []
     ignored = 0
     unmapped: list[tuple[str, str]] = []
     for child in sorted(root.iterdir()):
@@ -140,7 +146,7 @@ def discover(root: Path, rules: Rules) -> tuple[list[Path], int]:
                 unmapped.append((child.name, verdict.reason))
             ignored += 1
             continue
-        found.append(child)
+        found.append((child, source))
 
     for name, reason in unmapped:
         log.warning("a game set is going unimported: %s — %s", name, reason)
@@ -158,9 +164,24 @@ def run_scan(
 ) -> RunStats:
     """Import every game under one directory (--scan)."""
     since = pub.utc_now()
-    paths, ignored = discover(root, rules)
-    log.info("scanned %s: %d game source(s), %d entry(s) ignored", root, len(paths), ignored)
-    stats = run_paths(paths, cfg, rules, dry_run=dry_run, checksum=checksum, publisher=publisher)
+    started = time.monotonic()
+    scanned, ignored = discover(root, rules)
+    log.info(
+        "scanned %s in %.1fs: %d game source(s), %d entry(s) ignored",
+        root,
+        time.monotonic() - started,
+        len(scanned),
+        ignored,
+    )
+    stats = run_paths(
+        [path for path, _ in scanned],
+        cfg,
+        rules,
+        dry_run=dry_run,
+        checksum=checksum,
+        publisher=publisher,
+        sources={path: source for path, source in scanned},
+    )
 
     # The games tree is the raw source for everything whose torrent no longer
     # seeds — most of the library. Published after the torrent pass, so a
@@ -169,6 +190,18 @@ def run_scan(
         published, errors = pub.publish_games_root(publisher, mf.load(cfg.manifest_path), cfg)
         log.info("games-root pass: %d published, %d error(s)", published, errors)
         stats.publish_errors += errors
+
+    # Everything this run found unchanged, said once. The sweep below reads
+    # seen_at to decide what has vanished, and an entry nobody rewrote has an
+    # old one — so without this, skipping identical writes would report the
+    # library as gone.
+    if publisher and not dry_run:
+        try:
+            seen = publisher.touch()
+            log.info("unchanged: %d entry(s) marked as seen", seen)
+        except pub.PublishError as exc:
+            log.error("marking unchanged entries as seen: %s", exc)
+            stats.publish_errors += 1
 
     # Only a completed full enumeration may sweep: a partial or failed pass
     # would report the whole untouched library as vanished.
@@ -181,14 +214,20 @@ def run_scan(
     return stats
 
 
-def _plan_all(paths: list[Path], cfg: Config, rules: Rules) -> list[tuple[Path, list[pl.Op]]]:
+def _plan_all(
+    paths: list[Path],
+    cfg: Config,
+    rules: Rules,
+    sources: dict[Path, sc.Source] | None = None,
+) -> list[tuple[Path, list[pl.Op]]]:
     """Every source planned, updates and DLC sorted after the games they attach to.
 
     An update publishes onto its base's entry, which must exist first; the
     directory order is the release groups' naming. Stable, so the rest keeps
     its given order.
     """
-    planned = [(path, plan_source(path, cfg.games_root, rules)) for path in paths]
+    sources = sources or {}
+    planned = [(path, plan_source(path, cfg.games_root, rules, source=sources.get(path))) for path in paths]
     return sorted(planned, key=lambda item: any(op.action == pl.ACTION_ATTACH for op in item[1]))
 
 
@@ -200,10 +239,15 @@ def run_paths(
     dry_run: bool,
     checksum: bool = True,
     publisher: pub.Publisher | None = None,
+    sources: dict[Path, sc.Source] | None = None,
 ) -> RunStats:
-    """Import explicit source directories (--bootstrap)."""
+    """Import explicit source directories (--bootstrap).
+
+    `sources` are probes the caller already took — a full scan has them, and
+    --bootstrap does not.
+    """
     stats = RunStats()
-    planned = _plan_all(paths, cfg, rules)
+    planned = _plan_all(paths, cfg, rules, sources)
     if dry_run:
         ops = [op for _, source_ops in planned for op in source_ops]
         print_plan(ops)

@@ -59,6 +59,27 @@ under an id the client then hands to the wrong emulator.
 `rules.yaml` (a ConfigMap in-cluster) carries the DAT-directory and extension maps,
 so adding a platform is a config edit rather than a release.
 
+## What a run costs
+
+Most runs change nothing: the library is ~9,500 entries of hardlinks nobody has
+touched since the day they were made, and a weekly import exists to catch the
+handful that are new. Two things used to make that cost the same as a first
+import, and both are about not repeating work:
+
+**Every payload is probed once.** A scan is a directory walk and, for a scene
+release, an `unrar l` per payload. Discovery scans to decide a payload is a
+game; planning used to scan again to decide what to do with it. The probe is
+now passed along, so the phase does half the I/O and half the subprocesses it
+did.
+
+**An entry identical to the catalog is not written again.** The publisher holds
+the whole stored view (one `GET /catalog?full=1`), so "has this changed?" is a
+comparison in memory rather than a PUT over the network. Unchanged entries are
+still *seen* — `seen_at` is what the sweep reads to decide a game has vanished —
+but that is one `POST /catalog/seen` naming all of them instead of thousands of
+writes. Measured against a synthetic 9,488-entry catalog over loopback: 7.9s of
+PUTs became 0.15s, and on a real network the gap is wider.
+
 ## Operational notes
 
 Learned from the first real bootstrap over the live library:

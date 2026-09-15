@@ -60,7 +60,11 @@ class StubCatalog(BaseHTTPRequestHandler):
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length") or 0)
-        self.sweeps.append(json.loads(self.rfile.read(length)))
+        payload = json.loads(self.rfile.read(length))
+        self.sweeps.append(payload)
+        if self.path.endswith("/seen"):
+            self._reply(200, {"seen": len(payload.get("games", [])), "asked": len(payload.get("games", []))})
+            return
         self._reply(200, {"total": 1, "vanished": [{"platform": "n64", "id": "usa.gone"}]})
 
 
@@ -668,3 +672,69 @@ def test_an_update_and_a_dlc_coexist_under_different_extras_slots(tmp_path, stub
         "extras/update_1.4.3/g.sfv",
         "extras/dlc_zelda_dlc_pack/pack.nsp",
     ]
+
+
+# --- what a run costs when nothing changed -----------------------------------
+
+
+def stored_row(result, digest):
+    """The catalog's view of an entry the importer already published."""
+    op = result.op
+    member = _members(op)[0]
+    stat = member.path.stat()
+    return {
+        "platform": op.platform,
+        "id": op.entry_id,
+        "handler": op.handler,
+        "title": op.title,
+        "files": [
+            {
+                "name": member.name,
+                "path": str(member.path),
+                "size_bytes": stat.st_size,
+                "mtime": int(stat.st_mtime),
+                "sha256": digest,
+            }
+        ],
+    }
+
+
+def test_an_entry_identical_to_the_catalog_is_not_written_again(stub, tmp_path):
+    # The common case by a mile: most of the library is hardlinks nobody has
+    # touched since the day they were made, and re-PUTting each one to advance
+    # a timestamp was most of an import's wall clock.
+    url, handler = stub
+    result = link_result(tmp_path)
+    digest = hashlib.sha256(b"rom!").hexdigest()
+    handler.games = [stored_row(result, digest)]
+
+    publisher = Publisher(CatalogAPI(url, "token"))
+    publisher.publish(result)
+
+    assert handler.puts == [], "nothing changed, so nothing was written"
+    assert ("n64", "usa.zelda") in publisher.unchanged, "but it was still seen"
+
+
+def test_a_changed_entry_is_written(stub, tmp_path):
+    url, handler = stub
+    result = link_result(tmp_path)
+    row = stored_row(result, hashlib.sha256(b"rom!").hexdigest())
+    row["files"][0]["size_bytes"] = 999  # the bytes moved under us
+    handler.games = [row]
+
+    publisher = Publisher(CatalogAPI(url, "token"))
+    publisher.publish(result)
+
+    assert [path for path, _ in handler.puts] == ["/catalog/n64/usa.zelda"]
+    assert publisher.unchanged == set()
+
+
+def test_everything_unchanged_is_marked_seen_in_one_request(stub):
+    # Or the sweep, which reads seen_at, reports the whole library as vanished.
+    url, handler = stub
+    publisher = Publisher(CatalogAPI(url, "token"))
+    publisher.unchanged = {("n64", "usa.zelda"), ("gb", "usa.tetris")}
+
+    assert publisher.touch() == 2
+    assert handler.sweeps == [{"games": ["gb/usa.tetris", "n64/usa.zelda"]}]
+    assert publisher.unchanged == set(), "said once, not again next time"
