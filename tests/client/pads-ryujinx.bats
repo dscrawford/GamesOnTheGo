@@ -34,6 +34,31 @@ write_ryujinx_config() {
 
 BOUND='[{"id": "0-00000005-045e-0000-8e02-000030110000", "name": "Xbox 360 Controller (0)", "player_index": "Player1", "backend": "GamepadSDL2"}]'
 
+# The same, for a variant of a game on the same platform.
+variant_config_path() {
+  printf '%s/env-switch-world_zelda-60fps/config/Ryujinx/Config.json' "$GOTG_STATE_DIR/env"
+}
+
+variant_snap_path() {
+  printf '%s/env-switch-world_zelda-60fps/input-config.json' "$GOTG_STATE_DIR/env"
+}
+
+fake_ryujinx_variant() {
+  mkdir -p "$GOTG_ROOTS_DIR/env-switch-world_zelda-60fps/share/gotg"
+  jq -n '{emulator: "ryujinx"}' \
+    >"$GOTG_ROOTS_DIR/env-switch-world_zelda-60fps/share/gotg/pads.json"
+}
+
+# What Ryujinx writes on a first run: a keyboard as player 1, and no pad.
+DEFAULT='[{"id": "0", "name": "Keyboard", "player_index": "Player1", "backend": "WindowKeyboard"}]'
+
+write_variant_config() {
+  local bindings="$1"
+  mkdir -p "$(dirname "$(variant_config_path)")"
+  jq -n --argjson input "$bindings" \
+    '{version: 70, show_confirm_exit: true, input_config: $input}' >"$(variant_config_path)"
+}
+
 @test "a working binding is snapshotted" {
   fake_ryujinx_env
   write_ryujinx_config "$BOUND"
@@ -340,4 +365,114 @@ STEAM_PAD='[{"id": "0-00000003-28de-0000-ff11-000001000000", "name": "Steam Cont
   GOTG_STEAM_RUNNING=0 run pads_configure env-switch
   [ "$status" -eq 0 ]
   [[ "$output" != *"Steam is not running"* ]]
+}
+
+# --- a pad the environment has never been told about ------------------------
+
+@test "a new variant takes the pad the platform already has bound" {
+  # Bindings are per environment, so the first launch of a mod met Ryujinx's
+  # keyboard default — which is what "the game does not see my controller"
+  # was.
+  fake_ryujinx_env
+  write_ryujinx_config "$BOUND"
+  pads_configure env-switch
+
+  fake_ryujinx_variant
+  write_variant_config "$DEFAULT"
+  run --separate-stderr pads_configure env-switch-world_zelda-60fps
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.input_config[0].backend' "$(variant_config_path)")" = "GamepadSDL2" ]
+  [ "$(jq -r '.input_config[0].id' "$(variant_config_path)")" = "0-00000005-045e-0000-8e02-000030110000" ]
+  [[ "$stderr" == *"env-switch"* ]]
+}
+
+@test "the keyboard default is never remembered as a preference" {
+  # Snapshotting it would pin an environment's own padlessness on launch one
+  # and keep restoring it.
+  fake_ryujinx_variant
+  write_variant_config "$DEFAULT"
+  run pads_configure env-switch-world_zelda-60fps
+  [ "$status" -eq 0 ]
+  [ ! -s "$(variant_snap_path)" ]
+}
+
+@test "an environment that has its own bindings is not reseeded" {
+  fake_ryujinx_env
+  write_ryujinx_config "$BOUND"
+  pads_configure env-switch
+
+  fake_ryujinx_variant
+  local own='[{"id": "0-00000003-28de-0000-ff11-000001000000", "name": "Steam Controller", "player_index": "Player1", "backend": "GamepadSDL2"}]'
+  write_variant_config "$own"
+  pads_configure env-switch-world_zelda-60fps
+  [ "$(jq -r '.input_config[0].name' "$(variant_config_path)")" = "Steam Controller" ]
+}
+
+@test "a first launch seeds the snapshot even with no config to write into" {
+  # The emulator writes the config minutes from now; the platform's own
+  # preLaunch is what puts these bindings into it.
+  fake_ryujinx_env
+  write_ryujinx_config "$BOUND"
+  pads_configure env-switch
+
+  fake_ryujinx_variant
+  run pads_configure env-switch-world_zelda-60fps
+  [ "$status" -eq 0 ]
+  [ -s "$(variant_snap_path)" ]
+  [ "$(jq -r '.[0].backend' "$(variant_snap_path)")" = "GamepadSDL2" ]
+}
+
+@test "a sibling with nothing but a keyboard is not worth taking" {
+  fake_ryujinx_env
+  write_ryujinx_config "$DEFAULT"
+  pads_configure env-switch
+
+  fake_ryujinx_variant
+  write_variant_config "$DEFAULT"
+  run pads_configure env-switch-world_zelda-60fps
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.input_config[0].backend' "$(variant_config_path)")" = "WindowKeyboard" ]
+}
+
+@test "another platform's bindings are not a sibling" {
+  # A GameCube environment's pads.json names dolphin, and its bindings are in
+  # dolphin's own format — nothing Ryujinx could read.
+  mkdir -p "$GOTG_STATE_DIR/env/env-gamecube"
+  printf '%s\n' "$BOUND" >"$GOTG_STATE_DIR/env/env-gamecube/input-config.json"
+
+  fake_ryujinx_variant
+  write_variant_config "$DEFAULT"
+  run pads_configure env-switch-world_zelda-60fps
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.input_config[0].backend' "$(variant_config_path)")" = "WindowKeyboard" ]
+}
+
+@test "a snapshot remembering only a keyboard does not count as bindings" {
+  # What an older client left behind: it snapshotted the default, so the
+  # environment looks bound and never gets a pad.
+  fake_ryujinx_env
+  write_ryujinx_config "$BOUND"
+  pads_configure env-switch
+
+  fake_ryujinx_variant
+  mkdir -p "$(dirname "$(variant_snap_path)")"
+  printf '%s\n' "$DEFAULT" >"$(variant_snap_path)"
+  write_variant_config "$DEFAULT"
+  run pads_configure env-switch-world_zelda-60fps
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.input_config[0].backend' "$(variant_config_path)")" = "GamepadSDL2" ]
+}
+
+@test "an environment that has never run at all still gets the snapshot" {
+  # No config, no state directory: `gotg controllers apply --all` reaches
+  # environments that have only ever been built.
+  fake_ryujinx_env
+  write_ryujinx_config "$BOUND"
+  pads_configure env-switch
+
+  fake_ryujinx_variant
+  run pads_configure env-switch-world_zelda-60fps
+  [ "$status" -eq 0 ]
+  [ -s "$(variant_snap_path)" ]
+  [ -z "$(ls "$(dirname "$(variant_snap_path)")"/*.part 2>/dev/null)" ]
 }

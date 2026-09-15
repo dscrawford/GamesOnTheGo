@@ -27,6 +27,7 @@ pads_ryujinx_snapshot() { printf '%s/input-config.json' "$(env_state_dir "$1")";
 
 pads_ryujinx_configure() {
   local attr="$1"
+  pads_ryujinx_seed "$attr"
   pads_ryujinx_keep "$attr"
   # Twice around the keep, so the snapshot carries the motion block from this
   # launch rather than from the next one: a config restored a launch later
@@ -60,6 +61,99 @@ pads_ryujinx_warn_steam() {
          gotg controllers order --set <pad> && gotg controllers apply <id>"
 }
 
+# Ryujinx's untouched default: a keyboard bound as player 1 and no pad at all.
+# Worth naming, because it is not a choice anyone made — it is what the emulator
+# writes on a first run — and both halves of this file need to tell it apart
+# from bindings somebody has. Remembering it as a preference is how a new
+# environment would pin its own padlessness on launch one and keep it.
+pads_ryujinx_is_default() {
+  local config="$1"
+  jq -e '(.input_config // []) as $c
+         | ($c | length) == 0
+           or ($c | length) == 1 and $c[0].backend == "WindowKeyboard" and $c[0].id == "0"' \
+    "$config" >/dev/null 2>&1
+}
+
+# A pad this environment has never been told about, taken from one that has.
+#
+# Bindings are per environment, and every variant of a game is its own — so a
+# player who bound a pad once, for the platform, met Ryujinx's keyboard default
+# again the first time they opened a mod. Which looks exactly like "the game
+# does not see my controller", and was.
+#
+# The id Ryujinx stores is the pad's, not the environment's: the same puck
+# produces the same id under every config on the machine. So a sibling's
+# snapshot is not a guess, it is the same answer already written down — and
+# copying it stays inside this file's rule of keeping what Ryujinx wrote rather
+# than generating an id ourselves.
+#
+# Only into an environment that has nothing of its own. A snapshot here means
+# this environment has been bound before, and whatever it says wins.
+pads_ryujinx_seed() {
+  local attr="$1" config snap source
+  snap="$(pads_ryujinx_snapshot "$attr")"
+  # A snapshot with nothing but a keyboard in it is not bindings either. Older
+  # clients wrote those, before the default was told apart from a choice, and
+  # an environment carrying one is exactly an environment that never had a pad.
+  pads_ryujinx_has_pad "$snap" && return 0
+
+  # The `|| source=` belongs out here: with no sibling the lookup exits
+  # non-zero, and under errexit a bare assignment from it takes the launch down
+  # with it — which is every environment on a machine with one pad bound once.
+  source="$(pads_ryujinx_sibling "$attr")" || source=""
+  [[ -n "$source" ]] || return 0
+
+  # An environment that has never run has no state directory yet, which is
+  # exactly the case this exists for.
+  mkdir -p -- "$(dirname "$snap")" || return 0
+  cp -- "$source" "$snap.part" && mv "$snap.part" "$snap" || return 0
+
+  # And into the config, when there is one to write into. On a true first
+  # launch there is not — the emulator writes it minutes from now, and the
+  # platform's own preLaunch restores this snapshot the moment it does.
+  config="$(pads_ryujinx_config "$attr")"
+  [[ -f "$config" ]] || return 0
+  pads_ryujinx_is_default "$config" || return 0
+  if jq --slurpfile saved "$snap" '.input_config = $saved[0]' "$config" \
+    >"$config.part" 2>/dev/null && [[ -s "$config.part" ]]; then
+    mv "$config.part" "$config"
+    local from="${source%/input-config.json}"
+    log "took the controller bindings from ${from##*/}"
+  else
+    rm -f "$config.part"
+  fi
+}
+
+# The most recently used environment of the same platform that has a pad bound.
+# Same platform means same emulator, which is what makes the snapshot readable
+# here at all; most recent, because it is the one whose bindings the player last
+# saw working.
+pads_ryujinx_sibling() {
+  local attr="$1" platform state mine snap
+  # "env-switch-world_zelda-60fps" and "env-switch" are both the switch family;
+  # a platform slug holds no dash, which is what makes this a prefix and not a
+  # parse.
+  platform="${attr#env-}"
+  platform="${platform%%-*}"
+  state="${GOTG_ENV_STATE_DIR:-$GOTG_STATE_DIR/env}"
+  mine="$(pads_ryujinx_snapshot "$attr")"
+
+  while IFS= read -r snap; do
+    [[ "$snap" != "$mine" ]] || continue
+    pads_ryujinx_has_pad "$snap" || continue
+    printf '%s' "$snap"
+    return 0
+  done < <(ls -t -- "$state/env-$platform"*/input-config.json 2>/dev/null)
+  return 1
+}
+
+# Does this snapshot name a pad, rather than only the keyboard Ryujinx binds
+# when nobody has bound anything?
+pads_ryujinx_has_pad() {
+  [[ -s "$1" ]] || return 1
+  jq -e '[.[]? | .backend // "" | . != "WindowKeyboard"] | any' "$1" >/dev/null 2>&1
+}
+
 pads_ryujinx_keep() {
   local attr="$1" config snap bound
   config="$(pads_ryujinx_config "$attr")"
@@ -72,6 +166,11 @@ pads_ryujinx_keep() {
   # An unreadable config is not ours to fix — the emulator will replace it with
   # a default and say so, which is a better failure than us guessing at JSON.
   bound="$(jq -ce '.input_config // []' "$config" 2>/dev/null)" || return 0
+
+  # The untouched default is not bindings; see above. Treated as the empty set
+  # so that it is neither remembered nor allowed to stand where a snapshot has
+  # something real.
+  pads_ryujinx_is_default "$config" && bound="[]"
 
   if [[ "$bound" != "[]" ]]; then
     # This runs on every launch; an unchanged snapshot is not rewritten.

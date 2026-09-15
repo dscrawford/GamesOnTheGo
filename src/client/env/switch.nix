@@ -63,6 +63,23 @@ in
     # defaults.
     if [ ! -f "$gotg_ryujinx_config" ]; then
       env -u DISPLAY -u WAYLAND_DISPLAY ${gotgPkgs.ryubing}/bin/Ryujinx >/dev/null 2>&1 || true
+
+      # The config it just wrote binds a keyboard and no pad. The client keeps
+      # a copy of whatever pad this environment last had bound — and seeds that
+      # file from a sibling environment for one that has never run — but it
+      # cannot write it into a config that did not exist when it ran, which on
+      # a first launch is this one. So it goes in here, in the seconds between
+      # the file being born and the emulator reading it, and a new mod arrives
+      # with the controller already bound instead of on the launch after.
+      gotg_ryujinx_pads="$XDG_CONFIG_HOME/../input-config.json"
+      if [ -s "$gotg_ryujinx_pads" ] && [ -f "$gotg_ryujinx_config" ]; then
+        if ${pkgs.jq}/bin/jq --slurpfile saved "$gotg_ryujinx_pads" \
+          '.input_config = $saved[0]' "$gotg_ryujinx_config" >"$gotg_ryujinx_config.pads"; then
+          mv "$gotg_ryujinx_config.pads" "$gotg_ryujinx_config"
+        else
+          rm -f "$gotg_ryujinx_config.pads"
+        fi
+      fi
     fi
 
     # Pinned on every launch, not seeded once: these are what makes a launch go
