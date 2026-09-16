@@ -50,6 +50,32 @@ let
           { echo "${name}: p$player has $lines gamepad_number lines, not 1" >&2; exit 1; }
       done
     '';
+  # Every variant is the same port, compiled once. A directory per environment
+  # would be the same five-minute build four times over, and nothing about a
+  # launcher that still works would say so.
+  sharedPort = ''
+    echo "== one compiled port"
+    ports=""
+    for name in pc pc-2p pc-3p pc-4p; do
+      env="${envDir}/env-n64-usa_super_mario_64-$name"
+      found="$(grep -oE 'gotg/ports[^/]*/[a-z0-9]+-source' "$env/bin/gotg-play" | head -1)"
+      [ -n "$found" ] ||
+        { echo "$name: names no shared port directory" >&2; exit 1; }
+      ports="$ports$found\n"
+    done
+    [ "$(printf '%b' "$ports" | sort -u | grep -c .)" = 1 ] ||
+      { echo "the variants compile into different directories:" >&2
+        printf '%b' "$ports" >&2; exit 1; }
+  '';
+
+  # The four environments, in one directory, so the loop above can walk them by
+  # name rather than by four interpolations.
+  envDir = pkgs.linkFarm "sm64-coop-envs" (
+    map (name: {
+      name = "env-n64-usa_super_mario_64-${name}";
+      path = envs."env-n64-usa_super_mario_64-${name}";
+    }) [ "pc" "pc-2p" "pc-3p" "pc-4p" ]
+  );
 in
 pkgs.runCommand "check-sm64-coop"
   {
@@ -69,5 +95,6 @@ pkgs.runCommand "check-sm64-coop"
       3
       4
     ]}
+    ${sharedPort}
     touch $out
   ''

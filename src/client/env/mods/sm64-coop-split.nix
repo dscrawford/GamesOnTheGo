@@ -68,7 +68,9 @@ in
       split = gotgPkgs.splitscreen;
       # The port the plain `pc` launch would have used, named from the base so
       # that a co-op launch and a solo one can never end up on different builds
-      # of the game.
+      # of the game — and, because the base compiles into one directory keyed
+      # by its source rather than into each environment's state, so that four
+      # players is one compile rather than four.
       port = "${base.emulator}/bin/${base.bin}";
     in
     {
@@ -132,7 +134,7 @@ in
             } >>"$gotg_config"
 
             gotg_argv=(
-              ${lib.escapeShellArg port} "$state"
+              ${lib.escapeShellArg port}
               --savepath "$gotg_save"
               --playername "P$gotg_n"
               --windowed

@@ -72,19 +72,30 @@ let
     '';
   };
 
+  # Where the compiled port lives, and the one thing every variant agrees on.
+  #
+  # Not under any environment's state: the co-op variants are the same port as
+  # the plain launch, and a directory per variant is the same five-minute
+  # compile four times over for four identical trees. Keyed by the source it
+  # was built from, so bumping the version builds a new one rather than
+  # leaving the old binary in place under a name that says nothing.
+  #
+  # XDG_STATE_HOME rather than {state}: isolation moves XDG_CONFIG_HOME and
+  # XDG_DATA_HOME under the environment, and deliberately leaves this one
+  # alone. GOTG_PORTS_DIR is for a run that wants a tree of its own.
+  portDir = ''"''${GOTG_PORTS_DIR:-''${XDG_STATE_HOME:-$HOME/.local/state}/gotg/ports}/${builtins.baseNameOf src}"'';
+
   # The port finds dynos/lang/mods beside its executable, so it runs from the
   # tree the first launch compiled. Store libraries at run time: the binary
   # was linked outside stdenv, so nothing wrote an rpath into it.
   launcher = pkgs.writeShellApplication {
     name = "gotg-sm64coopdx";
     text = ''
-      port="''${1:?state directory required}/coopdx"
-      shift
       export LD_LIBRARY_PATH="${lib.makeLibraryPath buildDeps}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-      cd "$port"
-      # Anything after the state directory belongs to the port: a plain launch
-      # passes none, and a co-op one passes which save path, which controller
-      # and whether this copy is hosting.
+      cd ${portDir}
+      # Everything passed here belongs to the port: a plain launch passes
+      # nothing, and a co-op one passes which save path to use, which
+      # controller to read and whether this copy is hosting.
       exec ./sm64coopdx "$@"
     '';
   };
@@ -94,26 +105,42 @@ in
   bin = "gotg-sm64coopdx";
   configurable = false;
   isolate = true;
-  args = [ "{state}" ];
 
   path = [
     builder
     pkgs.unzip
+    pkgs.util-linux # flock, so two variants cannot compile the same tree at once
   ];
 
   preLaunch = ''
-    port="$state/coopdx"
-    if [ ! -x "$port/sm64coopdx" ]; then
+    gotg_port=${portDir}
+    mkdir -p "$(dirname "$gotg_port")"
+
+    # Held across the whole build: four players is four launches of this, at
+    # once, and two compiles into one directory is neither of them.
+    exec 8>"$gotg_port.lock"
+    flock 8
+    # A tree compiled before the port was shared, under this environment's own
+    # state. Moved rather than rebuilt: it is the same 124MB of the same
+    # source, and the alternative is five minutes and two copies of it.
+    if [ ! -x "$gotg_port/sm64coopdx" ] && [ -x "$state/coopdx/sm64coopdx" ]; then
+      if mv "$state/coopdx" "$gotg_port" 2>/dev/null; then
+        echo "adopted the port this environment had compiled for itself" >&2
+      fi
+    fi
+
+    if [ ! -x "$gotg_port/sm64coopdx" ]; then
       echo "first run: compiling sm64coopdx against this ROM — a few minutes, once" >&2
-      chmod -R u+w "$port" 2>/dev/null || true
-      rm -rf "$port" "$state/.build"
+      chmod -R u+w "$gotg_port" 2>/dev/null || true
+      rm -rf "$gotg_port" "$state/.build"
       mkdir -p "$state/.build"
       unzip -o "$install" -d "$state/.build" >/dev/null
       gotg_rom="$(find "$state/.build" -name '*.z64' | head -1)"
       [ -n "$gotg_rom" ] || { echo "no .z64 inside $install" >&2; exit 1; }
-      gotg-build-sm64coopdx "$gotg_rom" "$port"
+      gotg-build-sm64coopdx "$gotg_rom" "$gotg_port"
       rm -rf "$state/.build"
     fi
+    exec 8>&-
   '';
 
   # coopdx keeps saves and its settings under its data dir; the compiled port
