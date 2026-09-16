@@ -63,13 +63,16 @@ def draw_badge(screen, tile) -> None:
     scales with the tile and reads over art of any colour."""
     r = max(10, tile.width // 14)
     cx, cy = tile.x + r + 6, tile.y + r + 6
-    pygame.draw.circle(screen, BACKGROUND, (cx, cy), r + 2)
-    pygame.draw.circle(screen, TILE_SELECTED, (cx, cy), r)
+    pygame.draw.aacircle(screen, BACKGROUND, (cx, cy), r + 2)
+    pygame.draw.aacircle(screen, TILE_SELECTED, (cx, cy), r)
     shaft = r // 2
     head = r // 2
     stroke = max(2, r // 5)
     pygame.draw.line(screen, TEXT, (cx, cy - shaft), (cx, cy + shaft // 2), stroke)
+    # The arrow head: filled, then an aa outline over it, because pygame has
+    # no anti-aliased fill for a polygon and the diagonal edges are what show.
     pygame.draw.polygon(screen, TEXT, [(cx - head, cy), (cx + head, cy), (cx, cy + head)])
+    pygame.draw.aalines(screen, TEXT, True, [(cx - head, cy), (cx + head, cy), (cx, cy + head)])
     pygame.draw.line(screen, TEXT, (cx - head, cy + head + 2), (cx + head, cy + head + 2), stroke)
 
 

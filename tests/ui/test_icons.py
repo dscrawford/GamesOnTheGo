@@ -72,3 +72,11 @@ def test_an_icon_of_its_own_wins():
     path = icon_path("Steam Controller")
     assert path is not None
     assert path.parent.name == "icons"
+
+
+def test_a_keyboard_is_a_keyboard():
+    from gotg_ui.icons import icon_name
+
+    assert icon_name("AT Translated Set 2 keyboard") == "keyboard"
+    assert icon_name("Logitech USB Keyboard and Mouse") == "keyboard-mouse"
+    assert icon_name("Razer Mouse") == "mouse"
