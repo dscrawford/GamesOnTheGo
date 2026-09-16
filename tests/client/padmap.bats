@@ -115,13 +115,31 @@ teardown() { stop_saves_service; }
   grep -q -- "--title Zelda" "$SEAT_LOG"
 }
 
-@test "no controller check installed still launches the game" {
+@test "no controller check installed still launches the game, and says so" {
   # It ships with the picker, which is a separate package: the client depends
-  # on it the way it depends on padmap, which is to say not at all.
+  # on it the way it depends on padmap, which is to say not at all. Out loud,
+  # though -- a check that is quietly not there looks exactly like a check
+  # that ran and was happy.
   rm -f "$FAKE_BIN/gotg-seat"
-  run padmap_seat_gate n64 "Zelda"
+  unset GOTG_SEAT
+  run --separate-stderr padmap_seat_gate n64 "Zelda"
   [ "$status" -eq 0 ]
   [ ! -f "$SEAT_LOG" ]
+  [[ "$stderr" == *"no gotg-seat here"* ]]
+}
+
+@test "the check is found beside the picker when it is not on PATH" {
+  # Nothing puts the picker's directory on PATH for a command nobody types,
+  # so "on PATH" alone would miss it on the machines it ships to.
+  local elsewhere="$TEST_TMP/profile/bin"
+  mkdir -p "$elsewhere"
+  mv "$FAKE_BIN/gotg-seat" "$elsewhere/gotg-seat"
+  printf '#!%s\nexit 0\n' "$(command -v bash)" >"$elsewhere/gotg-ui"
+  chmod +x "$elsewhere/gotg-ui"
+  unset GOTG_SEAT
+  PATH="$elsewhere:$PATH" run padmap_seat_gate n64 "Zelda"
+  [ "$status" -eq 0 ]
+  grep -q -- "--platform n64" "$SEAT_LOG"
 }
 
 @test "a controller check that fails does not stop the game" {

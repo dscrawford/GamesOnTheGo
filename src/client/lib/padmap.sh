@@ -37,9 +37,27 @@ padmap_ensure() {
   export PADMAP_SKIP_DAEMON_CHECK=1
 }
 
-# The name of the launch-time controller check. Overridable for the same reason
-# every other tool here is: a test needs a stand-in it can watch being called.
-padmap_seat_bin() { printf '%s' "${GOTG_SEAT:-gotg-seat}"; }
+# Where the launch-time controller check is, or nothing.
+#
+# On PATH first. Failing that, beside `gotg-ui`: they are built and installed
+# as one package, so a machine with the picker has the check even when only the
+# picker's directory made it onto PATH -- which is the ordinary case, because
+# nothing puts a second entry there for a command nobody types.
+padmap_seat_bin() {
+  local named="${GOTG_SEAT:-}" beside
+  if [[ -n "$named" ]]; then
+    printf '%s' "$named"
+    return 0
+  fi
+  if command -v gotg-seat >/dev/null 2>&1; then
+    printf 'gotg-seat'
+    return 0
+  fi
+  beside="$(command -v gotg-ui 2>/dev/null)" || return 1
+  beside="$(dirname "$(readlink -f "$beside")")/gotg-seat"
+  [[ -x "$beside" ]] || return 1
+  printf '%s' "$beside"
+}
 
 # Ask about controllers before the game takes the screen.
 #
@@ -58,8 +76,13 @@ padmap_seat_bin() { printf '%s' "${GOTG_SEAT:-gotg-seat}"; }
 padmap_seat_gate() {
   local platform="$1" title="${2:-}" seat
   [[ "${GOTG_SEAT_GATE:-1}" != "0" ]] || return 0
-  seat="$(padmap_seat_bin)"
-  command -v "$seat" >/dev/null 2>&1 || return 0
+  if ! seat="$(padmap_seat_bin)" || ! command -v "$seat" >/dev/null 2>&1; then
+    # Said out loud. A check that is quietly not there is indistinguishable
+    # from a check that ran and was happy, and the difference is a game
+    # starting with nothing to play it with.
+    warn "no gotg-seat here; starting without checking for a controller"
+    return 0
+  fi
   padmap_ensure
   "$seat" --platform "$platform" --title "$title" || true
 }
