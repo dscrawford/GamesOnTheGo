@@ -32,7 +32,6 @@ from .padstrip import (
     colour_for,
     name_for,
     seats,
-    status_text,
 )
 
 BACKGROUND = (18, 18, 20)
@@ -263,6 +262,69 @@ def draw_strip(screen, font_at, players: list[dict], slots: int, status: str) ->
         screen.blit(label, (x + PAD_RADIUS + 6, middle - label.get_height() // 2))
         x += PAD_RADIUS * 2 + 6 + label.get_width() + GAP * 2
 
-    word = tiny.render(status_text(status), True, LABEL_DIM)
+    word = tiny.render(status, True, LABEL_DIM)
     screen.blit(word, (width - word.get_width() - GAP, middle - word.get_height() // 2))
     return HEIGHT
+
+
+def draw_assign(screen, font_at, view, icon_surface=None) -> None:
+    """The assignment screen: what to hold, what has been taken, what is left.
+
+    Deliberately large and plain. It is read from a sofa by somebody holding a
+    controller in both hands, and every line on it is an instruction.
+    """
+    width, height = screen.get_size()
+    screen.fill(BACKGROUND)
+
+    title = font_at(46).render("Controllers", True, TEXT)
+    screen.blit(title, ((width - title.get_width()) // 2, int(height * 0.06)))
+
+    prompt = font_at(30).render(view.prompt, True, TEXT)
+    screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.20)))
+
+    # The hold in flight. padmap reports it as a fraction, and a bar is the
+    # only part of this screen that answers "is it registering my button?"
+    if view.progress > 0:
+        bar_w = int(width * 0.4)
+        bar_x = (width - bar_w) // 2
+        bar_y = int(height * 0.30)
+        pygame.draw.rect(screen, LEADER, pygame.Rect(bar_x, bar_y, bar_w, 10), border_radius=5)
+        pygame.draw.rect(
+            screen,
+            LEADER_LIT,
+            pygame.Rect(bar_x, bar_y, int(bar_w * min(1.0, view.progress)), 10),
+            border_radius=5,
+        )
+
+    # The seats, across the middle, in the same colours the strip uses.
+    from .padstrip import EMPTY, EMPTY_TEXT, colour_for
+
+    slot_w = min(200, width // max(1, view.slots))
+    total = slot_w * view.slots
+    left = (width - total) // 2
+    middle = int(height * 0.52)
+    taken = {seat.player: seat for seat in view.seats}
+    for index in range(view.slots):
+        player = index + 1
+        seat = taken.get(player)
+        centre = (left + index * slot_w + slot_w // 2, middle)
+        colour = colour_for(player) if seat else EMPTY
+        pygame.draw.circle(screen, colour, centre, 34)
+        if seat is None:
+            pygame.draw.circle(screen, EMPTY_TEXT, centre, 34, 3)
+        number = font_at(38).render(str(player), True, (20, 20, 24) if seat else EMPTY_TEXT)
+        screen.blit(number, number.get_rect(center=centre))
+
+        label = font_at(20).render(
+            (seat.name if seat else "waiting")[:22], True, TEXT if seat else TEXT_DIM
+        )
+        screen.blit(label, label.get_rect(center=(centre[0], middle + 56)))
+
+    if view.message:
+        note = font_at(22).render(view.message, True, (232, 140, 140))
+        screen.blit(note, ((width - note.get_width()) // 2, int(height * 0.72)))
+
+    keys = "Enter keep   R start again   Esc cancel" if view.state == "assigning" \
+        else "A or Enter assign   Esc back"
+    footer = font_at(20).render(keys, True, TEXT_DIM)
+    screen.blit(footer, ((width - footer.get_width()) // 2, int(height * 0.86)))

@@ -17,9 +17,11 @@ from .browser import Browser
 from .catalog import Game, Library
 from .controllers import assets_dir
 from .controllers import draw as draw_controllers
-from .controllers import draw_strip
+from .controllers import draw_assign, draw_strip
+from .assign import Session
 from .padmap import Padmap, ensure_daemon
 from .padstrip import HEIGHT as STRIP_HEIGHT
+from .padstrip import status_text, strip_status
 from .fetch import Loader
 from .grid import Grid
 from .installed import installed_games
@@ -327,6 +329,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # A failure is a sentence in the strip, not a reason to refuse to draw.
     padmap_trouble = ensure_daemon()
     pads.connect()
+    # The assignment screen. `open` is what decides whether it is on screen,
+    # and padmap closes it by accepting rather than this program deciding.
+    seating = Session()
     controller_art: dict = {}
     # The storage screen, and the path being typed to add to it.
     storage: Storage | None = None
@@ -447,9 +452,22 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 # Same for the controller diagram: it is a whole screen, so
                 # the only input it takes is the way back.
                 if controllers is not None:
-                    if (event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_b, pygame.K_c)) or (
-                        event.type == pygame.JOYBUTTONDOWN and event.button == 1
-                    ):
+                    if event.type == pygame.KEYDOWN:
+                        if event.key in (pygame.K_ESCAPE, pygame.K_b, pygame.K_c):
+                            if seating.open:
+                                pads.send(seating.cancel())
+                            else:
+                                controllers = None
+                        elif event.key in (pygame.K_RETURN, pygame.K_a):
+                            # One key, two meanings, and the state says which:
+                            # nothing started yet means start, and a session in
+                            # flight means keep what has been claimed.
+                            pads.send(seating.accept() if seating.open else seating.begin())
+                        elif event.key == pygame.K_r and seating.open:
+                            pads.send(seating.reset())
+                    elif event.type == pygame.JOYBUTTONDOWN and event.button == 1:
+                        # padmap grabs the pads for the length of a session, so
+                        # this can only arrive when none is running.
                         controllers = None
                     continue
 
@@ -647,8 +665,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             # picker is open should be picked up without restarting it.
             if not pads.connected:
                 pads.connect()
-            for _event in pads.poll():
-                pass
+            for padmap_event in pads.poll():
+                seating.handle(padmap_event)
 
             # The full-screen views draw into the band below the strip rather
             # than under it: each starts its heading a sixteenth of the way
@@ -663,7 +681,10 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             elif storage is not None:
                 draw_storage(below, font_at, storage, storage_typing)
             elif controllers is not None:
-                draw_controllers(below, assets_dir(), controllers, font_at, controller_art)
+                if seating.open or seating.view.finished:
+                    draw_assign(below, font_at, seating.view)
+                else:
+                    draw_controllers(below, assets_dir(), controllers, font_at, controller_art)
             else:
                 # Whatever the workers finished since the last frame stops being a
                 # placeholder now. Only the page on screen is ever asked for.
@@ -683,7 +704,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 font_at,
                 pads.players,
                 pads.slots,
-                pads.status_word if pads.connected else (padmap_trouble or pads.status_word),
+                strip_status(pads.status_word, len(pads.players))
+                if pads.connected
+                else (padmap_trouble or status_text(pads.status_word)),
             )
             pygame.display.flip()
             # The loader only mirrors streamed text; 30fps halves the redundant

@@ -1,0 +1,182 @@
+"""Taking a seat: hold a button on each controller, in the order you want.
+
+Four identical adapter ports report the same name, phys, uniq, vendor, product
+and version, and differ only by an ordinal the kernel hands out in plug order.
+No file can pin player one to hardware that is genuinely indistinguishable, so
+padmap asks the person holding them — and this is the screen that asks.
+
+The whole flow is driven by what comes back from the daemon, not by the pad.
+padmap holds EVIOCGRAB for the length of a session, so while this screen is up
+no controller input reaches this program at all: a button held here arrives as
+a `claim` event and never as a pygame one. That is also why the way out is the
+keyboard, or the one gamepad button padmap has not grabbed — there isn't one,
+so it is the keyboard.
+
+Model only. What it looks like is drawing's business; what is tested is what a
+sequence of events leaves on screen.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
+
+
+@dataclass(frozen=True)
+class Seat:
+    """One player, as far as the assignment knows."""
+
+    player: int
+    name: str = ""
+    icon: str = ""
+    configured: bool = True
+
+
+@dataclass(frozen=True)
+class Assignment:
+    """What the screen shows, rebuilt from each event rather than mutated.
+
+    Immutable so a frame that draws while an event is being applied cannot see
+    half of it — the picker draws from whatever the last complete state was.
+    """
+
+    state: str = "idle"
+    slots: int = 4
+    pads: int = 0
+    seats: tuple[Seat, ...] = ()
+    progress: float = 0.0
+    confirm: float = 0.0
+    message: str = ""
+    finished: bool = False
+
+    @property
+    def seated(self) -> int:
+        return len(self.seats)
+
+    @property
+    def waiting_for(self) -> int | None:
+        """The seat a held button would claim next, or None when full."""
+        taken = {seat.player for seat in self.seats}
+        for player in range(1, self.slots + 1):
+            if player not in taken:
+                return player
+        return None
+
+    @property
+    def prompt(self) -> str:
+        """What to tell the person in front of the screen, right now."""
+        if self.finished:
+            return "controllers assigned"
+        if self.state != "assigning":
+            return "press A, or Enter, to assign controllers"
+        nxt = self.waiting_for
+        if nxt is None:
+            return "every seat is taken — press Enter to keep it"
+        if self.pads == 0:
+            return "no controllers found — plug one in"
+        return f"hold a button on the controller for player {nxt}"
+
+
+def apply(assignment: Assignment, event: dict) -> Assignment:
+    """One event, folded in. Anything unknown leaves it exactly as it was.
+
+    A front-end that rejected events it did not know would break every time
+    the daemon grew one, and the daemon is the authority here -- so the rule
+    is to render what is understood and ignore the rest.
+    """
+    kind = event.get("event")
+
+    if kind == "state":
+        state = event.get("state", assignment.state)
+        slots = event.get("slots")
+        seats = tuple(
+            Seat(
+                player=p["player"],
+                name=str(p.get("name") or ""),
+                icon=str(p.get("icon") or ""),
+            )
+            for p in (event.get("players") or [])
+            if isinstance(p, dict) and isinstance(p.get("player"), int)
+        )
+        return replace(
+            assignment,
+            state=state if isinstance(state, str) else assignment.state,
+            slots=slots if isinstance(slots, int) and slots > 0 else assignment.slots,
+            seats=tuple(sorted(seats, key=lambda s: s.player)),
+            # A session that ends returns to idle or ready with the claims in
+            # `players`; the hold in flight is not part of that.
+            progress=0.0 if state != "assigning" else assignment.progress,
+        )
+
+    if kind == "pads":
+        count = event.get("count")
+        return replace(assignment, pads=count if isinstance(count, int) else assignment.pads)
+
+    if kind == "progress":
+        frac = event.get("frac")
+        return replace(assignment, progress=float(frac) if isinstance(frac, (int, float)) else 0.0)
+
+    if kind == "claim":
+        player = event.get("player")
+        if not isinstance(player, int):
+            return assignment
+        seat = Seat(
+            player=player,
+            name=str(event.get("name") or ""),
+            icon=str(event.get("icon") or ""),
+            configured=bool(event.get("configured", True)),
+        )
+        others = tuple(s for s in assignment.seats if s.player != player)
+        return replace(
+            assignment,
+            seats=tuple(sorted((*others, seat), key=lambda s: s.player)),
+            progress=0.0,
+            message="",
+        )
+
+    if kind == "confirm":
+        frac = event.get("frac")
+        return replace(assignment, confirm=float(frac) if isinstance(frac, (int, float)) else 0.0)
+
+    if kind == "accepted":
+        return replace(assignment, finished=True, progress=0.0, confirm=0.0, message="")
+
+    if kind == "error":
+        return replace(assignment, message=str(event.get("message") or "padmap said no"))
+
+    return assignment
+
+
+@dataclass
+class Session:
+    """The screen's side of an assignment: what to send, and what to show.
+
+    Holds the commands as well as the state so that the picker's event loop
+    stays a loop -- it hands over a key press and gets back whatever should be
+    sent, rather than knowing padmap's vocabulary itself.
+    """
+
+    slots: int = 4
+    view: Assignment = field(default_factory=Assignment)
+    open: bool = False
+
+    def begin(self) -> dict:
+        self.open = True
+        self.view = Assignment(slots=self.slots, state="assigning")
+        return {"cmd": "begin", "players": self.slots}
+
+    def accept(self) -> dict:
+        return {"cmd": "accept"}
+
+    def cancel(self) -> dict:
+        self.open = False
+        self.view = Assignment(slots=self.slots)
+        return {"cmd": "cancel"}
+
+    def reset(self) -> dict:
+        self.view = replace(self.view, seats=(), progress=0.0, finished=False)
+        return {"cmd": "reset"}
+
+    def handle(self, event: dict) -> None:
+        self.view = apply(self.view, event)
+        if self.view.finished:
+            self.open = False
