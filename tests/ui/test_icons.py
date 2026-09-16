@@ -50,7 +50,7 @@ def test_every_rule_resolves_to_a_file_that_exists():
     # A rule naming artwork nobody vendored draws the generic pad instead, and
     # silently -- so the rules and the directory are checked against each other
     # here rather than by somebody noticing a wrong picture.
-    from gotg_ui.icons import RULES, icons_dir, controllers_dir
+    from gotg_ui.icons import RULES, controllers_dir, icons_dir
 
     for _needle, icon in RULES:
         found = (icons_dir() / f"{icon}.svg").exists() or (
