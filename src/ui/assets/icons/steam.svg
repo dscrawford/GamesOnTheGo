@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Steam Controller, drawn for GOTG. CC0: no rights reserved.
+     Flat and unbranded on purpose, to sit beside the ES-DE pads: the shape is
+     the recognisable part, and a logo would be a trademark this cannot grant. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <g id="layer1">
+    <!-- body: a wide shell with two grips falling away from the centre -->
+    <path id="shell" fill="#2f3136" stroke="#1b1c20" stroke-width="2"
+          d="M 46 78 C 78 64 178 64 210 78 C 224 84 232 96 232 112
+             C 232 140 222 168 206 186 C 196 197 182 198 174 188
+             C 162 173 148 166 128 166 C 108 166 94 173 82 188
+             C 74 198 60 197 50 186 C 34 168 24 140 24 112
+             C 24 96 32 84 46 78 Z" />
+    <!-- the two circular trackpads, which are what this controller is -->
+    <circle id="pad-left" cx="76" cy="108" r="27" fill="#3d4047" stroke="#22242a" stroke-width="2" />
+    <circle id="pad-left-inner" cx="76" cy="108" r="17" fill="#34373d" />
+    <circle id="pad-right" cx="180" cy="108" r="27" fill="#3d4047" stroke="#22242a" stroke-width="2" />
+    <circle id="pad-right-inner" cx="180" cy="108" r="17" fill="#34373d" />
+    <!-- analog stick, below the left pad -->
+    <circle id="stick" cx="92" cy="152" r="13" fill="#4a4d55" stroke="#22242a" stroke-width="2" />
+    <circle id="stick-top" cx="92" cy="152" r="7" fill="#3a3d44" />
+    <!-- face buttons, below the right pad -->
+    <circle id="button-y" cx="164" cy="141" r="7" fill="#d8c341" />
+    <circle id="button-x" cx="151" cy="152" r="7" fill="#4a8fd8" />
+    <circle id="button-b" cx="177" cy="152" r="7" fill="#d05050" />
+    <circle id="button-a" cx="164" cy="163" r="7" fill="#5fae5f" />
+    <!-- centre cluster: back, guide, start -->
+    <rect id="back" x="112" y="104" width="10" height="6" rx="3" fill="#4a4d55" />
+    <circle id="guide" cx="128" cy="107" r="6" fill="#4a4d55" />
+    <rect id="start" x="134" y="104" width="10" height="6" rx="3" fill="#4a4d55" />
+    <!-- bumpers -->
+    <path id="bumper-left" fill="#3d4047" stroke="#22242a" stroke-width="2"
+          d="M 52 74 C 64 66 88 62 104 62 L 104 70 C 88 70 66 74 56 80 Z" />
+    <path id="bumper-right" fill="#3d4047" stroke="#22242a" stroke-width="2"
+          d="M 204 74 C 192 66 168 62 152 62 L 152 70 C 168 70 190 74 200 80 Z" />
+  </g>
+</svg>
