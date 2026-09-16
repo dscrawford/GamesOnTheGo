@@ -13,20 +13,19 @@ from __future__ import annotations
 import pygame
 
 from .art import ArtStore
+from .assign import Session
 from .browser import Browser
 from .catalog import Game, Library
-from .controllers import assets_dir
+from .controllers import assets_dir, draw_assign, draw_strip
 from .controllers import draw as draw_controllers
-from .controllers import draw_assign, draw_strip
-from .assign import Session
-from .padmap import Padmap, ensure_daemon
-from .padstrip import HEIGHT as STRIP_HEIGHT
-from .padstrip import status_text, strip_status
 from .fetch import Loader
 from .grid import Grid
 from .installed import installed_games
 from .layout import grid, tile_at
 from .menu import Menu
+from .padmap import Padmap, ensure_daemon
+from .padstrip import HEIGHT as STRIP_HEIGHT
+from .padstrip import status_text, strip_status
 from .prepare import Preparer, is_ready
 from .storage import Storage, human
 from .variants import variants_for
@@ -278,9 +277,25 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     screen = pygame.display.set_mode(WINDOW)
     clock = pygame.time.Clock()
     pygame.joystick.init()
-    pads = [pygame.joystick.Joystick(i) for i in range(pygame.joystick.get_count())]
-    for pad in pads:
-        pad.init()
+    # Held, by instance id, for as long as the picker runs. A Joystick that
+    # goes out of scope is closed by SDL, and a closed one stops producing
+    # events -- so the list is not a formality, it is the input.
+    sticks: dict[int, pygame.joystick.Joystick] = {}
+
+    def open_stick(index: int) -> None:
+        """Open a joystick SDL has just found, or shrug.
+
+        A device can go away between being announced and being opened, and a
+        picker that raised there would die of somebody unplugging a pad.
+        """
+        try:
+            stick = pygame.joystick.Joystick(index)
+        except pygame.error:
+            return
+        sticks[stick.get_instance_id()] = stick
+
+    for stick_index in range(pygame.joystick.get_count()):
+        open_stick(stick_index)
 
     fonts: dict[int, pygame.font.Font] = {}
 
@@ -394,6 +409,20 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     running = False
                     continue
 
+                # Before any screen, because every screen needs it. Assigning
+                # controllers *replaces* them: padmap grabs the physical pad,
+                # which then reports nothing, and publishes `padmap Player N`
+                # in its place. A picker holding only the handles it opened at
+                # startup goes dead at exactly the moment somebody finishes
+                # setting their controller up -- which is the worst possible
+                # moment, because it looks like padmap broke the machine.
+                if event.type == pygame.JOYDEVICEADDED:
+                    open_stick(event.device_index)
+                    continue
+                if event.type == pygame.JOYDEVICEREMOVED:
+                    sticks.pop(event.instance_id, None)
+                    continue
+
                 # On the loader, the only input is the way out. Everything else
                 # would be the grid moving invisibly behind the build.
                 if preparer is not None:
@@ -452,8 +481,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             storage_typing = ""
                     continue
 
-                # Same for the controller diagram: it is a whole screen, so
-                # the only input it takes is the way back.
+                # Same for the controller diagram, which is also where a
+                # controller is assigned -- so it takes A, B and Y from both
+                # the keyboard and a pad, and nothing else.
                 if controllers is not None:
                     if event.type == pygame.KEYDOWN:
                         if event.key in (pygame.K_ESCAPE, pygame.K_b, pygame.K_c):
@@ -468,10 +498,23 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             pads.send(seating.accept() if seating.open else seating.begin())
                         elif event.key == pygame.K_r and seating.open:
                             pads.send(seating.reset())
-                    elif event.type == pygame.JOYBUTTONDOWN and event.button == 1:
-                        # padmap grabs the pads for the length of a session, so
-                        # this can only arrive when none is running.
-                        controllers = None
+                    elif event.type == pygame.JOYBUTTONDOWN:
+                        # The same three things the keyboard does. Leaving them
+                        # off was the whole of "I hold A and nothing happens":
+                        # no session was ever begun, so there was nothing to
+                        # hold a button *at*. It looked intermittent because
+                        # padmap opens a session by itself when a controller is
+                        # plugged in -- so holding A worked, but only ever
+                        # straight after connecting a second pad.
+                        if event.button == 0:
+                            pads.send(seating.accept() if seating.open else seating.begin())
+                        elif event.button == 1:
+                            if seating.open:
+                                pads.send(seating.cancel())
+                            else:
+                                controllers = None
+                        elif event.button == 3 and seating.open:
+                            pads.send(seating.reset())
                     continue
 
                 # While the menu is open it owns the input: the grid must
