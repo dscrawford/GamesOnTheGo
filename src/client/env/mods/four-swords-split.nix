@@ -36,7 +36,11 @@
       # The frame is what gotg launches; Dolphin is what the frame launches.
       emulator = split;
       bin = "splitscreen-session";
-      args = [ "{state}/splitscreen/session.json" ];
+      args = [
+        "{state}/splitscreen/session.json"
+        "--workdir"
+        "{state}/splitscreen"
+      ];
 
       # The GBA's own BIOS, which Dolphin will not boot an emulated GBA
       # without. It lives in the *Game Boy Advance* directory on the server,
