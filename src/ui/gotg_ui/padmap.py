@@ -27,9 +27,11 @@ import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
+from . import config
+
 # How long to wait for the connect itself. A unix socket either answers at once
 # or is not there; this is only so a stale socket file cannot hang the frame.
-CONNECT_TIMEOUT = 0.25
+CONNECT_TIMEOUT = float(config.get("theme.timeouts.padmap_connect", 0.25))
 
 # Read in chunks this size. Events are tens of bytes; the sdl_mapping one is a
 # few hundred per pad.
@@ -38,7 +40,7 @@ CHUNK = 65536
 # Starting a daemon means spawning a process and waiting for its socket. Long
 # enough for a cold start, short enough that a picker opening on a television
 # is not staring at nothing.
-DAEMON_TIMEOUT = 10
+DAEMON_TIMEOUT = int(config.get("theme.timeouts.padmap_daemon", 10))
 
 
 def ensure_daemon() -> str | None:

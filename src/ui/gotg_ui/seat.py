@@ -18,6 +18,8 @@ import sys
 import time
 from dataclasses import replace
 
+from . import config
+
 # Before pygame is imported, because it prints its banner at import time. This
 # runs in front of every launch, and the one line it is entitled to in a game's
 # log is one that says something went wrong.
@@ -30,13 +32,13 @@ from .gate import MAPPING, SEATING, SKIPPED, Gate, apply, decide
 from .padmap import Padmap, ensure_daemon
 from .padstrip import EMPTY_RING, LABEL, LABEL_DIM, PANEL, colour_for
 
-WINDOW = (1280, 720)
-BACKGROUND = (18, 18, 22)
+WINDOW = tuple(config.get("theme.window", [1280, 800]))
+BACKGROUND = config.colour("theme.colours.background", (18, 18, 20))
 
 # How long to wait for the daemon to say anything at all before giving up and
 # launching. A socket that is there answers in milliseconds; this is the bound
 # on a socket that is there and silent.
-FIRST_STATE_TIMEOUT = 3.0
+FIRST_STATE_TIMEOUT = float(config.get("theme.timeouts.first_state", 3.0))
 
 
 def draw(screen, font_at, gate: Gate, title: str, diagram: Diagram | None = None) -> None:

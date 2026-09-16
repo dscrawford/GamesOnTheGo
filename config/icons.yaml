@@ -1,0 +1,51 @@
+# Which drawing stands for a controller, by what it calls itself.
+#
+# A pad reports whatever its maker wrote -- "Xbox 360 Controller" and
+# "Microsoft X-Box 360 pad" are one icon -- so these are substrings of the
+# lowercased name, and the *first* one that matches wins.
+#
+# Order is the whole of it. Steam's virtual pad reports as an Xbox pad wearing
+# a different hat, so "steam virtual" has to be tried before "steam"; "nes "
+# has a trailing space so it cannot swallow "genesis".
+
+fallback: generic
+
+rules:
+  - "steam virtual":      xbox
+  - "steam controller":   steam
+  - "steam deck":         steam
+  - "valve":              steam
+  - "gamecube":           gamecube
+  - "nintendo gamecube":  gamecube
+  - "wii u":              generic
+  - "wii remote":         wii
+  - "wiimote":            wii
+  - "joy-con":            switch
+  - "joycon":             switch
+  - "switch pro":         switch
+  - "nintendo switch":    switch
+  - "nintendo 64":        n64
+  - "n64":                n64
+  - "super nintendo":     snes
+  - "snes":               snes
+  - "famicom":            nes
+  - "nes ":               nes
+  - "mega drive":         megadrive
+  - "megadrive":          megadrive
+  - "genesis":            megadrive
+  - "game boy advance":   gba
+  - "gba":                gba
+  - "game boy":           gameboy
+  - "gameboy":            gameboy
+  - "dualshock":          playstation
+  - "dualsense":          playstation
+  - "playstation":        playstation
+  - "ps3":                playstation
+  - "ps4":                playstation
+  - "ps5":                playstation
+  - "keyboard and mouse": keyboard-mouse
+  - "keyboard":           keyboard
+  - "mouse":              mouse
+  - "xbox":               xbox
+  - "x-box":              xbox
+  - "x360":               xbox

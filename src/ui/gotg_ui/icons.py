@@ -15,49 +15,28 @@ from __future__ import annotations
 import os
 import pathlib
 
-# Substrings, most specific first, because a pad reports whatever its maker
-# wrote: "Xbox 360 Controller" and "Microsoft X-Box 360 pad" are one icon. The
-# order matters -- Steam's virtual pad is an Xbox pad wearing a different hat.
-RULES: list[tuple[str, str]] = [
-    ("steam virtual", "xbox"),
-    ("steam controller", "steam"),
-    ("steam deck", "steam"),
-    ("valve", "steam"),
-    ("gamecube", "gamecube"),
-    ("nintendo gamecube", "gamecube"),
-    ("wii u", "generic"),
-    ("wii remote", "wii"),
-    ("wiimote", "wii"),
-    ("joy-con", "switch"),
-    ("joycon", "switch"),
-    ("switch pro", "switch"),
-    ("nintendo switch", "switch"),
-    ("nintendo 64", "n64"),
-    ("n64", "n64"),
-    ("super nintendo", "snes"),
-    ("snes", "snes"),
-    ("famicom", "nes"),
-    ("nes ", "nes"),
-    ("mega drive", "megadrive"),
-    ("megadrive", "megadrive"),
-    ("genesis", "megadrive"),
-    ("game boy advance", "gba"),
-    ("gba", "gba"),
-    ("game boy", "gameboy"),
-    ("gameboy", "gameboy"),
-    ("dualshock", "playstation"),
-    ("dualsense", "playstation"),
-    ("playstation", "playstation"),
-    ("ps3", "playstation"),
-    ("ps4", "playstation"),
-    ("ps5", "playstation"),
-    ("keyboard and mouse", "keyboard-mouse"),
-    ("keyboard", "keyboard"),
-    ("mouse", "mouse"),
-    ("xbox", "xbox"),
-    ("x-box", "xbox"),
-    ("x360", "xbox"),
-]
+from . import config
+
+
+def _rules() -> list[tuple[str, str]]:
+    """The substring table, in the order it is written in the config.
+
+    A list of one-entry mappings rather than one mapping, because order is the
+    whole of it -- "steam virtual" has to be tried before "steam" -- and YAML
+    mappings are not something to rely on the ordering of.
+    """
+    out: list[tuple[str, str]] = []
+    for entry in config.get("icons.rules", []) or []:
+        if isinstance(entry, dict):
+            out.extend((str(k).lower(), str(v)) for k, v in entry.items())
+    return out
+
+
+def _fallback() -> str:
+    """The generic pad. An unknown controller is still a controller, and the
+    generic drawing says "a pad is here" -- which is the question asked."""
+    return str(config.get("icons.fallback", "generic"))
+
 
 FALLBACK = "generic"
 
@@ -70,10 +49,10 @@ def icon_name(pad_name: str | None) -> str:
     the question the strip answers.
     """
     lowered = (pad_name or "").lower()
-    for needle, icon in RULES:
+    for needle, icon in _rules():
         if needle in lowered:
             return icon
-    return FALLBACK
+    return _fallback()
 
 
 def icons_dir() -> pathlib.Path:
@@ -102,5 +81,5 @@ def icon_path(pad_name: str | None) -> pathlib.Path | None:
         candidate = directory / f"{name}.svg"
         if candidate.exists():
             return candidate
-    fallback = controllers_dir() / f"{FALLBACK}.svg"
+    fallback = controllers_dir() / f"{_fallback()}.svg"
     return fallback if fallback.exists() else None

@@ -17,11 +17,10 @@ the wrong button. `tests/ui/test_schemes.py` checks them against padmap's data.
 
 from __future__ import annotations
 
-import os
 import pathlib
 from dataclasses import dataclass, field
 
-import yaml
+from . import config
 
 FALLBACK = "generic"
 
@@ -52,33 +51,16 @@ class Scheme:
         return (control, mapped) if mapped else (control,)
 
 
-def config_dir() -> pathlib.Path:
-    """Where the controller files are.
-
-    The wrapper sets this. A checkout run in place falls back to the tree, so
-    `python -m gotg_ui` from src/ui finds them with nothing installed.
-    """
-    override = os.environ.get("GOTG_UI_CONFIG")
-    if override:
-        return pathlib.Path(override)
-    return pathlib.Path(__file__).resolve().parents[3] / "config" / "controllers"
-
-
-def _read(path: pathlib.Path) -> Scheme | None:
-    try:
-        raw = yaml.safe_load(path.read_text()) or {}
-    except (OSError, yaml.YAMLError):
-        # One unreadable file is one controller without a description, not a
-        # picker that will not start.
-        return None
+def _scheme(name: str, raw: object) -> Scheme | None:
+    """One controller, from what the config loader handed back."""
     if not isinstance(raw, dict):
         return None
     controls = raw.get("controls") or {}
     anchors = raw.get("anchors") or {}
     platforms = raw.get("platforms") or []
     return Scheme(
-        name=path.stem,
-        label=str(raw.get("label") or path.stem),
+        name=name,
+        label=str(raw.get("label") or name),
         layout=str(raw.get("layout") or FALLBACK),
         artwork=str(raw.get("artwork") or FALLBACK),
         players=int(raw.get("players") or 1),
@@ -93,20 +75,26 @@ _cache: dict[str, Scheme] | None = None
 
 
 def load(directory: pathlib.Path | None = None) -> dict[str, Scheme]:
-    """Every controller, by file name. Read once."""
+    """Every controller, by file name.
+
+    Through `config`, so `config/` is read once for the whole picker and there
+    is one answer to where it is. A directory can be named outright, which is
+    what a test does to read a set of files that are not the installed ones.
+    """
     global _cache
-    if directory is None and _cache is not None:
-        return _cache
-    where = directory if directory is not None else config_dir()
-    found: dict[str, Scheme] = {}
-    try:
-        files = sorted(where.glob("*.yaml"))
-    except OSError:
-        files = []
-    for path in files:
-        scheme = _read(path)
+    if directory is not None:
+        # The same reader, so a file too broken to parse costs its own
+        # controller here exactly as it would anywhere else.
+        raw = config.read(directory)
+    else:
+        if _cache is not None:
+            return _cache
+        raw = config.get("controllers", {}) or {}
+    found = {}
+    for name, entry in raw.items():
+        scheme = _scheme(name, entry)
         if scheme is not None:
-            found[scheme.name] = scheme
+            found[name] = scheme
     if directory is None:
         _cache = found
     return found
@@ -116,6 +104,7 @@ def forget() -> None:
     """Drop the cache. For tests, and for a config edit taking effect."""
     global _cache
     _cache = None
+    config.forget()
 
 
 def fallback() -> Scheme:
