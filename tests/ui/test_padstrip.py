@@ -15,20 +15,28 @@ def player(n: int, name: str = "", **extra) -> dict:
     return {"player": n, "name": name or f"padmap Player {n}", **extra}
 
 
-def test_four_seats_even_when_nobody_is_in_them():
-    # The empty ones are the useful part: a pad that did not come back after a
-    # replug is a seat that went grey, not a strip with one fewer thing on it.
-    assert seats([], 4) == [None, None, None, None]
+def test_nobody_connected_is_no_seats_at_all():
+    # Three red rings saying "still nobody" above the games is a permanent
+    # complaint about a machine working exactly as it should with one pad. The
+    # strip draws an X instead, once.
+    assert seats([], 4) == []
 
 
-def test_a_gap_stays_a_gap():
+def test_only_the_seats_somebody_is_in():
     got = seats([player(1), player(3)], 4)
-    assert [s["player"] if s else None for s in got] == [1, None, 3, None]
+    assert [n for n, _ in got] == [1, 3]
+
+
+def test_a_seat_keeps_its_own_number():
+    # Sliding 3 into the second place would tell somebody they are player two
+    # when every emulator on the machine thinks otherwise.
+    got = seats([player(3)], 4)
+    assert [n for n, _ in got] == [3]
 
 
 def test_more_players_than_seats_asked_for_still_all_show():
     got = seats([player(1), player(2), player(3)], 2)
-    assert len([s for s in got if s]) == 3
+    assert len(got) == 3
 
 
 def test_every_player_has_their_own_colour():
@@ -47,8 +55,8 @@ def test_a_fifth_player_wraps_rather_than_failing():
 
 
 def test_an_empty_seat_writes_nothing():
-    # The red ring already says it. "empty" beside it is the same fact twice,
-    # four times across the top of every screen.
+    # Nothing draws one any more, but the helper still answers for it rather
+    # than raising: the assignment screen asks about seats nobody is in.
     assert name_for(None) == ""
 
 
