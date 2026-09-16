@@ -190,7 +190,12 @@ def test_the_platforms_on_offer_come_from_the_catalog(tmp_path):
 def test_a_game_knows_its_region(tmp_path):
     cache = write_cache(
         tmp_path / "m.json",
-        [("usa.zelda", "n64", "Z"), ("eur.asterix", "gb", "A"), ("jpn.mother", "gba", "M"), ("world.tetris", "gb", "T")],
+        [
+            ("usa.zelda", "n64", "Z"),
+            ("eur.asterix", "gb", "A"),
+            ("jpn.mother", "gba", "M"),
+            ("world.tetris", "gb", "T"),
+        ],
     )
     assert [g.region for g in load(cache)] == ["usa", "eur", "jpn", "world"]
 

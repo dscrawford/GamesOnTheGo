@@ -58,7 +58,7 @@ class FakeDaemon:
                 buffer += chunk
                 if buffer.endswith(b"\n"):
                     break
-        except socket.timeout:
+        except TimeoutError:
             pass
         return [json.loads(line) for line in buffer.splitlines() if line.strip()]
 
