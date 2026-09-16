@@ -1,9 +1,13 @@
 """Who is holding a controller, across the top of the screen.
 
-Four seats, always drawn, because the empty ones are the useful part: a person
-whose pad did not come back after a replug is looking for the seat that went
-grey, and a strip that only showed what was connected would answer that
-question by having one fewer thing on it than they remember.
+Only the seats somebody is in. A seat nobody is in is not information on a
+screen that is mostly a game library: three red rings saying "still nobody"
+above the games is a permanent complaint about a machine that is working
+exactly as it should with one controller. When *nothing* is connected that is
+worth saying, and it is said once, as an X.
+
+The assignment screen is the other way round and deliberately: there, the free
+seats are the whole point, because filling them is what the screen is for.
 
 A colour per player rather than a number alone. The number is there, but the
 colour is what makes "am I player 2" answerable from the sofa, and it is the
@@ -47,20 +51,24 @@ def colour_for(player: int) -> tuple[int, int, int]:
     return PLAYER_COLOURS[(player - 1) % len(PLAYER_COLOURS)]
 
 
-def seats(players: list[dict], slots: int) -> list[dict | None]:
-    """One entry per seat, in order, `None` where nobody is sitting.
+def seats(players: list[dict], slots: int = 4) -> list[tuple[int, dict]]:
+    """The occupied seats, in player order, as (player number, pad).
 
-    Built from the seat number rather than from position in the list, so a
-    session holding players 1 and 3 draws a gap at 2 instead of sliding 3 left
-    into a seat it does not have.
+    The number is carried rather than implied by position: players 1 and 3
+    draw as 1 and 3, in their own colours, with nothing between them. Sliding 3
+    into the second place would tell somebody they are player two when every
+    emulator on the machine thinks otherwise.
+
+    `slots` is accepted and ignored. It is what padmap was asked for, which
+    stopped mattering when the empty seats stopped being drawn -- kept in the
+    signature so the caller does not have to know that.
     """
-    by_player = {
-        p["player"]: p
+    found = [
+        (p["player"], p)
         for p in players
         if isinstance(p, dict) and isinstance(p.get("player"), int)
-    }
-    highest = max([*by_player, slots], default=slots)
-    return [by_player.get(seat) for seat in range(1, max(slots, highest) + 1)]
+    ]
+    return sorted(found, key=lambda pair: pair[0])
 
 
 def name_for(seat: dict | None) -> str:

@@ -246,25 +246,37 @@ def draw_strip(screen, font_at, players: list[dict], slots: int, status: str) ->
 
     x = GAP + PAD_RADIUS
     middle = HEIGHT // 2
-    for index, seat in enumerate(seats(players, slots), start=1):
-        filled = seat is not None
-        colour = colour_for(index) if filled else EMPTY
+    occupied = seats(players, slots)
+
+    if not occupied:
+        # Nothing is connected, and that is worth saying once rather than as a
+        # row of empty rings. An X is the only thing on the strip that means
+        # "none", so it cannot be read as a seat.
+        reach = PAD_RADIUS - 4
+        for dx, dy in ((-1, -1), (-1, 1)):
+            pygame.draw.aaline(
+                screen,
+                EMPTY_RING,
+                (x + dx * reach, middle + dy * reach),
+                (x - dx * reach, middle - dy * reach),
+                2,
+            )
+        label = tiny.render("no controllers", True, EMPTY_TEXT)
+        screen.blit(label, (x + PAD_RADIUS + 6, middle - label.get_height() // 2))
+    for player, seat in occupied:
+        colour = colour_for(player)
         # aacircle, not circle: a hard-edged disc at this size is visibly
-        # stepped, and four of them across the top of every screen is the
+        # stepped, and a row of them across the top of every screen is the
         # first thing anybody notices about the strip.
         pygame.draw.aacircle(screen, colour, (x, middle), PAD_RADIUS)
-        if not filled:
-            pygame.draw.aacircle(screen, EMPTY_RING, (x, middle), PAD_RADIUS, 2)
 
-        number = small.render(
-            str(index), True, (20, 20, 24) if filled else EMPTY_TEXT
-        )
+        number = small.render(str(player), True, (20, 20, 24))
         screen.blit(number, number.get_rect(center=(x, middle)))
 
         written = name_for(seat)
         width_used = 0
         if written:
-            label = tiny.render(written, True, LABEL if filled else LABEL_DIM)
+            label = tiny.render(written, True, LABEL)
             screen.blit(label, (x + PAD_RADIUS + 6, middle - label.get_height() // 2))
             width_used = 6 + label.get_width()
         x += PAD_RADIUS * 2 + width_used + GAP * 2
