@@ -19,7 +19,6 @@ import pathlib
 import pygame
 
 from .bindings import bindings_for, console_for, players_for
-from .gate import artwork_for, controls_for, layout_for
 from .leaders import Anchor, place
 from .padstrip import (
     EMPTY,
@@ -35,6 +34,7 @@ from .padstrip import (
     name_for,
     seats,
 )
+from .schemes import for_ares, for_platform
 
 BACKGROUND = (18, 18, 20)
 TEXT = (232, 232, 236)
@@ -47,18 +47,6 @@ DOT = (150, 150, 162)
 # the generic pad, which is what a new platform gets until someone draws it.
 # See assets/controllers/README.md for where the artwork came from and how to
 # add another.
-TABLE = {
-    "SuperFamicom": "snes",
-    "Famicom": "nes",
-    "Nintendo64": "n64",
-    "GameBoy": "gameboy",
-    # The Color shares the Pocket's shape and its whole button set. A drawing
-    # of its own would differ only in the shell colour, which the diagram does
-    # not depend on.
-    "GameBoyColor": "gameboy",
-    "GameBoyAdvance": "gba",
-    "MegaDrive": "megadrive",
-}
 FALLBACK = "generic"
 
 # The shoulders sit near the top centre, where a midline split would send them
@@ -110,13 +98,14 @@ class Diagram:
         return pygame.transform.smoothscale(source, (width, height))
 
 
-def diagram_for(assets: pathlib.Path, console: str, cache: dict, name: str = "") -> Diagram | None:
-    """The drawing for one console, or None when the assets are unreadable.
+def diagram_for(assets: pathlib.Path, name: str, cache: dict) -> Diagram | None:
+    """One drawing by name, or None when the assets are unreadable.
 
-    `name` names the artwork outright, for a console the ares table has never
-    heard of -- the caller has already worked out which drawing it wants.
+    Named outright rather than worked out from a console: which drawing stands
+    for which controller is `config/controllers/`'s business, and the caller
+    has already read it.
     """
-    name = name or TABLE.get(console, FALLBACK)
+    name = name or FALLBACK
     if name not in cache:
         try:
             cache[name] = Diagram(assets, name)
@@ -125,7 +114,13 @@ def diagram_for(assets: pathlib.Path, console: str, cache: dict, name: str = "")
     return cache[name]
 
 
-def anchors_for(diagram: Diagram, bindings: dict[str, str], rect, bound: bool = True) -> list[Anchor]:
+def anchors_for(
+    diagram: Diagram,
+    bindings: dict[str, str],
+    rect,
+    bound: bool = True,
+    alias: dict[str, str] | None = None,
+) -> list[Anchor]:
     """Every bound input that the artwork has a place for.
 
     The intersection on purpose, and it fails in the safe direction both ways:
@@ -135,9 +130,15 @@ def anchors_for(diagram: Diagram, bindings: dict[str, str], rect, bound: bool = 
     consoles is exactly the case where both happen.
     """
     left, top, width, height = rect
+    alias = alias or {}
     out = []
     for name, description in bindings.items():
+        # The control's own name first, then whatever the config says marks it:
+        # the older drawings name their circles after the console's letters, so
+        # a SNES `a` is the circle called B.
         uv = diagram.anchors.get(name)
+        if uv is None and name in alias:
+            uv = diagram.anchors.get(alias[name])
         if uv is None:
             continue
         # With a binding, the label is the input and what drives it. Without
@@ -159,9 +160,11 @@ def draw(screen, assets: pathlib.Path, platform: str, font_at, cache: dict, high
     console = console_for(platform)
     if console is not None:
         bindings = bindings_for(console)
-        artwork = TABLE.get(console, FALLBACK)
+        known = for_ares(console)
+        artwork = known.artwork if known else FALLBACK
         seats = players_for(console)
         bound = True
+        alias = {}
     else:
         # No ares console. For most platforms that means the environment has
         # not been built yet and playing a game once fills it in -- but for
@@ -170,13 +173,16 @@ def draw(screen, assets: pathlib.Path, platform: str, font_at, cache: dict, high
         # a GameCube game to play it once and come back is an instruction that
         # cannot work, so padmap's control set is used instead: it is the same
         # one the launch wizard walks, which is where these get bound.
-        console = layout_for(platform)
-        bindings = dict(controls_for(console))
-        artwork = artwork_for(console)
-        # What padmap seats, not what the ares table says -- it has never heard
-        # of this console, so it would answer one for a pad that takes four.
-        seats = 4
+        scheme = for_platform(platform)
+        console = scheme.label or scheme.name
+        bindings = dict(scheme.controls)
+        artwork = scheme.artwork
+        # What the controller seats, from its own file. The ares table has
+        # never heard of this console and would answer one for a pad that
+        # takes four.
+        seats = scheme.players
         bound = False
+        alias = scheme.anchors
         if not bindings:
             # Not "play one and they appear here", which is only true for the
             # emulators that publish a console. Dolphin and Ryujinx never do,
@@ -190,7 +196,7 @@ def draw(screen, assets: pathlib.Path, platform: str, font_at, cache: dict, high
             )
             return
 
-    diagram = diagram_for(assets, console, cache, artwork)
+    diagram = diagram_for(assets, artwork, cache)
     if diagram is None or not bindings:
         _note(
             screen,
@@ -213,7 +219,7 @@ def draw(screen, assets: pathlib.Path, platform: str, font_at, cache: dict, high
     art = diagram.surface(pad_width)
     screen.blit(art, (int(rect[0]), int(rect[1])))
 
-    anchors = anchors_for(diagram, bindings, rect, bound=bound)
+    anchors = anchors_for(diagram, bindings, rect, bound=bound, alias=alias)
     label_height = label_font.get_linesize()
     for item in place(anchors, rect, label_height, PINNED):
         lit = highlight is not None and item.anchor.input == highlight

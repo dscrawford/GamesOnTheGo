@@ -18,9 +18,12 @@ pkgs.runCommand "check-python-tests" { nativeBuildInputs = [ venv ]; } ''
   # pygame on purpose, so it runs in this venv like anything else.
   # Its drawing does not, and is not tested here.
   cp -r ${../../src/ui} src/ui
+  # The controller descriptions the picker reads, and the tests check against
+  # the artwork beside them.
+  cp -r ${../../config} config
   cp ${../../src/client/lib/common.sh} src/client/lib/common.sh
   cp ${../../pyproject.toml} pyproject.toml
-  chmod -R u+w tests src
+  chmod -R u+w tests src config
   python -m pytest tests/service tests/indexer tests/ui -q
   touch $out
 ''

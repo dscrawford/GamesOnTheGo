@@ -1,0 +1,33 @@
+# GameCube.
+#
+# Dolphin's two platforms: a Wii game is played with a GameCube pad here,
+# because that is what Dolphin is configured for.
+
+label: GameCube
+
+# The padmap layout the capture walks; `controls` is its control set.
+layout: gamecube
+# assets/controllers/<artwork>.svg
+artwork: gamecube
+players: 4
+# The GOTG platforms played with this controller.
+platforms: [gamecube, wii]
+
+# padmap's control id -> what the button says.
+controls:
+  a: A (large centre)
+  b: B (small, lower left)
+  x: X (right)
+  y: Y (top)
+  start: Start
+  dpup: D-pad up
+  dpdown: D-pad down
+  dpleft: D-pad left
+  dpright: D-pad right
+  leftshoulder: L
+  rightshoulder: R
+  righttrigger: Z
+  rightstick_up: C-stick up
+  rightstick_down: C-stick down
+  rightstick_left: C-stick left
+  rightstick_right: C-stick right

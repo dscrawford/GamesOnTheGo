@@ -1,0 +1,43 @@
+# Genesis.
+#
+# The drawing is the three-button pad, so X, Y, Z and Mode have nowhere
+# to point at. A six-button drawing would give them one.
+
+label: Genesis
+
+# The padmap layout the capture walks; `controls` is its control set.
+layout: genesis
+# assets/controllers/<artwork>.svg
+artwork: megadrive
+players: 2
+# What ares calls this console, for the bindings ares writes itself.
+ares: [MegaDrive]
+# The GOTG platforms played with this controller.
+platforms: [genesis]
+
+# padmap's control id -> what the button says.
+controls:
+  x: A (bottom left)
+  a: B (bottom middle)
+  b: C (bottom right)
+  leftshoulder: X (top left)
+  y: Y (top middle)
+  rightshoulder: Z (top right)
+  dpup: D-pad up
+  dpdown: D-pad down
+  dpleft: D-pad left
+  dpright: D-pad right
+  start: Start
+  back: Mode
+
+# Where the drawing marks it, when the circle is not named after the
+# control. These drawings predate padmap and use the console's letters.
+anchors:
+  x: A
+  a: B
+  b: C
+  dpup: Up
+  dpdown: Down
+  dpleft: Left
+  dpright: Right
+  start: Start

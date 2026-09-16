@@ -26,7 +26,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame  # noqa: E402 - the line above only works ahead of the import
 
 from .controllers import Diagram, assets_dir
-from .gate import MAPPING, SEATING, SKIPPED, Gate, anchor_names, apply, artwork_for, decide
+from .gate import MAPPING, SEATING, SKIPPED, Gate, apply, decide
 from .padmap import Padmap, ensure_daemon
 from .padstrip import EMPTY_RING, LABEL, LABEL_DIM, PANEL, colour_for
 
@@ -72,7 +72,7 @@ def draw(screen, font_at, gate: Gate, title: str, diagram: Diagram | None = None
         pad_x = (width - pad.get_width()) // 2
         pad_y = int(height * 0.31) + (budget_h - pad.get_height()) // 2
         screen.blit(pad, (pad_x, pad_y))
-        for name in anchor_names(gate.control):
+        for name in gate.scheme.anchor_names(gate.control):
             uv = diagram.anchors.get(name)
             if uv is None:
                 continue
@@ -146,7 +146,7 @@ def run(platform: str, title: str) -> int:
     # Loaded once, and absence is survivable: a console with no artwork, or a
     # build with none, still gets the words.
     try:
-        diagram: Diagram | None = Diagram(assets_dir(), artwork_for(gate.layout))
+        diagram: Diagram | None = Diagram(assets_dir(), gate.scheme.artwork)
     except (OSError, ValueError, KeyError) as error:
         print(f"gotg-seat: no controller drawing: {error}", file=sys.stderr)
         diagram = None

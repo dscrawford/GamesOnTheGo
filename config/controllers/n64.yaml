@@ -1,0 +1,50 @@
+# Nintendo 64.
+#
+# Z is underneath the pad and the drawing is from the front, so it has
+# nowhere to point at. It is bound; it just cannot be shown.
+
+label: Nintendo 64
+
+# The padmap layout the capture walks; `controls` is its control set.
+layout: n64
+# assets/controllers/<artwork>.svg
+artwork: n64
+players: 4
+# What ares calls this console, for the bindings ares writes itself.
+ares: [Nintendo64]
+# The GOTG platforms played with this controller.
+platforms: [n64]
+
+# padmap's control id -> what the button says.
+controls:
+  a: A
+  b: B
+  start: Start
+  dpup: D-pad up
+  dpdown: D-pad down
+  dpleft: D-pad left
+  dpright: D-pad right
+  leftshoulder: L (top left)
+  rightshoulder: R (top right)
+  lefttrigger: Z (underneath)
+  rightstick_up: C-up
+  rightstick_down: C-down
+  rightstick_left: C-left
+  rightstick_right: C-right
+
+# Where the drawing marks it, when the circle is not named after the
+# control. These drawings predate padmap and use the console's letters.
+anchors:
+  a: A
+  b: B
+  start: Start
+  dpup: Up
+  dpdown: Down
+  dpleft: Left
+  dpright: Right
+  leftshoulder: L
+  rightshoulder: R
+  rightstick_up: C-Up
+  rightstick_down: C-Down
+  rightstick_left: C-Left
+  rightstick_right: C-Right
