@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from gotg_ui.browser import ALL, Browser
+from gotg_ui.browser import ALL, INSTALLED, MISSING, Browser
 from gotg_ui.catalog import Game, Library
 
 
@@ -244,9 +244,17 @@ def test_it_composes_with_the_platform_filter():
 
 def test_the_status_line_says_so():
     b, _ = _installed_browser()
-    assert "installed only" not in b.status
+    assert "installed" not in b.status
     b.toggle_installed()
-    assert "installed only" in b.status
+    assert "installed" in b.status
+
+
+def test_the_status_line_names_which_way_round_it_is():
+    # "installed" and "not installed" both narrow, and a line that said only
+    # that something was narrowed would not say which half was on screen.
+    b, _ = _installed_browser()
+    b.set_presence(MISSING)
+    assert "not installed" in b.status
 
 
 def test_an_uninstall_updates_the_view_when_the_filter_is_on():
@@ -264,3 +272,58 @@ def test_an_uninstall_leaves_the_cursor_alone_when_the_filter_is_off():
     b.set_installed(set())
     assert b.grid.page_index == 2
     assert b.installed == set()
+
+
+# --- asking for what is *not* here -------------------------------------------
+
+
+def test_not_installed_is_the_other_half():
+    """The question a yes/no toggle could not ask.
+
+    Browsing for something new is asking which games are *not* here, and the
+    only answers available were "everything" and "what I already have".
+    """
+    b, here = _installed_browser()
+    everything = len(b.visible)
+    b.set_presence(INSTALLED)
+    mine = len(b.visible)
+    b.set_presence(MISSING)
+    rest = len(b.visible)
+    assert mine + rest == everything
+    assert rest > 0
+    assert not any(g.key in here for g in b.visible.games)
+
+
+def test_the_three_answers_are_exclusive():
+    b, _ = _installed_browser()
+    b.set_presence(MISSING)
+    assert not b.installed_only
+    b.set_presence(INSTALLED)
+    assert b.installed_only
+    b.set_presence(ALL)
+    assert not b.installed_only
+
+
+def test_the_toggle_still_means_on_and_off():
+    # It is what the grid's own key and the quick button use, and pressing it
+    # from "not installed" should land somewhere obvious rather than cycling.
+    b, _ = _installed_browser()
+    b.set_presence(MISSING)
+    b.toggle_installed()
+    assert b.presence == INSTALLED
+    b.toggle_installed()
+    assert b.presence == ALL
+
+
+def test_a_presence_nobody_has_heard_of_is_ignored():
+    b, _ = _installed_browser()
+    b.set_presence("perhaps")
+    assert b.presence == ALL
+
+
+def test_an_uninstall_updates_the_view_when_asking_for_what_is_missing():
+    b, here = _installed_browser()
+    b.set_presence(MISSING)
+    before = len(b.visible)
+    b.set_installed(set())
+    assert len(b.visible) > before
