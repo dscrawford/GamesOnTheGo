@@ -80,7 +80,7 @@ cmd_play() {
   log "launching $(manifest_field "$PLAY_GAME" title) with $PLAY_ATTR"
   # "$$" survives the exec below, so what the watcher holds is the emulator.
   killswitch_start "$$"
-  exec "$(env_bin "$PLAY_ATTR")" "$PLAY_TARGET" "$@"
+  padmap_exec "$(env_bin "$PLAY_ATTR")" "$PLAY_TARGET" "$@"
 }
 
 # Everything a launch needs short of running the emulator, shared by play and

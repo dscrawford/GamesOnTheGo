@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
+import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -32,6 +34,43 @@ CONNECT_TIMEOUT = 0.25
 # Read in chunks this size. Events are tens of bytes; the sdl_mapping one is a
 # few hundred per pad.
 CHUNK = 65536
+
+# Starting a daemon means spawning a process and waiting for its socket. Long
+# enough for a cold start, short enough that a picker opening on a television
+# is not staring at nothing.
+DAEMON_TIMEOUT = 10
+
+
+def ensure_daemon() -> str | None:
+    """Start padmap's daemon, or restart one running older code.
+
+    Returns None when there is now a current daemon, and a sentence when there
+    is not -- because that is a thing to say on screen, not a thing to stop
+    for. A machine where padmap cannot reach uinput still plays games with
+    whatever SDL finds by itself, which is what it did before padmap existed.
+
+    PADMAP_SKIP_DAEMON_CHECK is padmap's own flag for "already asked", and it
+    is exported so that a game launched from the grid does not ask again --
+    `gotg play` checks the same variable.
+    """
+    if os.environ.get("PADMAP_SKIP_DAEMON_CHECK") == "1":
+        return None
+    padmap = shutil.which("padmap")
+    if padmap is None:
+        return "padmap is not installed"
+    try:
+        done = subprocess.run(
+            [padmap, "ensure-daemon"],
+            capture_output=True,
+            timeout=DAEMON_TIMEOUT,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"padmap would not start: {exc}"
+    os.environ["PADMAP_SKIP_DAEMON_CHECK"] = "1"
+    if done.returncode != 0:
+        return (done.stderr or done.stdout or "padmap would not start").strip().splitlines()[-1]
+    return None
 
 
 def socket_path() -> Path:
