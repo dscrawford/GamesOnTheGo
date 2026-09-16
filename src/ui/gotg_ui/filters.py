@@ -4,11 +4,14 @@ Everything here was already in `Browser` and only half of it could be reached
 without a keyboard. A pad could walk platforms forwards — twelve of them, one
 way round — and could not touch regions at all, because they were on shift-Tab.
 
-So this is a list rather than more buttons. Up and down choose what to narrow
-by, left and right change it, and both directions exist. The value shown is
-read back out of the browser rather than kept here: the panel is a view of the
-filters, not a second copy of them, so a search typed on the grid is already
-correct when the panel opens.
+Start opens it. Up and down choose what to narrow by; pressing one opens the
+list of what it can be, because twelve platforms is a list to look down rather
+than a value to press right eleven times. Left and right still nudge, for when
+the answer is next door.
+
+The values are read back out of the browser rather than kept here: the panel is
+a view of the filters, not a second copy of them, so a search typed on the grid
+is already correct when the panel opens.
 
 Model only, and pygame-free. What it looks like is drawing's business.
 """
@@ -39,13 +42,38 @@ LABELS = {
 # What a row does when it is pressed rather than nudged.
 TYPING = "typing"
 
+# What "installed only" can be. A list of two rather than a toggle, so every
+# row on the panel answers to the same press.
+INSTALLED_OPTIONS = ("no", "yes")
+
+
+@dataclass
+class Choice:
+    """An open dropdown: what it is for, what it offers, where the cursor is."""
+
+    row: str
+    options: tuple[str, ...]
+    index: int = 0
+
+    @property
+    def value(self) -> str:
+        return self.options[self.index]
+
+    def move(self, delta: int) -> None:
+        """Wrapping, like the rows: a dozen platforms is a long way back up."""
+        self.index = (self.index + delta) % len(self.options)
+
 
 @dataclass
 class Filters:
-    """Which row the cursor is on. The values live in the browser."""
+    """Which row the cursor is on, and the list open over it if there is one.
+
+    The values live in the browser.
+    """
 
     index: int = 0
     rows: tuple[str, ...] = field(default=ROWS)
+    choice: Choice | None = None
 
     @property
     def row(self) -> str:
@@ -73,8 +101,9 @@ class Filters:
     def press(self, browser) -> str | None:
         """A or Enter on the current row.
 
-        Returns TYPING when the row wants the keyboard -- the caller owns the
-        text box, and on a Deck the Steam keyboard rises over it.
+        Opens the row's list of choices, or does the row's one thing. Returns
+        TYPING when the row wants the keyboard -- the caller owns the text box,
+        and on a Deck the Steam keyboard rises over it.
         """
         row = self.row
         if row == SEARCH:
@@ -82,9 +111,33 @@ class Filters:
         if row == CLEAR:
             clear(browser)
             return None
-        # Everything else is a nudge, and pressing it means the same as right.
-        self.adjust(browser, 1)
+        options = options_for(browser, row)
+        if not options:
+            return None
+        # Opened on what it already is, so the list starts where the eye is.
+        current = value_of(browser, row)
+        self.choice = Choice(
+            row=row,
+            options=options,
+            index=options.index(current) if current in options else 0,
+        )
         return None
+
+    def choose(self, browser) -> None:
+        """A on an open list: take the highlighted option and close."""
+        if self.choice is None:
+            return
+        set_value(browser, self.choice.row, self.choice.value)
+        self.choice = None
+
+    def close(self) -> None:
+        """B on an open list. Closes the list, not the panel -- one press, one
+        step back, which is what B means everywhere else here."""
+        self.choice = None
+
+    @property
+    def open(self) -> bool:
+        return self.choice is not None
 
 
 def clear(browser) -> None:
@@ -98,6 +151,32 @@ def clear(browser) -> None:
     browser.set_search("")
     if browser.installed_only:
         browser.toggle_installed()
+
+
+def options_for(browser, row: str) -> tuple[str, ...]:
+    """Everything this row can be, in the order the list shows them.
+
+    "all" is first in both lists rather than sorted into them, so the way back
+    to the whole library is the top of the list rather than somewhere in it.
+    """
+    if row == PLATFORM:
+        return tuple(browser.platforms)
+    if row == REGION:
+        return tuple(browser.regions)
+    if row == INSTALLED:
+        return INSTALLED_OPTIONS
+    return ()
+
+
+def set_value(browser, row: str, value: str) -> None:
+    """Put one row where the list says. The only writer besides `clear`."""
+    if row == PLATFORM:
+        browser.set_platform(value)
+    elif row == REGION:
+        browser.set_region(value)
+    elif row == INSTALLED:
+        if (value == "yes") != browser.installed_only:
+            browser.toggle_installed()
 
 
 def value_of(browser, row: str) -> str:
