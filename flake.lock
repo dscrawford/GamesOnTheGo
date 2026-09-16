@@ -42,17 +42,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1789524911,
-        "narHash": "sha256-4vQdZfczUAGdQi8sAOK6Brf4j6xCwlKGm1KYk/cS/rU=",
+        "lastModified": 1789584024,
+        "narHash": "sha256-ILpT/ov46ZWqutqkmAQZK1h9JGFwW5a+KCs3ikfyWFg=",
         "ref": "rustify",
-        "rev": "8553d54d13db4b8a620dc2cef746d0cf3e75bd9d",
-        "revCount": 95,
+        "rev": "6e59d1bf09f8f2931fb9ad9d0ff1db305a7e9650",
+        "revCount": 111,
         "type": "git",
         "url": "ssh://git@github.com/chadac/padmap"
       },
       "original": {
         "ref": "rustify",
-        "rev": "8553d54d13db4b8a620dc2cef746d0cf3e75bd9d",
+        "rev": "6e59d1bf09f8f2931fb9ad9d0ff1db305a7e9650",
         "type": "git",
         "url": "ssh://git@github.com/chadac/padmap"
       }

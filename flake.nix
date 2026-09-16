@@ -33,7 +33,7 @@
     # Pinned to a revision rather than following the branch, so that a launch
     # that worked yesterday is not changed by somebody else's commit today.
     padmap = {
-      url = "git+ssh://git@github.com/chadac/padmap?ref=rustify&rev=8553d54d13db4b8a620dc2cef746d0cf3e75bd9d";
+      url = "git+ssh://git@github.com/chadac/padmap?ref=rustify&rev=6e59d1bf09f8f2931fb9ad9d0ff1db305a7e9650";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
