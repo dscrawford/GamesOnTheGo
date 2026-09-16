@@ -19,6 +19,7 @@ from .controllers import assets_dir
 from .controllers import draw as draw_controllers
 from .controllers import draw_strip
 from .padmap import Padmap, ensure_daemon
+from .padstrip import HEIGHT as STRIP_HEIGHT
 from .fetch import Loader
 from .grid import Grid
 from .installed import installed_games
@@ -83,7 +84,7 @@ def draw(
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
     page = state.page
-    tiles = grid(width, height)
+    tiles = grid(width, height, STRIP_HEIGHT)
     # One translucent wash per tile size, cached: while the menu is open every
     # other tile drops to ~90% so the chosen one reads as chosen.
     dim = None
@@ -489,12 +490,12 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             else:
                                 menu = None
                     elif event.type == pygame.MOUSEMOTION:
-                        rows = menu_rects(menu, grid(*screen.get_size()), font_at)
+                        rows = menu_rects(menu, grid(*screen.get_size(), STRIP_HEIGHT), font_at)
                         for i, (rx, ry, rw, rh) in enumerate(rows):
                             if rx <= event.pos[0] < rx + rw and ry <= event.pos[1] < ry + rh:
                                 menu.select(i)
                     elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                        rows = menu_rects(menu, grid(*screen.get_size()), font_at)
+                        rows = menu_rects(menu, grid(*screen.get_size(), STRIP_HEIGHT), font_at)
                         hit = None
                         for i, (rx, ry, rw, rh) in enumerate(rows):
                             if rx <= event.pos[0] < rx + rw and ry <= event.pos[1] < ry + rh:
@@ -572,12 +573,12 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     # Hover moves the cursor, so the pointer and the stick drive
                     # one selection rather than two competing highlights. A gap
                     # leaves it where it was.
-                    over = tile_at(*event.pos, *screen.get_size())
+                    over = tile_at(*event.pos, *screen.get_size(), STRIP_HEIGHT)
                     if over is not None:
                         state.select(over)
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:
-                        over = tile_at(*event.pos, *screen.get_size())
+                        over = tile_at(*event.pos, *screen.get_size(), STRIP_HEIGHT)
                         # Only ever the tile actually under the pointer: hover has
                         # already put the cursor there, so this cannot launch
                         # something the click was not on.
@@ -649,12 +650,20 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             for _event in pads.poll():
                 pass
 
+            # The full-screen views draw into the band below the strip rather
+            # than under it: each starts its heading a sixteenth of the way
+            # down, which on a 800-pixel screen is where the strip ends. None
+            # of them hit-tests, so a subsurface costs nothing and no screen
+            # carries a copy of the strip's height.
+            below = screen.subsurface(
+                (0, STRIP_HEIGHT, screen.get_width(), screen.get_height() - STRIP_HEIGHT)
+            )
             if preparer is not None:
-                draw_prepare(screen, font_at, preparer.game, preparer.tail(28), prepare_failed)
+                draw_prepare(below, font_at, preparer.game, preparer.tail(28), prepare_failed)
             elif storage is not None:
-                draw_storage(screen, font_at, storage, storage_typing)
+                draw_storage(below, font_at, storage, storage_typing)
             elif controllers is not None:
-                draw_controllers(screen, assets_dir(), controllers, font_at, controller_art)
+                draw_controllers(below, assets_dir(), controllers, font_at, controller_art)
             else:
                 # Whatever the workers finished since the last frame stops being a
                 # placeholder now. Only the page on screen is ever asked for.
@@ -664,7 +673,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     surface_for(game)
                 draw(screen, state, font_at, art, browser.status, typing, menu, browser.installed)
                 if menu is not None:
-                    draw_menu(screen, menu, grid(*screen.get_size()), font_at)
+                    draw_menu(screen, menu, grid(*screen.get_size(), STRIP_HEIGHT), font_at)
 
             # Last, and over everything: which seat a person is in is the one
             # thing worth knowing on every screen, and drawing it after the
