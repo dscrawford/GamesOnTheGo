@@ -15,3 +15,4 @@ needs when the thing calling it keeps each emulator in a directory of its own.
 | [emit-destinations.md](emit-destinations.md) | GOTG isolates every environment, so config must be written where it says |
 | [dolphin.md](dolphin.md) | GameCube and Wii are Dolphin, and padmap writes no Dolphin config |
 | [machine-readable-list.md](machine-readable-list.md) | a launcher has to enumerate pads without a daemon and without parsing prose |
+| [always-seating.md](always-seating.md) | a controller that arrives mid-game should be able to join without everybody stopping |
