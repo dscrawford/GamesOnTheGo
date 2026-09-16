@@ -252,11 +252,40 @@
             export PATH="${pkgs.lib.makeBinPath gotgPkg.runtimeInputs}:$PATH"
             exec "$root/src/client/bin/gotg" "$@"
           '';
+
+          uiPkg = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-ui;
+          uiPython = pkgs.python3.withPackages (ps: [ ps.pygame-ce ]);
+
+          # The picker and the controller check, from the working tree, for the
+          # same reason `gotg` is. These two especially: the check runs in front
+          # of a launch and is found *beside the picker*, so a shell with one
+          # and not the other tests a path that cannot happen on a real machine
+          # -- which is exactly how it came to be shipped skipping itself.
+          #
+          # Only the artwork comes from the store. It is resvg output, produced
+          # at build time from the SVGs, and rasterising it on shell entry would
+          # charge every `nix develop` for something that changes about twice a
+          # year.
+          uiDev = name: module: pkgs.writeShellScriptBin name ''
+            root="''${GOTG_DEV_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+            if [ ! -d "$root/src/ui/gotg_ui" ]; then
+              echo "${name}: no src/ui/gotg_ui under $root" >&2
+              echo "      set GOTG_DEV_ROOT to your checkout, or use: nix run .#gotg-ui" >&2
+              exit 1
+            fi
+            export PYTHONPATH="$root/src/ui:${gotgPkg}/share/gotg/steam''${PYTHONPATH:+:$PYTHONPATH}"
+            export GOTG_UI_DATA="''${GOTG_UI_DATA:-${gotgPkg}/share/gotg/data}"
+            export GOTG_UI_ENV="''${GOTG_UI_ENV:-${gotgPkg}/share/gotg/env}"
+            export GOTG_UI_ASSETS="''${GOTG_UI_ASSETS:-${uiPkg}/share/gotg-ui/assets}"
+            exec ${uiPython}/bin/python3 -m ${module} "$@"
+          '';
         in
         {
           default = pkgs.mkShell {
             packages = [
               gotg-dev
+              (uiDev "gotg-ui" "gotg_ui")
+              (uiDev "gotg-seat" "gotg_ui.seat")
             ]
             ++ [
               # The importer's own dependencies, out of its lock rather than a
