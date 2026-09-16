@@ -1,0 +1,48 @@
+# Switch Pro.
+#
+# Ryujinx writes its own configuration and publishes no ares console, so
+# this comes from padmap alone. No Switch Pro drawing yet: the generic
+# pad stands in, which leaves Minus, Plus, ZL and ZR unmarked.
+
+label: Switch Pro
+
+# The padmap layout the capture walks; `controls` is its control set.
+layout: switch
+# assets/controllers/<artwork>.svg
+artwork: generic
+players: 4
+# The GOTG platforms played with this controller.
+platforms: [switch]
+
+# padmap's control id -> what the button says.
+controls:
+  a: B (bottom)
+  b: A (right)
+  x: Y (left)
+  y: X (top)
+  dpup: D-pad up
+  dpdown: D-pad down
+  dpleft: D-pad left
+  dpright: D-pad right
+  back: Minus
+  start: Plus
+  leftshoulder: L
+  rightshoulder: R
+  lefttrigger: ZL
+  righttrigger: ZR
+
+# Where the drawing marks it, when the circle is not named after the
+# control. These drawings predate padmap and use the console's letters.
+anchors:
+  a: B
+  b: A
+  x: Y
+  y: X
+  dpup: Up
+  dpdown: Down
+  dpleft: Left
+  dpright: Right
+  back: Select
+  start: Start
+  leftshoulder: L
+  rightshoulder: R

@@ -254,7 +254,7 @@
           '';
 
           uiPkg = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-ui;
-          uiPython = pkgs.python3.withPackages (ps: [ ps.pygame-ce ]);
+          uiPython = pkgs.python3.withPackages (ps: [ ps.pygame-ce ps.pyyaml ]);
 
           # The picker and the controller check, from the working tree, for the
           # same reason `gotg` is. These two especially: the check runs in front
@@ -277,6 +277,7 @@
             export GOTG_UI_DATA="''${GOTG_UI_DATA:-${gotgPkg}/share/gotg/data}"
             export GOTG_UI_ENV="''${GOTG_UI_ENV:-${gotgPkg}/share/gotg/env}"
             export GOTG_UI_ASSETS="''${GOTG_UI_ASSETS:-${uiPkg}/share/gotg-ui/assets}"
+            export GOTG_UI_CONFIG="''${GOTG_UI_CONFIG:-$root/config/controllers}"
             exec ${uiPython}/bin/python3 -m ${module} "$@"
           '';
         in

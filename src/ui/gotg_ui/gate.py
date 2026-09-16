@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from . import schemes
+
 # Where the gate is, which is also what the runner draws.
 CHECKING = "checking"   # connected, nothing decided yet
 SEATING = "seating"     # no controller: hold a button on one
@@ -27,98 +29,34 @@ MAPPING = "mapping"     # a controller with no idea what this console's buttons 
 READY = "ready"         # go and play
 SKIPPED = "skipped"     # asked, declined; go and play anyway
 
-# GOTG's platform -> the padmap layout whose controls the wizard walks. Wii is
-# GameCube because Dolphin is configured here for GameCube pads only. Anything
-# padmap has no layout for falls back to the generic pad rather than borrowing
-# a console's: NES walked through SNES would ask for buttons that do not exist.
-LAYOUTS = {
-    "gamecube": "gamecube",
-    "wii": "gamecube",
-    "wiiu": "wiiu",
-    "switch": "switch",
-    "n64": "n64",
-    "snes": "snes",
-    "genesis": "genesis",
-}
-FALLBACK_LAYOUT = "generic"
+def scheme_for(platform: str) -> schemes.Scheme:
+    """The controller a platform is played with, from `config/controllers/`."""
+    return schemes.for_platform(platform)
 
 
 def layout_for(platform: str) -> str:
-    """The layout id to capture against, never None.
+    """The padmap layout to capture against, never None.
 
-    A platform nobody has listed is still playable: the generic pad is the
-    control set every one of these consoles is a subset of, so the capture is
-    shorter than it should be rather than absent.
+    Keyed by platform rather than by layout, because several controllers share
+    one: an NES pad, a Game Boy and a GBA are all captured against the generic
+    layout and are three different drawings.
     """
-    return LAYOUTS.get((platform or "").lower(), FALLBACK_LAYOUT)
+    return scheme_for(platform).layout
 
 
-# The padmap layout -> the drawing that stands for it. Only what exists: a
-# console with no artwork gets the generic pad, which still shows a stick, a
-# d-pad and four face buttons in the right places.
-ARTWORK = {
-    "gamecube": "gamecube",
-    "n64": "n64",
-    "snes": "snes",
-    "genesis": "megadrive",
-}
-FALLBACK_ARTWORK = "generic"
-
-# padmap names controls the way SDL does; the diagrams that predate padmap name
-# their anchors the way ares does. Tried in that order, so gamecube -- drawn for
-# this screen -- needs no translation, and snes and n64 still light up.
-ANCHOR_ALIASES = {
-    "a": "A", "b": "B", "x": "X", "y": "Y",
-    "start": "Start", "back": "Select", "guide": "Home",
-    "dpup": "Up", "dpdown": "Down", "dpleft": "Left", "dpright": "Right",
-    "leftshoulder": "L", "rightshoulder": "R",
-    "lefttrigger": "L2", "righttrigger": "Z",
-}
+def artwork_for(platform: str) -> str:
+    return scheme_for(platform).artwork
 
 
-# What each control is called on a GameCube pad, mirroring padmap's gamecube
-# layout. Here because Dolphin publishes no ares console, so the binding screen
-# has no table of its own to read and would otherwise say a GameCube pad has no
-# buttons. Held honest by a test that checks it against padmap's own control
-# set, which is the same test that checks the artwork.
-GAMECUBE_CONTROLS = {
-    "a": "A",
-    "b": "B",
-    "x": "X",
-    "y": "Y",
-    "start": "Start",
-    "dpup": "D-pad up",
-    "dpdown": "D-pad down",
-    "dpleft": "D-pad left",
-    "dpright": "D-pad right",
-    "leftshoulder": "L",
-    "rightshoulder": "R",
-    "righttrigger": "Z",
-    "rightstick_up": "C-stick up",
-    "rightstick_down": "C-stick down",
-    "rightstick_left": "C-stick left",
-    "rightstick_right": "C-stick right",
-}
-
-CONTROLS = {"gamecube": GAMECUBE_CONTROLS}
+def controls_for(platform: str) -> dict[str, str]:
+    """Every control, and what the button says. Empty when no file describes
+    this platform -- which is a screen that says so, not a guess."""
+    return dict(scheme_for(platform).controls)
 
 
-def controls_for(layout: str) -> dict[str, str]:
-    """Every control this console has, and what it is called. Empty when
-    nothing here knows -- which is a screen that says so, not a guess."""
-    return CONTROLS.get(layout, {})
-
-
-def artwork_for(layout: str) -> str:
-    return ARTWORK.get(layout, FALLBACK_ARTWORK)
-
-
-def anchor_names(control: str) -> tuple[str, ...]:
+def anchor_names(control: str, platform: str = "") -> tuple[str, ...]:
     """Which anchors could mark this control, best first."""
-    if not control:
-        return ()
-    alias = ANCHOR_ALIASES.get(control)
-    return (control, alias) if alias else (control,)
+    return scheme_for(platform).anchor_names(control)
 
 
 def console_scope(layout: str) -> str:
@@ -169,8 +107,13 @@ class Gate:
     wizard: bool = False
 
     @property
+    def scheme(self) -> schemes.Scheme:
+        """The controller this platform is played with."""
+        return scheme_for(self.platform)
+
+    @property
     def layout(self) -> str:
-        return layout_for(self.platform)
+        return self.scheme.layout
 
     @property
     def scope(self) -> str:

@@ -1,0 +1,48 @@
+# SNES.
+#
+# `a: B` is not a mistake. padmap names a control by where it sits on a
+# modern pad -- `a` is the bottom face button -- and on a SNES pad that
+# button says B. The label is what is written on the plastic.
+
+label: SNES
+
+# The padmap layout the capture walks; `controls` is its control set.
+layout: snes
+# assets/controllers/<artwork>.svg
+artwork: snes
+players: 2
+# What ares calls this console, for the bindings ares writes itself.
+ares: [SuperFamicom]
+# The GOTG platforms played with this controller.
+platforms: [snes]
+
+# padmap's control id -> what the button says.
+controls:
+  a: B (bottom)
+  b: A (right)
+  x: Y (left)
+  y: X (top)
+  dpup: D-pad up
+  dpdown: D-pad down
+  dpleft: D-pad left
+  dpright: D-pad right
+  back: Select
+  start: Start
+  leftshoulder: L
+  rightshoulder: R
+
+# Where the drawing marks it, when the circle is not named after the
+# control. These drawings predate padmap and use the console's letters.
+anchors:
+  a: B
+  b: A
+  x: Y
+  y: X
+  dpup: Up
+  dpdown: Down
+  dpleft: Left
+  dpright: Right
+  back: Select
+  start: Start
+  leftshoulder: L
+  rightshoulder: R

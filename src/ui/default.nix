@@ -12,6 +12,10 @@
   resvg,
   gotg,
   padmap,
+  # The controller descriptions, from the repository root rather than from
+  # src/ui: they say which platforms a pad covers and which padmap layout it
+  # captures against, which is not the picker's private business.
+  controllers ? ../../config/controllers,
 }:
 
 let
@@ -19,7 +23,12 @@ let
   # gotg-pads is an SDL program and the controller bindings are written from
   # what SDL reports. A picker launched from Steam onto a handheld needs a
   # gamepad and a fullscreen window, which is the whole reason it is not tk.
-  python = python3.withPackages (ps: [ ps.pygame-ce ]);
+  # pyyaml for config/controllers. The same choice the indexer made for
+  # rules.yaml: a table somebody is expected to edit is worth a parser.
+  python = python3.withPackages (ps: [
+    ps.pygame-ce
+    ps.pyyaml
+  ]);
 in
 stdenvNoCC.mkDerivation {
   pname = "gotg-ui";
@@ -50,6 +59,7 @@ stdenvNoCC.mkDerivation {
     mkdir -p $out/share/gotg-ui
     cp -r gotg_ui $out/share/gotg-ui/
     cp -r assets/built $out/share/gotg-ui/assets
+    cp -r ${controllers} $out/share/gotg-ui/controllers
 
     # The client's own artwork sources ride on PYTHONPATH rather than being
     # copied: the grid asks SteamGridDB and libretro-thumbnails exactly as
@@ -69,6 +79,7 @@ stdenvNoCC.mkDerivation {
       --set GOTG_UI_DATA "${gotg}/share/gotg/data" \
       --set GOTG_UI_ENV "${gotg}/share/gotg/env" \
       --set GOTG_UI_ASSETS "$out/share/gotg-ui/assets" \
+      --set GOTG_UI_CONFIG "$out/share/gotg-ui/controllers" \
       --prefix PATH : ${lib.makeBinPath [
         gotg
         padmap
@@ -84,6 +95,7 @@ stdenvNoCC.mkDerivation {
       --set GOTG_UI_DATA "${gotg}/share/gotg/data" \
       --set GOTG_UI_ENV "${gotg}/share/gotg/env" \
       --set GOTG_UI_ASSETS "$out/share/gotg-ui/assets" \
+      --set GOTG_UI_CONFIG "$out/share/gotg-ui/controllers" \
       --prefix PATH : ${lib.makeBinPath [ padmap ]}
 
     runHook postInstall

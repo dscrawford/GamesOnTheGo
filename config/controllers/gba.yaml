@@ -1,0 +1,44 @@
+# Gamepad.
+
+label: Gamepad
+
+# The padmap layout the capture walks; `controls` is its control set.
+layout: generic
+# assets/controllers/<artwork>.svg
+artwork: gba
+players: 1
+# What ares calls this console, for the bindings ares writes itself.
+ares: [GameBoyAdvance]
+# The GOTG platforms played with this controller.
+platforms: [gba]
+
+# padmap's control id -> what the button says.
+controls:
+  a: A (bottom face)
+  b: B (right face)
+  x: X (left face)
+  y: Y (top face)
+  dpup: D-pad up
+  dpdown: D-pad down
+  dpleft: D-pad left
+  dpright: D-pad right
+  back: Select
+  start: Start
+  leftshoulder: Left shoulder
+  rightshoulder: Right shoulder
+  lefttrigger: Left trigger
+  righttrigger: Right trigger
+
+# Where the drawing marks it, when the circle is not named after the
+# control. These drawings predate padmap and use the console's letters.
+anchors:
+  a: A
+  b: B
+  dpup: Up
+  dpdown: Down
+  dpleft: Left
+  dpright: Right
+  back: Select
+  start: Start
+  leftshoulder: L
+  rightshoulder: R
