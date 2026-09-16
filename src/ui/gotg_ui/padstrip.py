@@ -18,30 +18,31 @@ words.
 
 from __future__ import annotations
 
+from . import config
+
 # Player 1-4. Nintendo's four-player order, which is what the consoles this
 # runs use on their own port lights and what a Switch shows above a head.
 PLAYER_COLOURS = [
-    (96, 176, 255),   # 1 blue
-    (240, 96, 96),    # 2 red
-    (120, 216, 120),  # 3 green
-    (248, 208, 88),   # 4 yellow
-]
+    tuple(int(part) for part in entry)
+    for entry in config.get("theme.players", []) or []
+    if isinstance(entry, (list, tuple)) and len(entry) == 3
+] or [(96, 176, 255), (240, 96, 96), (120, 216, 120), (248, 208, 88)]
 
 # An empty seat is red rather than grey. Grey reads as decoration; red reads as
 # something to do -- which it is, since a seat nobody is in is a controller
 # nobody can play with.
-EMPTY = (54, 30, 32)
-EMPTY_RING = (208, 78, 78)
-EMPTY_TEXT = (208, 78, 78)
-LABEL = (232, 232, 236)
-LABEL_DIM = (150, 150, 158)
-PANEL = (26, 26, 30)
+EMPTY = config.colour("theme.colours.empty", (54, 30, 32))
+EMPTY_RING = config.colour("theme.colours.empty_ring", (208, 78, 78))
+EMPTY_TEXT = config.colour("theme.colours.empty_text", (208, 78, 78))
+LABEL = config.colour("theme.colours.text", (232, 232, 236))
+LABEL_DIM = config.colour("theme.colours.text_dim", (150, 150, 158))
+PANEL = config.colour("theme.colours.panel", (26, 26, 30))
 
 # The strip's own height. The caller offsets everything below by it, so the
 # screens underneath carry no copy of the number.
-HEIGHT = 54
-PAD_RADIUS = 14
-GAP = 10
+HEIGHT = int(config.get("theme.strip.height", 54))
+PAD_RADIUS = int(config.get("theme.strip.pad_radius", 14))
+GAP = int(config.get("theme.strip.gap", 10))
 
 
 def colour_for(player: int) -> tuple[int, int, int]:

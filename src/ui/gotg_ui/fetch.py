@@ -29,6 +29,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from . import config
 from .art import ArtStore
 from .catalog import Game
 
@@ -53,7 +54,7 @@ def service() -> tuple[str, str]:
 
 # How long a request to our own service may take before the grid gives up on
 # it. Short: this is a machine we run, and a tile is not worth a stall.
-SERVICE_TIMEOUT = 10
+SERVICE_TIMEOUT = int(config.get("theme.timeouts.service", 10))
 
 # Identify ourselves, which is not cosmetic: gotg.dcraw.net is Cloudflare-
 # proxied, and Cloudflare answers the default Python-urllib/3.x with a 403

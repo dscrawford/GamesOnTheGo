@@ -1,0 +1,68 @@
+# How the picker looks, and how long it is prepared to wait.
+#
+# One palette. These colours used to live in four modules, and `background` was
+# (18, 18, 20) in two of them and (18, 18, 22) in a third -- close enough that
+# nobody saw it and different enough to be wrong. The same grey was `TEXT` in
+# one file and `LABEL` in another.
+
+colours:
+  background: [18, 18, 20]
+  panel: [26, 26, 30]
+  text: [232, 232, 236]
+  text_dim: [150, 150, 158]
+
+  # The grid.
+  tile: [38, 38, 44]
+  tile_selected: [58, 104, 148]
+
+  # Leader lines on the controller diagram, and the dot where one lands.
+  leader: [108, 108, 122]
+  leader_lit: [120, 180, 240]
+  dot: [150, 150, 162]
+
+  # An empty seat is red rather than grey: grey reads as decoration, red reads
+  # as something to do -- which it is, since a seat nobody is in is a
+  # controller nobody can play with.
+  empty: [54, 30, 32]
+  empty_ring: [208, 78, 78]
+  empty_text: [208, 78, 78]
+
+# Players 1-4. Nintendo's four-player order, which is what the consoles this
+# runs use on their own port lights. A fifth player wraps rather than failing:
+# padmap will seat as many as are asked for, and a pad with no colour is worse
+# than two pads sharing one.
+players:
+  - [96, 176, 255]   # 1 blue
+  - [240, 96, 96]    # 2 red
+  - [120, 216, 120]  # 3 green
+  - [248, 208, 88]   # 4 yellow
+
+window: [1280, 800]
+
+# The strip of seats across the top. `height` is what every screen below is
+# offset by, so they carry no copy of the number.
+strip:
+  height: 54
+  pad_radius: 14
+  gap: 10
+
+# The grid of games.
+grid:
+  columns: 5
+  rows: 2
+  tile_aspect: 1.5      # 900x600 box art
+  gap_fraction: 0.02
+  margin_fraction: 0.04
+
+# Seconds, everywhere.
+timeouts:
+  # A unix socket either answers at once or is not there; this is only so a
+  # stale socket file cannot hang a frame.
+  padmap_connect: 0.25
+  # Long enough for a cold daemon start, short enough that somebody in front
+  # of a television is not staring at nothing.
+  padmap_daemon: 10
+  # A daemon that is running but silent, before a launch gives up on it.
+  first_state: 3.0
+  service: 10
+  ready: 3

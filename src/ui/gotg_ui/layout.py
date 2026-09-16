@@ -9,18 +9,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-COLUMNS = 5
-ROWS = 2
+from . import config
+
+COLUMNS = int(config.get("theme.grid.columns", 5))
+ROWS = int(config.get("theme.grid.rows", 2))
 PER_PAGE = COLUMNS * ROWS
 
 # 600x900 is what SteamGridDB calls a portrait grid, so a tile is 2:3. A tile
 # of any other shape either letterboxes the art or stretches it.
-TILE_ASPECT = 900 / 600
+TILE_ASPECT = float(config.get("theme.grid.tile_aspect", 900 / 600))
 
 # Fractions of the shorter axis, so the grid keeps its proportions from a
 # 1280x800 Deck to a 4K television without a second set of numbers.
-GAP_FRACTION = 0.02
-MARGIN_FRACTION = 0.04
+GAP_FRACTION = float(config.get("theme.grid.gap_fraction", 0.02))
+MARGIN_FRACTION = float(config.get("theme.grid.margin_fraction", 0.04))
 
 
 @dataclass(frozen=True)

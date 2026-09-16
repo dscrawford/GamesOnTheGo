@@ -277,7 +277,7 @@
             export GOTG_UI_DATA="''${GOTG_UI_DATA:-${gotgPkg}/share/gotg/data}"
             export GOTG_UI_ENV="''${GOTG_UI_ENV:-${gotgPkg}/share/gotg/env}"
             export GOTG_UI_ASSETS="''${GOTG_UI_ASSETS:-${uiPkg}/share/gotg-ui/assets}"
-            export GOTG_UI_CONFIG="''${GOTG_UI_CONFIG:-$root/config/controllers}"
+            export GOTG_CONFIG="''${GOTG_CONFIG:-$root/config}"
             exec ${uiPython}/bin/python3 -m ${module} "$@"
           '';
         in

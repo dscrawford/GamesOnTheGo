@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pygame
 
+from . import config
 from .art import ArtStore
 from .assign import Session
 from .browser import Browser
@@ -32,14 +33,14 @@ from .variants import variants_for
 from .versions import names as version_names
 from .versions import versions_for
 
-BACKGROUND = (18, 18, 20)
-TILE = (38, 38, 44)
-TILE_SELECTED = (58, 104, 148)
-TEXT = (232, 232, 236)
-TEXT_DIM = (150, 150, 158)
+BACKGROUND = config.colour("theme.colours.background", (18, 18, 20))
+TILE = config.colour("theme.colours.tile", (38, 38, 44))
+TILE_SELECTED = config.colour("theme.colours.tile_selected", (58, 104, 148))
+TEXT = config.colour("theme.colours.text", (232, 232, 236))
+TEXT_DIM = config.colour("theme.colours.text_dim", (150, 150, 158))
 
 # The Deck's own panel, so a window on a desktop is the shape it will be there.
-WINDOW = (1280, 800)
+WINDOW = tuple(config.get("theme.window", [1280, 800]))
 
 
 def _fit(font_at, text: str, width: int, size: int):

@@ -18,6 +18,7 @@ import pathlib
 
 import pygame
 
+from . import config
 from .bindings import bindings_for, console_for, players_for
 from .leaders import Anchor, place
 from .padstrip import (
@@ -36,12 +37,12 @@ from .padstrip import (
 )
 from .schemes import for_ares, for_platform
 
-BACKGROUND = (18, 18, 20)
-TEXT = (232, 232, 236)
-TEXT_DIM = (150, 150, 158)
-LEADER = (108, 108, 122)
-LEADER_LIT = (120, 180, 240)
-DOT = (150, 150, 162)
+BACKGROUND = config.colour("theme.colours.background", (18, 18, 20))
+TEXT = config.colour("theme.colours.text", (232, 232, 236))
+TEXT_DIM = config.colour("theme.colours.text_dim", (150, 150, 158))
+LEADER = config.colour("theme.colours.leader", (108, 108, 122))
+LEADER_LIT = config.colour("theme.colours.leader_lit", (120, 180, 240))
+DOT = config.colour("theme.colours.dot", (150, 150, 162))
 
 # Which drawing stands for which console. A console absent here falls back to
 # the generic pad, which is what a new platform gets until someone draws it.

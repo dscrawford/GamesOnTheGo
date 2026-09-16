@@ -12,10 +12,11 @@
   resvg,
   gotg,
   padmap,
-  # The controller descriptions, from the repository root rather than from
-  # src/ui: they say which platforms a pad covers and which padmap layout it
-  # captures against, which is not the picker's private business.
-  controllers ? ../../config/controllers,
+  # Everything under config/: the controller descriptions, the theme, the icon
+  # rules. From the repository root rather than src/ui, because what a pad
+  # covers and what colour player two is are not the picker's private business
+  # -- they are things somebody is expected to edit.
+  configDir ? ../../config,
 }:
 
 let
@@ -59,7 +60,7 @@ stdenvNoCC.mkDerivation {
     mkdir -p $out/share/gotg-ui
     cp -r gotg_ui $out/share/gotg-ui/
     cp -r assets/built $out/share/gotg-ui/assets
-    cp -r ${controllers} $out/share/gotg-ui/controllers
+    cp -r ${configDir} $out/share/gotg-ui/config
 
     # The client's own artwork sources ride on PYTHONPATH rather than being
     # copied: the grid asks SteamGridDB and libretro-thumbnails exactly as
@@ -79,7 +80,7 @@ stdenvNoCC.mkDerivation {
       --set GOTG_UI_DATA "${gotg}/share/gotg/data" \
       --set GOTG_UI_ENV "${gotg}/share/gotg/env" \
       --set GOTG_UI_ASSETS "$out/share/gotg-ui/assets" \
-      --set GOTG_UI_CONFIG "$out/share/gotg-ui/controllers" \
+      --set GOTG_CONFIG "$out/share/gotg-ui/config" \
       --prefix PATH : ${lib.makeBinPath [
         gotg
         padmap
@@ -95,7 +96,7 @@ stdenvNoCC.mkDerivation {
       --set GOTG_UI_DATA "${gotg}/share/gotg/data" \
       --set GOTG_UI_ENV "${gotg}/share/gotg/env" \
       --set GOTG_UI_ASSETS "$out/share/gotg-ui/assets" \
-      --set GOTG_UI_CONFIG "$out/share/gotg-ui/controllers" \
+      --set GOTG_CONFIG "$out/share/gotg-ui/config" \
       --prefix PATH : ${lib.makeBinPath [ padmap ]}
 
     runHook postInstall

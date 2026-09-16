@@ -20,6 +20,7 @@ import signal
 import subprocess
 import threading
 
+from . import config
 from .catalog import Game
 from .launch import gotg_bin
 
@@ -29,7 +30,7 @@ TAIL_LINES = 200
 # The ready check is pure filesystem on the client's side and measures ~120ms;
 # a ceiling 25x that is a hung client, and every second of it is a frozen
 # frame loop under somebody's thumb.
-READY_TIMEOUT = 3
+READY_TIMEOUT = int(config.get("theme.timeouts.ready", 3))
 
 
 def is_ready(game: Game, variant: str | None = None) -> bool:

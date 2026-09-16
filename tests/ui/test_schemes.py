@@ -56,7 +56,7 @@ def test_a_platform_is_claimed_by_exactly_one_controller():
 
 
 def test_a_platform_nobody_claims_gets_the_generic_pad(monkeypatch):
-    monkeypatch.setenv("GOTG_UI_CONFIG", str(CONFIG))
+    monkeypatch.setenv("GOTG_CONFIG", str(CONFIG.parent))
     schemes.forget()
     assert schemes.for_platform("saturn").name == "generic"
     assert schemes.for_platform("").name == "generic"
