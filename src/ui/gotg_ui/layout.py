@@ -36,8 +36,13 @@ class Tile:
         return (self.x, self.y, self.width, self.height)
 
 
-def grid(width: int, height: int) -> list[Tile]:
+def grid(width: int, height: int, reserved: int = 0) -> list[Tile]:
     """Ten tiles, in reading order, centred in the window.
+
+    `reserved` is a band along the top that belongs to something else -- the
+    strip saying who is holding which controller -- and the tiles are centred
+    in what is left rather than drawn under it. In screen coordinates
+    throughout, so a pointer lands on the tile it looks like it landed on.
 
     Reading order because the selection index and the position on the page are
     the same number — index 4 is top-right, 5 is the start of the second row —
@@ -47,6 +52,8 @@ def grid(width: int, height: int) -> list[Tile]:
     Sized to whichever axis runs out first, so a wide window gets bars at the
     sides rather than tiles cropped off the bottom.
     """
+    reserved = max(0, min(reserved, height - 1))
+    height = height - reserved
     short = max(1, min(width, height))
     gap = max(1, int(short * GAP_FRACTION))
     margin = max(1, int(short * MARGIN_FRACTION))
@@ -69,7 +76,7 @@ def grid(width: int, height: int) -> list[Tile]:
     span_x = tile_width * COLUMNS + gap * (COLUMNS - 1)
     span_y = tile_height * ROWS + gap * (ROWS - 1)
     left = (width - span_x) // 2
-    top = (height - span_y) // 2
+    top = reserved + (height - span_y) // 2
 
     return [
         Tile(
@@ -83,7 +90,7 @@ def grid(width: int, height: int) -> list[Tile]:
     ]
 
 
-def tile_at(x: int, y: int, width: int, height: int) -> int | None:
+def tile_at(x: int, y: int, width: int, height: int, reserved: int = 0) -> int | None:
     """Which tile a point is on, or None for the gaps and the margins.
 
     Tested against the rectangles rather than derived from the arithmetic, so
@@ -92,7 +99,7 @@ def tile_at(x: int, y: int, width: int, height: int) -> int | None:
     mean the one beside it, because a click that looks like it missed would
     then launch a game.
     """
-    for index, tile in enumerate(grid(width, height)):
+    for index, tile in enumerate(grid(width, height, reserved)):
         if tile.x <= x < tile.x + tile.width and tile.y <= y < tile.y + tile.height:
             return index
     return None

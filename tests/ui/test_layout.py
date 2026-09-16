@@ -125,3 +125,49 @@ def test_a_tiny_window_does_not_claim_the_whole_screen():
     # grid() floors tiles at one pixel; tile_at must not then answer for every
     # point in a window that has no room for a grid.
     assert tile_at(199, 119, 200, 120) in (None, *range(10))
+
+
+# --- the band the controller strip keeps ------------------------------------
+
+
+def test_tiles_start_below_a_reserved_band():
+    from gotg_ui.layout import grid
+
+    tiles = grid(1280, 800, 54)
+    assert min(t.y for t in tiles) >= 54
+
+
+def test_the_grid_still_fits_on_the_screen():
+    from gotg_ui.layout import grid
+
+    tiles = grid(1280, 800, 54)
+    assert max(t.y + t.height for t in tiles) <= 800
+
+
+def test_reserving_nothing_is_what_it_always_was():
+    from gotg_ui.layout import grid
+
+    assert grid(1280, 800, 0) == grid(1280, 800)
+
+
+def test_a_point_in_the_band_is_on_no_tile():
+    # Otherwise a click on the strip launches whatever is behind it.
+    from gotg_ui.layout import tile_at
+
+    assert tile_at(640, 20, 1280, 800, 54) is None
+
+
+def test_hit_testing_agrees_with_where_the_tiles_are_drawn():
+    from gotg_ui.layout import grid, tile_at
+
+    tiles = grid(1280, 800, 54)
+    for index, tile in enumerate(tiles):
+        centre = (tile.x + tile.width // 2, tile.y + tile.height // 2)
+        assert tile_at(*centre, 1280, 800, 54) == index
+
+
+def test_a_band_taller_than_the_screen_does_not_produce_nothing():
+    from gotg_ui.layout import grid
+
+    tiles = grid(1280, 800, 5000)
+    assert len(tiles) == 10
