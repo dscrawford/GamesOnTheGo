@@ -11,6 +11,25 @@ Three components share one contract:
 | **[service](src/gotg/service/)** | One endpoint holding the credentials and the saves — fronts the artwork APIs, serves the catalog, and decides save conflicts | In-cluster Deployment |
 | **[client](src/client/)** | `gotg` — fetches a game on demand, builds the environment it runs in, generates a Steam launcher | Desktop, Steam Deck |
 
+## Installing it
+
+On a Steam Deck, in Desktop Mode, from Konsole:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash
+```
+
+That installs Nix if it is missing, turns on flakes, puts `gotg` and the picker
+in your profile, lets GOTG publish controllers, and adds **Games On The Go** to
+your Steam library. Running it again does nothing but say what was already
+there — which is also how you put the controller permission back after a
+SteamOS update takes it.
+
+With Nix already on the machine: `nix run github:dscrawford/GamesOnTheGo#install`.
+
+[docs/install.md](docs/install.md) has the rest, including why this is a script
+and not an AppImage or a Flatpak.
+
 ## The entry-id contract
 
 ```

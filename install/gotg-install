@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+# Put GOTG on a machine that has never heard of Nix.
+#
+#   curl -sSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash
+#
+# Or, on a Steam Deck, download it and run it from Konsole in Desktop Mode.
+#
+# Not an AppImage and not a Flatpak, deliberately: what is being installed is
+# *Nix*. A Flatpak is sandboxed and cannot create /nix, write a udev rule or
+# reach Steam's shortcut file, and an AppImage bundles an application with its
+# libraries -- this application's libraries are the Nix store. See docs/install.md.
+#
+# Idempotent: running it twice does nothing the second time. It needs a password
+# for three things, each said before it asks -- /nix on SteamOS, Nix's own
+# installer elsewhere, and making /dev/uinput openable so padmap can publish
+# controllers.
+set -euo pipefail
+
+FLAKE="${GOTG_FLAKE_REF:-github:dscrawford/GamesOnTheGo}"
+NIX_INSTALLER="${GOTG_NIX_INSTALLER:-https://nixos.org/nix/install}"
+# Overridable so the tests can put a SteamOS in front of it, and so a rule can
+# be written somewhere harmless. Nothing else has a reason to set them.
+OS_RELEASE="${GOTG_OS_RELEASE:-/etc/os-release}"
+UDEV_PATH="${GOTG_UDEV_PATH:-/etc/udev/rules.d/99-gotg-uinput.rules}"
+
+C_OK=$'\e[32m'; C_WARN=$'\e[33m'; C_ERR=$'\e[31m'; C_DIM=$'\e[2m'; C_OFF=$'\e[0m'
+[[ -t 1 ]] || { C_OK=""; C_WARN=""; C_ERR=""; C_DIM=""; C_OFF=""; }
+
+say() { printf '%s\n' "$*" >&2; }
+step() { printf '%s==>%s %s\n' "$C_OK" "$C_OFF" "$*" >&2; }
+skip() { printf '%s==>%s %s %s(already done)%s\n' "$C_DIM" "$C_OFF" "$*" "$C_DIM" "$C_OFF" >&2; }
+warn() { printf '%s!!%s %s\n' "$C_WARN" "$C_OFF" "$*" >&2; }
+die() { printf '%serror:%s %s\n' "$C_ERR" "$C_OFF" "$*" >&2; exit 1; }
+
+# --- what machine is this ----------------------------------------------------
+
+# SteamOS, by the file every SteamOS release has had. Not by hostname, and not
+# by the presence of a `deck` user: somebody's desktop can have both.
+is_steamos() {
+  [[ -e "$OS_RELEASE" ]] || return 1
+  grep -qiE '^(ID|ID_LIKE)=.*steamos' "$OS_RELEASE"
+}
+
+# The read-only root is SteamOS's, but the tool is what actually decides.
+readonly_root() {
+  command -v steamos-readonly >/dev/null 2>&1 || return 1
+  [[ "$(steamos-readonly status 2>/dev/null || echo enabled)" != "disabled" ]]
+}
+
+# --- sudo --------------------------------------------------------------------
+
+# A Steam Deck ships with no password for `deck`, so sudo cannot ask for one
+# and every prompt fails with a message about the terminal. Telling somebody
+# that up front is the difference between a minute and an afternoon.
+need_sudo() {
+  command -v sudo >/dev/null 2>&1 || die "no sudo here, and this needs root for one or two steps"
+  if sudo -n true 2>/dev/null; then
+    return 0
+  fi
+  if is_steamos && ! passwd --status "$USER" 2>/dev/null | grep -qE ' (P|PS) '; then
+    die "this account has no password, so sudo cannot ask for one.
+     Set one first — run: passwd
+     then run this again. (It is the Deck's own password, not your Steam one.)"
+  fi
+  say ""
+  say "  The next step needs your password."
+  say ""
+  sudo -v || die "sudo said no"
+}
+
+# --- nix ---------------------------------------------------------------------
+
+have_nix() { command -v nix >/dev/null 2>&1 || [[ -e /nix/var/nix/profiles/default/bin/nix ]]; }
+
+# Put nix on PATH for the rest of this run. A fresh single-user install only
+# reaches the shell that sources its profile, and this one did not.
+use_nix() {
+  local single="$HOME/.nix-profile/etc/profile.d/nix.sh"
+  local daemon=/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+  # shellcheck disable=SC1090,SC1091 # written by the installer, not by us
+  [[ -r "$single" ]] && . "$single"
+  # shellcheck disable=SC1090,SC1091
+  [[ -r "$daemon" ]] && . "$daemon"
+  command -v nix >/dev/null 2>&1
+}
+
+install_nix_steamos() {
+  # SteamOS 3.5 and later ship /nix already, bind-mounted to the home
+  # partition, and Valve keeps it across updates — which is the whole reason
+  # this works at all. It belongs to root until somebody hands it over.
+  if [[ ! -d /nix ]]; then
+    die "no /nix on this SteamOS, so it is older than 3.5.
+     Update SteamOS and run this again — before 3.5 the store had to be
+     bind-mounted by hand, and that is not something to do behind your back."
+  fi
+  if [[ ! -w /nix ]]; then
+    step "handing /nix to $USER"
+    need_sudo
+    sudo chown "$USER" /nix
+  fi
+  step "installing Nix (single user — no daemon, nothing to keep running)"
+  curl -sSL "$NIX_INSTALLER" | sh -s -- --no-daemon
+}
+
+install_nix_generic() {
+  step "installing Nix"
+  need_sudo
+  curl -sSL "$NIX_INSTALLER" | sh -s -- --daemon
+}
+
+ensure_nix() {
+  if have_nix && use_nix; then
+    skip "Nix is here"
+    return 0
+  fi
+  if is_steamos; then install_nix_steamos; else install_nix_generic; fi
+  use_nix || die "Nix installed but is not on PATH. Open a new terminal and run this again."
+}
+
+# Flakes are still behind a flag, and GOTG is a flake.
+ensure_flakes() {
+  local conf="${XDG_CONFIG_HOME:-$HOME/.config}/nix/nix.conf"
+  if [[ -f "$conf" ]] && grep -qE '^[^#]*experimental-features.*flakes' "$conf"; then
+    skip "flakes are on"
+    return 0
+  fi
+  step "turning on flakes"
+  mkdir -p "$(dirname "$conf")"
+  printf 'experimental-features = nix-command flakes\n' >>"$conf"
+}
+
+# --- controllers -------------------------------------------------------------
+
+# padmap publishes each controller as a new device through /dev/uinput, and
+# cannot open it without permission. `uaccess` gives it to whoever is logged in
+# at the seat, which is the right answer on a handheld.
+UDEV_RULE='KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"'
+
+ensure_uinput() {
+  if [[ -w /dev/uinput ]]; then
+    skip "controllers can be published"
+    return 0
+  fi
+  if [[ -f "$UDEV_PATH" ]] && grep -qF 'uinput' "$UDEV_PATH"; then
+    warn "the rule is written but /dev/uinput is still not writable — a reboot applies it"
+    return 0
+  fi
+
+  step "letting GOTG publish controllers (/dev/uinput)"
+  need_sudo
+
+  local relock=0
+  if readonly_root; then
+    # SteamOS keeps / read-only and puts it back on every update, so this rule
+    # is not permanent. Said out loud at the end rather than discovered later.
+    sudo steamos-readonly disable || die "could not unlock the system partition"
+    relock=1
+  fi
+  printf '%s\n' "$UDEV_RULE" | sudo tee "$UDEV_PATH" >/dev/null
+  sudo udevadm control --reload-rules || true
+  sudo udevadm trigger --subsystem-match=misc --sysname-match=uinput || true
+  sudo modprobe uinput 2>/dev/null || true
+  if ((relock)); then
+    sudo steamos-readonly enable || warn "could not put the system partition back to read-only"
+  fi
+}
+
+# --- gotg --------------------------------------------------------------------
+
+install_gotg() {
+  step "installing GOTG from $FLAKE"
+  # --priority so a second run replaces rather than colliding with the first.
+  nix profile install "$FLAKE#gotg" "$FLAKE#gotg-ui" --priority 4 ||
+    die "could not install GOTG. If this is a private repository, see:
+     nix profile install --help, and NIX_CONFIG=\"extra-access-tokens = ...\""
+}
+
+add_to_steam() {
+  command -v gotg >/dev/null 2>&1 || return 0
+  if pgrep -x steam >/dev/null 2>&1; then
+    warn "Steam is running, so the shortcut is queued.
+     Close Steam, then run: gotg steam picker"
+    return 0
+  fi
+  step "putting GOTG in your Steam library"
+  gotg steam picker || warn "could not add the Steam shortcut; run 'gotg steam picker' yourself"
+}
+
+# --- the run -----------------------------------------------------------------
+
+main() {
+  say ""
+  say "  GOTG — installing onto $(is_steamos && echo "SteamOS" || echo "this machine")"
+  say ""
+
+  command -v curl >/dev/null 2>&1 || die "curl is needed and is not here"
+
+  ensure_nix
+  ensure_flakes
+  install_gotg
+  ensure_uinput
+  add_to_steam
+
+  say ""
+  say "${C_OK}Done.${C_OFF}"
+  say ""
+  say "  gotg list                 what is in the catalog"
+  say "  gotg install <id>         download a game and build what runs it"
+  say "  gotg-ui                   the picker, for a controller and a sofa"
+  say ""
+  if is_steamos; then
+    say "  Restart Steam to see GOTG in your library. It reads its shortcut file"
+    say "  once, at startup."
+    say ""
+    say "${C_WARN}  A SteamOS update wipes the system partition, which takes the"
+    say "  controller permission with it. Your games and Nix survive — they are on"
+    say "  the home partition. Run this installer again after an update and it will"
+    say "  put back only what is missing.${C_OFF}"
+    say ""
+  fi
+}
+
+# Sourced rather than run when the tests want the decisions without the
+# installing: every step above is a function, and this is the only line that
+# does anything.
+[[ "${GOTG_INSTALL_LIB:-0}" == "1" ]] && return 0
+
+main "$@"

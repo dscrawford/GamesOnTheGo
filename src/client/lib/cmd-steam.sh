@@ -30,6 +30,7 @@ steam_usage() {
   cat <<'EOF'
 usage: gotg steam <command> [args]
 
+  picker                 put GOTG itself in Steam, to pick a game from a sofa
   add <id> [variant]     put it in Steam, writing the launcher if needed
   remove <id> [variant]  take it out again
   art <id> [variant]     fetch its artwork again, --force to replace
@@ -59,6 +60,7 @@ cmd_steam() {
   esac
 
   case "$verb" in
+    picker) steam_picker "$@" ;;
     add) steam_add "$@" ;;
     remove | rm) steam_remove "$@" ;;
     art | artwork) steam_art "$@" ;;
@@ -578,6 +580,51 @@ steam_art() {
 
   steam_fetch_artwork "$name" "$appid" "$game" "${opts[@]}"
   steam_attach_icon "$launcher" "$(steam_icon_path "$appid")"
+}
+
+# The picker, as a Steam entry, so Game Mode can reach it.
+#
+# A launcher script rather than the binary itself: on a Deck the picker comes
+# from a nix profile, and the store path changes on every upgrade. Steam
+# remembers the path it was given -- it is half of how an entry is identified --
+# so a shortcut pointing into the store would stop working at the next
+# `gotg sync`, in Game Mode, where there is nothing to read the error.
+steam_picker() {
+  local name="${GOTG_PICKER_NAME:-Games On The Go}"
+  local launcher="$GOTG_STATE_DIR/launchers/gotg-ui.sh"
+
+  # Overridable like every other tool this shells out to: a test needs to be
+  # able to say there is no picker on a machine that has one.
+  local picker="${GOTG_PICKER:-}"
+  if [[ -z "$picker" ]]; then
+    picker="$(command -v gotg-ui 2>/dev/null)" || picker=""
+  fi
+  [[ -x "$picker" ]] ||
+    die "no gotg-ui here. Install the picker first: nix profile install $GOTG_REMOTE_FLAKE#gotg-ui"
+
+  ! steam_defer picker "" "" || return 0
+
+  mkdir -p "$(dirname "$launcher")"
+  # By name, not by path, for the reason above -- resolved against PATH each
+  # time it is pressed.
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf '# Written by gotg steam picker. Safe to delete; it is rewritten.\n'
+    printf 'exec gotg-ui "$@"\n'
+  } >"$launcher"
+  chmod +x "$launcher"
+
+  local result
+  result="$(steam_helper --file "$(steam_shortcuts_file)" add \
+    --name "$name" --exe "$launcher" --start-dir "$(dirname "$launcher")" \
+    --tag "GOTG")" ||
+    die "could not write the Steam shortcut"
+
+  log "$(jq -r '"\(.action): \(.name)"' <<<"$result")"
+  log "  $launcher -> $picker"
+  log ""
+  log "Restart Steam and it will be in your library — it reads its shortcut"
+  log "file once, at startup, so a Steam that is already open will not see it."
 }
 
 steam_add() {
