@@ -37,6 +37,8 @@ source "$GOTG_LIB/env.sh"
 source "$GOTG_LIB/launcher.sh"
 # shellcheck source=lib/versions.sh
 source "$GOTG_LIB/versions.sh"
+# shellcheck source=lib/padmap.sh
+source "$GOTG_LIB/padmap.sh"
 # shellcheck source=lib/killswitch.sh
 source "$GOTG_LIB/killswitch.sh"
 # shellcheck source=lib/cmd-play.sh

@@ -11,6 +11,7 @@
   python3,
   resvg,
   gotg,
+  padmap,
 }:
 
 let
@@ -68,7 +69,10 @@ stdenvNoCC.mkDerivation {
       --set GOTG_UI_DATA "${gotg}/share/gotg/data" \
       --set GOTG_UI_ENV "${gotg}/share/gotg/env" \
       --set GOTG_UI_ASSETS "$out/share/gotg-ui/assets" \
-      --prefix PATH : ${lib.makeBinPath [ gotg ]}
+      --prefix PATH : ${lib.makeBinPath [
+        gotg
+        padmap
+      ]}
 
     runHook postInstall
   '';

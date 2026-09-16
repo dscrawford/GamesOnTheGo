@@ -181,3 +181,60 @@ def test_the_commands_are_the_protocol_s_words(daemon):
 def test_sending_to_a_dead_socket_reports_rather_than_raises(tmp_path):
     client = Padmap(tmp_path / "nothing.sock")
     assert client.send({"cmd": "status"}) is False
+
+
+# --- starting the daemon ----------------------------------------------------
+#
+# The picker is usually the first thing open on the machine, so if it does not
+# start padmap nothing will. What is tested is that it never becomes a reason
+# not to draw: every failure comes back as a sentence.
+
+
+def fake_padmap(tmp_path, monkeypatch, *, exit_code=0, message=""):
+    script = tmp_path / "padmap"
+    script.write_text(
+        "#!/bin/sh\n"
+        f'[ -n "{message}" ] && echo "{message}" >&2\n'
+        f"exit {exit_code}\n"
+    )
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path), prepend=False)
+    monkeypatch.delenv("PADMAP_SKIP_DAEMON_CHECK", raising=False)
+    return script
+
+
+def test_a_daemon_that_starts_says_nothing(tmp_path, monkeypatch):
+    from gotg_ui.padmap import ensure_daemon
+
+    fake_padmap(tmp_path, monkeypatch)
+    assert ensure_daemon() is None
+
+
+def test_asking_twice_only_asks_once(tmp_path, monkeypatch):
+    # padmap's own flag, and `gotg play` reads the same one -- so a game
+    # launched from the grid does not stop to check what the picker checked.
+    from gotg_ui.padmap import ensure_daemon
+
+    fake_padmap(tmp_path, monkeypatch)
+    ensure_daemon()
+    import os
+
+    assert os.environ["PADMAP_SKIP_DAEMON_CHECK"] == "1"
+    assert ensure_daemon() is None
+
+
+def test_a_daemon_that_will_not_start_is_a_sentence(tmp_path, monkeypatch):
+    from gotg_ui.padmap import ensure_daemon
+
+    fake_padmap(tmp_path, monkeypatch, exit_code=1, message="no permission for uinput")
+    trouble = ensure_daemon()
+    assert trouble is not None
+    assert "uinput" in trouble
+
+
+def test_no_padmap_at_all_is_a_sentence_too(tmp_path, monkeypatch):
+    from gotg_ui.padmap import ensure_daemon
+
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.delenv("PADMAP_SKIP_DAEMON_CHECK", raising=False)
+    assert ensure_daemon() == "padmap is not installed"

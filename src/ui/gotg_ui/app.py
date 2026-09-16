@@ -18,7 +18,7 @@ from .catalog import Game, Library
 from .controllers import assets_dir
 from .controllers import draw as draw_controllers
 from .controllers import draw_strip
-from .padmap import Padmap
+from .padmap import Padmap, ensure_daemon
 from .fetch import Loader
 from .grid import Grid
 from .installed import installed_games
@@ -321,6 +321,10 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # with no daemon running is what every machine looks like before anybody
     # has set a controller up, and the strip says so instead of disappearing.
     pads = Padmap()
+    # Started rather than waited for: the picker is usually the first thing
+    # open on this machine, so if it does not start the daemon nothing will.
+    # A failure is a sentence in the strip, not a reason to refuse to draw.
+    padmap_trouble = ensure_daemon()
     pads.connect()
     controller_art: dict = {}
     # The storage screen, and the path being typed to add to it.
@@ -665,7 +669,13 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             # Last, and over everything: which seat a person is in is the one
             # thing worth knowing on every screen, and drawing it after the
             # others means no screen has to leave room for it.
-            draw_strip(screen, font_at, pads.players, pads.slots, pads.status_word)
+            draw_strip(
+                screen,
+                font_at,
+                pads.players,
+                pads.slots,
+                pads.status_word if pads.connected else (padmap_trouble or pads.status_word),
+            )
             pygame.display.flip()
             # The loader only mirrors streamed text; 30fps halves the redundant
             # re-render of a mostly-unchanged tail across a minutes-long build.

@@ -112,6 +112,7 @@
         // rec {
           gotg = pkgs.callPackage ./src/client {
             inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg-pads gotg-killswitch;
+            inherit (padmap.packages.${pkgs.stdenv.hostPlatform.system}) padmap padmap-rs;
           };
 
           # The picker. Takes the client rather than reimplementing it: what
@@ -119,6 +120,7 @@
           # and the copy nobody runs from a terminal is the one that rots.
           gotg-ui = pkgs.callPackage ./src/ui {
             inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg;
+            inherit (padmap.packages.${pkgs.stdenv.hostPlatform.system}) padmap;
           };
           # Both roles come from the one workspace: the indexer venv carries
           # the yaml extra, the service venv carries nothing at all.
