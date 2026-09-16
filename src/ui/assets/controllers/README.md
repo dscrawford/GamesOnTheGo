@@ -1,7 +1,16 @@
 # Controller artwork
 
-One SVG per console, each carrying an `anchor-<input>` circle for every button,
-where `<input>` is the ares input name exactly as `ares-pads.json` spells it.
+One SVG per console, each carrying an `anchor-<input>` circle for every button.
+
+`<input>` is the ares input name exactly as `ares-pads.json` spells it — except
+for `gamecube.svg`, whose anchors are named for padmap's canonical controls
+(`a`, `dpup`, `righttrigger`). There is no ares GameCube: Dolphin writes its own
+configuration and publishes no console, so that drawing exists for the launch
+wizard rather than the binding screen, and naming its anchors after the only
+thing that asks for them beats inventing a table to translate between two
+spellings of "Z". `gate.ANCHOR_ALIASES` maps padmap's names onto the ares ones
+for the consoles that have both.
+
 `build-controllers.py` reads those circles and nothing else, so the artwork
 itself can be drawn however it likes.
 
@@ -12,6 +21,7 @@ itself can be drawn however it likes.
 | `snes.svg` | ES-DE `gamepad_nintendo_snes.svg` | MIT |
 | `nes.svg` | ES-DE `gamepad_nintendo_nes.svg` | MIT |
 | `n64.svg` | ES-DE `gamepad_nintendo_64.svg` | MIT |
+| `gamecube.svg` | ES-DE `gamepad_nintendo_gamecube.svg` | MIT |
 | `megadrive.svg` | ES-DE `gamepad_sega_md_3_buttons.svg` | MIT |
 | `gameboy.svg` | Wikimedia Commons `Gameboy pocket.svg` | CC0 |
 | `gba.svg` | Openclipart 344577 `game-boy-advance` | CC0 |
@@ -23,13 +33,14 @@ is a plain MIT grant and none of the 46 files in its `licenses/` directory cover
 `resources/graphics/`, so the root licence is what applies. See `LICENSE-MIT-ES-DE`
 beside this file, which is that grant kept verbatim as MIT requires.
 
-The three-button Mega Drive pad and the N64 pad are the reason this is ES-DE and
-not Commons: no CC0 vector of either exists. Commons has photographs.
+The three-button Mega Drive pad, the N64 pad and the GameCube pad are the reason
+this is ES-DE and not Commons: no CC0 vector of any of them exists. Commons has
+photographs.
 
 ## The wordmarks are removed on purpose
 
-The ES-DE originals carry "SUPER NINTENDO", "Nintendo", "SEGA" and "MEGA DRIVE
-CONTROL PAD". MIT grants copyright, not trademark, so those paths are deleted
+The ES-DE originals carry "SUPER NINTENDO", "Nintendo", "SEGA", "MEGA DRIVE
+CONTROL PAD" and "NINTENDO GAMECUBE". MIT grants copyright, not trademark, so those paths are deleted
 when the file is vendored — and deleted *completely*, since half a wordmark
 renders as a glitch rather than as restraint. Removing them is also why the
 files here differ from upstream, which MIT permits and this note records.

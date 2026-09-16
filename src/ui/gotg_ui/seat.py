@@ -25,7 +25,8 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 import pygame  # noqa: E402 - the line above only works ahead of the import
 
-from .gate import MAPPING, SEATING, SKIPPED, Gate, apply, decide
+from .controllers import Diagram, assets_dir
+from .gate import MAPPING, SEATING, SKIPPED, Gate, anchor_names, apply, artwork_for, decide
 from .padmap import Padmap, ensure_daemon
 from .padstrip import EMPTY_RING, LABEL, LABEL_DIM, PANEL, colour_for
 
@@ -38,42 +39,64 @@ BACKGROUND = (18, 18, 22)
 FIRST_STATE_TIMEOUT = 3.0
 
 
-def draw(screen, font_at, gate: Gate, title: str) -> None:
+def draw(screen, font_at, gate: Gate, title: str, diagram: Diagram | None = None) -> None:
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
 
     heading = font_at(34).render(title, True, LABEL_DIM)
-    screen.blit(heading, ((width - heading.get_width()) // 2, int(height * 0.16)))
+    screen.blit(heading, ((width - heading.get_width()) // 2, int(height * 0.10)))
 
     prompt = font_at(56).render(gate.prompt, True, LABEL)
-    screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.34)))
+    screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.22)))
 
     if gate.state == SEATING:
         # One ring, because one controller is what this is waiting for. The
         # colour is player one's, so the seat somebody is about to take looks
         # like the seat they will have.
-        centre = (width // 2, int(height * 0.58))
+        centre = (width // 2, int(height * 0.52))
         pygame.draw.circle(screen, PANEL, centre, 46)
         pygame.draw.aacircle(screen, colour_for(1), centre, 46)
         pygame.draw.aacircle(screen, colour_for(1), centre, 45)
 
+    if gate.state == MAPPING and diagram is not None:
+        # The pad, with the button being asked for ringed on it. "press Z" is
+        # a sentence somebody has to already know the answer to; a ring on the
+        # drawing is the answer.
+        # Sized from the height it is allowed rather than the width, because a
+        # pad is wider than it is tall only for some consoles -- the GameCube
+        # drawing is square, and a width-sized one runs off the bottom of the
+        # screen and through the progress bar.
+        budget_h = int(height * 0.48)
+        pad_w = min(int(budget_h * diagram.size[0] / diagram.size[1]), int(width * 0.52))
+        pad = diagram.surface(pad_w)
+        pad_x = (width - pad.get_width()) // 2
+        pad_y = int(height * 0.31) + (budget_h - pad.get_height()) // 2
+        screen.blit(pad, (pad_x, pad_y))
+        for name in anchor_names(gate.control):
+            uv = diagram.anchors.get(name)
+            if uv is None:
+                continue
+            at = (pad_x + int(uv[0] * pad.get_width()), pad_y + int(uv[1] * pad.get_height()))
+            pygame.draw.aacircle(screen, colour_for(1), at, 17, 3)
+            break
+
     if gate.state == MAPPING and gate.total:
         bar_w, bar_h = int(width * 0.5), 10
-        left, top = (width - bar_w) // 2, int(height * 0.58)
+        left, top = (width - bar_w) // 2, int(height * 0.82)
         pygame.draw.rect(screen, PANEL, (left, top, bar_w, bar_h), border_radius=5)
         filled = int(bar_w * (gate.index / gate.total))
         pygame.draw.rect(screen, colour_for(1), (left, top, filled, bar_h), border_radius=5)
         counted = font_at(24).render(f"{gate.index} of {gate.total}", True, LABEL_DIM)
-        screen.blit(counted, ((width - counted.get_width()) // 2, top + 26))
+        screen.blit(counted, ((width - counted.get_width()) // 2, top - 30))
 
     if gate.message:
         said = font_at(24).render(gate.message, True, EMPTY_RING)
-        screen.blit(said, ((width - said.get_width()) // 2, int(height * 0.72)))
+        screen.blit(said, ((width - said.get_width()) // 2, int(height * 0.76)))
 
     keys = "S skip this button   Esc play without it" if gate.state == MAPPING \
         else "Esc play without a controller"
     footer = font_at(22).render(keys, True, LABEL_DIM)
-    screen.blit(footer, ((width - footer.get_width()) // 2, int(height * 0.86)))
+    screen.blit(footer, ((width - footer.get_width()) // 2, int(height * 0.92)))
 
 
 def run(platform: str, title: str) -> int:
@@ -121,6 +144,14 @@ def run(platform: str, title: str) -> int:
         return fonts[size]
 
     accepted = False
+    # Loaded once, and absence is survivable: a console with no artwork, or a
+    # build with none, still gets the words.
+    try:
+        diagram: Diagram | None = Diagram(assets_dir(), artwork_for(gate.layout))
+    except (OSError, ValueError, KeyError) as error:
+        print(f"gotg-seat: no controller drawing: {error}", file=sys.stderr)
+        diagram = None
+
     try:
         while not gate.done:
             for event in pygame.event.get():
@@ -148,7 +179,7 @@ def run(platform: str, title: str) -> int:
             if gate.state == SEATING and gate.seated and not accepted:
                 accepted = pads.send({"cmd": "accept"})
 
-            draw(screen, font_at, gate, title)
+            draw(screen, font_at, gate, title, diagram)
             pygame.display.flip()
             clock.tick(60)
     finally:
