@@ -84,11 +84,13 @@ def test_installed_only_answers_to_either_direction():
     assert not ours.installed_only
 
 
-def test_pressing_a_row_means_the_same_as_right():
+def test_left_and_right_still_nudge_without_opening_anything():
+    # For when the answer is next door and a list is more than is wanted.
     ours = browser()
     panel = filters.Filters()
-    assert panel.press(ours) is None
+    panel.adjust(ours, 1)
     assert ours.platform != ALL
+    assert not panel.open
 
 
 def test_the_search_row_asks_for_the_keyboard():
@@ -155,3 +157,99 @@ def test_every_row_has_a_label_and_a_value():
     assert all(label for label, _, _ in rows)
     # Exactly one row is the selected one, whichever it is.
     assert sum(1 for _, _, selected in rows if selected) == 1
+
+
+# --- the dropdown ------------------------------------------------------------
+
+
+def test_pressing_a_row_opens_its_list():
+    # Twelve platforms is a list to look down, not a value to press right
+    # eleven times.
+    ours = browser()
+    panel = filters.Filters()
+    panel.press(ours)
+    assert panel.open
+    assert panel.choice.row == filters.PLATFORM
+    assert ALL in panel.choice.options
+
+
+def test_the_list_opens_on_what_the_filter_already_is():
+    # So the eye starts where the value is rather than at the top of a dozen.
+    ours = browser()
+    ours.set_platform("snes")
+    panel = filters.Filters()
+    panel.press(ours)
+    assert panel.choice.value == "snes"
+
+
+def test_choosing_sets_the_filter_and_closes_the_list():
+    ours = browser()
+    panel = filters.Filters()
+    panel.press(ours)
+    panel.choice.move(1)
+    wanted = panel.choice.value
+    panel.choose(ours)
+    assert ours.platform == wanted
+    assert not panel.open
+
+
+def test_the_list_wraps_too():
+    ours = browser()
+    panel = filters.Filters()
+    panel.press(ours)
+    panel.choice.move(-1)
+    assert panel.choice.value == panel.choice.options[-1]
+
+
+def test_closing_the_list_changes_nothing():
+    # B is one step back, not a way to set a filter by accident.
+    ours = browser()
+    panel = filters.Filters()
+    panel.press(ours)
+    panel.choice.move(2)
+    panel.close()
+    assert not panel.open
+    assert ours.platform == ALL
+
+
+def test_the_way_back_to_everything_is_the_top_of_the_list():
+    ours = browser()
+    panel = filters.Filters()
+    panel.press(ours)
+    assert panel.choice.options[0] == ALL
+
+
+def test_regions_get_a_list_of_their_own():
+    ours = browser()
+    panel = filters.Filters(index=filters.ROWS.index(filters.REGION))
+    panel.press(ours)
+    assert panel.choice.row == filters.REGION
+    assert "jpn" in panel.choice.options
+
+
+def test_installed_only_is_a_list_of_two_rather_than_a_toggle():
+    # Every row on the panel answers to the same press, so none of them is a
+    # special case somebody has to learn.
+    ours = browser()
+    panel = filters.Filters(index=filters.ROWS.index(filters.INSTALLED))
+    panel.press(ours)
+    assert panel.choice.options == ("no", "yes")
+    panel.choice.index = panel.choice.options.index("yes")
+    panel.choose(ours)
+    assert ours.installed_only
+
+
+def test_setting_installed_to_what_it_already_is_does_not_flip_it():
+    # It is a toggle underneath, and choosing "no" twice must not mean yes.
+    ours = browser()
+    filters.set_value(ours, filters.INSTALLED, "no")
+    assert not ours.installed_only
+    filters.set_value(ours, filters.INSTALLED, "yes")
+    filters.set_value(ours, filters.INSTALLED, "yes")
+    assert ours.installed_only
+
+
+def test_search_and_clear_have_no_list():
+    ours = browser()
+    for row in (filters.SEARCH, filters.CLEAR):
+        assert filters.options_for(ours, row) == ()

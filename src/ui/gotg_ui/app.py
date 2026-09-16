@@ -27,7 +27,7 @@ from .layout import grid, tile_at
 from .menu import Menu
 from .padmap import Padmap, ensure_daemon
 from .padstrip import HEIGHT as STRIP_HEIGHT
-from .padstrip import status_text, strip_status
+from .padstrip import PANEL, status_text, strip_status
 from .prepare import Preparer, is_ready
 from .storage import Storage, human
 from .variants import variants_for
@@ -229,9 +229,66 @@ def draw_filters(screen, font_at, browser, panel) -> None:
             shown = font_at(26).render(value, True, TEXT if selected else TEXT_DIM)
             screen.blit(shown, (rx + rw - shown.get_width() - 20, ry + (rh - 6 - shown.get_height()) // 2))
 
-    keys = "left/right change   A or Enter choose   B or Esc back"
+    bottom = rows[-1][1] + rows[-1][3]
+    if panel.choice is not None:
+        # The list can reach below the rows, and the keys have to clear it --
+        # a footer drawn under an open list reads as part of the options.
+        bottom = max(bottom, draw_choice(screen, font_at, panel, rows))
+
+    keys = (
+        "up/down choose   A pick   B back"
+        if panel.choice is not None
+        else "A open the list   left/right nudge   B or Esc back"
+    )
     footer = font_at(22).render(keys, True, TEXT_DIM)
-    screen.blit(footer, ((width - footer.get_width()) // 2, rows[-1][1] + rows[-1][3] + 20))
+    screen.blit(footer, ((width - footer.get_width()) // 2, bottom + 20))
+
+
+# How many options are on screen at once. A dozen platforms would run off the
+# bottom of a Deck, so the list scrolls around the cursor instead.
+CHOICE_WINDOW = 7
+
+
+def draw_choice(screen, font_at, panel, rows) -> int:
+    """The open dropdown, over the row it belongs to. Returns its bottom."""
+    choice = panel.choice
+    rx, ry, rw, rh = rows[panel.index]
+    row_h = font_at(24).get_height() + 10
+
+    # Scrolled so the cursor is in the middle, except at the ends, where
+    # sliding past the last entry would show empty space instead of options.
+    total = len(choice.options)
+    shown = min(CHOICE_WINDOW, total)
+    first = max(0, min(choice.index - shown // 2, total - shown))
+
+    counter = font_at(18)
+    # Room for "7 of 12" under the last option rather than across it.
+    footer_h = counter.get_height() + 6 if total > shown else 0
+    list_w = max(220, rw // 2)
+    list_x = rx + rw - list_w
+    list_y = ry + rh - 6
+    list_h = row_h * shown + 8 + footer_h
+    # Upwards when there is no room below, which there is not for the last row.
+    if list_y + list_h > screen.get_height():
+        list_y = ry - list_h + 6
+
+    pygame.draw.rect(screen, PANEL, (list_x, list_y, list_w, list_h), border_radius=8)
+    pygame.draw.rect(screen, TEXT_DIM, (list_x, list_y, list_w, list_h), width=1, border_radius=8)
+
+    for offset in range(shown):
+        index = first + offset
+        y = list_y + 4 + offset * row_h
+        if index == choice.index:
+            pygame.draw.rect(screen, TILE_SELECTED, (list_x + 4, y, list_w - 8, row_h - 2), border_radius=6)
+        colour = TEXT if index == choice.index else TEXT_DIM
+        text = font_at(24).render(choice.options[index], True, colour)
+        screen.blit(text, (list_x + 16, y + (row_h - 2 - text.get_height()) // 2))
+
+    # Said, rather than left to be guessed at from a list that stops.
+    if footer_h:
+        more = counter.render(f"{choice.index + 1} of {total}", True, TEXT_DIM)
+        screen.blit(more, (list_x + list_w - more.get_width() - 12, list_y + list_h - more.get_height() - 4))
+    return list_y + list_h
 
 
 def draw_storage(screen, font_at, storage: Storage, typing: str | None) -> None:
@@ -623,31 +680,48 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 # so that opening the keyboard from it still works, and before
                 # the grid so the cursor does not move behind it.
                 if panel is not None and typing is None:
+                    # An open list owns up, down, A and B; the panel underneath
+                    # owns them when there is none. One step back per press of
+                    # B: the list first, then the panel.
                     if event.type == pygame.KEYDOWN:
-                        if event.key in (pygame.K_ESCAPE, pygame.K_b, pygame.K_TAB):
-                            panel = None
+                        if event.key in (pygame.K_ESCAPE, pygame.K_b):
+                            if panel.open:
+                                panel.close()
+                            else:
+                                panel = None
                         elif event.key == pygame.K_UP:
-                            panel.move(-1)
+                            panel.choice.move(-1) if panel.open else panel.move(-1)
                         elif event.key == pygame.K_DOWN:
-                            panel.move(1)
-                        elif event.key == pygame.K_LEFT:
+                            panel.choice.move(1) if panel.open else panel.move(1)
+                        elif event.key == pygame.K_LEFT and not panel.open:
                             panel.adjust(browser, -1)
-                        elif event.key == pygame.K_RIGHT:
+                        elif event.key == pygame.K_RIGHT and not panel.open:
                             panel.adjust(browser, 1)
                         elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-                            if panel.press(browser) == filters.TYPING:
+                            if panel.open:
+                                panel.choose(browser)
+                            elif panel.press(browser) == filters.TYPING:
                                 typing = browser.search
                     elif event.type == pygame.JOYHATMOTION:
                         dx, dy = event.value
                         if dy:
-                            panel.move(-dy)  # the hat is y-up
-                        if dx:
+                            # The hat is y-up and both lists are y-down.
+                            panel.choice.move(-dy) if panel.open else panel.move(-dy)
+                        if dx and not panel.open:
                             panel.adjust(browser, dx)
                     elif event.type == pygame.JOYBUTTONDOWN:
                         if event.button == 0:
-                            if panel.press(browser) == filters.TYPING:
+                            if panel.open:
+                                panel.choose(browser)
+                            elif panel.press(browser) == filters.TYPING:
                                 typing = browser.search
-                        elif event.button in (1, 6):
+                        elif event.button == 1:
+                            if panel.open:
+                                panel.close()
+                            else:
+                                panel = None
+                        elif event.button == 7:
+                            # Start closes it the way Start opened it.
                             panel = None
                     continue
 
@@ -765,12 +839,10 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         # X: search. A Deck raises the Steam keyboard over this.
                         typing = browser.search
                     elif event.button == 7:
-                        # Start: toggles installed-only. Every face button is
-                        # taken; Start reads as "my library" on a handheld.
-                        browser.toggle_installed()
-                    elif event.button == 6:
-                        # Select: the filter panel. The one button left, and
-                        # the only way a pad can reach regions at all.
+                        # Start: the filter panel, which is where installed-only
+                        # now lives along with everything else that narrows the
+                        # library. Start is the button somebody presses looking
+                        # for options, so that is what it opens.
                         panel = Filters()
 
             # Completion first, drawing second: a finished steam-add clears
