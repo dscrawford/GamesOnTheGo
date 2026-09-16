@@ -37,6 +37,33 @@ padmap_ensure() {
   export PADMAP_SKIP_DAEMON_CHECK=1
 }
 
+# The name of the launch-time controller check. Overridable for the same reason
+# every other tool here is: a test needs a stand-in it can watch being called.
+padmap_seat_bin() { printf '%s' "${GOTG_SEAT:-gotg-seat}"; }
+
+# Ask about controllers before the game takes the screen.
+#
+# Only ever asks when there is something to ask -- no controller seated, or one
+# that has never been mapped for this console -- and the check itself is a
+# socket round trip that costs nothing on a machine somebody has already set
+# up. The reason it is here rather than in the picker is that a game can be
+# started from a terminal, from Steam, or from the grid, and the controller is
+# missing in exactly the same way in all three.
+#
+# Absent is fine. gotg-seat ships with the picker, which is a separate package
+# and deliberately not something the client depends on: found on PATH it runs,
+# and not found it is skipped without a word. Failure is fine too -- it exits 0
+# by design, and this ignores its status anyway, because nothing about a
+# controller is a reason not to start a game somebody asked for.
+padmap_seat_gate() {
+  local platform="$1" title="${2:-}" seat
+  [[ "${GOTG_SEAT_GATE:-1}" != "0" ]] || return 0
+  seat="$(padmap_seat_bin)"
+  command -v "$seat" >/dev/null 2>&1 || return 0
+  padmap_ensure
+  "$seat" --platform "$platform" --title "$title" || true
+}
+
 # Launch, with padmap's mappings in the environment.
 #
 # `padmap-rs exec` reads the file the daemon wrote at its last republish and

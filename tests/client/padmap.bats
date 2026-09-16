@@ -32,12 +32,19 @@ setup() {
     printf 'shift 2\n'
     printf 'exec "$@"\n'
   } >"$FAKE_BIN/padmap-rs"
-  chmod +x "$FAKE_BIN/padmap" "$FAKE_BIN/padmap-rs"
+  export SEAT_LOG="$TEST_TMP/seat.log"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'printf "gotg-seat %%s\\n" "$*" >>"$SEAT_LOG"\n'
+    printf 'exit "${FAKE_SEAT_EXIT:-0}"\n'
+  } >"$FAKE_BIN/gotg-seat"
+  chmod +x "$FAKE_BIN/padmap" "$FAKE_BIN/padmap-rs" "$FAKE_BIN/gotg-seat"
   export PATH="$FAKE_BIN:$PATH"
   # Named rather than found: the packaged client puts the real padmap first on
   # PATH, where a stand-in in this directory could never win.
   export GOTG_PADMAP="$FAKE_BIN/padmap"
   export GOTG_PADMAP_RS="$FAKE_BIN/padmap-rs"
+  export GOTG_SEAT="$FAKE_BIN/gotg-seat"
   unset PADMAP_SKIP_DAEMON_CHECK
 }
 
@@ -97,4 +104,51 @@ teardown() { stop_saves_service; }
   [ "$status" -eq 0 ]
   [[ "$output" == *"emulator ran"* ]]
   grep -q "padmap-rs exec --" "$PADMAP_LOG"
+}
+
+@test "the controller check runs before the game, and is told which console" {
+  # The console is what decides the control set the capture walks, so a gate
+  # that did not carry it would ask for the wrong buttons.
+  run padmap_seat_gate n64 "Zelda"
+  [ "$status" -eq 0 ]
+  grep -q -- "--platform n64" "$SEAT_LOG"
+  grep -q -- "--title Zelda" "$SEAT_LOG"
+}
+
+@test "no controller check installed still launches the game" {
+  # It ships with the picker, which is a separate package: the client depends
+  # on it the way it depends on padmap, which is to say not at all.
+  rm -f "$FAKE_BIN/gotg-seat"
+  run padmap_seat_gate n64 "Zelda"
+  [ "$status" -eq 0 ]
+  [ ! -f "$SEAT_LOG" ]
+}
+
+@test "a controller check that fails does not stop the game" {
+  FAKE_SEAT_EXIT=3 run padmap_seat_gate n64 "Zelda"
+  [ "$status" -eq 0 ]
+}
+
+@test "the check can be turned off entirely" {
+  GOTG_SEAT_GATE=0 run padmap_seat_gate n64 "Zelda"
+  [ "$status" -eq 0 ]
+  [ ! -f "$SEAT_LOG" ]
+}
+
+@test "play asks about controllers before it runs the emulator" {
+  add_game n64 "usa.zelda.z64" "rom" "Zelda"
+  gotg refresh
+  export GOTG_ENV_DIR="$TEST_TMP/env"
+  mkdir -p "$GOTG_ENV_DIR"
+  : >"$GOTG_ENV_DIR/n64.nix"
+  fake_env env-n64
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'echo "emulator ran"\n'
+  } >"$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
+  chmod +x "$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
+
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  grep -q -- "--platform n64" "$SEAT_LOG"
 }
