@@ -316,8 +316,6 @@ def draw_assign(screen, font_at, view, icon_surface=None) -> None:
         )
 
     # The seats, across the middle, in the same colours the strip uses.
-    from .padstrip import EMPTY, EMPTY_TEXT, colour_for
-
     slot_w = min(200, width // max(1, view.slots))
     total = slot_w * view.slots
     left = (width - total) // 2
@@ -343,7 +341,10 @@ def draw_assign(screen, font_at, view, icon_surface=None) -> None:
         note = font_at(22).render(view.message, True, (232, 140, 140))
         screen.blit(note, ((width - note.get_width()) // 2, int(height * 0.72)))
 
-    keys = "Enter keep   R start again   Esc cancel" if view.state == "assigning" \
-        else "A or Enter assign   Esc back"
+    # Named for both, because both work and only one of them is in the room:
+    # somebody holding a pad should not have to find a keyboard to keep what
+    # they have just claimed.
+    keys = "A or Enter keep   Y or R start again   B or Esc cancel" \
+        if view.state == "assigning" else "A or Enter assign   B or Esc back"
     footer = font_at(20).render(keys, True, TEXT_DIM)
     screen.blit(footer, ((width - footer.get_width()) // 2, int(height * 0.86)))
