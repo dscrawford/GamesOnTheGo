@@ -7,6 +7,7 @@ would not have worked.
 """
 
 from gotg_ui.gate import (
+    ANCHOR_ALIASES,
     CHECKING,
     MAPPING,
     READY,
@@ -14,7 +15,9 @@ from gotg_ui.gate import (
     SKIPPED,
     Gate,
     Seat,
+    anchor_names,
     apply,
+    artwork_for,
     console_scope,
     decide,
     layout_for,
@@ -188,3 +191,71 @@ def test_an_unknown_event_leaves_the_gate_alone():
 def test_an_error_is_shown_rather_than_thrown():
     gate = apply(Gate(), {"event": "error", "message": "no joypads found"})
     assert gate.message == "no joypads found"
+
+
+# --- which drawing, and which circle on it ----------------------------------
+
+
+def test_a_console_with_artwork_uses_its_own():
+    assert artwork_for("gamecube") == "gamecube"
+    assert artwork_for("genesis") == "megadrive"
+
+
+def test_a_console_with_no_artwork_gets_the_generic_pad():
+    # Still a stick, a d-pad and four face buttons in the right places, which
+    # is enough to point at the button being asked for.
+    assert artwork_for("switch") == "generic"
+    assert artwork_for("wiiu") == "generic"
+
+
+def test_the_gamecube_drawing_is_looked_up_by_padmaps_own_name():
+    # Its anchors are named for padmap's controls, so no translation is wanted
+    # and the canonical name has to come first.
+    assert anchor_names("righttrigger")[0] == "righttrigger"
+
+
+def test_the_older_drawings_are_still_reachable_through_an_alias():
+    # snes.svg and n64.svg predate padmap and name their anchors the way ares
+    # does, so "dpup" has to be able to find "Up".
+    assert anchor_names("dpup") == ("dpup", "Up")
+    assert anchor_names("a") == ("a", "A")
+
+
+def test_a_control_with_no_alias_asks_for_itself_only():
+    assert anchor_names("rightstick_left") == ("rightstick_left",)
+
+
+def test_no_control_asks_for_nothing():
+    assert anchor_names("") == ()
+
+
+def test_the_gamecube_drawing_has_a_circle_for_every_control_padmap_asks_for():
+    """The artwork and the wizard have to agree, or a step points at nothing.
+
+    Parsed rather than eyeballed: an anchor named `dpUp`, or a control padmap
+    adds later, is a button somebody is asked to press with no mark on the pad
+    and no error anywhere.
+    """
+    import pathlib
+    import xml.etree.ElementTree as ET
+
+    svg = pathlib.Path(__file__).resolve().parents[2] / "src/ui/assets/controllers/gamecube.svg"
+    root = ET.parse(svg).getroot()
+    found = {
+        (el.get("id") or "")[len("anchor-"):]
+        for el in root.iter()
+        if (el.get("id") or "").startswith("anchor-")
+    }
+    # padmap's gamecube layout, as of the pinned revision.
+    wanted = {
+        "a", "b", "x", "y", "start",
+        "dpup", "dpdown", "dpleft", "dpright",
+        "leftshoulder", "rightshoulder", "righttrigger",
+        "rightstick_up", "rightstick_down", "rightstick_left", "rightstick_right",
+    }
+    assert wanted <= found, sorted(wanted - found)
+
+
+def test_every_alias_points_at_a_different_name():
+    # A pair that collided would light the wrong button on half the consoles.
+    assert len(set(ANCHOR_ALIASES.values())) == len(ANCHOR_ALIASES)

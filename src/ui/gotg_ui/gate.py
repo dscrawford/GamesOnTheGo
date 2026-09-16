@@ -53,6 +53,41 @@ def layout_for(platform: str) -> str:
     return LAYOUTS.get((platform or "").lower(), FALLBACK_LAYOUT)
 
 
+# The padmap layout -> the drawing that stands for it. Only what exists: a
+# console with no artwork gets the generic pad, which still shows a stick, a
+# d-pad and four face buttons in the right places.
+ARTWORK = {
+    "gamecube": "gamecube",
+    "n64": "n64",
+    "snes": "snes",
+    "genesis": "megadrive",
+}
+FALLBACK_ARTWORK = "generic"
+
+# padmap names controls the way SDL does; the diagrams that predate padmap name
+# their anchors the way ares does. Tried in that order, so gamecube -- drawn for
+# this screen -- needs no translation, and snes and n64 still light up.
+ANCHOR_ALIASES = {
+    "a": "A", "b": "B", "x": "X", "y": "Y",
+    "start": "Start", "back": "Select", "guide": "Home",
+    "dpup": "Up", "dpdown": "Down", "dpleft": "Left", "dpright": "Right",
+    "leftshoulder": "L", "rightshoulder": "R",
+    "lefttrigger": "L2", "righttrigger": "Z",
+}
+
+
+def artwork_for(layout: str) -> str:
+    return ARTWORK.get(layout, FALLBACK_ARTWORK)
+
+
+def anchor_names(control: str) -> tuple[str, ...]:
+    """Which anchors could mark this control, best first."""
+    if not control:
+        return ()
+    alias = ANCHOR_ALIASES.get(control)
+    return (control, alias) if alias else (control,)
+
+
 def console_scope(layout: str) -> str:
     """padmap's scope string for "every game on this console"."""
     return f"console:{layout}"
