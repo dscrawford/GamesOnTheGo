@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pygame
 
-from . import config
+from . import config, filters
 from .art import ArtStore
 from .assign import Session
 from .browser import Browser
@@ -20,6 +20,7 @@ from .catalog import Game, Library
 from .controllers import assets_dir, draw_assign, draw_strip
 from .controllers import draw as draw_controllers
 from .fetch import Loader
+from .filters import Filters
 from .grid import Grid
 from .installed import installed_games
 from .layout import grid, tile_at
@@ -191,6 +192,48 @@ def draw_menu(screen, menu: Menu, tiles, font_at) -> None:
         screen.blit(text, (rx + 16, ry + (rh - text.get_height()) // 2 - 2))
 
 
+def filter_rects(panel, font_at, size) -> list[tuple[int, int, int, int]]:
+    """One rect per filter row, centred. Computed here and only here, so the
+    drawing and the pointer cannot disagree about where a row is."""
+    width, height = size
+    row_h = font_at(26).get_height() + 16
+    panel_w = min(int(width * 0.6), 560)
+    total = row_h * len(panel.rows)
+    left = (width - panel_w) // 2
+    top = (height - total) // 2
+    return [(left, top + i * row_h, panel_w, row_h) for i in range(len(panel.rows))]
+
+
+def draw_filters(screen, font_at, browser, panel) -> None:
+    """The filter panel: a row per thing to narrow by, and its value.
+
+    A list rather than more buttons. Everything on it was already possible and
+    half of it only from a keyboard -- regions had no binding a pad could
+    reach at all.
+    """
+    width, height = screen.get_size()
+    overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+    overlay.fill((*BACKGROUND, 232))
+    screen.blit(overlay, (0, 0))
+
+    title = font_at(40).render("Filter", True, TEXT)
+    rows = filter_rects(panel, font_at, (width, height))
+    screen.blit(title, ((width - title.get_width()) // 2, rows[0][1] - title.get_height() - 24))
+
+    for (label, value, selected), (rx, ry, rw, rh) in zip(filters.rows_for(browser, panel), rows, strict=True):
+        if selected:
+            pygame.draw.rect(screen, TILE_SELECTED, (rx, ry, rw, rh - 6), border_radius=8)
+        name = font_at(26).render(label, True, TEXT if selected else TEXT_DIM)
+        screen.blit(name, (rx + 20, ry + (rh - 6 - name.get_height()) // 2))
+        if value:
+            shown = font_at(26).render(value, True, TEXT if selected else TEXT_DIM)
+            screen.blit(shown, (rx + rw - shown.get_width() - 20, ry + (rh - 6 - shown.get_height()) // 2))
+
+    keys = "left/right change   A or Enter choose   B or Esc back"
+    footer = font_at(22).render(keys, True, TEXT_DIM)
+    screen.blit(footer, ((width - footer.get_width()) // 2, rows[-1][1] + rows[-1][3] + 20))
+
+
 def draw_storage(screen, font_at, storage: Storage, typing: str | None) -> None:
     """The storage screen: every games directory, the device's room, the way out."""
     width, height = screen.get_size()
@@ -339,6 +382,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # A screen rather than an overlay: it is a page of reference, not an
     # action, and nothing underneath it should keep moving.
     controllers: str | None = None
+    # The filter panel, while it is open. None is the grid.
+    panel: Filters | None = None
     # The controller layer. Absent is a state rather than a failure: a machine
     # with no daemon running is what every machine looks like before anybody
     # has set a controller up, and the strip says so instead of disappearing.
@@ -574,6 +619,38 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 pick(picked.game, verb, picked.variant, picked.version)
                     continue
 
+                # The filter panel, while it is up. Before the typing branch
+                # so that opening the keyboard from it still works, and before
+                # the grid so the cursor does not move behind it.
+                if panel is not None and typing is None:
+                    if event.type == pygame.KEYDOWN:
+                        if event.key in (pygame.K_ESCAPE, pygame.K_b, pygame.K_TAB):
+                            panel = None
+                        elif event.key == pygame.K_UP:
+                            panel.move(-1)
+                        elif event.key == pygame.K_DOWN:
+                            panel.move(1)
+                        elif event.key == pygame.K_LEFT:
+                            panel.adjust(browser, -1)
+                        elif event.key == pygame.K_RIGHT:
+                            panel.adjust(browser, 1)
+                        elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                            if panel.press(browser) == filters.TYPING:
+                                typing = browser.search
+                    elif event.type == pygame.JOYHATMOTION:
+                        dx, dy = event.value
+                        if dy:
+                            panel.move(-dy)  # the hat is y-up
+                        if dx:
+                            panel.adjust(browser, dx)
+                    elif event.type == pygame.JOYBUTTONDOWN:
+                        if event.button == 0:
+                            if panel.press(browser) == filters.TYPING:
+                                typing = browser.search
+                        elif event.button in (1, 6):
+                            panel = None
+                    continue
+
                 # While typing, every key is text. Nothing below runs, or the
                 # letters of a search would also be moving the cursor.
                 if typing is not None:
@@ -602,12 +679,11 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         if state.game is not None:
                             controllers = state.game.platform
                     elif event.key == pygame.K_TAB:
-                        # Tab walks platforms, shift-Tab walks regions — one
-                        # key for both switches. Backwards lives on R/shift-R.
-                        if event.mod & pygame.KMOD_SHIFT:
-                            browser.cycle_region(1)
-                        else:
-                            browser.cycle_platform(1)
+                        # The panel, which is every filter in one place and
+                        # both directions on each. It used to cycle platforms
+                        # forwards and, with shift, regions — a controller
+                        # could reach the first and not the second.
+                        panel = Filters()
                     elif event.key == pygame.K_LEFT:
                         state.move(-1, 0)
                     elif event.key == pygame.K_RIGHT:
@@ -692,6 +768,10 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         # Start: toggles installed-only. Every face button is
                         # taken; Start reads as "my library" on a handheld.
                         browser.toggle_installed()
+                    elif event.button == 6:
+                        # Select: the filter panel. The one button left, and
+                        # the only way a pad can reach regions at all.
+                        panel = Filters()
 
             # Completion first, drawing second: a finished steam-add clears
             # the preparer, and this same frame must already be the grid's.
@@ -727,6 +807,11 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 draw_prepare(below, font_at, preparer.game, preparer.tail(28), prepare_failed)
             elif storage is not None:
                 draw_storage(below, font_at, storage, storage_typing)
+            elif panel is not None:
+                # The grid behind it, so changing a filter is visibly changing
+                # the thing underneath rather than a number on a form.
+                draw(below, state, font_at, art, browser.status, None, None, browser.installed)
+                draw_filters(below, font_at, browser, panel)
             elif controllers is not None:
                 if seating.open or seating.view.finished:
                     draw_assign(below, font_at, seating.view)
