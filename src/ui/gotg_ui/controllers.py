@@ -19,6 +19,7 @@ import pathlib
 import pygame
 
 from .bindings import bindings_for, console_for, players_for
+from .gate import artwork_for, controls_for, layout_for
 from .leaders import Anchor, place
 from .padstrip import (
     EMPTY,
@@ -109,9 +110,13 @@ class Diagram:
         return pygame.transform.smoothscale(source, (width, height))
 
 
-def diagram_for(assets: pathlib.Path, console: str, cache: dict) -> Diagram | None:
-    """The drawing for one console, or None when the assets are unreadable."""
-    name = TABLE.get(console, FALLBACK)
+def diagram_for(assets: pathlib.Path, console: str, cache: dict, name: str = "") -> Diagram | None:
+    """The drawing for one console, or None when the assets are unreadable.
+
+    `name` names the artwork outright, for a console the ares table has never
+    heard of -- the caller has already worked out which drawing it wants.
+    """
+    name = name or TABLE.get(console, FALLBACK)
     if name not in cache:
         try:
             cache[name] = Diagram(assets, name)
@@ -120,7 +125,7 @@ def diagram_for(assets: pathlib.Path, console: str, cache: dict) -> Diagram | No
     return cache[name]
 
 
-def anchors_for(diagram: Diagram, bindings: dict[str, str], rect) -> list[Anchor]:
+def anchors_for(diagram: Diagram, bindings: dict[str, str], rect, bound: bool = True) -> list[Anchor]:
     """Every bound input that the artwork has a place for.
 
     The intersection on purpose, and it fails in the safe direction both ways:
@@ -135,7 +140,11 @@ def anchors_for(diagram: Diagram, bindings: dict[str, str], rect) -> list[Anchor
         uv = diagram.anchors.get(name)
         if uv is None:
             continue
-        out.append(Anchor(input=name, x=left + uv[0] * width, y=top + uv[1] * height, label=f"{name} — {description}"))
+        # With a binding, the label is the input and what drives it. Without
+        # one it is what the button is called, because "dpup — " reads as a
+        # line somebody forgot to finish.
+        label = f"{name} — {description}" if bound else description or name
+        out.append(Anchor(input=name, x=left + uv[0] * width, y=top + uv[1] * height, label=label))
     return out
 
 
@@ -148,17 +157,40 @@ def draw(screen, assets: pathlib.Path, platform: str, font_at, cache: dict, high
     screen.blit(title, ((width - title.get_width()) // 2, int(height * 0.045)))
 
     console = console_for(platform)
-    if console is None:
-        _note(
-            screen,
-            font_at,
-            "No bindings for this platform yet.",
-            f"Play a {platform} game once and they appear here.",
-        )
-        return
+    if console is not None:
+        bindings = bindings_for(console)
+        artwork = TABLE.get(console, FALLBACK)
+        seats = players_for(console)
+        bound = True
+    else:
+        # No ares console. For most platforms that means the environment has
+        # not been built yet and playing a game once fills it in -- but for
+        # Dolphin's two it means never, because Dolphin writes its own
+        # configuration and publishes no console at all. Telling somebody with
+        # a GameCube game to play it once and come back is an instruction that
+        # cannot work, so padmap's control set is used instead: it is the same
+        # one the launch wizard walks, which is where these get bound.
+        console = layout_for(platform)
+        bindings = dict(controls_for(console))
+        artwork = artwork_for(console)
+        # What padmap seats, not what the ares table says -- it has never heard
+        # of this console, so it would answer one for a pad that takes four.
+        seats = 4
+        bound = False
+        if not bindings:
+            # Not "play one and they appear here", which is only true for the
+            # emulators that publish a console. Dolphin and Ryujinx never do,
+            # so for their platforms that sentence promises something that
+            # cannot happen. Starting a game is what captures them, either way.
+            _note(
+                screen,
+                font_at,
+                "No bindings for this platform yet.",
+                "They are captured the first time you start a game.",
+            )
+            return
 
-    bindings = bindings_for(console)
-    diagram = diagram_for(assets, console, cache)
+    diagram = diagram_for(assets, console, cache, artwork)
     if diagram is None or not bindings:
         _note(
             screen,
@@ -181,7 +213,7 @@ def draw(screen, assets: pathlib.Path, platform: str, font_at, cache: dict, high
     art = diagram.surface(pad_width)
     screen.blit(art, (int(rect[0]), int(rect[1])))
 
-    anchors = anchors_for(diagram, bindings, rect)
+    anchors = anchors_for(diagram, bindings, rect, bound=bound)
     label_height = label_font.get_linesize()
     for item in place(anchors, rect, label_height, PINNED):
         lit = highlight is not None and item.anchor.input == highlight
@@ -198,7 +230,6 @@ def draw(screen, assets: pathlib.Path, platform: str, font_at, cache: dict, high
         x = item.x + 8 if item.align == "left" else item.x - text.get_width() - 8
         screen.blit(text, (int(x), int(item.y)))
 
-    seats = players_for(console)
     line = (
         f"{console}  ·  {len(anchors)} of {len(bindings)} inputs  ·  "
         f"{seats} player{'s' if seats != 1 else ''}   —   applied to every game on this platform"

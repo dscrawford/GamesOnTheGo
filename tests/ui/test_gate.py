@@ -25,8 +25,11 @@ from gotg_ui.gate import (
 )
 
 
-def state_event(players):
-    return {"event": "state", "state": "ready", "slots": 4, "players": players}
+def state_event(players, state=None):
+    """padmap's state. "assigning" is how it says a session is open."""
+    if state is None:
+        state = "ready" if players else "idle"
+    return {"event": "state", "state": state, "slots": 4, "players": players}
 
 
 def seated(player=1, name="Xbox Wireless Controller", mappings=()):
@@ -71,20 +74,24 @@ def test_a_mapped_controller_goes_straight_to_the_game():
 
 
 def test_a_pad_mapped_for_another_console_is_still_asked_about():
+    # A session first. Binding buttons is refused without one, so a seated pad
+    # that needs mapping means opening a session it is already seated in.
     gate = Gate(platform="n64")
     gate = apply(gate, state_event([seated(mappings=["console:gamecube"])]))
+    gate, command = decide(gate)
+    assert command == {"cmd": "begin", "players": 4}
+    gate = apply(gate, state_event([seated(mappings=["console:gamecube"])], state="assigning"))
     gate, command = decide(gate)
     assert gate.state == MAPPING
     assert command == {"cmd": "map", "player": 1, "layout": "n64", "scope": "console:n64"}
 
 
 def test_the_first_unmapped_pad_is_the_one_asked_about():
+    players = [seated(player=1, mappings=["console:snes"]), seated(player=2, mappings=[])]
     gate = Gate(platform="snes")
-    gate = apply(gate, state_event([
-        seated(player=1, mappings=["console:snes"]),
-        seated(player=2, mappings=[]),
-    ]))
+    gate = apply(gate, state_event(players, state="assigning"))
     gate, command = decide(gate)
+    assert command["cmd"] == "map"
     assert command["player"] == 2
 
 
@@ -109,19 +116,39 @@ def test_asking_happens_once_however_many_state_events_arrive():
     assert second is None
 
 
-def test_a_hold_fills_the_seat_and_the_mapping_question_follows():
+def test_the_whole_sequence_for_a_machine_with_nothing_set_up():
+    """begin, hold a button, bind the buttons, accept. In that order.
+
+    The order is the point: `map` is refused with "mapping needs an open
+    session", and `accept` is what closes the session -- so accepting the seat
+    before binding, which is the obvious order, is the one that cannot work.
+    """
     gate = Gate(platform="gamecube")
     gate = apply(gate, state_event([]))
-    gate, _ = decide(gate)
+    gate, command = decide(gate)
+    assert command == {"cmd": "begin", "players": 4}
+    assert gate.state == SEATING
+
+    gate = apply(gate, state_event([], state="assigning"))
+    gate, command = decide(gate)
+    assert command is None          # padmap is reading the pads; nothing to send
+
     gate = apply(gate, {"event": "claim", "player": 1, "name": "GOTG test pad"})
-    assert gate.seated == 1
-    # Still inside the session; `accepted` is what makes the seat real, and
-    # only then is there a mapping to look for.
-    gate = apply(gate, {"event": "accepted"})
-    gate = apply(gate, state_event([seated(name="GOTG test pad")]))
+    gate = apply(gate, state_event([seated(name="GOTG test pad")], state="assigning"))
     gate, command = decide(gate)
     assert gate.state == MAPPING
     assert command["cmd"] == "map"
+
+    gate = apply(gate, {"event": "mapping", "control": "a", "label": "A", "index": 0, "total": 16})
+    gate = apply(gate, {"event": "mapping", "done": True, "stored": True})
+    gate = apply(gate, state_event(
+        [seated(name="GOTG test pad", mappings=["console:gamecube"])], state="assigning"))
+    gate, command = decide(gate)
+    assert command == {"cmd": "accept"}
+
+    gate = apply(gate, {"event": "accepted"})
+    assert gate.state == READY
+    assert gate.done
 
 
 # --- walking the buttons -----------------------------------------------------
@@ -147,21 +174,21 @@ def test_a_button_already_used_says_so_rather_than_looking_dead():
 
 
 def test_a_stored_capture_sends_the_gate_back_to_look_again():
-    gate = Gate(platform="gamecube", state=MAPPING, asked=True)
+    gate = Gate(platform="gamecube", state=MAPPING, awaiting="map", session=True)
     gate = apply(gate, {"event": "mapping", "done": True, "stored": True})
     assert gate.state == CHECKING
-    assert not gate.asked
-    # And with the mapping now on the pad, the next look reaches the game.
-    gate = apply(gate, state_event([seated(mappings=["console:gamecube"])]))
+    assert gate.awaiting == ""
+    # With the mapping on the pad there is nothing left to ask, so the session
+    # it was bound in is closed.
+    gate = apply(gate, state_event([seated(mappings=["console:gamecube"])], state="assigning"))
     gate, command = decide(gate)
-    assert gate.state == READY
-    assert command is None
+    assert command == {"cmd": "accept"}
 
 
 def test_an_abandoned_capture_does_not_ask_again():
     # Backing out of the wizard is an answer. Asking a second time would make
     # the way out of the screen the screen itself.
-    gate = Gate(platform="gamecube", state=MAPPING, asked=True)
+    gate = Gate(platform="gamecube", state=MAPPING, awaiting="map", session=True)
     gate = apply(gate, {"event": "mapping", "done": True, "stored": False})
     assert gate.state == SKIPPED
     assert gate.done
@@ -259,3 +286,68 @@ def test_the_gamecube_drawing_has_a_circle_for_every_control_padmap_asks_for():
 def test_every_alias_points_at_a_different_name():
     # A pair that collided would light the wrong button on half the consoles.
     assert len(set(ANCHOR_ALIASES.values())) == len(ANCHOR_ALIASES)
+
+
+# --- when padmap says no -----------------------------------------------------
+
+
+def test_a_refused_bind_is_not_asked_for_again():
+    """padmap refuses `map` without an open session, and would refuse it the
+    same way for ever. Resending it every frame is a screen that never moves
+    and a socket that never stops."""
+    gate = Gate(platform="gamecube", session=True, awaiting="map")
+    gate = apply(gate, {"event": "error", "message": "mapping needs an open session"})
+    assert gate.awaiting == ""
+    assert "map" in gate.refused
+    assert gate.state == SKIPPED
+    gate, command = decide(gate)
+    assert command is None
+
+
+def test_a_refused_session_leaves_the_screen_up():
+    # "no joypads found" is answered by plugging one in, and padmap opens a
+    # session by itself when somebody does -- so this one waits.
+    gate = Gate(platform="gamecube", state=SEATING, awaiting="begin")
+    gate = apply(gate, {"event": "error", "message": "no joypads found"})
+    assert gate.state == SEATING
+    assert not gate.done
+    gate, command = decide(gate)
+    assert command is None
+    # And the session padmap opens on its own is picked up.
+    gate = apply(gate, state_event([], state="assigning"))
+    assert gate.session
+
+
+def test_one_command_is_in_flight_at_a_time():
+    gate = Gate(platform="gamecube")
+    gate = apply(gate, state_event([]))
+    gate, first = decide(gate)
+    gate, second = decide(gate)
+    assert first == {"cmd": "begin", "players": 4}
+    assert second is None
+
+
+def test_the_gamecube_control_names_match_the_drawing():
+    """One table, not two. The binding screen reads these and the artwork has
+    a circle for each; a name in one and not the other is a button that draws
+    nothing or a label pointing at empty plastic."""
+    import pathlib
+    import xml.etree.ElementTree as ET
+
+    from gotg_ui.gate import controls_for
+
+    svg = pathlib.Path(__file__).resolve().parents[2] / "src/ui/assets/controllers/gamecube.svg"
+    root = ET.parse(svg).getroot()
+    drawn = {
+        (el.get("id") or "")[len("anchor-"):]
+        for el in root.iter()
+        if (el.get("id") or "").startswith("anchor-")
+    }
+    named = set(controls_for("gamecube"))
+    assert named == drawn
+
+
+def test_a_console_nothing_here_knows_gets_no_invented_controls():
+    from gotg_ui.gate import controls_for
+
+    assert controls_for("ps2") == {}
