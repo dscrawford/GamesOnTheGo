@@ -17,6 +17,8 @@ from .browser import Browser
 from .catalog import Game, Library
 from .controllers import assets_dir
 from .controllers import draw as draw_controllers
+from .controllers import draw_strip
+from .padmap import Padmap
 from .fetch import Loader
 from .grid import Grid
 from .installed import installed_games
@@ -315,6 +317,11 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # A screen rather than an overlay: it is a page of reference, not an
     # action, and nothing underneath it should keep moving.
     controllers: str | None = None
+    # The controller layer. Absent is a state rather than a failure: a machine
+    # with no daemon running is what every machine looks like before anybody
+    # has set a controller up, and the strip says so instead of disappearing.
+    pads = Padmap()
+    pads.connect()
     controller_art: dict = {}
     # The storage screen, and the path being typed to add to it.
     storage: Storage | None = None
@@ -630,6 +637,14 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         running = False
                 else:
                     prepare_failed = True
+            # Reconnected here rather than on a timer: connect() on an absent
+            # socket fails at once with ENOENT, and a daemon started while the
+            # picker is open should be picked up without restarting it.
+            if not pads.connected:
+                pads.connect()
+            for _event in pads.poll():
+                pass
+
             if preparer is not None:
                 draw_prepare(screen, font_at, preparer.game, preparer.tail(28), prepare_failed)
             elif storage is not None:
@@ -646,6 +661,11 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 draw(screen, state, font_at, art, browser.status, typing, menu, browser.installed)
                 if menu is not None:
                     draw_menu(screen, menu, grid(*screen.get_size()), font_at)
+
+            # Last, and over everything: which seat a person is in is the one
+            # thing worth knowing on every screen, and drawing it after the
+            # others means no screen has to leave room for it.
+            draw_strip(screen, font_at, pads.players, pads.slots, pads.status_word)
             pygame.display.flip()
             # The loader only mirrors streamed text; 30fps halves the redundant
             # re-render of a mostly-unchanged tail across a minutes-long build.
