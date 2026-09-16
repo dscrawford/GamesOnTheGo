@@ -23,6 +23,19 @@
       inputs.uv2nix.follows = "uv2nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # The controller layer. Four identical adapter ports report the same
+    # everything and differ only by an ordinal libudev sorts as a string, so no
+    # configuration file can pin player order to them: padmap asks the person
+    # holding the controllers instead, and republishes each one through uinput
+    # as a pad whose identity it made. Everything downstream binds to those.
+    #
+    # Pinned to a revision rather than following the branch, so that a launch
+    # that worked yesterday is not changed by somebody else's commit today.
+    padmap = {
+      url = "git+ssh://git@github.com/chadac/padmap?ref=rustify&rev=8553d54d13db4b8a620dc2cef746d0cf3e75bd9d";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -32,6 +45,7 @@
       pyproject-nix,
       uv2nix,
       pyproject-build-systems,
+      padmap,
     }:
     let
       systems = [
