@@ -16,6 +16,14 @@ from .grid import Grid
 # whichever platform happens to sort first.
 ALL = "all"
 
+# The three answers to "is it here". `MISSING` is the one that was not
+# reachable at all: a yes/no toggle can ask for what is downloaded and cannot
+# ask for what is not, which is the question somebody browsing for something
+# new is actually asking.
+INSTALLED = "installed"
+MISSING = "not installed"
+PRESENCE = (ALL, INSTALLED, MISSING)
+
 
 class Browser:
     """One library, narrowed three ways, with a cursor that survives all of them."""
@@ -36,7 +44,7 @@ class Browser:
         # On-disk keys from the client, kept off Game: this changes under the
         # grid (an uninstall), the catalog does not.
         self.installed: set[tuple[str, str]] = set(installed or ())
-        self.installed_only = False
+        self.presence = ALL
         self.grid = Grid(library)
 
     @property
@@ -76,15 +84,27 @@ class Browser:
     def is_installed(self, game: Game) -> bool:
         return game.key in self.installed
 
+    @property
+    def installed_only(self) -> bool:
+        """Kept as a name because the rest of the picker asks in these words,
+        and because "only what is here" is still the common case."""
+        return self.presence == INSTALLED
+
     def toggle_installed(self) -> None:
-        self.installed_only = not self.installed_only
-        self._reframe()
+        """On, off. The third answer is reached by naming it, not by pressing
+        a toggle a third time -- which would be a toggle with a hidden state."""
+        self.set_presence(ALL if self.presence == INSTALLED else INSTALLED)
+
+    def set_presence(self, presence: str) -> None:
+        if presence in PRESENCE:
+            self.presence = presence
+            self._reframe()
 
     def set_installed(self, keys: set[tuple[str, str]]) -> None:
         """Refresh after an uninstall: badges always update; the cursor only
         moves when the filter is on, since with it off nothing changed shape."""
         self.installed = set(keys)
-        if self.installed_only:
+        if self.presence != ALL:
             self._reframe()
 
     def _reframe(self) -> None:
@@ -101,8 +121,10 @@ class Browser:
             search=self.search or None,
         )
         games = found.games
-        if self.installed_only:
+        if self.presence == INSTALLED:
             games = [g for g in games if g.key in self.installed]
+        elif self.presence == MISSING:
+            games = [g for g in games if g.key not in self.installed]
         self.grid = Grid(Library(games, self.per_page))
 
     @property
@@ -119,6 +141,6 @@ class Browser:
             bits.append(f"region {self.region}+world" if self.region != "world" else "region world")
         if self.search:
             bits.append(f'"{self.search}"')
-        if self.installed_only:
-            bits.append("installed only")
+        if self.presence != ALL:
+            bits.append(self.presence)
         return "  ·  ".join(bits)

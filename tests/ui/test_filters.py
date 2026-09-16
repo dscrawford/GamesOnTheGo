@@ -227,26 +227,47 @@ def test_regions_get_a_list_of_their_own():
     assert "jpn" in panel.choice.options
 
 
-def test_installed_only_is_a_list_of_two_rather_than_a_toggle():
-    # Every row on the panel answers to the same press, so none of them is a
-    # special case somebody has to learn.
+def test_installed_is_a_list_of_three_rather_than_a_toggle():
+    # Every row on the panel answers to the same press, and the third answer --
+    # what is *not* here -- is the one a yes/no toggle could not ask for.
     ours = browser()
     panel = filters.Filters(index=filters.ROWS.index(filters.INSTALLED))
     panel.press(ours)
-    assert panel.choice.options == ("no", "yes")
-    panel.choice.index = panel.choice.options.index("yes")
+    assert panel.choice.options == ("all", "installed", "not installed")
+    panel.choice.index = panel.choice.options.index("installed")
     panel.choose(ours)
     assert ours.installed_only
 
 
-def test_setting_installed_to_what_it_already_is_does_not_flip_it():
-    # It is a toggle underneath, and choosing "no" twice must not mean yes.
+def test_the_row_can_ask_for_what_is_not_installed():
     ours = browser()
-    filters.set_value(ours, filters.INSTALLED, "no")
+    panel = filters.Filters(index=filters.ROWS.index(filters.INSTALLED))
+    panel.press(ours)
+    panel.choice.index = panel.choice.options.index("not installed")
+    panel.choose(ours)
+    assert ours.presence == "not installed"
     assert not ours.installed_only
-    filters.set_value(ours, filters.INSTALLED, "yes")
-    filters.set_value(ours, filters.INSTALLED, "yes")
+
+
+def test_choosing_what_it_already_is_leaves_it_there():
+    # It used to be a toggle underneath, where choosing "yes" twice meant no.
+    ours = browser()
+    filters.set_value(ours, filters.INSTALLED, "installed")
+    filters.set_value(ours, filters.INSTALLED, "installed")
     assert ours.installed_only
+
+
+def test_nudging_the_row_goes_round_all_three_both_ways():
+    ours = browser()
+    panel = filters.Filters(index=filters.ROWS.index(filters.INSTALLED))
+    panel.adjust(ours, 1)
+    assert ours.presence == "installed"
+    panel.adjust(ours, 1)
+    assert ours.presence == "not installed"
+    panel.adjust(ours, 1)
+    assert ours.presence == "all"
+    panel.adjust(ours, -1)
+    assert ours.presence == "not installed"
 
 
 def test_search_and_clear_have_no_list():

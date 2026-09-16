@@ -20,6 +20,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .browser import ALL as PRESENCE_ALL
+from .browser import INSTALLED as PRESENCE_INSTALLED
+from .browser import MISSING as PRESENCE_MISSING
+
 PLATFORM = "platform"
 REGION = "region"
 INSTALLED = "installed"
@@ -34,7 +38,7 @@ ROWS = (PLATFORM, REGION, INSTALLED, SEARCH, CLEAR)
 LABELS = {
     PLATFORM: "Platform",
     REGION: "Region",
-    INSTALLED: "Installed only",
+    INSTALLED: "Installed",
     SEARCH: "Search",
     CLEAR: "Clear all",
 }
@@ -42,9 +46,10 @@ LABELS = {
 # What a row does when it is pressed rather than nudged.
 TYPING = "typing"
 
-# What "installed only" can be. A list of two rather than a toggle, so every
-# row on the panel answers to the same press.
-INSTALLED_OPTIONS = ("no", "yes")
+# What the "Installed" row can be. Three answers rather than two: a yes/no
+# toggle can ask for what is downloaded and cannot ask for what is not, which
+# is the question somebody browsing for something new is asking.
+INSTALLED_OPTIONS = (PRESENCE_ALL, PRESENCE_INSTALLED, PRESENCE_MISSING)
 
 
 @dataclass
@@ -96,7 +101,10 @@ class Filters:
         elif row == REGION:
             browser.cycle_region(delta)
         elif row == INSTALLED:
-            browser.toggle_installed()
+            # Round the three, both ways, like every other row here.
+            options = INSTALLED_OPTIONS
+            index = options.index(value_of(browser, INSTALLED))
+            browser.set_presence(options[(index + delta) % len(options)])
 
     def press(self, browser) -> str | None:
         """A or Enter on the current row.
@@ -149,8 +157,7 @@ def clear(browser) -> None:
     browser.set_platform(browser.platforms[0])
     browser.set_region(browser.regions[0])
     browser.set_search("")
-    if browser.installed_only:
-        browser.toggle_installed()
+    browser.set_presence(PRESENCE_ALL)
 
 
 def options_for(browser, row: str) -> tuple[str, ...]:
@@ -175,8 +182,7 @@ def set_value(browser, row: str, value: str) -> None:
     elif row == REGION:
         browser.set_region(value)
     elif row == INSTALLED:
-        if (value == "yes") != browser.installed_only:
-            browser.toggle_installed()
+        browser.set_presence(value)
 
 
 def value_of(browser, row: str) -> str:
@@ -186,7 +192,7 @@ def value_of(browser, row: str) -> str:
     if row == REGION:
         return browser.region
     if row == INSTALLED:
-        return "yes" if browser.installed_only else "no"
+        return browser.presence
     if row == SEARCH:
         return browser.search or "—"
     return ""
