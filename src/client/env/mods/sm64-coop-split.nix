@@ -77,7 +77,14 @@ in
       # The frame is what gotg launches; the frame launches the games.
       emulator = split;
       bin = "splitscreen-session";
-      args = [ "{state}/splitscreen/session.json" ];
+      # --workdir as well as the session: without it the frame keeps its logs
+      # in a fresh /tmp directory per launch, which is where they were the one
+      # time anybody needed them.
+      args = [
+        "{state}/splitscreen/session.json"
+        "--workdir"
+        "{state}/splitscreen"
+      ];
 
       # Each player gets their own save directory, so `saves` is the set of
       # them rather than the single one the solo port keeps.
