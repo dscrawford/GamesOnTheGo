@@ -25,8 +25,16 @@ assert len(clients) == expected - 1, f"{path}: {len(clients)} clients"
 
 port = hosts[0].command[hosts[0].command.index("--server") + 1]
 for client in clients:
-    joined = client.command[client.command.index("--client") + 2]
+    at = client.command.index("--client")
+    joined = client.command[at + 2]
     assert joined == port, f"{client.id} joins {joined}, but the host holds {port}"
+    # Never the last argument. Upstream reads the port with
+    # `if ((i + 2) < argc)` after consuming the ip, so `--client <ip> <port>`
+    # at the end of the line drops the port and silently dials 7777 -- which
+    # is three players on a JOINING screen and nothing in any log.
+    assert at + 2 < len(client.command) - 1, (
+        f"{client.id}: --client is last, so its port would be thrown away"
+    )
     # A client that starts before the host spends the opening on a connecting
     # screen, so each one waits for the port to be taken.
     assert client.pre_launch, f"{client.id} does not wait for the host"

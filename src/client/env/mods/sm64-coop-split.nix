@@ -140,18 +140,30 @@ in
               printf 'background_gamepad true\n'
             } >>"$gotg_config"
 
-            gotg_argv=(
-              ${lib.escapeShellArg port}
-              --savepath "$gotg_save"
-              --playername "P$gotg_n"
-              --windowed
-              --skip-intro --hide-loading-screen --skip-update-check --no-discord
-            )
+            # Who hosts goes *first*, and never last, because of how the port
+            # is parsed upstream:
+            #
+            #   arg_string("--client <ip>", argv[++i], ...);
+            #   if ((i + 2) < argc) { arg_uint("--client <port>", argv[++i], ...); }
+            #   else { gCLIOpts.networkPort = 7777; }
+            #
+            # With `--client <ip> <port>` at the end of the line, i + 2 == argc,
+            # so the port somebody passed is dropped and 7777 is used instead.
+            # Three players sat on a JOINING screen forever, dialling a port the
+            # host was not on, and nothing anywhere said so. Keeping the flags
+            # that follow means the count always works out.
+            gotg_argv=(${lib.escapeShellArg port})
             if [ "$gotg_n" -eq 1 ]; then
               gotg_argv+=(--server "$gotg_port")
             else
               gotg_argv+=(--client 127.0.0.1 "$gotg_port")
             fi
+            gotg_argv+=(
+              --savepath "$gotg_save"
+              --playername "P$gotg_n"
+              --windowed
+              --skip-intro --hide-loading-screen --skip-update-check --no-discord
+            )
 
             # One argument per line into jq, rather than jq's own --args: a
             # positional that starts with a dash is read as an option there, and
