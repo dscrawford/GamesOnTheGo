@@ -76,6 +76,39 @@ ANCHOR_ALIASES = {
 }
 
 
+# What each control is called on a GameCube pad, mirroring padmap's gamecube
+# layout. Here because Dolphin publishes no ares console, so the binding screen
+# has no table of its own to read and would otherwise say a GameCube pad has no
+# buttons. Held honest by a test that checks it against padmap's own control
+# set, which is the same test that checks the artwork.
+GAMECUBE_CONTROLS = {
+    "a": "A",
+    "b": "B",
+    "x": "X",
+    "y": "Y",
+    "start": "Start",
+    "dpup": "D-pad up",
+    "dpdown": "D-pad down",
+    "dpleft": "D-pad left",
+    "dpright": "D-pad right",
+    "leftshoulder": "L",
+    "rightshoulder": "R",
+    "righttrigger": "Z",
+    "rightstick_up": "C-stick up",
+    "rightstick_down": "C-stick down",
+    "rightstick_left": "C-stick left",
+    "rightstick_right": "C-stick right",
+}
+
+CONTROLS = {"gamecube": GAMECUBE_CONTROLS}
+
+
+def controls_for(layout: str) -> dict[str, str]:
+    """Every control this console has, and what it is called. Empty when
+    nothing here knows -- which is a screen that says so, not a guess."""
+    return CONTROLS.get(layout, {})
+
+
 def artwork_for(layout: str) -> str:
     return ARTWORK.get(layout, FALLBACK_ARTWORK)
 
@@ -119,9 +152,21 @@ class Gate:
     total: int = 0
     conflict: str = ""
     message: str = ""
-    # Set once the gate has asked for something, so that a state event
+    # padmap has a session open. Everything about binding buttons happens
+    # inside one: `map` is refused with "mapping needs an open session", and
+    # `accept` is what closes it -- so accepting before mapping, which is the
+    # obvious order, is the one order that cannot work.
+    session: bool = False
+    # The command sent and not yet answered. One at a time, so a state event
     # arriving mid-flow cannot send the same command twice.
-    asked: bool = False
+    awaiting: str = ""
+    # Commands padmap has refused. Not retried, because the same command would
+    # be refused the same way for ever.
+    refused: tuple[str, ...] = ()
+    # A capture is running. Every step of one is a `mapping` event, and a step
+    # is not an answer to `map` -- treating it as one sends a second `map`,
+    # which starts a second capture, which sends more steps.
+    wizard: bool = False
 
     @property
     def layout(self) -> str:
@@ -185,23 +230,48 @@ def decide(gate: Gate) -> tuple[Gate, dict | None]:
     Called after every event rather than only at the start, because both
     answers can change underneath it: a controller switched on fills a seat,
     and a wizard finishing fills in a mapping.
+
+    The order is the whole of this function. Binding buttons needs a session
+    open, and accepting closes it, so: begin, seat somebody, bind, and only
+    then accept.
     """
-    if gate.done or gate.asked:
+    if gate.done or gate.awaiting or gate.wizard:
         return gate, None
-    if gate.seated == 0:
+
+    wanted = gate.seated == 0 or gate.unmapped is not None
+    if not wanted:
+        if gate.session:
+            # Nothing left to ask. Accepting is what turns the claims into
+            # assignments, republishes the pads and writes the emulator's
+            # configuration -- so the game starts with them.
+            return replace(gate, awaiting="accept"), {"cmd": "accept"}
+        return replace(gate, state=READY), None
+
+    if not gate.session:
+        if "begin" in gate.refused:
+            return gate, None
         # A session rather than a quiet listen. This is the one moment where
         # grabbing every pad costs nothing -- no game is running yet, and the
         # screen in front of the person is this one.
-        return replace(gate, state=SEATING, asked=True), {"cmd": "begin", "players": 4}
+        return replace(
+            gate,
+            state=SEATING if gate.seated == 0 else MAPPING,
+            awaiting="begin",
+        ), {"cmd": "begin", "players": 4}
+
+    if gate.seated == 0:
+        # Waiting on a hold. Nothing to send: padmap is reading the pads.
+        return replace(gate, state=SEATING), None
+
     seat = gate.unmapped
-    if seat is not None:
-        return replace(gate, state=MAPPING, asked=True), {
-            "cmd": "map",
-            "player": seat.player,
-            "layout": gate.layout,
-            "scope": gate.scope,
-        }
-    return replace(gate, state=READY), None
+    if seat is None or "map" in gate.refused:
+        return gate, None
+    return replace(gate, state=MAPPING, awaiting="map"), {
+        "cmd": "map",
+        "player": seat.player,
+        "layout": gate.layout,
+        "scope": gate.scope,
+    }
 
 
 def apply(gate: Gate, event: dict) -> Gate:
@@ -209,7 +279,15 @@ def apply(gate: Gate, event: dict) -> Gate:
     kind = event.get("event")
 
     if kind == "state":
-        return replace(gate, seats=seats_from(event.get("players")))
+        # "assigning" is padmap saying a session is open, which is the answer
+        # to `begin` -- there is no other acknowledgement of it.
+        session = event.get("state") == "assigning"
+        return replace(
+            gate,
+            seats=seats_from(event.get("players")),
+            session=session,
+            awaiting="" if gate.awaiting == "begin" and session else gate.awaiting,
+        )
 
     if kind == "claim":
         # A seat taken during the gate's own session. Accepting is what turns
@@ -228,15 +306,15 @@ def apply(gate: Gate, event: dict) -> Gate:
 
     if kind == "mapping":
         if event.get("done"):
-            # Whether it was stored or abandoned, the wizard is closed and the
-            # gate has to look again: a stored capture fills the mapping in,
-            # and an abandoned one leaves the pad exactly as unmapped as it
-            # was -- which is a decision, not a reason to ask twice.
+            # A stored capture fills the mapping in and the gate looks again --
+            # which finds nothing left to ask and accepts. An abandoned one is
+            # a decision, not a reason to ask twice.
             stored = bool(event.get("stored"))
             return replace(
                 gate,
                 state=CHECKING if stored else SKIPPED,
-                asked=False,
+                awaiting="",
+                wizard=False,
                 control="",
                 label="",
                 conflict="",
@@ -244,6 +322,8 @@ def apply(gate: Gate, event: dict) -> Gate:
         return replace(
             gate,
             state=MAPPING,
+            awaiting="",
+            wizard=True,
             control=str(event.get("control") or ""),
             label=str(event.get("label") or ""),
             index=int(event.get("index") or 0),
@@ -252,11 +332,25 @@ def apply(gate: Gate, event: dict) -> Gate:
         )
 
     if kind == "accepted":
-        # The seats are real now. Ask again rather than assuming: what padmap
-        # writes into `mappings` is the answer to the second question.
-        return replace(gate, asked=False)
+        # Seats, republished pads and emulator configuration, all written. The
+        # only thing left was the game.
+        return replace(gate, state=READY, session=False, awaiting="")
 
     if kind == "error":
-        return replace(gate, message=str(event.get("message") or "padmap said no"))
+        # Whatever was in flight is not coming. Remembered as refused so the
+        # same command is not sent again on the next frame, for ever.
+        refused = gate.refused
+        if gate.awaiting and gate.awaiting not in refused:
+            refused = (*refused, gate.awaiting)
+        return replace(
+            gate,
+            message=str(event.get("message") or "padmap said no"),
+            awaiting="",
+            refused=refused,
+            # A refusal to bind is the end of the asking; a refusal to open a
+            # session leaves the screen up, because plugging a controller in
+            # makes padmap open one by itself.
+            state=SKIPPED if gate.awaiting in ("map", "accept") else gate.state,
+        )
 
     return gate

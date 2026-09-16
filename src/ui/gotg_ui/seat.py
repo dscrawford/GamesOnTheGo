@@ -143,7 +143,6 @@ def run(platform: str, title: str) -> int:
             fonts[size] = pygame.font.Font(None, size)
         return fonts[size]
 
-    accepted = False
     # Loaded once, and absence is survivable: a console with no artwork, or a
     # build with none, still gets the words.
     try:
@@ -172,12 +171,6 @@ def run(platform: str, title: str) -> int:
             gate, command = decide(gate)
             if command is not None:
                 pads.send(command)
-            # A seat claimed during the gate's own session is not an
-            # assignment until it is accepted, and nothing else will send that.
-            # Once: `accepted` is answered with an error when there is no
-            # session left to accept.
-            if gate.state == SEATING and gate.seated and not accepted:
-                accepted = pads.send({"cmd": "accept"})
 
             draw(screen, font_at, gate, title, diagram)
             pygame.display.flip()
