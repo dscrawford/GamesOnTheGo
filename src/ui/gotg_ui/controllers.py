@@ -20,6 +20,20 @@ import pygame
 
 from .bindings import bindings_for, console_for, players_for
 from .leaders import Anchor, place
+from .padstrip import (
+    EMPTY,
+    EMPTY_TEXT,
+    GAP,
+    HEIGHT,
+    LABEL,
+    LABEL_DIM,
+    PAD_RADIUS,
+    PANEL,
+    colour_for,
+    name_for,
+    seats,
+    status_text,
+)
 
 BACKGROUND = (18, 18, 20)
 TEXT = (232, 232, 236)
@@ -213,3 +227,42 @@ def _note(screen, font_at, headline: str, detail: str) -> None:
     two = font_at(24).render(detail, True, TEXT_DIM)
     screen.blit(one, ((width - one.get_width()) // 2, height // 2 - one.get_height()))
     screen.blit(two, ((width - two.get_width()) // 2, height // 2 + 10))
+
+
+def draw_strip(screen, font_at, players: list[dict], slots: int, status: str) -> int:
+    """Draw the strip along the top. Returns the height it used.
+
+    The caller offsets everything below by that, so the strip decides its own
+    height and the screens under it do not carry a copy of the number.
+    """
+    width = screen.get_width()
+    pygame.draw.rect(screen, PANEL, pygame.Rect(0, 0, width, HEIGHT))
+
+    small = font_at(15)
+    tiny = font_at(12)
+
+    x = GAP + PAD_RADIUS
+    middle = HEIGHT // 2
+    for index, seat in enumerate(seats(players, slots), start=1):
+        filled = seat is not None
+        colour = colour_for(index) if filled else EMPTY
+        pygame.draw.circle(screen, colour, (x, middle), PAD_RADIUS)
+        # An outline on the empty ones, so a seat nobody is in reads as a seat
+        # rather than as a smudge.
+        if not filled:
+            pygame.draw.circle(screen, EMPTY_TEXT, (x, middle), PAD_RADIUS, 2)
+
+        number = small.render(
+            str(index), True, (20, 20, 24) if filled else EMPTY_TEXT
+        )
+        screen.blit(number, number.get_rect(center=(x, middle)))
+
+        label = tiny.render(
+            name_for(seat), True, LABEL if filled else LABEL_DIM
+        )
+        screen.blit(label, (x + PAD_RADIUS + 6, middle - label.get_height() // 2))
+        x += PAD_RADIUS * 2 + 6 + label.get_width() + GAP * 2
+
+    word = tiny.render(status_text(status), True, LABEL_DIM)
+    screen.blit(word, (width - word.get_width() - GAP, middle - word.get_height() // 2))
+    return HEIGHT
