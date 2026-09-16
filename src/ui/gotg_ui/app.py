@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pygame
 
-from . import config, filters
+from . import config, filters, pads
 from .art import ArtStore
 from .assign import Session
 from .browser import Browser
@@ -377,26 +377,11 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     pygame.display.set_caption("GamesOnTheGo")
     screen = pygame.display.set_mode(WINDOW)
     clock = pygame.time.Clock()
-    pygame.joystick.init()
-    # Held, by instance id, for as long as the picker runs. A Joystick that
-    # goes out of scope is closed by SDL, and a closed one stops producing
-    # events -- so the list is not a formality, it is the input.
-    sticks: dict[int, pygame.joystick.Joystick] = {}
-
-    def open_stick(index: int) -> None:
-        """Open a joystick SDL has just found, or shrug.
-
-        A device can go away between being announced and being opened, and a
-        picker that raised there would die of somebody unplugging a pad.
-        """
-        try:
-            stick = pygame.joystick.Joystick(index)
-        except pygame.error:
-            return
-        sticks[stick.get_instance_id()] = stick
-
-    for stick_index in range(pygame.joystick.get_count()):
-        open_stick(stick_index)
+    # Held open for as long as the picker runs: a pad that goes out of scope is
+    # closed by SDL, and a closed one stops producing events. Opened through
+    # the controller API, which is what makes "the right bumper" mean the same
+    # button on every pad rather than index 5 on an Xbox one.
+    sticks = pads.init()
 
     fonts: dict[int, pygame.font.Font] = {}
 
@@ -444,12 +429,12 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # The controller layer. Absent is a state rather than a failure: a machine
     # with no daemon running is what every machine looks like before anybody
     # has set a controller up, and the strip says so instead of disappearing.
-    pads = Padmap()
+    padmap = Padmap()
     # Started rather than waited for: the picker is usually the first thing
     # open on this machine, so if it does not start the daemon nothing will.
     # A failure is a sentence in the strip, not a reason to refuse to draw.
     padmap_trouble = ensure_daemon()
-    pads.connect()
+    padmap.connect()
     # The assignment screen. `open` is what decides whether it is on screen,
     # and padmap closes it by accepting rather than this program deciding.
     seating = Session()
@@ -520,18 +505,18 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 # setting their controller up -- which is the worst possible
                 # moment, because it looks like padmap broke the machine.
                 if event.type == pygame.JOYDEVICEADDED:
-                    open_stick(event.device_index)
+                    sticks.add(event.device_index)
                     continue
                 if event.type == pygame.JOYDEVICEREMOVED:
-                    sticks.pop(event.instance_id, None)
+                    sticks.remove(event.instance_id)
                     continue
 
                 # On the loader, the only input is the way out. Everything else
                 # would be the grid moving invisibly behind the build.
                 if preparer is not None:
-                    back = (event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_b)) or (
-                        event.type == pygame.JOYBUTTONDOWN and event.button == 1
-                    )
+                    back = (
+                        event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_b)
+                    ) or pads.button(event) == pads.B
                     if back:
                         if not prepare_failed:
                             preparer.cancel()
@@ -568,19 +553,19 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             storage.remove()
                         elif event.key in (pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_EQUALS, pygame.K_y):
                             storage_typing = ""
-                    elif event.type == pygame.JOYHATMOTION:
-                        dx, dy = event.value
-                        if dy:
-                            storage.move(-dy)
-                    elif event.type == pygame.JOYBUTTONDOWN:
-                        if event.button == 0:
+                    else:
+                        step = pads.direction(event)
+                        pressed = pads.button(event)
+                        if step and step[1]:
+                            storage.move(step[1])
+                        elif pressed == pads.A:
                             storage.make_default()
-                        elif event.button == 1:
+                        elif pressed == pads.B:
                             storage = None
-                        elif event.button == 2:
+                        elif pressed == pads.X:
                             storage.remove()
-                        elif event.button == 3:
-                            # Y: add. A Deck raises the Steam keyboard over this.
+                        elif pressed == pads.Y:
+                            # A Deck raises the Steam keyboard over this.
                             storage_typing = ""
                     continue
 
@@ -591,33 +576,31 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     if event.type == pygame.KEYDOWN:
                         if event.key in (pygame.K_ESCAPE, pygame.K_b, pygame.K_c):
                             if seating.open:
-                                pads.send(seating.cancel())
+                                padmap.send(seating.cancel())
                             else:
                                 controllers = None
                         elif event.key in (pygame.K_RETURN, pygame.K_a):
                             # One key, two meanings, and the state says which:
                             # nothing started yet means start, and a session in
                             # flight means keep what has been claimed.
-                            pads.send(seating.accept() if seating.open else seating.begin())
+                            padmap.send(seating.accept() if seating.open else seating.begin())
                         elif event.key == pygame.K_r and seating.open:
-                            pads.send(seating.reset())
-                    elif event.type == pygame.JOYBUTTONDOWN:
+                            padmap.send(seating.reset())
+                    else:
                         # The same three things the keyboard does. Leaving them
                         # off was the whole of "I hold A and nothing happens":
                         # no session was ever begun, so there was nothing to
-                        # hold a button *at*. It looked intermittent because
-                        # padmap opens a session by itself when a controller is
-                        # plugged in -- so holding A worked, but only ever
-                        # straight after connecting a second pad.
-                        if event.button == 0:
-                            pads.send(seating.accept() if seating.open else seating.begin())
-                        elif event.button == 1:
+                        # hold a button *at*.
+                        pressed = pads.button(event)
+                        if pressed == pads.A:
+                            padmap.send(seating.accept() if seating.open else seating.begin())
+                        elif pressed == pads.B:
                             if seating.open:
-                                pads.send(seating.cancel())
+                                padmap.send(seating.cancel())
                             else:
                                 controllers = None
-                        elif event.button == 3 and seating.open:
-                            pads.send(seating.reset())
+                        elif pressed == pads.Y and seating.open:
+                            padmap.send(seating.reset())
                     continue
 
                 # While the menu is open it owns the input: the grid must
@@ -639,17 +622,18 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             if verb is not None:
                                 picked, menu = menu, None
                                 pick(picked.game, verb, picked.variant, picked.version)
-                    elif event.type == pygame.JOYHATMOTION:
-                        dx, dy = event.value
+                    elif pads.direction(event) is not None:
+                        _, dy = pads.direction(event)
                         if dy:
-                            menu.move(-dy)  # the hat is y-up
-                    elif event.type == pygame.JOYBUTTONDOWN:
-                        if event.button == 0:
+                            menu.move(dy)
+                    elif pads.button(event) is not None:
+                        pressed = pads.button(event)
+                        if pressed == pads.A:
                             verb = menu.confirm()
                             if verb is not None:
                                 picked, menu = menu, None
                                 pick(picked.game, verb, picked.variant, picked.version)
-                        elif event.button == 1:
+                        elif pressed == pads.B:
                             # B backs out of the variants first, and only then
                             # out of the menu: one button, one step at a time.
                             if menu.expanded:
@@ -702,25 +686,26 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 panel.choose(browser)
                             elif panel.press(browser) == filters.TYPING:
                                 typing = browser.search
-                    elif event.type == pygame.JOYHATMOTION:
-                        dx, dy = event.value
-                        if dy:
-                            # The hat is y-up and both lists are y-down.
-                            panel.choice.move(-dy) if panel.open else panel.move(-dy)
-                        if dx and not panel.open:
-                            panel.adjust(browser, dx)
-                    elif event.type == pygame.JOYBUTTONDOWN:
-                        if event.button == 0:
+                    else:
+                        step = pads.direction(event)
+                        pressed = pads.button(event)
+                        if step:
+                            dx, dy = step
+                            if dy:
+                                panel.choice.move(dy) if panel.open else panel.move(dy)
+                            if dx and not panel.open:
+                                panel.adjust(browser, dx)
+                        elif pressed == pads.A:
                             if panel.open:
                                 panel.choose(browser)
                             elif panel.press(browser) == filters.TYPING:
                                 typing = browser.search
-                        elif event.button == 1:
+                        elif pressed == pads.B:
                             if panel.open:
                                 panel.close()
                             else:
                                 panel = None
-                        elif event.button == 7:
+                        elif pressed == pads.START:
                             # Start closes it the way Start opened it.
                             panel = None
                     continue
@@ -810,13 +795,14 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     # page twice for one scroll.
                 elif event.type == pygame.MOUSEWHEEL:
                     browser.grid.turn(-1 if event.y > 0 else 1)
-                elif event.type == pygame.JOYHATMOTION:
-                    dx, dy = event.value
-                    state.move(dx, -dy)  # SDL's hat is y-up, the grid is y-down
-                elif event.type == pygame.JOYBUTTONDOWN:
-                    # SDL's own mapping, which is why gotg-pads exists: A is 0,
-                    # B is 1, and 4 and 5 are the shoulders.
-                    if event.button == 0:
+                elif pads.direction(event) is not None:
+                    state.move(*pads.direction(event))
+                elif pads.button(event) is not None:
+                    # By name, not by index: the shoulders are 4 and 5 on an
+                    # Xbox pad and 9 and 10 on a Steam Controller, and this used
+                    # to compare against the first pair on both.
+                    pressed = pads.button(event)
+                    if pressed == pads.A:
                         if state.game is not None:
                             menu = Menu(
                                 state.game,
@@ -825,20 +811,20 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 variants_for(state.game),
                                 version_names(versions_for(state.game)),
                             )
-                    elif event.button == 1:
+                    elif pressed == pads.B:
                         running = False
-                    elif event.button == 4:
+                    elif pressed == pads.LB:
                         state.turn(-1)
-                    elif event.button == 5:
+                    elif pressed == pads.RB:
                         state.turn(1)
-                    elif event.button == 3:
-                        # Y: the next platform. Six of them, so cycling beats a
-                        # menu nobody can reach without a pointer.
+                    elif pressed == pads.Y:
+                        # The next platform: quicker than the panel when it is
+                        # the next one that is wanted.
                         browser.cycle_platform(1)
-                    elif event.button == 2:
-                        # X: search. A Deck raises the Steam keyboard over this.
+                    elif pressed == pads.X:
+                        # Search. A Deck raises the Steam keyboard over this.
                         typing = browser.search
-                    elif event.button == 7:
+                    elif pressed == pads.START:
                         # Start: the filter panel, which is where installed-only
                         # now lives along with everything else that narrows the
                         # library. Start is the button somebody presses looking
@@ -862,9 +848,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             # Reconnected here rather than on a timer: connect() on an absent
             # socket fails at once with ENOENT, and a daemon started while the
             # picker is open should be picked up without restarting it.
-            if not pads.connected:
-                pads.connect()
-            for padmap_event in pads.poll():
+            if not padmap.connected:
+                padmap.connect()
+            for padmap_event in padmap.poll():
                 seating.handle(padmap_event)
 
             # The full-screen views draw into the band below the strip rather
@@ -906,11 +892,11 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             draw_strip(
                 screen,
                 font_at,
-                pads.players,
-                pads.slots,
-                strip_status(pads.status_word, len(pads.players))
-                if pads.connected
-                else (padmap_trouble or status_text(pads.status_word)),
+                padmap.players,
+                padmap.slots,
+                strip_status(padmap.status_word, len(padmap.players))
+                if padmap.connected
+                else (padmap_trouble or status_text(padmap.status_word)),
             )
             pygame.display.flip()
             # The loader only mirrors streamed text; 30fps halves the redundant
