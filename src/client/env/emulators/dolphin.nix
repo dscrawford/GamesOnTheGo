@@ -126,6 +126,21 @@
           gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini" \
             Interface SkipNKitWarning True
 
+          # "Do you want to stop the current emulation?" — which nobody can
+          # answer with a controller, and which is the last thing between a
+          # game and the kill switch.
+          #
+          # It does not protect a save; it costs one. gotg-killswitch sends
+          # SIGTERM, waits five seconds and then SIGKILLs, and Dolphin spends
+          # those five seconds holding a modal dialog open instead of writing
+          # its memory card. Off, the SIGTERM is taken and the shutdown is the
+          # orderly one; on, every stop is the hard one.
+          #
+          # These consoles had a power switch, and pressing it was not a
+          # question.
+          gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini" \
+            Interface ConfirmStop False
+
           # Vulkan rather than Dolphin's OpenGL default: the Mesa/RDNA2
           # handhelds this targets run markedly faster on it.
           gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini" \
