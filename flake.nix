@@ -122,6 +122,20 @@
             inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg;
             inherit (padmap.packages.${pkgs.stdenv.hostPlatform.system}) padmap;
           };
+          # The installer, for a machine that has never heard of Nix. Packaged
+          # as well as curl-able so that `gotg-install` is on PATH afterwards:
+          # a SteamOS update wipes the udev rule, and re-running this is how it
+          # comes back.
+          gotg-install = pkgs.writeShellApplication {
+            name = "gotg-install";
+            runtimeInputs = with pkgs; [
+              curl
+              gnugrep
+              procps # pgrep, to notice Steam is running
+            ];
+            text = builtins.readFile ./install/gotg-install;
+          };
+
           # Both roles come from the one workspace: the indexer venv carries
           # the yaml extra, the service venv carries nothing at all.
           gotg-importer = pkgs.callPackage ./nix/gotg-importer.nix {
@@ -224,6 +238,15 @@
           };
         }
       );
+
+      # `nix run github:dscrawford/GamesOnTheGo#install` -- the other way in,
+      # for a machine that already has nix and wants the rest.
+      apps = forAllSystems (pkgs: {
+        install = {
+          type = "app";
+          program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-install}/bin/gotg-install";
+        };
+      });
 
       devShells = forAllSystems (
         pkgs:

@@ -29,6 +29,14 @@ teardown() { stop_saves_service; }
 
 helper() { python3 "$GOTG_STEAM_HELPER" --file "$SHORTCUTS" "$@"; }
 
+# A picker on PATH, since a shortcut to it is what `gotg steam picker` writes.
+fake_picker() {
+  mkdir -p "$TEST_TMP/pickerbin"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$TEST_TMP/pickerbin/gotg-ui"
+  chmod +x "$TEST_TMP/pickerbin/gotg-ui"
+  export PATH="$TEST_TMP/pickerbin:$PATH"
+}
+
 # An entry in exactly the shape Steam writes, quoting and all.
 seed_existing() {
   helper add --name "Someone Else's Game" --exe "/opt/other/game.sh" \
@@ -500,3 +508,52 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   [ "$(helper list | jq -r 'length')" = "1" ]
 }
 
+
+@test "gotg steam picker puts GOTG itself in the library" {
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  fake_picker
+
+  gotg steam picker
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"added"* ]]
+
+  run helper list
+  [[ "$output" == *"Games On The Go"* ]]
+}
+
+@test "the picker shortcut points at a launcher, not into the nix store" {
+  # Steam remembers the path it was given, and a profile upgrade moves the
+  # store path -- so an entry pointing into the store dies at the next sync,
+  # in Game Mode, where there is nothing to read an error on.
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  fake_picker
+
+  gotg steam picker
+  run helper list
+  local exe
+  exe="$(jq -r '.[0].exe' <<<"$output" | tr -d '"')"
+  [[ "$exe" != /nix/store/* ]]
+  [ -x "$exe" ]
+  grep -q 'exec gotg-ui' "$exe"
+}
+
+@test "gotg steam picker with no picker installed says how to get one" {
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  # Named rather than hidden: the packaged client puts a real gotg-ui on PATH,
+  # where removing a stand-in would prove nothing.
+  # No outer `run`: the helper already runs, and wrapping it again captures
+  # run's own status rather than gotg's.
+  GOTG_PICKER="$TEST_TMP/no-such-picker" gotg steam picker
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"nix profile install"* ]]
+}
+
+@test "asking twice leaves one picker entry, not two" {
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  fake_picker
+
+  gotg steam picker
+  gotg steam picker
+  run helper list
+  [ "$(jq '[.[] | select(.name == "Games On The Go")] | length' <<<"$output")" -eq 1 ]
+}

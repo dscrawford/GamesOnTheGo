@@ -28,6 +28,9 @@ pkgs.runCommand "check-client-tests"
       # gone, a target that exits while it waits — is tested against the real
       # binary rather than a stand-in.
       packages.gotg-killswitch
+      # install.bats sources the packaged installer rather than the checkout's
+      # copy, so what is tested is what somebody would actually download.
+      packages.gotg-install
     ];
     GOTG_BIN = pkgs.lib.getExe packages.gotg;
   }

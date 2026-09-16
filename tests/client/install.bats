@@ -1,0 +1,146 @@
+#!/usr/bin/env bats
+# The installer's decisions, without it installing anything.
+#
+# It is sourced rather than run: every step is a function and only the last
+# line does anything, so the machine it thinks it is on, the password it knows
+# it needs and the work it knows it can skip are all answerable here. What
+# cannot be tested without a Steam Deck is the part that hands over /nix, and
+# that is exactly the part that must never run by accident — so nothing here
+# calls it.
+
+bats_require_minimum_version 1.5.0
+
+setup() {
+  INSTALLER="${BATS_TEST_DIRNAME}/../../install/gotg-install"
+  [ -f "$INSTALLER" ] || INSTALLER="$(command -v gotg-install)"
+  TMP="$BATS_TEST_TMPDIR"
+  export GOTG_INSTALL_LIB=1
+  export GOTG_OS_RELEASE="$TMP/os-release"
+  export GOTG_UDEV_PATH="$TMP/99-gotg-uinput.rules"
+  export XDG_CONFIG_HOME="$TMP/config"
+}
+
+steamos() { printf 'ID=steamos\nID_LIKE=arch\nNAME="SteamOS"\n' >"$GOTG_OS_RELEASE"; }
+other_linux() { printf 'ID=ubuntu\nID_LIKE=debian\nNAME="Ubuntu"\n' >"$GOTG_OS_RELEASE"; }
+
+load_installer() {
+  # shellcheck disable=SC1090
+  source "$INSTALLER"
+}
+
+@test "it is a shell script, not an AppImage or a Flatpak" {
+  # The thing being installed is Nix. Recorded as a test because it is the
+  # first question anybody asks of an installer, and the answer is a decision.
+  # The shebang's path is whatever packaged it -- the point is that there is
+  # one, and that it names a shell.
+  run head -1 "$INSTALLER"
+  [[ "$output" == "#!"*"bash" ]]
+  run file --mime-type -b "$INSTALLER"
+  [[ "$output" == text/* ]]
+}
+
+@test "SteamOS is recognised by its os-release, not its hostname" {
+  steamos
+  load_installer
+  run is_steamos
+  [ "$status" -eq 0 ]
+}
+
+@test "a desktop with a deck user is not SteamOS" {
+  other_linux
+  load_installer
+  run is_steamos
+  [ "$status" -ne 0 ]
+}
+
+@test "a machine with no os-release at all is not SteamOS" {
+  rm -f "$GOTG_OS_RELEASE"
+  load_installer
+  run is_steamos
+  [ "$status" -ne 0 ]
+}
+
+@test "flakes are turned on, and only once" {
+  other_linux
+  load_installer
+  run ensure_flakes
+  [ "$status" -eq 0 ]
+  grep -q "experimental-features = nix-command flakes" "$XDG_CONFIG_HOME/nix/nix.conf"
+
+  # Again: the file must not grow a second copy.
+  run ensure_flakes
+  [ "$status" -eq 0 ]
+  [ "$(grep -c "experimental-features" "$XDG_CONFIG_HOME/nix/nix.conf")" -eq 1 ]
+  [[ "$output" == *"already done"* ]]
+}
+
+@test "an existing flakes line is left alone" {
+  other_linux
+  load_installer
+  mkdir -p "$XDG_CONFIG_HOME/nix"
+  printf 'experimental-features = nix-command flakes repl-flake\n' >"$XDG_CONFIG_HOME/nix/nix.conf"
+  run ensure_flakes
+  [ "$status" -eq 0 ]
+  grep -q "repl-flake" "$XDG_CONFIG_HOME/nix/nix.conf"
+}
+
+@test "a commented-out flakes line does not count as on" {
+  other_linux
+  load_installer
+  mkdir -p "$XDG_CONFIG_HOME/nix"
+  printf '# experimental-features = nix-command flakes\n' >"$XDG_CONFIG_HOME/nix/nix.conf"
+  run ensure_flakes
+  [ "$status" -eq 0 ]
+  [ "$(grep -cE '^experimental-features' "$XDG_CONFIG_HOME/nix/nix.conf")" -eq 1 ]
+}
+
+@test "a Deck with no password is told to set one, rather than shown a sudo error" {
+  # `deck` ships with no password, so sudo cannot prompt and fails with a
+  # message about the terminal that explains nothing.
+  steamos
+  load_installer
+  sudo() { return 1; }
+  passwd() { printf '%s NP 01/01/2024 0 99999 7 -1\n' "$USER"; }
+  export -f sudo passwd 2>/dev/null || true
+  run need_sudo
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"passwd"* ]]
+  [[ "$output" == *"no password"* ]]
+}
+
+@test "the udev rule names uinput and hands it to whoever is at the seat" {
+  other_linux
+  load_installer
+  [[ "$UDEV_RULE" == *'KERNEL=="uinput"'* ]]
+  [[ "$UDEV_RULE" == *'uaccess'* ]]
+}
+
+@test "a writable uinput means there is nothing to do" {
+  other_linux
+  load_installer
+  # The check is on /dev/uinput itself; where a machine already allows it, the
+  # installer must not ask for a password to change nothing.
+  if [[ -w /dev/uinput ]]; then
+    run ensure_uinput
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"already done"* ]]
+  else
+    skip "/dev/uinput is not writable here, which is the case the rule is for"
+  fi
+}
+
+@test "the flake it installs from can be pointed somewhere else" {
+  other_linux
+  GOTG_FLAKE_REF="git+file:///somewhere/else" load_installer
+  [ "$FLAKE" = "git+file:///somewhere/else" ]
+}
+
+@test "sourcing it installs nothing" {
+  # The guard that makes every test above safe. If this ever fails, the rest
+  # of this file is running an installer on somebody's machine.
+  steamos
+  run load_installer
+  [ "$status" -eq 0 ]
+  [ ! -e "$GOTG_UDEV_PATH" ]
+  [ ! -e "$XDG_CONFIG_HOME/nix/nix.conf" ]
+}
