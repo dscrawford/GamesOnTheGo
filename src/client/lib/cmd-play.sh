@@ -78,6 +78,13 @@ cmd_play() {
   play_prepare "$want" "$variant" "$want_version"
 
   log "launching $(manifest_field "$PLAY_GAME" title) with $PLAY_ATTR"
+
+  # Before the kill switch rather than after: the gate draws a window, and the
+  # watcher is holding the pid that is about to become the game.
+  padmap_seat_gate \
+    "$(manifest_field "$PLAY_GAME" platform)" \
+    "$(manifest_field "$PLAY_GAME" title)"
+
   # "$$" survives the exec below, so what the watcher holds is the emulator.
   killswitch_start "$$"
   padmap_exec "$(env_bin "$PLAY_ATTR")" "$PLAY_TARGET" "$@"

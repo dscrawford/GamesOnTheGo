@@ -74,6 +74,18 @@ stdenvNoCC.mkDerivation {
         padmap
       ]}
 
+    # The launch-time controller check, as its own command. The client runs it
+    # by name if it is on PATH and shrugs if it is not, which is what keeps the
+    # dependency pointing one way: this package knows about the client, and the
+    # client never has to know about this one.
+    makeWrapper ${python}/bin/python3 $out/bin/gotg-seat \
+      --add-flags "-m gotg_ui.seat" \
+      --set PYTHONPATH "$out/share/gotg-ui:${gotg}/share/gotg/steam" \
+      --set GOTG_UI_DATA "${gotg}/share/gotg/data" \
+      --set GOTG_UI_ENV "${gotg}/share/gotg/env" \
+      --set GOTG_UI_ASSETS "$out/share/gotg-ui/assets" \
+      --prefix PATH : ${lib.makeBinPath [ padmap ]}
+
     runHook postInstall
   '';
 
