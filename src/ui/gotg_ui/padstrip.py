@@ -77,6 +77,18 @@ def name_for(seat: dict | None) -> str:
     return name
 
 
+def strip_status(status: str, seated: int) -> str:
+    """What the right-hand end of the strip says.
+
+    "padmap ready" is true and useless when no seat is taken: the question in
+    front of somebody then is not what padmap is doing, it is how to make it do
+    anything. So the idle-and-empty case is the only one that names a key.
+    """
+    if status == "idle" and seated == 0:
+        return "press C to assign controllers"
+    return status_text(status)
+
+
 def status_text(status: str) -> str:
     """padmap's state, in words that mean something to whoever is reading it
     rather than the daemon's own vocabulary."""

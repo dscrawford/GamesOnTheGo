@@ -71,3 +71,18 @@ def test_the_status_is_in_words_somebody_can_act_on():
     # An unknown state is shown rather than swallowed: a daemon that grew a
     # state this does not know about should not draw an empty corner.
     assert status_text("recalibrating") == "recalibrating"
+
+
+def test_an_idle_padmap_with_nobody_seated_says_how_to_start():
+    # "padmap ready" is true and useless there: the question in front of
+    # somebody is how to make it do anything, not what it is doing.
+    from gotg_ui.padstrip import strip_status
+
+    assert strip_status("idle", 0) == "press C to assign controllers"
+
+
+def test_once_somebody_is_seated_it_goes_back_to_saying_what_is_true():
+    from gotg_ui.padstrip import strip_status
+
+    assert strip_status("idle", 2) == "padmap ready"
+    assert strip_status("assigning", 0) == "hold a button on each controller"
