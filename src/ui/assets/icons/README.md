@@ -16,6 +16,9 @@ labelled. These have no anchors and are never annotated; they are read at about
 | `playstation.svg` | ES-DE `gamepad_playstation.svg` | MIT |
 | `wii.svg` | ES-DE `wii_remote_nintendo.svg` | MIT |
 | `switch.svg` | ES-DE `joycon_pair_nintendo.svg` | MIT |
+| `keyboard.svg` | ES-DE `keyboard_generic.svg` | MIT |
+| `keyboard-mouse.svg` | ES-DE `keyboard_and_mouse_generic.svg` | MIT |
+| `mouse.svg` | ES-DE `mouse_generic.svg` | MIT |
 | `steam.svg` | Drawn here | CC0 |
 
 ES-DE is [EmulationStation Desktop Edition](https://gitlab.com/es-de/emulationstation-de),
@@ -35,6 +38,9 @@ rather than as restraint. Removed here:
 | `xbox.svg` | the guide-button logo (`g5600`) |
 | `playstation.svg` | "PlayStation" (ten elements around x=120-140, y=103-111) |
 | `wii.svg` | "Wii" (`rect126`, `rect128`, `rect130`, `rect132`, `polygon134`) |
+
+The keyboard and mouse drawings carry no wordmark: nobody brands a generic
+keyboard, and ES-DE's are drawn rather than traced from a product.
 
 The button *letters* stay. A, B, X and Y beside a face button are what the
 button is called, and a person matching the icon to the pad in their hands

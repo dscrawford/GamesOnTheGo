@@ -23,8 +23,12 @@ PLAYER_COLOURS = [
     (248, 208, 88),   # 4 yellow
 ]
 
-EMPTY = (60, 60, 68)
-EMPTY_TEXT = (120, 120, 130)
+# An empty seat is red rather than grey. Grey reads as decoration; red reads as
+# something to do -- which it is, since a seat nobody is in is a controller
+# nobody can play with.
+EMPTY = (54, 30, 32)
+EMPTY_RING = (208, 78, 78)
+EMPTY_TEXT = (208, 78, 78)
 LABEL = (232, 232, 236)
 LABEL_DIM = (150, 150, 158)
 PANEL = (26, 26, 30)
@@ -60,14 +64,18 @@ def seats(players: list[dict], slots: int) -> list[dict | None]:
 
 
 def name_for(seat: dict | None) -> str:
-    """What to write beside the badge.
+    """What to write beside the badge, or nothing at all.
 
-    padmap names its clones "padmap Player N", which is true and says nothing:
-    beside a badge that already says 2 in player two's colour, the useful half
-    is the controller it stands for.
+    An empty seat says nothing: the red ring already says it, and "empty"
+    beside it is the same fact twice in a row of four -- which reads as three
+    words of noise across the top of every screen.
+
+    padmap names its clones "padmap Player N", which is true and says nothing
+    either: beside a badge that already says 2 in player two's colour, the
+    useful half is the controller it stands for.
     """
     if seat is None:
-        return "empty"
+        return ""
     name = str(seat.get("name") or "").strip()
     if not name:
         return "pad"

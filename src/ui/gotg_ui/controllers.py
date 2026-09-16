@@ -22,6 +22,7 @@ from .bindings import bindings_for, console_for, players_for
 from .leaders import Anchor, place
 from .padstrip import (
     EMPTY,
+    EMPTY_RING,
     EMPTY_TEXT,
     GAP,
     HEIGHT,
@@ -187,8 +188,11 @@ def draw(screen, assets: pathlib.Path, platform: str, font_at, cache: dict, high
         colour = LEADER_LIT if lit else LEADER
         pygame.draw.aalines(screen, colour, False, [(x, y) for x, y in item.points])
         if lit:
-            pygame.draw.lines(screen, colour, False, [(int(x), int(y)) for x, y in item.points], 2)
-        pygame.draw.circle(screen, colour if lit else DOT, (int(item.points[0][0]), int(item.points[0][1])), 4)
+            # aalines and aacircle: a leader is a thin diagonal, which is the
+            # shape aliasing shows up on worst, and it is drawn over artwork
+            # that resvg already anti-aliased.
+            pygame.draw.aalines(screen, colour, False, [(int(x), int(y)) for x, y in item.points], 2)
+        pygame.draw.aacircle(screen, colour if lit else DOT, (int(item.points[0][0]), int(item.points[0][1])), 4)
 
         text = label_font.render(item.anchor.label, True, TEXT if lit else TEXT_DIM)
         x = item.x + 8 if item.align == "left" else item.x - text.get_width() - 8
@@ -245,22 +249,25 @@ def draw_strip(screen, font_at, players: list[dict], slots: int, status: str) ->
     for index, seat in enumerate(seats(players, slots), start=1):
         filled = seat is not None
         colour = colour_for(index) if filled else EMPTY
-        pygame.draw.circle(screen, colour, (x, middle), PAD_RADIUS)
-        # An outline on the empty ones, so a seat nobody is in reads as a seat
-        # rather than as a smudge.
+        # aacircle, not circle: a hard-edged disc at this size is visibly
+        # stepped, and four of them across the top of every screen is the
+        # first thing anybody notices about the strip.
+        pygame.draw.aacircle(screen, colour, (x, middle), PAD_RADIUS)
         if not filled:
-            pygame.draw.circle(screen, EMPTY_TEXT, (x, middle), PAD_RADIUS, 2)
+            pygame.draw.aacircle(screen, EMPTY_RING, (x, middle), PAD_RADIUS, 2)
 
         number = small.render(
             str(index), True, (20, 20, 24) if filled else EMPTY_TEXT
         )
         screen.blit(number, number.get_rect(center=(x, middle)))
 
-        label = tiny.render(
-            name_for(seat), True, LABEL if filled else LABEL_DIM
-        )
-        screen.blit(label, (x + PAD_RADIUS + 6, middle - label.get_height() // 2))
-        x += PAD_RADIUS * 2 + 6 + label.get_width() + GAP * 2
+        written = name_for(seat)
+        width_used = 0
+        if written:
+            label = tiny.render(written, True, LABEL if filled else LABEL_DIM)
+            screen.blit(label, (x + PAD_RADIUS + 6, middle - label.get_height() // 2))
+            width_used = 6 + label.get_width()
+        x += PAD_RADIUS * 2 + width_used + GAP * 2
 
     word = tiny.render(status, True, LABEL_DIM)
     screen.blit(word, (width - word.get_width() - GAP, middle - word.get_height() // 2))
@@ -309,14 +316,14 @@ def draw_assign(screen, font_at, view, icon_surface=None) -> None:
         seat = taken.get(player)
         centre = (left + index * slot_w + slot_w // 2, middle)
         colour = colour_for(player) if seat else EMPTY
-        pygame.draw.circle(screen, colour, centre, 34)
+        pygame.draw.aacircle(screen, colour, centre, 34)
         if seat is None:
-            pygame.draw.circle(screen, EMPTY_TEXT, centre, 34, 3)
+            pygame.draw.aacircle(screen, EMPTY_RING, centre, 34, 3)
         number = font_at(38).render(str(player), True, (20, 20, 24) if seat else EMPTY_TEXT)
         screen.blit(number, number.get_rect(center=centre))
 
         label = font_at(20).render(
-            (seat.name if seat else "waiting")[:22], True, TEXT if seat else TEXT_DIM
+            (seat.name if seat else "waiting")[:22], True, TEXT if seat else EMPTY_TEXT
         )
         screen.blit(label, label.get_rect(center=(centre[0], middle + 56)))
 

@@ -46,8 +46,10 @@ def test_a_fifth_player_wraps_rather_than_failing():
     assert colour_for(5) == colour_for(1)
 
 
-def test_an_empty_seat_says_so():
-    assert name_for(None) == "empty"
+def test_an_empty_seat_writes_nothing():
+    # The red ring already says it. "empty" beside it is the same fact twice,
+    # four times across the top of every screen.
+    assert name_for(None) == ""
 
 
 def test_padmap_s_own_name_is_not_what_gets_drawn():
