@@ -165,7 +165,7 @@ gotg play world.legend_of_zelda_tears_of_the_kingdom 120fps --version 1.4.2
 | `gamecube/usa.legend_of_zelda_four_swords_adventures` | `2p`, `3p`, `4p` (split-screen) |
 | `n64/usa.super_mario_64` | `pc`, `pc-2p`, `pc-3p`, `pc-4p` (sm64coopdx, split-screen) |
 | `n64/usa.legend_of_zelda_majoras_mask` | `rando` |
-| `n64/usa.legend_of_zelda_ocarina_of_time_rev2` | `rando` |
+| `n64/usa.legend_of_zelda_ocarina_of_time_rev2` | `rando`, `2p`, `3p`, `4p` (Anchor co-op, split-screen) |
 | `n64/usa.paper_mario` | `recut` |
 | `gba/world.pokemon_emerald_version` | `rogue` |
 | `switch/world.legend_of_zelda_breath_of_the_wild` | `60fps`, `120fps` (needs 1.6.0) |
