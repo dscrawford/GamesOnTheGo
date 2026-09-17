@@ -84,6 +84,7 @@ let
     (import ./mods/skyward-sword.nix { inherit pkgs lib; })
     (import ./mods/four-swords-split.nix { inherit pkgs lib; })
     (import ./mods/sm64-coop-split.nix { inherit pkgs lib; })
+    (import ./mods/oot-coop-split.nix { inherit pkgs lib; })
     (import ./mods/kirby-forgotten-land.nix { inherit pkgs lib; })
     (import ./mods/paper-mario-ttyd.nix { inherit pkgs lib; })
     (import ./mods/super-mario-rpg.nix { inherit pkgs lib; })

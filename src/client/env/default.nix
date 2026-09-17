@@ -29,6 +29,9 @@ let
     # Only the Four Swords Adventures split-screen variants name this, so only
     # they build it — sway, gamescope and bwrap are not the client's problem.
     splitscreen = pkgs.callPackage ../../../pkgs/splitscreen { };
+    # The relay Ship of Harkinian's co-op talks through, run locally so four
+    # copies of Ocarina of Time on one sofa need no internet.
+    anchor-server = pkgs.callPackage ../../../pkgs/anchor-server { };
   };
 
   nixNames =
