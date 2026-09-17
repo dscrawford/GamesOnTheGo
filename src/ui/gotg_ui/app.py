@@ -12,15 +12,16 @@ from __future__ import annotations
 
 import pygame
 
-from . import config, filters, pads
+from . import around, config, filters, pads, profiles
 from .art import ArtStore
 from .assign import Session
 from .browser import Browser
 from .catalog import Game, Library
-from .controllers import assets_dir, draw_assign, draw_strip
+from .controllers import assets_dir, control_places, draw_assign, draw_strip
 from .controllers import draw as draw_controllers
 from .fetch import Loader
 from .filters import Filters
+from .gate import layout_for
 from .grid import Grid
 from .installed import installed_games
 from .layout import grid, tile_at
@@ -42,6 +43,26 @@ TEXT_DIM = config.colour("theme.colours.text_dim", (150, 150, 158))
 
 # The Deck's own panel, so a window on a desktop is the shape it will be there.
 WINDOW = tuple(config.get("theme.window", [1280, 800]))
+
+# The keyboard's arrows as the same steps a d-pad gives, so the diagram is
+# walked the same way from either.
+ARROWS = {
+    pygame.K_LEFT: (-1, 0),
+    pygame.K_RIGHT: (1, 0),
+    pygame.K_UP: (0, -1),
+    pygame.K_DOWN: (0, 1),
+}
+
+
+def seated_pad_name(client) -> str:
+    """The name of player one's controller, or nothing.
+
+    Player one because the diagram is one pad's worth of screen. A second
+    player with a different controller is a real case and a bigger screen than
+    this one.
+    """
+    players = client.players if client.connected else []
+    return str(players[0].get("name", "")) if players else ""
 
 
 def _fit(font_at, text: str, width: int, size: int):
@@ -424,6 +445,14 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # A screen rather than an overlay: it is a page of reference, not an
     # action, and nothing underneath it should keep moving.
     controllers: str | None = None
+    # Which control the cursor is on while the diagram is up, and what the
+    # seated pad has bound to each -- read off padmap's own profile, since it
+    # answers no question about the inside of a mapping.
+    focus: str = ""
+    bound: dict[str, str] = {}
+    # Filled in when the diagram is drawn. Empty until then, which the cursor
+    # treats as "nowhere to go" rather than as an error.
+    control_anchors: dict[str, tuple[float, float]] = {}
     # The filter panel, while it is open. None is the grid.
     panel: Filters | None = None
     # The controller layer. Absent is a state rather than a failure: a machine
@@ -579,6 +608,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 padmap.send(seating.cancel())
                             else:
                                 controllers = None
+                        elif event.key in ARROWS and not seating.open:
+                            focus = around.nearest(control_anchors, focus, ARROWS[event.key])
                         elif event.key in (pygame.K_RETURN, pygame.K_a):
                             # One key, two meanings, and the state says which:
                             # nothing started yet means start, and a session in
@@ -586,6 +617,11 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             padmap.send(seating.accept() if seating.open else seating.begin())
                         elif event.key == pygame.K_r and seating.open:
                             padmap.send(seating.reset())
+                    elif pads.direction(event) is not None and not seating.open:
+                        # Around the drawing itself. Geometric, so "right" from
+                        # the d-pad reaches the face buttons rather than
+                        # whichever control the config happens to list next.
+                        focus = around.nearest(control_anchors, focus, pads.direction(event))
                     else:
                         # The same three things the keyboard does. Leaving them
                         # off was the whole of "I hold A and nothing happens":
@@ -874,7 +910,17 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 if seating.open or seating.view.finished:
                     draw_assign(below, font_at, seating.view)
                 else:
-                    draw_controllers(below, assets_dir(), controllers, font_at, controller_art)
+                    control_anchors = control_places(assets_dir(), controllers, controller_art)
+                    if focus not in control_anchors:
+                        focus = around.first(control_anchors)
+                    bound = profiles.described(
+                        profiles.for_pad(seated_pad_name(padmap)),
+                        f"console:{layout_for(controllers)}",
+                    )
+                    draw_controllers(
+                        below, assets_dir(), controllers, font_at, controller_art,
+                        highlight=focus, bound=bound,
+                    )
             else:
                 # Whatever the workers finished since the last frame stops being a
                 # placeholder now. Only the page on screen is ever asked for.
