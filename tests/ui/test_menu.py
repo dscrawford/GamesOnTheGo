@@ -31,6 +31,8 @@ def test_opening_holds_the_game_and_starts_on_play():
 def test_moving_walks_and_clamps():
     m = Menu(game(), tile_index=0)
     m.move(1)
+    assert m.action == "install"  # not here yet, so Install sits under Play
+    m.move(1)
     assert m.action == "configure"
     m.move(1)
     assert m.action == "controllers"
@@ -57,9 +59,9 @@ def test_the_panel_lands_on_the_open_side_of_the_tile(tile_index, side):
 
 def test_selecting_an_item_by_index_is_refused_off_the_list():
     m = Menu(game(), tile_index=0)
-    assert m.select(4) is True
+    assert m.select(5) is True
     assert m.action == "steam-add"
-    assert m.select(5) is False
+    assert m.select(6) is False
     assert m.action == "steam-add", "a refused select leaves the cursor"
     assert m.select(-1) is False
 
@@ -83,10 +85,10 @@ def test_a_game_that_is_here_gets_uninstall_last():
 
 def test_a_game_that_is_not_here_has_no_uninstall_to_press():
     m = Menu(game(), tile_index=0, installed=False)
-    assert len(m.actions) == 5
+    assert len(m.actions) == 6  # Play, Install, Configure, Controllers, Storage, Add to Steam
     m.move(10)
     assert m.action == "steam-add"
-    assert m.select(5) is False
+    assert m.select(6) is False
 
 
 # --- mods, as a menu you walk into ------------------------------------------
@@ -97,7 +99,11 @@ def with_mods(installed=False):
 
 
 def test_a_game_with_no_variants_is_the_menu_it_always_was():
-    assert [label for label, _ in Menu(game(), 0).actions] == [label for label, _ in ACTIONS]
+    # Plus the one row its presence decides: Install while it is not here,
+    # Uninstall once it is.
+    labels = [label for label, _ in ACTIONS]
+    assert [label for label, _ in Menu(game(), 0, installed=True).actions] == [*labels, "Uninstall"]
+    assert [label for label, _ in Menu(game(), 0).actions] == ["Play Game", "Install", *labels[1:]]
 
 
 def test_the_mods_row_comes_first_and_names_what_is_chosen():
@@ -105,7 +111,7 @@ def test_the_mods_row_comes_first_and_names_what_is_chosen():
     m = with_mods()
     label, verb = m.actions[0]
     assert verb == MODS and label == f"Mods: {PLAIN}"
-    assert [v for _, v in m.actions[1:]] == [v for _, v in ACTIONS]
+    assert [v for _, v in m.actions[1:]] == ["play", "install", "configure", "controllers", "storage", "steam-add"]
 
 
 def test_opening_the_row_replaces_the_verbs_with_the_variants():
@@ -230,3 +236,28 @@ def test_the_shape_defaults_to_the_grids():
     from gotg_ui.menu import Menu
 
     assert Menu(_game(), 0, False).columns == COLUMNS
+
+
+def test_a_game_that_is_not_here_can_be_installed_from_the_menu():
+    # Play would install it too, and then run it; on a sofa that is the
+    # wrong pair of things when what you want is the download to happen now
+    # and the game later. Its own row, right under Play, only while the game
+    # is not here.
+    m = Menu(game(), 0, installed=False)
+    verbs = [verb for _, verb in m.actions]
+    assert verbs[:2] == ["play", "install"]
+    assert "uninstall" not in verbs
+
+
+def test_a_game_that_is_here_has_no_install_row():
+    m = Menu(game(), 0, installed=True)
+    verbs = [verb for _, verb in m.actions]
+    assert "install" not in verbs
+    assert verbs[-1] == "uninstall"
+
+
+def test_install_is_still_there_with_a_mod_chosen():
+    m = Menu(game(), 0, installed=False, variants=("60fps",))
+    m.open_list(MODS)
+    m.choose("variant:60fps")
+    assert ("Install", "install") in m.actions

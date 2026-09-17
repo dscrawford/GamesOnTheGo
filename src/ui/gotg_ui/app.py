@@ -744,6 +744,13 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             preparer = Preparer(game, ["steam", "add"], variant, version)
             after_prepare = None
             return
+        if verb == "install":
+            # The loader, then the grid: the badge fills in, the game waits.
+            # Per variant, like play -- a mod is its own environment, and
+            # installing it here is what makes its Play instant later.
+            preparer = Preparer(game, ["install"], variant, version)
+            after_prepare = "install"
+            return
         if verb == "uninstall":
             # Through the loader like steam-add, so what was removed is read
             # rather than guessed; then the badges are asked for again.
@@ -1138,10 +1145,10 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 if preparer.ok:
                     if after_prepare is None:
                         preparer = None  # steam add done — back to the grid
-                    elif after_prepare == "uninstall":
+                    elif after_prepare in ("install", "uninstall"):
                         browser.set_installed(installed_games())
                         # What the client said about versions was about a game
-                        # that is no longer there.
+                        # that is no longer there -- or not there yet.
                         forget_versions()
                         preparer = None
                     else:
