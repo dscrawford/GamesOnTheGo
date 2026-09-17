@@ -3,8 +3,10 @@
 The negative half is the point. Most of a real library has no art anywhere —
 libretro has no Switch playlist at all, and plenty of No-Intro names match
 nothing — and a cache that only remembered successes would ask the network
-about thousands of games on every launch. So a miss is written down too, and
-only a deliberate refresh looks again.
+about thousands of games on every launch. So a miss is written down too. It
+holds for the launch that wrote it: the next launch asks once more, because
+the answer lives on the service and can change there (`gotg admin art set`),
+and a machine that wrote "none" once must not draw a blank tile for ever.
 
 Kept under the state directory rather than the store, so it survives a
 rebuild, like the catalog cache and the save archives.
@@ -94,8 +96,15 @@ class ArtStore:
                 return candidate
         return None
 
-    def is_miss(self, game: Game) -> bool:
-        return self.miss_path(game).exists()
+    def is_miss(self, game: Game, since: float | None = None) -> bool:
+        """Whether "none" was written down -- and, given `since`, whether it
+        was written after that moment. A loader passes its own start, so a
+        miss from an earlier launch is a question again."""
+        try:
+            written = self.miss_path(game).stat().st_mtime
+        except OSError:
+            return False
+        return since is None or written >= since
 
     def put(self, game: Game, body: bytes) -> Path:
         extension = extension_for(body)
@@ -118,8 +127,8 @@ class ArtStore:
     def put_miss(self, game: Game) -> None:
         directory = self._dir(game)
         directory.mkdir(parents=True, exist_ok=True)
-        # The stamp is for a person reading the directory, not for the code:
-        # nothing expires, and only a refresh looks again.
+        # The stamp is for a person reading the directory; the code goes by
+        # the file's own mtime.
         self.miss_path(game).write_text(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()) + "\n")
 
     def forget(self, game: Game) -> None:

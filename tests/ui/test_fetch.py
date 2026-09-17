@@ -8,6 +8,7 @@ client's, covered from its side.
 from __future__ import annotations
 
 import json
+import os
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -139,3 +140,27 @@ def test_the_grid_identifies_itself(art_service):
     game = Game(id="usa.zelda", platform="n64", title="Zelda", handler="single_file")
     _Art.pictures["n64/usa.zelda"] = PICTURE
     assert service_art(game, art_service, "client-token") == (PICTURE, True)
+
+
+def test_a_miss_from_a_previous_launch_is_queued_again(tmp_path, monkeypatch):
+    # Last launch wrote "none" for this game. This launch asks the service
+    # once more, because the answer over there may have changed since.
+    monkeypatch.setenv("GOTG_API_FILE", str(tmp_path / "absent.json"))
+    store = ArtStore(tmp_path / "art")
+    game = Game(id="usa.zelda", platform="n64", title="Zelda", handler="single_file")
+    store.put_miss(game)
+    old = store.miss_path(game).stat().st_mtime - 60
+    os.utime(store.miss_path(game), (old, old))
+    loader = Loader(store, workers=0)
+    assert loader.want(game) is None
+    assert game.key in loader._seen, "asked again, not skipped"
+
+
+def test_a_miss_from_this_launch_is_not_asked_about_twice(tmp_path, monkeypatch):
+    monkeypatch.setenv("GOTG_API_FILE", str(tmp_path / "absent.json"))
+    store = ArtStore(tmp_path / "art")
+    game = Game(id="usa.zelda", platform="n64", title="Zelda", handler="single_file")
+    loader = Loader(store, workers=0)
+    store.put_miss(game)  # what a worker writes when the service says no
+    assert loader.want(game) is None
+    assert game.key not in loader._seen
