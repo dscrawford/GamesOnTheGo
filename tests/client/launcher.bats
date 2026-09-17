@@ -548,3 +548,39 @@ fake_zenity() {
   dialog_dir_remove "/"
   [ -e "$TEST_TMP/precious/file" ]
 }
+
+@test "a dialog that dies later, for its own reasons, does not stop the build either" {
+  # zenity 4 initialises GTK before it parses its options, so a refused
+  # option surfaces well after any start-up grace. Its exit status says
+  # what happened: 255 is zenity's problem, and the build goes on.
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  gotg download usa.zelda
+  rm -rf "$GOTG_ROOTS_DIR/env-n64"
+  stub_nix
+  fake_zenity ok
+  printf '#!%s\nsleep 0.8\necho "This option is not available." >&2\nexit 255\n' "$(command -v bash)" >"$GOTG_ZENITY"
+  # A build still running when the dialog dies, or the branch never runs.
+  sed -i 's/^exit 0$/sleep 2; exit 0/' "$GOTG_NIX"
+
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"went away (zenity exited 255)"* ]]
+  [[ "$stderr" != *"build stopped"* ]]
+}
+
+@test "closing the dialog is still a cancellation" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  gotg download usa.zelda
+  rm -rf "$GOTG_ROOTS_DIR/env-n64"
+  stub_nix
+  fake_zenity ok
+  printf '#!%s\nsleep 0.8\nexit 1\n' "$(command -v bash)" >"$GOTG_ZENITY"
+  # A build that would take long enough to be cancelled.
+  sed -i 's/^exit 0$/sleep 5; exit 0/' "$GOTG_NIX"
+
+  gotg play usa.zelda
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"build stopped: the progress dialog was cancelled"* ]]
+}
