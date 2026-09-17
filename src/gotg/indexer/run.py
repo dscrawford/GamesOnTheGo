@@ -161,8 +161,17 @@ def run_scan(
     dry_run: bool,
     checksum: bool = True,
     publisher: pub.Publisher | None = None,
+    match: str | None = None,
 ) -> RunStats:
-    """Import every game under one directory (--scan)."""
+    """Import every game under one directory (--scan).
+
+    With ``match``, only the sources whose name the pattern is found in --
+    case-insensitively -- and nothing that follows a full enumeration: no
+    games-root pass, no marking the rest as seen, and no sweep, because a
+    subset says nothing about what else is there. It is the twenty-second
+    answer to "index the update I just dropped in" where the whole library
+    is twenty minutes.
+    """
     since = pub.utc_now()
     started = time.monotonic()
     scanned, ignored = discover(root, rules)
@@ -173,6 +182,11 @@ def run_scan(
         len(scanned),
         ignored,
     )
+    if match is not None:
+        pattern = re.compile(match, re.IGNORECASE)
+        chosen = [(path, source) for path, source in scanned if pattern.search(path.name)]
+        log.info("matched %d of %d source(s) against %r", len(chosen), len(scanned), match)
+        scanned = chosen
     stats = run_paths(
         [path for path, _ in scanned],
         cfg,
@@ -186,6 +200,9 @@ def run_scan(
     # The games tree is the raw source for everything whose torrent no longer
     # seeds — most of the library. Published after the torrent pass, so a
     # living source always wins.
+    if match is not None:
+        return stats
+
     if publisher and not dry_run:
         published, errors = pub.publish_games_root(publisher, mf.load(cfg.manifest_path), cfg)
         log.info("games-root pass: %d published, %d error(s)", published, errors)

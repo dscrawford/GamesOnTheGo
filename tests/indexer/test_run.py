@@ -474,3 +474,35 @@ def test_planning_without_a_probe_still_takes_one(cfg):
     zipped_set(cfg, "Nintendo - Game Boy")
     ops = run_paths([cfg.source_root / "Nintendo - Game Boy"], cfg, load_rules(), dry_run=True)
     assert ops.actions
+
+
+def test_a_match_imports_only_what_matches_and_never_sweeps(cfg):
+    # A full scan of the library takes twenty minutes; the person who just
+    # dropped one update in wants that one indexed. A subset is not a full
+    # enumeration, so nothing else is marked seen and nothing is swept.
+    make_set(cfg, "Nintendo - Nintendo 64 (BigEndian)", ["Body Harvest (USA).zip"])
+    make_set(cfg, "Nintendo - Super Nintendo Entertainment System", ["Zelda (USA).zip"])
+    publisher = FakePublisher()
+    stats = run_scan(cfg.source_root, cfg, RULES, dry_run=False, publisher=publisher, match="nintendo 64")
+    assert publisher.published == ["usa.body_harvest"]
+    assert publisher.swept == []
+    assert publisher.touched == []
+    assert not stats.failed
+
+
+def test_a_match_is_a_case_insensitive_search_on_the_source_name(cfg):
+    make_set(cfg, "Nintendo - Nintendo 64 (BigEndian)", ["Body Harvest (USA).zip"])
+    publisher = FakePublisher()
+    run_scan(cfg.source_root, cfg, RULES, dry_run=False, publisher=publisher, match="BIGENDIAN")
+    assert publisher.published == ["usa.body_harvest"]
+
+
+def test_a_match_that_matches_nothing_imports_nothing(cfg, caplog):
+    caplog.set_level("INFO")
+    make_set(cfg, "Nintendo - Nintendo 64 (BigEndian)", ["Body Harvest (USA).zip"])
+    publisher = FakePublisher()
+    stats = run_scan(cfg.source_root, cfg, RULES, dry_run=False, publisher=publisher, match="breath of the wild")
+    assert publisher.published == []
+    assert publisher.swept == []
+    assert not stats.failed
+    assert "matched 0 of 1" in caplog.text

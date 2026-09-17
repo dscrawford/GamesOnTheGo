@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -51,6 +52,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help=(
             "walk one directory, import everything that classifies as a game, and ignore the rest; needs no qBittorrent"
+        ),
+    )
+    parser.add_argument(
+        "--match",
+        metavar="REGEX",
+        default=None,
+        help=(
+            "with --scan: import only the sources whose name the pattern is found in (case-insensitive), "
+            "and skip the sweep -- seconds for one release rather than minutes for the library"
         ),
     )
     parser.add_argument(
@@ -118,6 +128,13 @@ def main(argv: list[str] | None = None) -> int:
                 raise cfgmod.ConfigError(f"source does not exist: {path}")
         if args.scan and not args.scan.is_dir():
             raise cfgmod.ConfigError(f"not a directory: {args.scan}")
+        if args.match is not None:
+            if not args.scan:
+                raise cfgmod.ConfigError("--match narrows a --scan; with --bootstrap the paths are already the choice")
+            try:
+                re.compile(args.match)
+            except re.error as exc:
+                raise cfgmod.ConfigError(f"--match is not a valid pattern: {exc}") from exc
     except (cfgmod.ConfigError, rulesmod.RulesError) as exc:
         log.error("%s", exc)
         return EXIT_CONFIG
@@ -156,7 +173,15 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.scan:
-            stats = run_scan(args.scan, cfg, rules, dry_run=args.dry_run, checksum=checksum, publisher=publisher)
+            stats = run_scan(
+                args.scan,
+                cfg,
+                rules,
+                dry_run=args.dry_run,
+                checksum=checksum,
+                publisher=publisher,
+                match=args.match,
+            )
         elif paths:
             stats = run_paths(paths, cfg, rules, dry_run=args.dry_run, checksum=checksum, publisher=publisher)
     except OSError as exc:

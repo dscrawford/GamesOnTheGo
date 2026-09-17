@@ -38,6 +38,7 @@ The Kubernetes CronJob depends on these exact knobs — treat them as a public A
 | `--once` | process one pass and exit (what the CronJob runs) |
 | `--dry-run` | print the plan, write nothing |
 | `--bootstrap DIR [DIR...]` | process explicit paths instead of polling qBittorrent |
+| `--match REGEX` | with `--scan`: only the sources whose name the pattern is found in (case-insensitive), and no sweep — seconds for one release rather than minutes for the library |
 
 Exit `0` on success including "nothing to do"; non-zero only on hard failure (bad
 config, unwritable volume, qBittorrent unreachable).

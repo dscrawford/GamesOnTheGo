@@ -23,12 +23,15 @@ usage: gotg admin <command> [args]
   tokens                        every token: name, display, last use
   revoke <name>                 end one token now, and cancel any invite
                                 still outstanding for it; the person re-claims
-  import [--follow] [--timeout <seconds>]
+  import [--follow] [--timeout <seconds>] [--match <regex>]
                                 run the importer now instead of waiting for
                                 Sunday: a one-off Job cloned from the CronJob,
                                 same image, same mounts. Needs kubectl and the
                                 cluster, not the admin token. Prints what the
-                                run flagged and its summary line
+                                run flagged and its summary line.
+                                --match indexes only the sources whose name
+                                the pattern is found in (case-insensitive),
+                                and skips the sweep: seconds, not twenty minutes
   art warm [--rate <n>] [--limit <n>] [--platform <p>] [--refresh]
                                 resolve tile pictures for the whole catalog
                                 and store them in the service, so no client
@@ -322,12 +325,17 @@ admin_scan() {
 kubectl_bin() { printf '%s' "${GOTG_KUBECTL:-kubectl}"; }
 
 admin_import() {
-  local follow=0 timeout=1800
+  local follow=0 timeout=1800 match=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --follow)
         follow=1
         shift
+        ;;
+      --match)
+        [[ -n "${2:-}" ]] || die "--match takes a pattern"
+        match="$2"
+        shift 2
         ;;
       --timeout)
         [[ "${2:-}" =~ ^[1-9][0-9]*$ ]] || die "--timeout takes seconds"
@@ -344,8 +352,17 @@ admin_import() {
   # linger, so two runs in one minute must not collide.
   job="gotg-import-manual-$(date -u +%Y%m%d-%H%M%S)"
 
-  "$(kubectl_bin)" create job "$job" --from="cronjob/$cron" >/dev/null ||
-    die "could not create a job from cronjob/$cron — is kubectl pointed at the cluster?"
+  if [[ -n "$match" ]]; then
+    # Still the CronJob's spec -- `--from` cannot take arguments, so the clone
+    # is rendered, the match appended to the importer's own, and created.
+    "$(kubectl_bin)" create job "$job" --from="cronjob/$cron" --dry-run=client -o json |
+      jq --arg m "$match" '.spec.template.spec.containers[0].args += ["--match", $m]' |
+      "$(kubectl_bin)" create -f - >/dev/null ||
+      die "could not create a job from cronjob/$cron — is kubectl pointed at the cluster?"
+  else
+    "$(kubectl_bin)" create job "$job" --from="cronjob/$cron" >/dev/null ||
+      die "could not create a job from cronjob/$cron — is kubectl pointed at the cluster?"
+  fi
   log "import running as job/$job"
 
   if ((follow)); then
