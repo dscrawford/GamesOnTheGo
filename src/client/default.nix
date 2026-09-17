@@ -100,5 +100,6 @@ stdenvNoCC.mkDerivation {
   meta = {
     description = "Downloads games from the GOTG server on demand and launches them";
     mainProgram = "gotg";
+    license = lib.licenses.mit;
   };
 }

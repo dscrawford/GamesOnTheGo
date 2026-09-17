@@ -23,6 +23,7 @@ runCommand "gotg-importer-0.6.0"
     meta = {
       description = "Indexes a folder of games into the GOTG catalog and /Games";
       mainProgram = "gotg-importer";
+      license = lib.licenses.mit;
     };
   }
   ''
