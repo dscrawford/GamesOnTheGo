@@ -227,6 +227,12 @@ EOF
   export GOTG_ENV_STATE_DIR="$rundir/env-state"
   # No zenity: this is a terminal (or CI) workflow even when a display exists.
   export GOTG_NO_DIALOG=1
+  # And no controller gate. Nobody is in front of this to hold a button, and
+  # the gate waits for one until somebody does -- which on a machine with a
+  # padmap daemon and an unmapped pad is a run that never starts and never
+  # says why. QA brings its own virtual pad a few lines below; the question
+  # the gate asks is already answered.
+  export GOTG_SEAT_GATE=0
 
   # The pad first: pads_configure inside play_prepare must see it, and the
   # emulator must find it already present when SDL first scans /dev/input.
