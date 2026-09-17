@@ -165,6 +165,14 @@ Each variant gets its own launcher and its own entry, named `Title (variant)`
 from the catalog's own title, so `bse` and `bsmso` sit side by side. Entries are
 tagged with their platform, which Steam shows as a collection.
 
+**The picker goes in Steam the same way.** `gotg steam picker` adds **Games On
+The Go** itself, which is how Game Mode reaches it; the installer runs it for
+you. The shortcut points at `~/.local/state/gotg/launchers/gotg-ui.sh`, a
+two-line script that execs `gotg-ui` by name, rather than at the picker in the
+Nix store — Steam identifies an entry partly by its path, and a store path
+changes on every upgrade, which would break the shortcut in Game Mode where
+there is nothing to read an error with.
+
 **Artwork is fetched too**, written under the names Steam looks for, from two
 sources tried in order:
 
@@ -188,7 +196,8 @@ gotg steam art usa.super_mario_sunshine bse [--force]     # works with no key at
 echo '{"api_key": "..."}' > ~/.config/gotg/steamgriddb.json   # from steamgriddb.com
 ```
 
-**Or hold the key once, in the cluster.** `Kubernetes/GOTG/api.yaml` deploys
+**Or hold the key once, in the cluster.** `Kubernetes/GOTG/api.yaml`, in the
+homelab repo rather than this one, deploys
 the GOTG service, which holds the SteamGridDB key — and, if you give it one, an
 IGDB client id and secret, whose access token expires every sixty days and
 which it mints and refreshes so no client has to. The same service is also the
@@ -334,6 +343,48 @@ The file is binary, and every non-Steam game you have lives in it, so the
 previous version is kept beside it before each write and entries that are not
 ours are left alone.
 
+### The picker
+
+`gotg-ui` is the screen a Deck opens into: a grid of covers a controller can
+drive, with a strip across the top showing who is holding which pad. It launches
+games through the client rather than reimplementing it — what makes a game run
+is already in `src/client/lib` and already tested, and the copy nobody runs from
+a terminal is the one that rots.
+
+**Two views, because a cover is not always the useful thing.** The grid is ten
+tiles big enough to read from a sofa. The `rows` view is a list down the left —
+one game a line, icon and title — with the cover of the game in hand filling the
+right, which is how you look through four hundred titles without scrolling past
+nine of them a page. Swap them with the **View** row in the Start menu.
+
+**Start opens the menu.** Everything on it was already in the browser and half
+of it could not be reached without a keyboard: a pad could walk twelve platforms
+one way round and could not touch regions at all. The rows are **Platform**,
+**Region**, **Installed**, **Search**, **Clear all**, **View** and **Controller
+for…**. Pressing one opens the list of what it can be, because twelve platforms
+is a list to look down rather than a value to press right eleven times; left and
+right still nudge, for when the answer is next door. **Installed** has three
+answers rather than two — a yes/no toggle can ask what is downloaded and cannot
+ask what is *not*, which is the question somebody browsing for something new is
+asking.
+
+**Controller for… draws the pad.** Each console gets a diagram with a leader
+line to every button, labelled with what that button is called on *that* console
+and, where padmap has a profile for the pad in hand, what it is actually bound
+to — "Z is button 5" rather than "this pad has been mapped". The d-pad walks the
+drawing geometrically, so right from the d-pad reaches the face buttons instead
+of whichever control the config happens to list next.
+
+**What the picker looks like is `config/`.** `theme.yaml` holds the palette, the
+window, the shape of both views and how long things wait; `icons.yaml` maps a
+controller's reported name to a drawing; `config/controllers/*.yaml` is one file
+per controller, saying which platforms it covers, which padmap layout a capture
+walks, and what every control is called. Adding a console is a data edit —
+nothing in Python knows that a GameCube has a Z button or that a SNES calls its
+bottom face button B. Missing is never an error: every reader has a default, so
+a config directory that is gone entirely leaves the picker exactly as it was
+when these were constants.
+
 ### Controllers
 
 Bindings are written for you. `gotg play` points the emulator at whatever
@@ -352,8 +403,34 @@ The identity string it binds by is built the same way the emulator builds it,
 and compared as a string — which is why `list` prints it: that is what tells you
 whether a controller is the same one a binding was written for.
 
-**Every game can be stopped from the controller.** Hold **both shoulders (or
-both triggers) and Start for three seconds** and the game shuts down. Emulated
+**Underneath all of this is [padmap](https://github.com/chadac/padmap)**, a flake
+input pinned to a revision. It grabs each physical pad and republishes it through
+`/dev/uinput` as a controller whose identity it made — stable across replugs, in
+the player order somebody chose by holding a button — and captures a mapping for
+models SDL has never heard of. `gotg play` starts its daemon if nothing else has,
+asks whether there is a controller worth asking about before the game takes the
+screen, and then execs the emulator through `padmap-rs exec`, which puts the
+captured mappings in `SDL_GAMECONTROLLERCONFIG`. SDL reads that database once, at
+startup, which is why it has to be there *before* the emulator rather than a
+second later — the failure that looks like "it works the second time".
+
+None of it is allowed to stop a launch. No daemon, no uinput, nothing on PATH:
+the game starts anyway with whatever SDL already knows, which is what it had
+before padmap existed. That is also why the installer writes
+`/etc/udev/rules.d/99-gotg-uinput.rules`, and why a SteamOS update that wipes it
+is worth re-running the installer for.
+
+**The controller question is asked before the game takes the screen.** A launch
+runs `gotg-seat` first, and it draws something only when there is something to
+ask: no controller seated, or one padmap has never mapped. Once a game is
+fullscreen the person holding the pad has nothing to fix it with — the picker is
+gone and nothing has focus — so both questions are asked while there is still a
+screen to ask on, at the cost of a socket round trip on a machine already set up.
+It exits 0 whatever happens, including when padmap is not running. `GOTG_SEAT_GATE=0`
+skips it, and a machine with only the client and no picker does not have it at all.
+
+**Every game can be stopped from the controller.** Hold **both top buttons — shoulder or
+trigger, either side — and Start for three seconds** and the game shuts down. Emulated
 games have no Quit a pad can reach — a Switch title wants the Home button, an
 N64 ROM wants a keyboard that is not in the room, and a game that has hung
 wants neither — so on the couch the way out had been to get up and find one.
@@ -400,6 +477,14 @@ Each attached controller is seated in the console port of its own number, up to
 the four every ares console has. The order is SDL's enumeration order by
 default, which is what the emulators go by too — so `order` and the bindings
 cannot disagree.
+
+Where padmap is running, *it* decides the seats, and it asks the only authority
+there is: hold a button on the pad you want to be player one, then the next.
+Four identical adapter ports report the same name, phys, vendor and product and
+differ only by an ordinal the kernel hands out in plug order, so no file could
+have pinned them — the person holding the controllers can. On a machine where
+both are in play they should agree; where they do not, padmap's seating is the
+one the game gets.
 
 To choose instead:
 
@@ -500,8 +585,8 @@ property of the environment. Put it in `~/.config/gotg/video.json`:
 { "resolution": "4k" }
 ```
 
-`default`, `720p`, `1080p`, `1440p`, `4k`, `5k`, or `1x`–`8x` for the multiplier
-itself. It applies to every Dolphin environment at once — GameCube, Wii, and the
+`default` (or `native`), `720p`, `1080p`, `1440p`, `4k`, `5k`, or `1x`–`8x` for
+the multiplier itself. It applies to every Dolphin environment at once — GameCube, Wii, and the
 per-game variants — and takes effect on the next launch with nothing to rebuild.
 
 Dolphin renders at whole multiples of the GameCube's 640×528 and names them by
@@ -646,8 +731,9 @@ library entry that fails from inside Steam. `gotg info` is where it is still
 named, with what it wants:
 
 ```
-mods:      60fps, 120fps
-disabled:  enhanced (needs 1.4.2 or older)
+disabled:  60fps (needs 1.1.0 to 1.4.2)
+disabled:  120fps (needs 1.1.0 to 1.4.2)
+disabled:  enhanced (needs 1.1.0 to 1.4.2)
 ```
 
 Add an update it can take and it comes back on its own. Until an environment is
@@ -752,8 +838,9 @@ Controllers are seated in gotg's own order — the one `gotg controllers order`
 sets and every other emulator here already uses — so player one's pad drives
 the GBA in player one's corner. The frame is
 [SplitScreenWrapper](https://github.com/dscrawford/SplitScreenWrapper), pinned
-by revision and named by these three environments and nothing else: a machine
-that never launches one never builds sway, gamescope or bubblewrap for it. The
+by revision and named by six environments and nothing else — these three and
+the three Super Mario 64 co-op ones: a machine that never launches one never
+builds sway, gamescope or bubblewrap for it. The
 GBA's BIOS is fetched on demand from the Game Boy Advance directory on the
 server, since that is whose file it is — one copy, whichever platform turns out
 to need it.
@@ -845,7 +932,7 @@ from `gotg saves` while the in-game saves travel as usual.
 
 These take the ROM once rather than on every launch: the first run extracts it
 into an `.o2r` archive kept with the game's saves, and afterwards the port
-starts with no ROM at all. `src/client/env/helpers.nix` holds that handshake, since
+starts with no ROM at all. `src/client/env/emulators/harkinian.nix` holds that handshake, since
 all three share it — the guard matters, because handing these ports a ROM they
 have already extracted stops the launch on a confirmation dialog.
 
@@ -995,11 +1082,13 @@ the raw report. If more than a fifth of the catalog turns up missing the
 report says so out loud, because a library volume that failed to mount looks
 exactly like every game vanishing at once.
 
-**Saves only.** A pull restores what you played, not what you installed. Cemu's
-`mlc01/usr/title` — installed updates and DLC — is deliberately excluded: it is
-not a save, it can run to gigabytes, and it is not reconstructible from the ROM,
-so a machine that has only ever pulled will have your progress and still need
-those installed by hand.
+**Saves only.** A pull restores what you played, not what you installed. The
+Wii U environment is the clearest case and is not finished: it declares no save
+globs at all yet, so `gotg saves` carries nothing for it. Cemu keeps saves and
+installed titles under one `mlc01` tree, and the titles half runs to gigabytes
+that are not reconstructible from the ROM — so the globs have to name the saves
+precisely before this can be turned on, and a machine that has only ever pulled
+will still need updates and DLC installed by hand.
 
 ### Per-game tweaks
 
@@ -1032,7 +1121,8 @@ Steam is a hostile launch environment, and each of these was learned the hard wa
 ## Development
 
 ```bash
-nix develop        # gotg on PATH, plus uv, the locked python env, ruff, shellcheck, bats
+nix develop        # gotg, gotg-ui and gotg-seat on PATH, from the working tree
+                   # plus uv, the locked python env, ruff, shellcheck, bats
 nix flake check    # every test suite and linter
 ```
 
@@ -1041,9 +1131,9 @@ tree, with the packaged wrapper's own dependency list on PATH. Edits apply on
 save — there is nothing to rebuild and no shell to re-enter. `nix run .#gotg`
 gives you the packaged article when that is what you want to test.
 
-`nix flake check` runs 413 python tests (pytest, service and indexer together),
-280 client tests (bats, against the real GOTG service over real HTTP), ruff,
-shellcheck, and the recipe and platform drift checks.
+`nix flake check` runs 1211 python tests (pytest — the service, the indexer and
+the picker's model half), 667 client tests (bats, against the real GOTG service
+over real HTTP), ruff, shellcheck, and the recipe and platform drift checks.
 
 **The Python side is one uv project.** Its dependencies are resolved and hashed in
 `uv.lock`, and [uv2nix](https://github.com/pyproject-nix/uv2nix) builds

@@ -137,6 +137,7 @@ command_help() {
   case "$1" in
     login) echo "usage: gotg login [--claim <url>]    — save the server URL and token (a claim url is a single-use invite), stored mode 600" ;;
     refresh) echo "usage: gotg refresh  — re-fetch the game catalog from the server" ;;
+    versions) echo "usage: gotg versions <id> [variant]  — which installed versions there are, and which one a launch would run" ;;
     list | ls)
       cat <<'EOF'
 usage: gotg list [pattern] [page] [--search <re>] [--platform <p>] [--installed] [--page N] [--all] [--limit N]
@@ -176,7 +177,7 @@ main() {
 
   # Every leaf command answers -h/--help. The group commands handle their own.
   case "$cmd" in
-    login | refresh | list | ls | info | show | download | get | install | uninstall | play | launch | configure | sync)
+    login | refresh | list | ls | info | show | download | get | install | uninstall | play | launch | configure | sync | versions)
       case "${1:-}" in
         -h | --help) command_help "$cmd"; return 0 ;;
       esac
