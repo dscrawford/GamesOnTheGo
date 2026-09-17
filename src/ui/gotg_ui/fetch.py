@@ -24,6 +24,7 @@ import json
 import os
 import queue
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -124,6 +125,9 @@ class Loader:
         self.ready: queue.Queue = queue.Queue()
         self._seen: set[tuple[str, str]] = set()
         self._lock = threading.Lock()
+        # Misses older than this launch are asked about once more. A second
+        # back, so a miss written in the same tick as the start still counts.
+        self.started = time.time() - 1
         self.threads = [threading.Thread(target=self._work, daemon=True) for _ in range(workers)]
         for thread in self.threads:
             thread.start()
@@ -145,7 +149,7 @@ class Loader:
         if cached is not None:
             return cached
         with self._lock:
-            if game.key in self._seen or self.store.is_miss(game):
+            if game.key in self._seen or self.store.is_miss(game, since=self.started):
                 return None
             self._seen.add(game.key)
         self.queue.put(game)

@@ -96,9 +96,20 @@ def test_a_miss_is_remembered(store):
     assert store.get(game()) is None
 
 
-def test_a_remembered_miss_survives_a_relaunch(tmp_path):
+def test_a_miss_is_on_disk_after_a_relaunch(tmp_path):
     ArtStore(tmp_path / "art").put_miss(game())
     assert ArtStore(tmp_path / "art").is_miss(game()) is True
+
+
+def test_a_miss_from_an_earlier_launch_is_asked_about_again(tmp_path):
+    # The service's answer can change -- `gotg admin art set` fixes a game
+    # for everybody -- and a machine that wrote "none" once must not draw a
+    # blank tile forever. A miss counts only for the launch that wrote it.
+    store = ArtStore(tmp_path / "art")
+    store.put_miss(game())
+    written = store.miss_path(game()).stat().st_mtime
+    assert store.is_miss(game(), since=written - 1) is True
+    assert store.is_miss(game(), since=written + 1) is False
 
 
 def test_a_miss_records_when_it_was_looked_for(store):
