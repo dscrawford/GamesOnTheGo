@@ -193,14 +193,25 @@ _env_build_zenity() {
   "$(nix_bin)" build "$ref" -o "$root" "$@" &
   build_pid=$!
 
+  local zrc
   while kill -0 "$build_pid" 2>/dev/null; do
-    # The dialog is gone: either the user cancelled, or zenity never started.
+    # The dialog is gone. zenity says why in its exit status: 1 is the
+    # person closing or cancelling it, and that stops the build; anything
+    # else -- an option it refused, a display it lost -- is the dialog's
+    # problem and not a reason to lose an emulator build.
     if ! kill -0 "$zen_pid" 2>/dev/null; then
-      kill "$build_pid" 2>/dev/null || true
-      wait "$build_pid" 2>/dev/null || true
+      wait "$zen_pid" 2>/dev/null
+      zrc=$?
       exec 6>&-
       dialog_dir_remove "$pipedir"
-      die "build stopped: the progress dialog closed (cancelled, or zenity could not run)"
+      if [[ "$zrc" -eq 1 ]]; then
+        kill "$build_pid" 2>/dev/null || true
+        wait "$build_pid" 2>/dev/null || true
+        die "build stopped: the progress dialog was cancelled"
+      fi
+      warn "the progress dialog went away (zenity exited $zrc); building $attr without it"
+      wait "$build_pid" || status=$?
+      return "$status"
     fi
     sleep "${GOTG_PROGRESS_TICK:-0.5}"
   done

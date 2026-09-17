@@ -85,7 +85,17 @@ have_zenity() { command -v "$(zenity_bin)" >/dev/null 2>&1; }
 # refuses any non-ASCII argument -- an ellipsis, a game title with an accent --
 # with "This option is not available". On the Deck that took every environment
 # build down as "the progress dialog closed".
-zenity_run() { LC_ALL=C.UTF-8 "$(zenity_bin)" "$@"; }
+zenity_run() {
+  local rc=0
+  LC_ALL=C.UTF-8 "$(zenity_bin)" "$@" || rc=$?
+  # 0 is done, 1 is the person cancelling, 5 is its own timeout. Anything
+  # else is zenity failing, and the log should say in what surroundings.
+  case "$rc" in
+    0 | 1 | 5) ;;
+    *) warn "zenity exited $rc (LANG=${LANG:-} LC_ALL=C.UTF-8 DISPLAY=${DISPLAY:-} WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-} zenity=$(command -v "$(zenity_bin)" 2>/dev/null))" ;;
+  esac
+  return "$rc"
+}
 
 # Whether a dialog started at all: zenity that dies within its first moments
 # never showed anything, and the work it was fronting should go on without it.

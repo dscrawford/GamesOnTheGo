@@ -141,20 +141,26 @@ _download_zenity() {
   _curl_download "$url" "$out" "$etag" --silent --show-error &
   curl_pid=$!
 
-  local size pct=0 resumed_from start now
+  local size pct=0 resumed_from start now zrc
   resumed_from="$(stat -c '%s' "$out" 2>/dev/null || echo 0)"
   start="$(date +%s)"
   while kill -0 "$curl_pid" 2>/dev/null; do
-    # The user closed or cancelled the dialog: stop the transfer, keep the
-    # partial file so the next attempt resumes.
+    # The dialog is gone. Cancelled (zenity exits 1): stop the transfer and
+    # keep the partial file so the next attempt resumes. Anything else is
+    # the dialog failing, and the download goes on without it.
     if ! kill -0 "$zen_pid" 2>/dev/null; then
-      kill "$curl_pid" 2>/dev/null || true
-      wait "$curl_pid" 2>/dev/null || true
+      wait "$zen_pid" 2>/dev/null
+      zrc=$?
       exec 9>&-
       dialog_dir_remove "$pipedir"
-      # Could be the user cancelling, or zenity failing to start at all; say so
-      # rather than asserting an intent we cannot observe.
-      die "download stopped: the progress dialog closed (cancelled, or zenity could not run)"
+      if [[ "$zrc" -eq 1 ]]; then
+        kill "$curl_pid" 2>/dev/null || true
+        wait "$curl_pid" 2>/dev/null || true
+        die "download stopped: the progress dialog was cancelled"
+      fi
+      warn "the progress dialog went away (zenity exited $zrc); downloading $title without it"
+      wait "$curl_pid" || status=$?
+      return "$status"
     fi
     size="$(stat -c '%s' "$out" 2>/dev/null || echo 0)"
     now="$(date +%s)"
