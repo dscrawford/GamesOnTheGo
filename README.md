@@ -9,7 +9,7 @@ game picked up on the Deck continues where the desktop left it.
 
 | Component | Does | Runs |
 |---|---|---|
-| [indexer](src/gotg/indexer/) | indexes game torrents into the catalog, hardlinks them into `/Games` | CronJob |
+| [indexer](src/gotg/indexer/) | searches a folder for games and indexes them into the catalog, hardlinked into `/Games` | CronJob |
 | [service](src/gotg/service/) | serves the catalog, artwork and saves | Deployment |
 | [client](src/client/) | `gotg` — fetch, build, launch | Desktop, Steam Deck |
 | [picker](src/ui/) | `gotg-ui` — controller-driven game grid | Desktop, Steam Deck |

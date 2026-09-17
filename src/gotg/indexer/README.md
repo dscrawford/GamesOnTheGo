@@ -1,7 +1,8 @@
 # gotg-importer
 
-Organizes completed game torrents into the canonical `/Games/<platform>/<entry>` tree
-using renamed hardlinks, so the originals keep seeding at zero extra space.
+Searches a folder for games and organizes what it finds into the canonical
+`/Games/<platform>/<entry>` tree using renamed hardlinks, so the originals stay
+where they are at zero extra space.
 
 The pipeline is split so that everything except two thin I/O layers is pure and
 testable off-cluster:
@@ -24,7 +25,7 @@ The Kubernetes CronJob depends on these exact knobs — treat them as a public A
 | `QBIT_USER`, `QBIT_PASS` | WebUI credentials (from a Secret) |
 | `QBIT_CATEGORY` | work-queue category (default `games`) |
 | `GAMES_ROOT` | absolute path of the organized tree, e.g. `/data/Games` |
-| `SOURCE_ROOT` | where torrents live, e.g. `/data/Torrents` |
+| `SOURCE_ROOT` | the folder to search, e.g. `/data/Torrents` |
 | `PATH_PREFIX` | prefix written into manifest paths, e.g. `/Games` |
 | `STATE_DIR` | writable dir for the idempotency state file |
 
