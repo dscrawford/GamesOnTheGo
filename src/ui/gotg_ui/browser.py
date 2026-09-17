@@ -10,6 +10,12 @@ from __future__ import annotations
 
 from .catalog import Game, Library
 from .grid import Grid
+from .layout import COLUMNS, ROWS, SHELF_COLUMNS, SHELF_ROWS
+
+# The two views, and the shape each one draws the library in.
+GRID = "grid"
+SHELF = "rows"
+SHAPES = {GRID: (COLUMNS, ROWS), SHELF: (SHELF_COLUMNS, SHELF_ROWS)}
 
 # Pinned to the front of the list rather than sorted into it, so one press
 # from the starting position widens to everything rather than narrowing to
@@ -45,7 +51,16 @@ class Browser:
         # grid (an uninstall), the catalog does not.
         self.installed: set[tuple[str, str]] = set(installed or ())
         self.presence = ALL
-        self.grid = Grid(library)
+        # The shape the cursor steps in, and how many fit on a page. Two views
+        # draw the same library differently -- ten big tiles, or twenty-four
+        # small ones -- and both numbers change together or the cursor walks
+        # off the end of a page that is not that size.
+        self.columns = COLUMNS
+        self.rows = ROWS
+        # Which of the two shapes is on screen. The browser owns it because
+        # the shape and the page size are the same decision.
+        self.view = GRID
+        self.grid = Grid(library, self.columns, self.rows)
 
     @property
     def platform(self) -> str:
@@ -107,6 +122,36 @@ class Browser:
         if self.presence != ALL:
             self._reframe()
 
+    def set_view(self, view: str) -> None:
+        """Switch between the grid and the shelf, and re-page for it."""
+        if view not in SHAPES or view == self.view:
+            return
+        self.view = view
+        self.set_shape(*SHAPES[view])
+
+    def set_shape(self, columns: int, rows: int) -> None:
+        """Re-page for a view of a different shape, keeping the game in hand.
+
+        The cursor survives the switch: somebody looking at a game and changing
+        how it is drawn is still looking at that game, and putting them back on
+        page one is the kind of thing that makes a view worth avoiding.
+        """
+        was = self.grid.game
+        self.columns, self.rows = max(1, columns), max(1, rows)
+        self.per_page = self.columns * self.rows
+        self._reframe()
+        if was is not None:
+            self.show(was)
+
+    def show(self, game: Game) -> bool:
+        """Put the cursor on one game wherever it is, if it is still visible."""
+        for index, found in enumerate(self.visible.games):
+            if found.key == game.key:
+                self.grid.page_index = index // self.per_page
+                self.grid.selected = index % self.per_page
+                return True
+        return False
+
     def _reframe(self) -> None:
         """Rebuild the view, and put the cursor back at the start.
 
@@ -125,7 +170,7 @@ class Browser:
             games = [g for g in games if g.key in self.installed]
         elif self.presence == MISSING:
             games = [g for g in games if g.key not in self.installed]
-        self.grid = Grid(Library(games, self.per_page))
+        self.grid = Grid(Library(games, self.per_page), self.columns, self.rows)
 
     @property
     def status(self) -> str:

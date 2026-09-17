@@ -325,3 +325,52 @@ def test_closing_the_controller_list_opens_nothing():
     panel.press(ours)
     panel.close()
     assert panel.choose(ours) is None
+
+
+# --- the other view ----------------------------------------------------------
+
+
+def test_the_view_row_offers_both_ways_of_looking():
+    ours = browser()
+    assert filters.options_for(ours, filters.VIEW) == ("grid", "rows")
+
+
+def test_choosing_a_view_switches_it_and_re_pages():
+    # The shelf holds more than the grid, so the page size changes with it.
+    ours = browser()
+    panel = filters.Filters(index=filters.ROWS.index(filters.VIEW))
+    before = ours.per_page
+    panel.press(ours)
+    panel.choice.index = panel.choice.options.index("rows")
+    assert panel.choose(ours) is None          # a view is a setting, not a door
+    assert ours.view == "rows"
+    assert ours.per_page > before
+
+
+def test_the_view_row_nudges_round_both_ways():
+    ours = browser()
+    panel = filters.Filters(index=filters.ROWS.index(filters.VIEW))
+    panel.adjust(ours, 1)
+    assert ours.view == "rows"
+    panel.adjust(ours, 1)
+    assert ours.view == "grid"
+    panel.adjust(ours, -1)
+    assert ours.view == "rows"
+
+
+def test_the_row_says_which_view_is_on():
+    ours = browser()
+    assert filters.value_of(ours, filters.VIEW) == "grid"
+    ours.set_view("rows")
+    assert filters.value_of(ours, filters.VIEW) == "rows"
+
+
+def test_clearing_the_filters_leaves_the_view_alone():
+    # Clear all is about what is shown, not how. Somebody who has chosen the
+    # shelf has not asked to be put back in the grid.
+    ours = browser()
+    ours.set_view("rows")
+    ours.set_platform("n64")
+    filters.clear(ours)
+    assert ours.platform == ALL
+    assert ours.view == "rows"

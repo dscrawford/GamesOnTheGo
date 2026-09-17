@@ -15,8 +15,16 @@ from .layout import COLUMNS, ROWS
 class Grid:
     """Where the cursor is, and which page it is on."""
 
-    def __init__(self, library: Library):
+    def __init__(self, library: Library, columns: int = COLUMNS, rows: int = ROWS):
+        """The shape is the cursor's, not the layout module's.
+
+        Two views draw the same library in different shapes -- ten big tiles,
+        or rows of small icons -- and a cursor that stepped by the grid's five
+        columns inside a shelf eight wide would skip three games per press.
+        """
         self.library = library
+        self.columns = max(1, columns)
+        self.rows = max(1, rows)
         self.page_index = 0
         self.selected = 0
 
@@ -34,22 +42,22 @@ class Grid:
         page = self.page
         if not page:
             return
-        column, row = self.selected % COLUMNS, self.selected // COLUMNS
+        column, row = self.selected % self.columns, self.selected // self.columns
         if dy:
-            row = max(0, min(ROWS - 1, row + dy))
+            row = max(0, min(self.rows - 1, row + dy))
         if dx:
             column += dx
             if column < 0:
                 if self.turn(-1):
-                    column = COLUMNS - 1
+                    column = self.columns - 1
                 else:
                     column = 0
-            elif column >= COLUMNS:
+            elif column >= self.columns:
                 if self.turn(1):
                     column = 0
                 else:
-                    column = COLUMNS - 1
-        self.selected = min(row * COLUMNS + column, len(self.page) - 1)
+                    column = self.columns - 1
+        self.selected = min(row * self.columns + column, len(self.page) - 1)
 
     def select(self, index: int) -> bool:
         """Put the cursor on one tile of this page. False if there is no game

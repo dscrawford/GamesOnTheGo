@@ -54,6 +54,14 @@ grid:
   gap_fraction: 0.02
   margin_fraction: 0.04
 
+# The other view: rows of covers, with the one under the cursor shown full
+# size beside them. More of the library at once than the grid, smaller.
+shelf:
+  columns: 8
+  rows: 3
+  # How much of the window the full art gets.
+  hero_fraction: 0.5
+
 # Seconds, everywhere.
 timeouts:
   # A unix socket either answers at once or is not there; this is only so a

@@ -15,7 +15,7 @@ import pygame
 from . import around, config, filters, pads, profiles
 from .art import ArtStore
 from .assign import Session
-from .browser import Browser
+from .browser import SHELF, Browser
 from .catalog import Game, Library
 from .controllers import assets_dir, control_places, draw_assign, draw_strip
 from .controllers import draw as draw_controllers
@@ -24,7 +24,7 @@ from .filters import Filters
 from .gate import layout_for
 from .grid import Grid
 from .installed import installed_games
-from .layout import grid, tile_at
+from .layout import grid, shelf, shelf_at, tile_at
 from .menu import Menu
 from .padmap import Padmap, ensure_daemon
 from .padstrip import HEIGHT as STRIP_HEIGHT
@@ -96,6 +96,104 @@ def draw_badge(screen, tile) -> None:
     pygame.draw.polygon(screen, TEXT, [(cx - head, cy), (cx + head, cy), (cx, cy + head)])
     pygame.draw.aalines(screen, TEXT, True, [(cx - head, cy), (cx + head, cy), (cx, cy + head)])
     pygame.draw.line(screen, TEXT, (cx - head, cy + head + 2), (cx + head, cy + head + 2), stroke)
+
+
+def hovering(browser, pos, size) -> int | None:
+    """Which cover the pointer is on, in whichever view is drawn.
+
+    Asked of the view rather than assumed, because the two have different
+    rectangles and a pointer answered by the wrong one selects a game three
+    along from the one it is over.
+    """
+    finder = shelf_at if browser.view == SHELF else tile_at
+    return finder(*pos, *size, STRIP_HEIGHT)
+
+
+def draw_cover(screen, tile, game, picture, font_at, selected: bool) -> None:
+    """One cover, fitted into its rectangle and never stretched.
+
+    The grid and the shelf draw the same thing at two sizes, and drawing it
+    twice is two places for the art to start being squashed in one of them.
+    """
+    if picture is not None:
+        pw, ph = picture.get_size()
+        scale = min(tile.width / pw, tile.height / ph)
+        size = (max(1, int(pw * scale)), max(1, int(ph * scale)))
+        pygame.draw.rect(screen, TILE, tile.rect, border_radius=8)
+        screen.blit(
+            pygame.transform.smoothscale(picture, size),
+            (tile.x + (tile.width - size[0]) // 2, tile.y + (tile.height - size[1]) // 2),
+        )
+        return
+    pygame.draw.rect(screen, TILE_SELECTED if selected else TILE, tile.rect, border_radius=8)
+    inner = max(8, tile.width - 16)
+    text = game.title[:120]
+    base = max(10, min(20, tile.width // 6))
+    title = font_at(base).render(text, True, TEXT)
+    if title.get_width() > inner:
+        title = _fit(font_at, text, inner, base).render(text, True, TEXT)
+    # Clipped to its own cover. _fit gives up at its smallest size, and on a
+    # shelf cover that is still too wide for a long title -- which then runs
+    # across the game beside it.
+    before = screen.get_clip()
+    screen.set_clip(pygame.Rect(*tile.rect))
+    screen.blit(title, (tile.x + 8, tile.y + tile.height // 2 - title.get_height() // 2))
+    screen.set_clip(before)
+
+
+def draw_shelf(
+    screen,
+    state: Grid,
+    font_at,
+    art=None,
+    status: str = "",
+    installed: set[tuple[str, str]] | None = None,
+) -> None:
+    """Rows of covers, with the one under the cursor shown full size.
+
+    The other way to look at the same library: the grid shows ten games big
+    enough to read, this shows twenty-four and puts the art of the one you are
+    on where it can actually be seen.
+    """
+    width, height = screen.get_size()
+    screen.fill(BACKGROUND)
+    page = state.page
+    hero, tiles = shelf(width, height, STRIP_HEIGHT)
+
+    chosen = page[state.selected] if 0 <= state.selected < len(page) else None
+    if chosen is not None:
+        picture = art.get(chosen.key) if art else None
+        draw_cover(screen, hero, chosen, picture, font_at, True)
+
+        # Beside the art rather than under it: a cover is 2:3, so the space
+        # this view has going spare is to its right.
+        left = hero.x + hero.width + max(16, hero.width // 8)
+        room = max(80, width - left - 40)
+        text = chosen.title[:120]
+        title = font_at(40).render(text, True, TEXT)
+        if title.get_width() > room:
+            title = _fit(font_at, text, room, 40).render(text, True, TEXT)
+        screen.blit(title, (left, hero.y + 8))
+
+        line = chosen.platform
+        if installed and chosen.key in installed:
+            line += "   ·   installed"
+        screen.blit(font_at(24).render(line, True, TEXT_DIM), (left, hero.y + 16 + title.get_height()))
+
+    for index, tile in enumerate(tiles):
+        if index >= len(page):
+            break
+        game = page[index]
+        selected = index == state.selected
+        draw_cover(screen, tile, game, art.get(game.key) if art else None, font_at, selected)
+        if installed and game.key in installed:
+            draw_badge(screen, tile)
+        if selected:
+            pygame.draw.rect(screen, TEXT, tile.rect, width=3, border_radius=8)
+
+    if status:
+        shown = font_at(22).render(status, True, TEXT_DIM)
+        screen.blit(shown, ((width - shown.get_width()) // 2, height - shown.get_height() - 10))
 
 
 def draw(
@@ -815,12 +913,12 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     # Hover moves the cursor, so the pointer and the stick drive
                     # one selection rather than two competing highlights. A gap
                     # leaves it where it was.
-                    over = tile_at(*event.pos, *screen.get_size(), STRIP_HEIGHT)
+                    over = hovering(browser, event.pos, screen.get_size())
                     if over is not None:
                         state.select(over)
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:
-                        over = tile_at(*event.pos, *screen.get_size(), STRIP_HEIGHT)
+                        over = hovering(browser, event.pos, screen.get_size())
                         # Only ever the tile actually under the pointer: hover has
                         # already put the cursor there, so this cannot launch
                         # something the click was not on.
@@ -910,7 +1008,10 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             elif panel is not None:
                 # The grid behind it, so changing a filter is visibly changing
                 # the thing underneath rather than a number on a form.
-                draw(below, state, font_at, art, browser.status, None, None, browser.installed)
+                if browser.view == SHELF:
+                    draw_shelf(below, state, font_at, art, browser.status, browser.installed)
+                else:
+                    draw(below, state, font_at, art, browser.status, None, None, browser.installed)
                 draw_filters(below, font_at, browser, panel)
             elif controllers is not None:
                 if seating.open or seating.view.finished:
@@ -934,7 +1035,13 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     art.pop(game.key, None)
                 for game in state.page:
                     surface_for(game)
-                draw(screen, state, font_at, art, browser.status, typing, menu, browser.installed)
+                if browser.view == SHELF and menu is None and typing is None:
+                    draw_shelf(screen, state, font_at, art, browser.status, browser.installed)
+                else:
+                    # The menu and the search box are the grid's own furniture;
+                    # a shelf that had to grow both would be a second copy of
+                    # them to keep in step.
+                    draw(screen, state, font_at, art, browser.status, typing, menu, browser.installed)
                 if menu is not None:
                     draw_menu(screen, menu, grid(*screen.get_size(), STRIP_HEIGHT), font_at)
 
