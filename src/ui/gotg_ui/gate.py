@@ -66,14 +66,26 @@ def console_scope(layout: str) -> str:
 
 @dataclass(frozen=True)
 class Seat:
-    """A seated player, and whether this console means anything to it."""
+    """A seated player, and whether it knows where its own buttons are."""
 
     player: int
     name: str = ""
     mappings: tuple[str, ...] = ()
+    # padmap's own word for it: mapped, not merely known. True for a pad it
+    # bound from the kernel's BTN_ codes as well as one somebody captured by
+    # hand, which is the whole point -- a standard controller arrives working.
+    configured: bool = False
 
     def mapped(self, scope: str) -> bool:
-        return scope in self.mappings
+        """Whether this pad can play this console.
+
+        Any capture, not a capture for this scope. padmap falls back to the
+        universal mapping when a console has none of its own, so a pad bound
+        once is bound for everything -- and a gate that demanded
+        `console:<this one>` asked again on every new platform for a pad that
+        already worked.
+        """
+        return self.configured or bool(self.mappings) or scope in self.mappings
 
 
 @dataclass(frozen=True)
@@ -160,6 +172,7 @@ def seats_from(players: list | None) -> tuple[Seat, ...]:
             player=p["player"],
             name=str(p.get("name") or ""),
             mappings=tuple(str(m) for m in (p.get("mappings") or [])),
+            configured=bool(p.get("configured", False)),
         )
         for p in (players or [])
         if isinstance(p, dict) and isinstance(p.get("player"), int)
