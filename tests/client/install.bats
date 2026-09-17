@@ -150,7 +150,7 @@ load_installer() {
 # --- installing GOTG itself ----------------------------------------------------
 #
 # A stand-in `nix` answers `profile list --json` from $NIX_HAVE and records every
-# call, so each case is a machine in a known state with nothing installed.
+# call, so each case is a machine in a known state and nothing really installs.
 
 stub_nix() {
   NIX_CALLS="$TMP/nix-calls"
@@ -291,4 +291,28 @@ stub_side_effects() {
   [ "$status" -eq 0 ]
   [ ! -s "$SIDE" ]
   [[ "$output" == *"would run: gotg steam picker"* ]]
+}
+
+@test "a failed rule on SteamOS still puts the system partition back to read-only" {
+  steamos
+  export GOTG_UINPUT="$TMP/no-such-uinput"
+  load_installer
+  stub_side_effects
+  steamos-readonly() { printf 'enabled\n'; }
+  # Password already cached, and the write itself refused.
+  sudo() {
+    printf 'sudo %s\n' "$*" >>"$SIDE"
+    [[ "$1" != tee ]]
+  }
+  run ensure_uinput
+  [ "$status" -ne 0 ]
+  grep -qx "sudo steamos-readonly disable" "$SIDE"
+  grep -qx "sudo steamos-readonly enable" "$SIDE"
+}
+
+@test "an exported DRY_RUN from something else does not turn the install into a dry run" {
+  other_linux
+  export DRY_RUN=1
+  load_installer
+  [ "$DRY_RUN" = "0" ]
 }

@@ -13,7 +13,7 @@ Game library on a server; download on first launch; play from Steam.
 
 ```bash
 # Steam Deck or any Linux, Nix not required (on a Deck: Desktop Mode, Konsole)
-curl -sSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash
 
 # Nix already installed
 nix run github:dscrawford/GamesOnTheGo#install

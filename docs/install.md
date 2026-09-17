@@ -5,7 +5,7 @@
 In Desktop Mode, open Konsole and paste:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash
 ```
 
 It will ask for your password once or twice, and say what for before it asks.
@@ -60,7 +60,7 @@ Each step checks first, so running it again only upgrades GOTG. To see what it
 would do without doing it:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash -s -- --dry-run
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash -s -- --dry-run
 ```
 
 | step | why |
