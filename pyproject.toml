@@ -5,8 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gotg"
 version = "0.5.5"
-description = "GOTG: the credential-holding service, the saves store, and the torrent indexer"
+description = "GOTG: the credential-holding service, the saves store, and the indexer"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
 # The service stays stdlib-only on purpose: it faces the internet and holds
 # every credential, so its supply chain is the standard library.
 dependencies = []

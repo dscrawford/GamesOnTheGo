@@ -274,3 +274,7 @@ nix develop                         # gotg, gotg-ui, gotg-seat from the working 
 nix flake check                     # 1211 python tests, 667 client tests, ruff, shellcheck, drift checks
 uv lock                             # after changing pyproject.toml
 ```
+
+## License
+
+[MIT](LICENSE).

@@ -123,5 +123,6 @@ stdenvNoCC.mkDerivation {
   meta = {
     description = "A grid to pick a game from, and play it";
     mainProgram = "gotg-ui";
+    license = lib.licenses.mit;
   };
 }
