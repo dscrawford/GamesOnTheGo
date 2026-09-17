@@ -22,6 +22,7 @@ NIX_INSTALLER="${GOTG_NIX_INSTALLER:-https://nixos.org/nix/install}"
 # be written somewhere harmless. Nothing else has a reason to set them.
 OS_RELEASE="${GOTG_OS_RELEASE:-/etc/os-release}"
 UDEV_PATH="${GOTG_UDEV_PATH:-/etc/udev/rules.d/99-gotg-uinput.rules}"
+UINPUT="${GOTG_UINPUT:-/dev/uinput}"
 
 C_OK=$'\e[32m'; C_WARN=$'\e[33m'; C_ERR=$'\e[31m'; C_DIM=$'\e[2m'; C_OFF=$'\e[0m'
 [[ -t 1 ]] || { C_OK=""; C_WARN=""; C_ERR=""; C_DIM=""; C_OFF=""; }
@@ -31,6 +32,16 @@ step() { printf '%s==>%s %s\n' "$C_OK" "$C_OFF" "$*" >&2; }
 skip() { printf '%s==>%s %s %s(already done)%s\n' "$C_DIM" "$C_OFF" "$*" "$C_DIM" "$C_OFF" >&2; }
 warn() { printf '%s!!%s %s\n' "$C_WARN" "$C_OFF" "$*" >&2; }
 die() { printf '%serror:%s %s\n' "$C_ERR" "$C_OFF" "$*" >&2; exit 1; }
+
+# Every change goes through here, so --dry-run can show them instead.
+DRY_RUN="${DRY_RUN:-0}"
+change() {
+  if [[ "$DRY_RUN" == "1" ]]; then
+    printf '%s   would run:%s %s\n' "$C_DIM" "$C_OFF" "$*" >&2
+    return 0
+  fi
+  "$@"
+}
 
 # --- what machine is this ----------------------------------------------------
 
@@ -53,6 +64,10 @@ readonly_root() {
 # and every prompt fails with a message about the terminal. Telling somebody
 # that up front is the difference between a minute and an afternoon.
 need_sudo() {
+  if [[ "$DRY_RUN" == "1" ]]; then
+    say "   would ask for your password"
+    return 0
+  fi
   command -v sudo >/dev/null 2>&1 || die "no sudo here, and this needs root for one or two steps"
   if sudo -n true 2>/dev/null; then
     return 0
@@ -84,6 +99,9 @@ use_nix() {
   command -v nix >/dev/null 2>&1
 }
 
+# A pipe cannot go through `change`, so the download and the run are one command.
+nix_installer() { curl -sSL "$NIX_INSTALLER" | sh -s -- "$@"; }
+
 install_nix_steamos() {
   # SteamOS 3.5 and later ship /nix already, bind-mounted to the home
   # partition, and Valve keeps it across updates — which is the whole reason
@@ -96,16 +114,16 @@ install_nix_steamos() {
   if [[ ! -w /nix ]]; then
     step "handing /nix to $USER"
     need_sudo
-    sudo chown "$USER" /nix
+    change sudo chown "$USER" /nix
   fi
   step "installing Nix (single user — no daemon, nothing to keep running)"
-  curl -sSL "$NIX_INSTALLER" | sh -s -- --no-daemon
+  change nix_installer --no-daemon
 }
 
 install_nix_generic() {
   step "installing Nix"
   need_sudo
-  curl -sSL "$NIX_INSTALLER" | sh -s -- --daemon
+  change nix_installer --daemon
 }
 
 ensure_nix() {
@@ -120,13 +138,20 @@ ensure_nix() {
 # Flakes are still behind a flag, and GOTG is a flake.
 ensure_flakes() {
   local conf="${XDG_CONFIG_HOME:-$HOME/.config}/nix/nix.conf"
-  if [[ -f "$conf" ]] && grep -qE '^[^#]*experimental-features.*flakes' "$conf"; then
+  # Asked of nix, not read from one file: a daemon install (the Determinate
+  # installer's, for one) turns flakes on in /etc/nix/nix.conf.
+  if nix config show experimental-features 2>/dev/null | grep -qw flakes ||
+    { [[ -f "$conf" ]] && grep -qE '^[^#]*experimental-features.*flakes' "$conf"; }; then
     skip "flakes are on"
     return 0
   fi
   step "turning on flakes"
-  mkdir -p "$(dirname "$conf")"
-  printf 'experimental-features = nix-command flakes\n' >>"$conf"
+  change mkdir -p "$(dirname "$conf")"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    change append "experimental-features = nix-command flakes" to "$conf"
+  else
+    printf 'experimental-features = nix-command flakes\n' >>"$conf"
+  fi
 }
 
 # --- controllers -------------------------------------------------------------
@@ -137,7 +162,7 @@ ensure_flakes() {
 UDEV_RULE='KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"'
 
 ensure_uinput() {
-  if [[ -w /dev/uinput ]]; then
+  if [[ -w "$UINPUT" ]]; then
     skip "controllers can be published"
     return 0
   fi
@@ -153,42 +178,83 @@ ensure_uinput() {
   if readonly_root; then
     # SteamOS keeps / read-only and puts it back on every update, so this rule
     # is not permanent. Said out loud at the end rather than discovered later.
-    sudo steamos-readonly disable || die "could not unlock the system partition"
+    change sudo steamos-readonly disable || die "could not unlock the system partition"
     relock=1
   fi
-  printf '%s\n' "$UDEV_RULE" | sudo tee "$UDEV_PATH" >/dev/null
-  sudo udevadm control --reload-rules || true
-  sudo udevadm trigger --subsystem-match=misc --sysname-match=uinput || true
-  sudo modprobe uinput 2>/dev/null || true
+  if [[ "$DRY_RUN" == "1" ]]; then
+    change write "$UDEV_RULE" to "$UDEV_PATH"
+  else
+    printf '%s\n' "$UDEV_RULE" | sudo tee "$UDEV_PATH" >/dev/null
+  fi
+  change sudo udevadm control --reload-rules || true
+  change sudo udevadm trigger --subsystem-match=misc --sysname-match=uinput || true
+  change sudo modprobe -q uinput || true
   if ((relock)); then
-    sudo steamos-readonly enable || warn "could not put the system partition back to read-only"
+    change sudo steamos-readonly enable || warn "could not put the system partition back to read-only"
   fi
 }
 
 # --- gotg --------------------------------------------------------------------
 
+# Which of these the profile already holds, one per line.
+installed() {
+  nix profile list --json 2>/dev/null |
+    grep -oE '"(gotg|gotg-ui)":' | tr -d '":' | sort -u || true
+}
+
 install_gotg() {
-  step "installing GOTG from $FLAKE"
-  # --priority so a second run replaces rather than colliding with the first.
-  nix profile install "$FLAKE#gotg" "$FLAKE#gotg-ui" --priority 4 ||
-    die "could not install GOTG. If this is a private repository, see:
-     nix profile install --help, and NIX_CONFIG=\"extra-access-tokens = ...\""
+  local have want=() upgrade=() name
+  have="$(installed)"
+  for name in gotg gotg-ui; do
+    if grep -qx "$name" <<<"$have"; then
+      upgrade+=("$name")
+    else
+      want+=("$FLAKE#$name")
+    fi
+  done
+
+  # Upgraded, not re-added: adding a name the profile already has is a warning
+  # and exit 0, so a re-run left the old build in place and reported success.
+  if ((${#upgrade[@]})); then
+    step "upgrading ${upgrade[*]}"
+    change nix profile upgrade "${upgrade[@]}" || die "could not upgrade ${upgrade[*]}"
+  fi
+  if ((${#want[@]})); then
+    step "installing GOTG from $FLAKE"
+    change nix profile add "${want[@]}" ||
+      die "could not install GOTG. For a private repository, set
+     NIX_CONFIG=\"extra-access-tokens = github.com=<token>\""
+  fi
 }
 
 add_to_steam() {
-  command -v gotg >/dev/null 2>&1 || return 0
+  # In a dry run gotg may not be installed yet, and is only named.
+  [[ "$DRY_RUN" == "1" ]] || command -v gotg >/dev/null 2>&1 || return 0
   if pgrep -x steam >/dev/null 2>&1; then
     warn "Steam is running, so the shortcut is queued.
      Close Steam, then run: gotg steam picker"
     return 0
   fi
   step "putting GOTG in your Steam library"
-  gotg steam picker || warn "could not add the Steam shortcut; run 'gotg steam picker' yourself"
+  change gotg steam picker || warn "could not add the Steam shortcut; run 'gotg steam picker' yourself"
 }
 
 # --- the run -----------------------------------------------------------------
 
 main() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --dry-run | -n) DRY_RUN=1 ;;
+      -h | --help)
+        say "usage: gotg-install [--dry-run]"
+        say "  --dry-run   print what would change, change nothing"
+        exit 0
+        ;;
+      *) die "unknown option: $arg (try --help)" ;;
+    esac
+  done
+  ((DRY_RUN)) && say "  (dry run: nothing will be changed)"
   say ""
   say "  GOTG — installing onto $(is_steamos && echo "SteamOS" || echo "this machine")"
   say ""

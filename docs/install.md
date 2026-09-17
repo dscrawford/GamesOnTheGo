@@ -27,7 +27,7 @@ nix run github:dscrawford/GamesOnTheGo#install
 or skip the installer entirely and take the two packages:
 
 ```bash
-nix profile install github:dscrawford/GamesOnTheGo#gotg \
+nix profile add github:dscrawford/GamesOnTheGo#gotg \
                     github:dscrawford/GamesOnTheGo#gotg-ui
 ```
 
@@ -56,13 +56,18 @@ installer writes: `gotg steam picker`.
 
 ## What the installer does
 
-Each step checks first, so running it again does nothing but say so.
+Each step checks first, so running it again only upgrades GOTG. To see what it
+would do without doing it:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash -s -- --dry-run
+```
 
 | step | why |
 | --- | --- |
 | install Nix | SteamOS 3.5+ ships `/nix` already, bind-mounted to the home partition and kept across updates; the installer just takes ownership and runs the single-user install. Elsewhere it uses the official multi-user installer. |
 | turn on flakes | GOTG is a flake and they are still behind a flag |
-| `nix profile install` | `gotg` and `gotg-ui`, from `github:dscrawford/GamesOnTheGo` |
+| `nix profile add` / `upgrade` | `gotg` and `gotg-ui`, from `github:dscrawford/GamesOnTheGo`; upgraded in place when already there |
 | a udev rule | padmap publishes each controller as a new device through `/dev/uinput`, and cannot open it without permission. The rule tags it `uaccess`, which gives it to whoever is logged in at the seat. |
 | a Steam shortcut | so Game Mode can launch the picker |
 
@@ -72,8 +77,8 @@ Your games and everything Nix built survive: they live on the home partition,
 which updates do not touch. The **udev rule does not** — it is on the system
 partition, and a SteamOS update replaces that wholesale.
 
-Run the installer again. It will find Nix and GOTG already there, say so, and
-put back only the rule.
+Run the installer again. It will find Nix there, upgrade GOTG, and put back the
+rule.
 
 ## Where things end up
 

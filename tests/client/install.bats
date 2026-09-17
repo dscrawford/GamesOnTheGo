@@ -63,6 +63,7 @@ load_installer() {
 @test "flakes are turned on, and only once" {
   other_linux
   load_installer
+  stub_nix  # the real one on this machine may have flakes on system-wide
   run ensure_flakes
   [ "$status" -eq 0 ]
   grep -q "experimental-features = nix-command flakes" "$XDG_CONFIG_HOME/nix/nix.conf"
@@ -87,6 +88,7 @@ load_installer() {
 @test "a commented-out flakes line does not count as on" {
   other_linux
   load_installer
+  stub_nix  # the real one on this machine may have flakes on system-wide
   mkdir -p "$XDG_CONFIG_HOME/nix"
   printf '# experimental-features = nix-command flakes\n' >"$XDG_CONFIG_HOME/nix/nix.conf"
   run ensure_flakes
@@ -143,4 +145,150 @@ load_installer() {
   [ "$status" -eq 0 ]
   [ ! -e "$GOTG_UDEV_PATH" ]
   [ ! -e "$XDG_CONFIG_HOME/nix/nix.conf" ]
+}
+
+# --- installing GOTG itself ----------------------------------------------------
+#
+# A stand-in `nix` answers `profile list --json` from $NIX_HAVE and records every
+# call, so each case is a machine in a known state with nothing installed.
+
+stub_nix() {
+  NIX_CALLS="$TMP/nix-calls"
+  : >"$NIX_CALLS"
+  nix() {
+    printf '%s\n' "$*" >>"$NIX_CALLS"
+    case "$*" in
+      "profile list --json")
+        local elements="" name
+        for name in ${NIX_HAVE:-}; do
+          elements+="${elements:+,}\"$name\":{}"
+        done
+        printf '{"version":3,"elements":{%s}}\n' "$elements"
+        ;;
+      "config show experimental-features") printf '%s\n' "${NIX_FEATURES:-}" ;;
+    esac
+    return 0
+  }
+}
+
+@test "a machine that already has GOTG upgrades it rather than adding it again" {
+  # The Deck this was tested on: `nix profile add` of a name already present
+  # is a warning and exit 0, so the old build stayed forever and the installer
+  # said it had installed GOTG.
+  other_linux
+  load_installer
+  stub_nix
+  NIX_HAVE="gotg gotg-ui" run install_gotg
+  [ "$status" -eq 0 ]
+  grep -qx "profile upgrade gotg gotg-ui" "$NIX_CALLS"
+  ! grep -q "profile add" "$NIX_CALLS"
+}
+
+@test "a fresh machine adds both" {
+  other_linux
+  load_installer
+  stub_nix
+  NIX_HAVE="" run install_gotg
+  [ "$status" -eq 0 ]
+  grep -qx "profile add $FLAKE#gotg $FLAKE#gotg-ui" "$NIX_CALLS"
+  ! grep -q "profile upgrade" "$NIX_CALLS"
+}
+
+@test "half an install is finished rather than redone" {
+  other_linux
+  load_installer
+  stub_nix
+  NIX_HAVE="gotg" run install_gotg
+  [ "$status" -eq 0 ]
+  grep -qx "profile upgrade gotg" "$NIX_CALLS"
+  grep -qx "profile add $FLAKE#gotg-ui" "$NIX_CALLS"
+}
+
+@test "flakes turned on system-wide are not written into the user's file too" {
+  # The Deck again: a daemon install with flakes in /etc/nix/nix.conf.
+  other_linux
+  load_installer
+  stub_nix
+  NIX_FEATURES="nix-command flakes" run ensure_flakes
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already done"* ]]
+  [ ! -e "$XDG_CONFIG_HOME/nix/nix.conf" ]
+}
+
+@test "a dry run changes nothing" {
+  other_linux
+  load_installer
+  stub_nix
+  DRY_RUN=1 NIX_HAVE="gotg gotg-ui" run install_gotg
+  [ "$status" -eq 0 ]
+  ! grep -q "profile upgrade" "$NIX_CALLS"
+  ! grep -q "profile add" "$NIX_CALLS"
+}
+
+@test "a dry run says what it would have done" {
+  other_linux
+  load_installer
+  stub_nix
+  DRY_RUN=1 NIX_HAVE="gotg" run install_gotg
+  [[ "$output" == *"would run: nix profile upgrade gotg"* ]]
+  [[ "$output" == *"would run: nix profile add"* ]]
+}
+
+@test "a dry run writes no nix.conf" {
+  other_linux
+  load_installer
+  stub_nix
+  DRY_RUN=1 NIX_FEATURES="nix-command" run ensure_flakes
+  [ "$status" -eq 0 ]
+  [ ! -e "$XDG_CONFIG_HOME/nix/nix.conf" ]
+}
+
+# Records what would have touched the machine, instead of touching it.
+stub_side_effects() {
+  SIDE="$TMP/side-effects"
+  : >"$SIDE"
+  sudo() { printf 'sudo %s\n' "$*" >>"$SIDE"; }
+  curl() { printf 'curl %s\n' "$*" >>"$SIDE"; }
+  gotg() { printf 'gotg %s\n' "$*" >>"$SIDE"; }
+  pgrep() { return 1; }
+}
+
+@test "a dry run installs no Nix" {
+  other_linux
+  load_installer
+  stub_side_effects
+  DRY_RUN=1 run install_nix_generic
+  [ "$status" -eq 0 ]
+  [ ! -s "$SIDE" ]
+  [[ "$output" == *"would run:"* ]]
+}
+
+@test "a dry run hands over no /nix on a Deck" {
+  steamos
+  load_installer
+  stub_side_effects
+  DRY_RUN=1 run install_nix_steamos
+  [ ! -s "$SIDE" ]
+}
+
+@test "a dry run writes no udev rule" {
+  other_linux
+  export GOTG_UINPUT="$TMP/no-such-uinput"
+  load_installer
+  stub_side_effects
+  DRY_RUN=1 run ensure_uinput
+  [ "$status" -eq 0 ]
+  [ ! -s "$SIDE" ]
+  [ ! -e "$GOTG_UDEV_PATH" ]
+  [[ "$output" == *"would run:"* ]]
+}
+
+@test "a dry run adds no Steam shortcut" {
+  other_linux
+  load_installer
+  stub_side_effects
+  DRY_RUN=1 run add_to_steam
+  [ "$status" -eq 0 ]
+  [ ! -s "$SIDE" ]
+  [[ "$output" == *"would run: gotg steam picker"* ]]
 }
