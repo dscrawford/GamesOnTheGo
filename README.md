@@ -1,6 +1,11 @@
 # GamesOnTheGo (GOTG)
 
-Game library on a server; download on first launch; play from Steam.
+A game library you host once and play anywhere. A server holds the catalog,
+artwork and saves; a client on each machine (a desktop, a Steam Deck) fetches a
+game on first launch, builds the emulator or port it needs with Nix, maps
+whatever controllers are plugged in, and runs it — from a terminal, from
+Steam, or from a controller-driven picker. Saves go back to the server, so a
+game picked up on the Deck continues where the desktop left it.
 
 | Component | Does | Runs |
 |---|---|---|
