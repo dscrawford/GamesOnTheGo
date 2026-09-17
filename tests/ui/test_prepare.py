@@ -279,3 +279,63 @@ def test_a_variant_is_asked_about_and_installed_by_name(bin_env, tmp_path):
     p = Preparer(game(), None, "bse")
     wait_done(p)
     assert log.read_text().strip().splitlines()[-1] == "install n64/usa.zelda bse"
+
+
+# --- progress the loader can draw --------------------------------------------
+#
+# A download under the picker used to be curl --silent: nothing on screen for
+# the minutes a 30 GB game takes, which reads as frozen. The client now says
+# where it is, one tab-separated line per tick, and the loader keeps the
+# latest as a bar rather than as text.
+
+
+def test_a_progress_line_is_parsed_and_not_shown_as_text():
+    got = prepare.parse_progress("progress\t123\t1000\t50\tZelda: game.7z")
+    assert got == prepare.Progress(done=123, total=1000, rate=50, what="Zelda: game.7z")
+    assert prepare.parse_progress("checksum ok") is None
+    assert prepare.parse_progress("progress\tnot\tnumbers\tat\tall") is None
+
+
+def test_progress_describes_itself_for_a_television():
+    p = prepare.Progress(done=5 * 1024**3, total=20 * 1024**3, rate=50 * 1024**2, what="x")
+    assert p.fraction == 0.25
+    text = p.describe()
+    assert text.startswith("25%")
+    assert "5.0 GB of 20.0 GB" in text
+    assert "50.0 MB/s" in text
+    assert "5m 07s left" in text
+
+
+def test_progress_with_no_known_size_still_shows_how_much_and_how_fast():
+    p = prepare.Progress(done=300 * 1024**2, total=0, rate=10 * 1024**2, what="x")
+    assert p.fraction is None
+    assert p.describe() == "300.0 MB · 10.0 MB/s"
+
+
+def test_progress_before_the_first_byte_has_no_speed_and_no_eta():
+    p = prepare.Progress(done=0, total=1000, rate=0, what="x")
+    assert p.describe() == "0% · 0 B of 1000 B"
+
+
+def test_elapsed_reads_as_minutes_and_seconds():
+    assert prepare.elapsed_text(5) == "5s"
+    assert prepare.elapsed_text(65) == "1m 05s"
+    assert prepare.elapsed_text(3600 + 61) == "1h 01m"
+
+
+def test_the_loader_keeps_the_latest_progress_and_asks_the_client_for_it(bin_env, tmp_path):
+    bin_env(
+        f'echo "lines=$GOTG_PROGRESS_LINES" > {tmp_path}/env\n'
+        'echo "fetching Zelda"\n'
+        'printf "progress\\t10\\t100\\t5\\tZelda: a\\n" >&2\n'
+        'printf "progress\\t60\\t100\\t30\\tZelda: a\\n" >&2\n'
+        'echo "checksum ok"; exit 0'
+    )
+    p = Preparer(game())
+    wait_done(p)
+    assert p.ok is True
+    assert (tmp_path / "env").read_text().strip() == "lines=1"
+    assert p.progress == prepare.Progress(done=60, total=100, rate=30, what="Zelda: a")
+    # The bar is the progress; the text stays the narration.
+    assert p.tail() == ["fetching Zelda", "checksum ok"]
+    assert p.elapsed >= 0
