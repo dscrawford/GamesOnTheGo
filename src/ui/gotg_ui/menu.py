@@ -36,6 +36,10 @@ ACTIONS: list[tuple[str, str]] = [
 # Only offered for a game that is here: uninstalling nothing is not a verb,
 # and a row that does nothing is a row somebody will press.
 UNINSTALL: tuple[str, str] = ("Uninstall", "uninstall")
+# And only for one that is not. Play would fetch it too, and then run it;
+# from a sofa that is the wrong pair when what is wanted is the download now
+# and the game some other evening. Right under Play, where the eye is.
+INSTALL: tuple[str, str] = ("Install", "install")
 
 # The rows that open a list, and the one that comes back from them. Their
 # verbs never leave this program: the menu handles them itself.
@@ -94,7 +98,7 @@ class Menu:
             rows = [("Back", BACK), (AUTOMATIC, "version:")]
             return rows + [(name, f"version:{name}") for name in self.versions]
 
-        verbs = [*ACTIONS, UNINSTALL] if self.installed else list(ACTIONS)
+        verbs = [*ACTIONS, UNINSTALL] if self.installed else [ACTIONS[0], INSTALL, *ACTIONS[1:]]
         # Above the verbs, because they decide what every row under them means.
         # A game with one version has nothing to choose, so it gets no row.
         chooser = []
