@@ -33,7 +33,7 @@
     # Pinned to a revision rather than following the branch, so that a launch
     # that worked yesterday is not changed by somebody else's commit today.
     padmap = {
-      url = "git+ssh://git@github.com/chadac/padmap?ref=rustify&rev=169c741760621d5c7ad6ec582fe9a3e05e92b9c0";
+      url = "git+ssh://git@github.com/dscrawford/padmap?ref=rustify&rev=20f50de55ec3b128715b890bc0ab75cb26046e32";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -133,7 +133,13 @@
               gnugrep
               procps # pgrep, to notice Steam is running
             ];
-            text = builtins.readFile ./install/gotg-install;
+            text = builtins.readFile ./install.sh;
+          };
+          # Its inverse. Nix stays: the script says how to remove it instead.
+          gotg-uninstall = pkgs.writeShellApplication {
+            name = "gotg-uninstall";
+            runtimeInputs = with pkgs; [ gnugrep ];
+            text = builtins.readFile ./uninstall.sh;
           };
 
           # Both roles come from the one workspace: the indexer venv carries
@@ -245,6 +251,10 @@
         install = {
           type = "app";
           program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-install}/bin/gotg-install";
+        };
+        uninstall = {
+          type = "app";
+          program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-uninstall}/bin/gotg-uninstall";
         };
       });
 

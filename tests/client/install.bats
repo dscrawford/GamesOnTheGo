@@ -11,7 +11,7 @@
 bats_require_minimum_version 1.5.0
 
 setup() {
-  INSTALLER="${BATS_TEST_DIRNAME}/../../install/gotg-install"
+  INSTALLER="${BATS_TEST_DIRNAME}/../../install.sh"
   [ -f "$INSTALLER" ] || INSTALLER="$(command -v gotg-install)"
   TMP="$BATS_TEST_TMPDIR"
   export GOTG_INSTALL_LIB=1
@@ -392,7 +392,7 @@ stub_steps() {
   ensure_nix() { echo "SHOULD NOT RUN"; }
   run main --dry-run --help
   [ "$status" -eq 0 ]
-  [[ "$output" == *"usage: gotg-install"* ]]
+  [[ "$output" == *"usage: install.sh"* ]]
   [[ "$output" != *"SHOULD NOT RUN"* ]]
 }
 

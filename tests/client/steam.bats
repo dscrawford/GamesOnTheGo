@@ -545,7 +545,24 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   # run's own status rather than gotg's.
   GOTG_PICKER="$TEST_TMP/no-such-picker" gotg steam picker
   [ "$status" -ne 0 ]
-  [[ "$stderr" == *"nix profile install"* ]]
+  [[ "$stderr" == *"nix profile add"* ]]
+}
+
+@test "gotg steam remove picker takes GOTG out again" {
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  fake_picker
+  gotg steam picker
+  [ "$status" -eq 0 ]
+
+  gotg steam remove picker
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"removed"* ]]
+  run helper list
+  [[ "$output" != *"Games On The Go"* ]]
+
+  # And again, when it is already gone, is not an error.
+  gotg steam remove picker
+  [ "$status" -eq 0 ]
 }
 
 @test "asking twice leaves one picker entry, not two" {

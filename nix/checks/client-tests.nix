@@ -31,6 +31,7 @@ pkgs.runCommand "check-client-tests"
       # install.bats sources the packaged installer rather than the checkout's
       # copy, so what is tested is what somebody would actually download.
       packages.gotg-install
+      packages.gotg-uninstall
     ];
     GOTG_BIN = pkgs.lib.getExe packages.gotg;
   }

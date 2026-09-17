@@ -9,7 +9,7 @@ digitally. See the note at the top of the [README](../README.md).
 In Desktop Mode, open Konsole and paste:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install.sh | bash
 ```
 
 It will ask for your password once or twice, and say what for before it asks.
@@ -25,7 +25,7 @@ Game Mode with a controller.
 The same line:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install.sh | bash
 ```
 
 ## With Nix already there
@@ -112,7 +112,7 @@ Each step checks first, so running it again only upgrades GOTG. To see what it
 would do without doing it:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash -s -- --dry-run
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install.sh | bash -s -- --dry-run
 ```
 
 | step | why |
@@ -144,10 +144,24 @@ rule.
 ## Uninstalling
 
 ```bash
-nix profile remove gotg gotg-ui
-sudo rm -f /etc/udev/rules.d/99-gotg-uinput.rules
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/uninstall.sh | bash
 ```
 
-Games and saves are left alone; delete `~/.local/state/gotg` if you want them
-gone too. Removing Nix itself is `/nix` and the lines its installer added to
-your shell profile.
+Or, with GOTG installed, `gotg-uninstall`; with Nix, `nix run github:dscrawford/GamesOnTheGo#uninstall`.
+
+It takes the two commands out of the Nix profile, the picker out of Steam,
+and the udev rule off the system partition. `--dry-run` shows the steps
+without taking them.
+
+Games, saves and settings stay in `~/.local/state/gotg` and `~/.config/gotg`
+unless you ask:
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/uninstall.sh | bash -s -- --games
+```
+
+Nix stays: it is a package manager, not part of GOTG, and other things may use
+it. The script ends by printing the one command that removes it on your kind of
+machine — `sudo /nix/nix-installer uninstall` where the Determinate installer
+put it, `sudo rm -rf /nix …` for a single-user install, or the manual's page
+for a daemon install.
