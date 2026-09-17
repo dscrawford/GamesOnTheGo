@@ -118,18 +118,26 @@ _download_zenity() {
   # A private directory for the fifo: mktemp -u then mkfifo races with anything
   # else that could claim the name in between.
   local pipedir pipe curl_pid zen_pid status=0
-  pipedir="$(mktemp -d)"
+  pipedir="$(dialog_dir)"
   pipe="$pipedir/progress"
   mkfifo "$pipe"
 
   local mode=(--auto-close)
   ((expected <= 0)) && mode+=(--pulsate)
 
-  zenity --progress --title="GOTG" \
+  zenity_run --progress --title="GOTG" \
     --text="Downloading $title…" "${mode[@]}" <"$pipe" &
   zen_pid=$!
 
   exec 9>"$pipe"
+  # A dialog that never came up is not a cancellation: fetch without it.
+  if ! dialog_started "$zen_pid"; then
+    exec 9>&-
+    dialog_dir_remove "$pipedir"
+    warn "the progress dialog could not start; downloading $title without it"
+    _download_quiet "$url" "$out" "$etag"
+    return
+  fi
   _curl_download "$url" "$out" "$etag" --silent --show-error &
   curl_pid=$!
 
@@ -143,7 +151,7 @@ _download_zenity() {
       kill "$curl_pid" 2>/dev/null || true
       wait "$curl_pid" 2>/dev/null || true
       exec 9>&-
-      rm -rf "$pipedir"
+      dialog_dir_remove "$pipedir"
       # Could be the user cancelling, or zenity failing to start at all; say so
       # rather than asserting an intent we cannot observe.
       die "download stopped: the progress dialog closed (cancelled, or zenity could not run)"
@@ -168,7 +176,7 @@ _download_zenity() {
     printf '# download failed\n' >&9 || true
   fi
   exec 9>&-
-  rm -rf "$pipedir"
+  dialog_dir_remove "$pipedir"
   wait "$zen_pid" 2>/dev/null || true
   return "$status"
 }
@@ -180,7 +188,7 @@ _download_with_progress() {
     _download_terminal "$url" "$out" "$etag" "$expected"
   elif [[ "${GOTG_PROGRESS_LINES:-}" == "1" ]]; then
     _download_lines "$url" "$out" "$etag" "$title" "$expected"
-  elif has_display && command -v zenity >/dev/null 2>&1; then
+  elif has_display && have_zenity; then
     _download_zenity "$url" "$out" "$etag" "$title" "$expected"
   else
     _download_quiet "$url" "$out" "$etag"

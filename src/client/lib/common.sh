@@ -61,6 +61,40 @@ has_display() {
   [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]
 }
 
+# The private directory a progress dialog's fifo lives in, and its removal.
+#
+# Both of these exist so that `rm -rf` never sees a name that came from
+# anywhere but mktemp: the directory is created here, holds one fifo, and is
+# removed only if it is still a directory under the temp root. A path that is
+# empty, unset (set -u would have stopped that anyway) or somewhere else is
+# refused rather than removed.
+dialog_dir() { mktemp -d "${TMPDIR:-/tmp}/gotg-dialog.XXXXXXXX"; }
+dialog_dir_remove() {
+  local dir="$1"
+  [[ -n "$dir" && -d "$dir" && "$dir" == "${TMPDIR:-/tmp}/gotg-dialog."* ]] || return 0
+  rm -rf -- "$dir"
+}
+
+# The dialog program, named so a test can stand one in: the packaged client
+# puts nixpkgs' zenity first on PATH, where a stub could never win.
+zenity_bin() { printf '%s' "${GOTG_ZENITY:-zenity}"; }
+have_zenity() { command -v "$(zenity_bin)" >/dev/null 2>&1; }
+
+# zenity, in a locale that can read its own arguments. Under Steam, over ssh
+# and in a few other places the locale is C, and GLib's option parser then
+# refuses any non-ASCII argument -- an ellipsis, a game title with an accent --
+# with "This option is not available". On the Deck that took every environment
+# build down as "the progress dialog closed".
+zenity_run() { LC_ALL=C.UTF-8 "$(zenity_bin)" "$@"; }
+
+# Whether a dialog started at all: zenity that dies within its first moments
+# never showed anything, and the work it was fronting should go on without it.
+DIALOG_START_GRACE="${GOTG_DIALOG_START_GRACE:-0.3}"
+dialog_started() {
+  sleep "$DIALOG_START_GRACE"
+  kill -0 "$1" 2>/dev/null
+}
+
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 }

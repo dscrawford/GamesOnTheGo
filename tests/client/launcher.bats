@@ -465,3 +465,86 @@ commit_flake() {
   [[ "$stderr" != *"Add a Non-Steam Game"* ]]
 }
 
+
+# --- the progress dialog, when there is a display and no terminal -------------
+#
+# Under Steam a build fronts itself with a zenity dialog. On a Deck zenity
+# refused GOTG's own arguments -- "This option is not available" -- because
+# the locale was C and the text had an ellipsis in it; and the client read
+# the dialog vanishing as a cancellation and killed every build.
+
+fake_zenity() {
+  local mode="${1:-refuse}"
+  export ZENITY_LOG="$TEST_TMP/zenity.log"
+  export GOTG_ZENITY="$TEST_TMP/bin/zenity"
+  mkdir -p "$TEST_TMP/bin"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'printf "LC_ALL=%%s args=%%s\\n" "$LC_ALL" "$*" >>"$ZENITY_LOG"\n'
+    if [[ "$mode" == refuse ]]; then
+      printf 'echo "This option is not available. Please see --help for all possible usages." >&2\nexit 255\n'
+    else
+      printf 'cat >/dev/null\nexit 0\n'
+    fi
+  } >"$GOTG_ZENITY"
+  chmod +x "$GOTG_ZENITY"
+  # A display and no terminal: the dialog path. bats gives us the no-terminal.
+  export DISPLAY=:0
+  unset GOTG_NO_DIALOG
+}
+
+@test "a dialog that cannot start does not stop the build" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  gotg download usa.zelda
+  rm -rf "$GOTG_ROOTS_DIR/env-n64"
+  stub_nix
+  fake_zenity refuse
+
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  grep -q "build $GOTG_FLAKE#env-n64" "$NIX_LOG"
+  [[ "$stderr" == *"progress dialog could not start"* ]]
+  [[ "$stderr" != *"build stopped"* ]]
+}
+
+@test "the dialog runs in a locale that can read an ellipsis or an accent" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  gotg download usa.zelda
+  rm -rf "$GOTG_ROOTS_DIR/env-n64"
+  stub_nix
+  fake_zenity ok
+
+  LC_ALL=C gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  grep -q "^LC_ALL=C.UTF-8 args=--progress" "$ZENITY_LOG"
+}
+
+@test "a download whose dialog cannot start still downloads" {
+  add_game n64 "usa.zelda.z64" "rom-content"
+  gotg refresh
+  fake_zenity refuse
+
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [ "$(cat "$GOTG_GAMES_DIR/n64/usa.zelda.z64")" = rom-content ]
+  [[ "$stderr" == *"progress dialog could not start"* ]]
+}
+
+@test "the dialog's scratch directory is only ever one mktemp made" {
+  # The one `rm -rf` on this path must never see a name from anywhere else.
+  load_client_libs
+  d="$(dialog_dir)"
+  [ -d "$d" ]
+  [[ "$d" == "${TMPDIR:-/tmp}/gotg-dialog."* ]]
+  dialog_dir_remove "$d"
+  [ ! -e "$d" ]
+  # Anything that is not such a directory is left alone, quietly.
+  mkdir -p "$TEST_TMP/precious"
+  touch "$TEST_TMP/precious/file"
+  dialog_dir_remove "$TEST_TMP/precious"
+  dialog_dir_remove ""
+  dialog_dir_remove "/"
+  [ -e "$TEST_TMP/precious/file" ]
+}

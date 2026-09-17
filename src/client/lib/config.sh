@@ -90,8 +90,8 @@ prompt_secret() {
   if is_tty; then
     read -r -s -p "$prompt" value </dev/tty
     printf '\n' >&2
-  elif has_display && command -v zenity >/dev/null 2>&1; then
-    value="$(zenity --password --title="GOTG" 2>/dev/null)" || true
+  elif has_display && have_zenity; then
+    value="$(zenity_run --password --title="GOTG" 2>/dev/null)" || true
   else
     die "no terminal or display to prompt for a password"
   fi
@@ -102,8 +102,8 @@ prompt_line() {
   local prompt="$1" default="${2:-}" value=""
   if is_tty; then
     read -r -p "$prompt" value </dev/tty
-  elif has_display && command -v zenity >/dev/null 2>&1; then
-    value="$(zenity --entry --title="GOTG" --text="$prompt" 2>/dev/null)" || true
+  elif has_display && have_zenity; then
+    value="$(zenity_run --entry --title="GOTG" --text="$prompt" 2>/dev/null)" || true
   else
     # As prompt_secret already does. Nowhere to ask means the answer is not
     # known — silently taking the default would point a headless login at a

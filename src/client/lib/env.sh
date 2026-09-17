@@ -172,14 +172,23 @@ _env_build_zenity() {
   local ref="$1" root="$2" attr="$3"
   shift 3
   local pipedir pipe build_pid zen_pid status=0
-  pipedir="$(mktemp -d)"
+  pipedir="$(dialog_dir)"
   pipe="$pipedir/progress"
   mkfifo "$pipe"
 
-  zenity --progress --title="GOTG" --text="Preparing $attr…" \
+  zenity_run --progress --title="GOTG" --text="Preparing $attr…" \
     --pulsate --auto-close <"$pipe" &
   zen_pid=$!
   exec 6>"$pipe"
+
+  # A dialog that never came up is not a cancellation: build without it.
+  if ! dialog_started "$zen_pid"; then
+    exec 6>&-
+    dialog_dir_remove "$pipedir"
+    warn "the progress dialog could not start; building $attr without it"
+    "$(nix_bin)" build "$ref" -o "$root" "$@"
+    return
+  fi
 
   "$(nix_bin)" build "$ref" -o "$root" "$@" &
   build_pid=$!
@@ -190,7 +199,7 @@ _env_build_zenity() {
       kill "$build_pid" 2>/dev/null || true
       wait "$build_pid" 2>/dev/null || true
       exec 6>&-
-      rm -rf "$pipedir"
+      dialog_dir_remove "$pipedir"
       die "build stopped: the progress dialog closed (cancelled, or zenity could not run)"
     fi
     sleep "${GOTG_PROGRESS_TICK:-0.5}"
@@ -199,7 +208,7 @@ _env_build_zenity() {
   wait "$build_pid" || status=$?
   [[ "$status" -eq 0 ]] && printf '100\n' >&6
   exec 6>&-
-  rm -rf "$pipedir"
+  dialog_dir_remove "$pipedir"
   wait "$zen_pid" 2>/dev/null || true
   return "$status"
 }
@@ -235,7 +244,7 @@ env_build() {
 
   [[ -n "${GOTG_BUILD_QUIET:-}" ]] ||
     log "building $attr from $ref — the first launch on a platform compiles its emulator"
-  if ! is_tty && has_display && command -v zenity >/dev/null 2>&1; then
+  if ! is_tty && has_display && have_zenity; then
     _env_build_zenity "$ref" "$root" "$attr" "${refresh[@]}" || _env_build_failed "$attr" "$ref"
   else
     "$(nix_bin)" build "$ref" -o "$root" "${refresh[@]}" || _env_build_failed "$attr" "$ref"
