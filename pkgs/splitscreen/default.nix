@@ -18,6 +18,7 @@
   sway,
   gamescope,
   bubblewrap,
+  xorg,
 }:
 
 let
@@ -36,8 +37,8 @@ stdenvNoCC.mkDerivation {
   src = fetchFromGitHub {
     owner = "dscrawford";
     repo = "SplitScreenWrapper";
-    rev = "cd0a92113c30df98a8a243f83eab4d0301f22763";
-    hash = "sha256-8KBoQYwKHXoMxxHeLBeCsFYHpfXcuvuVpsr35rcGvcA=";
+    rev = "428a48d20c301ae27568144d86bd700ea5fd8402";
+    hash = "sha256-VPR52+2NRmzPFw4teOX0UKHjbQi4gbFWX/kzLHgqjVU=";
   };
 
   nativeBuildInputs = [ makeWrapper ];
@@ -61,6 +62,7 @@ stdenvNoCC.mkDerivation {
             sway
             gamescope
             bubblewrap
+            xorg.xrandr # the frame asks the screen how big it is
           ]
         }
     done
