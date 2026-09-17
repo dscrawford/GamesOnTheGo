@@ -46,6 +46,13 @@ let
       steps.collectExtras
       steps.placeBundle
     ];
+    # Updates or DLC that arrived after the game was installed: the raw
+    # directory holds only the new extras/<release>/ entries, and the
+    # destination is the bundle they join.
+    extras = [
+      steps.collectExtras
+      steps.mergeExtras
+    ];
   };
 
   # A disc image that travelled as a 7z: extract, convert to the RVZ the

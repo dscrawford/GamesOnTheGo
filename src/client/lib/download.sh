@@ -193,63 +193,14 @@ _install_file() {
   mv -f "$staged" "$dest"
 }
 
-# Download one game if it is not already here. Returns 0 when the game is ready.
-#
-# An entry is a list of raw member files; each downloads with resume and its
-# own checksum. What happens after the last member depends on the handler:
-# a single file moves into place, a tree stays a tree, and everything else is
-# a recipe the game's environment carries — unrar, convert, whatever this
-# platform's raw sources need. The raw members are deleted once the refined
-# artifact exists; they are re-downloadable, it is deterministic.
-download_game() {
-  local game="$1"
-  local id platform handler title dest staged
+# Every member the catalog lists for a game -- or, given a JSON array of
+# release names, only the members under those extras/<release>/ directories --
+# into the staging directory, each verified against the catalog's hash.
+_fetch_members() {
+  local game="$1" staged="$2" title="$3" want="$4"
+  local id platform
   id="$(manifest_field "$game" id)"
   platform="$(manifest_field "$game" platform)"
-  handler="$(manifest_field "$game" handler)"
-  title="$(manifest_field "$game" title)"
-  : "${title:=$id}"
-
-  validate_id "$id"
-  validate_platform "$platform"
-
-  if game_is_installed "$game"; then
-    _warn_without_extras "$game"
-    return 0
-  fi
-  dest="$(game_local_path "$game")"
-
-  mkdir -p "$GOTG_PARTIAL_DIR"
-  staged="$(download_partial_path "$id")"
-
-  # Two fetches of one game share a staging directory, so a terminal
-  # `gotg install` racing a Steam launch of the same title would interleave.
-  # The lock makes the second wait and then see the finished install.
-  mkdir -p "$GOTG_STATE_DIR/locks"
-  exec 8>"$GOTG_STATE_DIR/locks/$id.lock"
-  if ! flock -w 3600 8; then
-    die "timed out waiting for another gotg process to finish downloading $id"
-  fi
-  if game_is_installed "$game"; then
-    exec 8>&-
-    return 0
-  fi
-
-  service_have || die "no service configured — run: gotg login"
-
-  # With the library mounted, a cache fetched before it was carries no
-  # paths: one refresh, so the copy below has somewhere to copy from.
-  if [[ -n "${GOTG_LIBRARY_MOUNT:-}" ]] && ! jq -e '[.files[]?.path] | any' <<<"$game" >/dev/null 2>&1; then
-    if manifest_refresh; then
-      game="$(manifest_find "$platform/$id")"
-    fi
-  fi
-
-  local total count
-  total="$(jq -r '[.files[].size_bytes] | add' <<<"$game")"
-  count="$(jq -r '.files | length' <<<"$game")"
-  log "fetching $title ($(human_size "$total"), $count file(s))"
-
   local files_base
   files_base="$(manifest_files_pick)"
 
@@ -300,8 +251,69 @@ download_game() {
     done
     [[ -n "$fetched" ]] ||
       die "download failed for $id (partials kept at $staged; run again to resume)"
-  done < <(jq -r '.files[] | [.name, .size_bytes, (.sha256 // "null"),
+  done < <(jq -r --argjson want "$want" '.files[] | select(.name as $n | $want | if type == "array" then any(.[]; . as $r | $n | startswith("extras/" + $r + "/")) else true end)
+    | [.name, .size_bytes, (.sha256 // "null"),
     (.name | split("/") | map(@uri) | join("/")), (.path // "")] | @tsv' <<<"$game")
+}
+
+# Download one game if it is not already here. Returns 0 when the game is ready.
+#
+# An entry is a list of raw member files; each downloads with resume and its
+# own checksum. What happens after the last member depends on the handler:
+# a single file moves into place, a tree stays a tree, and everything else is
+# a recipe the game's environment carries — unrar, convert, whatever this
+# platform's raw sources need. The raw members are deleted once the refined
+# artifact exists; they are re-downloadable, it is deterministic.
+download_game() {
+  local game="$1"
+  local id platform handler title dest staged
+  id="$(manifest_field "$game" id)"
+  platform="$(manifest_field "$game" platform)"
+  handler="$(manifest_field "$game" handler)"
+  title="$(manifest_field "$game" title)"
+  : "${title:=$id}"
+
+  validate_id "$id"
+  validate_platform "$platform"
+
+  if game_is_installed "$game"; then
+    _top_up_extras "$game"
+    return 0
+  fi
+  dest="$(game_local_path "$game")"
+
+  mkdir -p "$GOTG_PARTIAL_DIR"
+  staged="$(download_partial_path "$id")"
+
+  # Two fetches of one game share a staging directory, so a terminal
+  # `gotg install` racing a Steam launch of the same title would interleave.
+  # The lock makes the second wait and then see the finished install.
+  mkdir -p "$GOTG_STATE_DIR/locks"
+  exec 8>"$GOTG_STATE_DIR/locks/$id.lock"
+  if ! flock -w 3600 8; then
+    die "timed out waiting for another gotg process to finish downloading $id"
+  fi
+  if game_is_installed "$game"; then
+    exec 8>&-
+    return 0
+  fi
+
+  service_have || die "no service configured — run: gotg login"
+
+  # With the library mounted, a cache fetched before it was carries no
+  # paths: one refresh, so the copy below has somewhere to copy from.
+  if [[ -n "${GOTG_LIBRARY_MOUNT:-}" ]] && ! jq -e '[.files[]?.path] | any' <<<"$game" >/dev/null 2>&1; then
+    if manifest_refresh; then
+      game="$(manifest_find "$platform/$id")"
+    fi
+  fi
+
+  local total count
+  total="$(jq -r '[.files[].size_bytes] | add' <<<"$game")"
+  count="$(jq -r '.files | length' <<<"$game")"
+  log "fetching $title ($(human_size "$total"), $count file(s))"
+
+  _fetch_members "$game" "$staged" "$title" true
 
   case "$handler" in
     single_file | no_intro_set)
@@ -334,14 +346,67 @@ download_game() {
   log "installed $(game_installed_path "$game" || printf '%s' "$dest")"
 }
 
-# An install from before the catalog attached updates or DLC to this game
-# runs as it is; fetching them means reinstalling, which is not done behind
-# anyone's back.
-_warn_without_extras() {
-  local game="$1" legacy
-  legacy="$(game_legacy_path "$game" "$(game_games_dir "$game")")" || return 0
-  [[ -f "$legacy" ]] || return 0
-  warn "$(manifest_field "$game" id) is installed without its updates and DLC — uninstall and install again to fetch them"
+# The releases the catalog attaches under extras/, one name per line.
+game_extras_releases() {
+  jq -r '[.files[]?.name | select(startswith("extras/")) | split("/")[1]] | unique[]' <<<"$1"
+}
+
+# Which of those are not beside an installed bundle yet. collect-extras names
+# what it unpacks <release>-<file>, so a release is here when anything under
+# extras/ starts with its name.
+_extras_missing() {
+  local install="$1" release
+  while IFS= read -r release; do
+    [[ -n "$release" ]] || continue
+    validate_filename "$release"
+    local here=("$install/extras/$release-"*)
+    [[ -e "${here[0]}" ]] || printf '%s\n' "$release"
+  done < <(game_extras_releases "$2")
+}
+
+# An installed game whose catalog row has since gained updates or DLC.
+#
+# A bundle fetches only what it is missing and unpacks it beside the game: the
+# case is Tears of the Kingdom, 32 GB installed with 1.4.3, and then 1.4.2 --
+# the one version its mods run on -- attached to the catalog half a gigabyte
+# later. A single file placed under its own name before extras existed is
+# left as it is and said so; turning it into a bundle is a reinstall, which is
+# not done behind anyone's back.
+_top_up_extras() {
+  local game="$1" id title install legacy missing staged
+  id="$(manifest_field "$game" id)"
+  title="$(manifest_field "$game" title)"
+  : "${title:=$id}"
+  game_has_extras "$game" || return 0
+
+  legacy="$(game_legacy_path "$game" "$(game_games_dir "$game")")" || legacy=""
+  if [[ -n "$legacy" && -f "$legacy" ]]; then
+    warn "$id is installed without its updates and DLC — uninstall and install again to fetch them"
+    return 0
+  fi
+  install="$(game_installed_path "$game")" || return 0
+  [[ -d "$install" ]] || return 0
+
+  missing="$(_extras_missing "$install" "$game")"
+  [[ -n "$missing" ]] || return 0
+  log "fetching what $title is missing: $(tr '\n' ' ' <<<"$missing")"
+
+  mkdir -p "$GOTG_PARTIAL_DIR" "$GOTG_STATE_DIR/locks"
+  staged="$(download_partial_path "$id")"
+  exec 8>"$GOTG_STATE_DIR/locks/$id.lock"
+  flock -w 3600 8 || die "timed out waiting for another gotg process to finish downloading $id"
+  service_have || die "no service configured — run: gotg login"
+
+  _fetch_members "$game" "$staged" "$title" "$(jq -cR . <<<"$missing" | jq -cs .)"
+  _run_recipe "$game" extras "$staged" "$install"
+  rm -rf "$staged"
+  exec 8>&-
+  log "added to $install: $(tr '\n' ' ' <<<"$missing")"
+}
+
+_recipe_declares() {
+  jq -e --arg h "$2" '.handlers | index($h)' \
+    "$GOTG_ROOTS_DIR/$1/share/gotg/recipe.json" >/dev/null 2>&1
 }
 
 # The environment owns the recipe and its tools; the catalog only said what
@@ -359,8 +424,10 @@ _run_recipe() {
   [[ -x "$recipe" ]] || env_refresh "$attr" || true
   [[ -x "$recipe" ]] ||
     die "$attr has no recipe for '$handler' built yet — run: gotg install $(manifest_field "$game" id)"
-  jq -e --arg h "$handler" '.handlers | index($h)' \
-    "$GOTG_ROOTS_DIR/$attr/share/gotg/recipe.json" >/dev/null 2>&1 ||
+  # The same again for a handler the root predates -- `extras` arrived after
+  # the first bundles were built.
+  _recipe_declares "$attr" "$handler" || env_refresh "$attr" || true
+  _recipe_declares "$attr" "$handler" ||
     die "$attr declares no recipe for '$handler'"
   log "processing $(manifest_field "$game" id) ($handler)"
   mkdir -p "$(dirname "$dest")"
@@ -377,7 +444,7 @@ cmd_download() {
   local here
   if here="$(game_installed_path "$game")"; then
     log "already installed: $here"
-    _warn_without_extras "$game"
+    _top_up_extras "$game"
     return 0
   fi
   download_game "$game"
