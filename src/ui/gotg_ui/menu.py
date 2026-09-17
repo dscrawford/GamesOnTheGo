@@ -45,7 +45,7 @@ BACK = "back"
 
 # What the plain game is called in a list of mods. Not "none": the row is a
 # thing to choose, and every other row in that list is a name.
-PLAIN = "the game as it shipped"
+PLAIN = "vanilla"
 
 # What "let the client decide" is called in a list of versions — the newest
 # installed, or the newest a chosen mod was built for. It is the right answer
@@ -75,7 +75,7 @@ class Menu:
         # Newest first, as the client lists them — a version list reads like a
         # changelog, and the one somebody wants is usually at the top.
         self.versions = tuple(versions)
-        # Which variant the verbs act on; None is the game as it shipped.
+        # Which variant the verbs act on; None is vanilla.
         self.variant: str | None = None
         # Which version; None leaves the choice to the client, which knows
         # what a mod can take.

@@ -708,7 +708,7 @@ choose, and Play, Configure and Add to Steam all carry that choice. A mod added
 to Steam gets its own entry, its own launcher and its own artwork, because that
 is what the client does with a variant anyway.
 
-![The picker's mod menu on Four Swords Adventures: Back, the game as it shipped, 2p, 3p, 4p](docs/ui-mods-menu.png)
+![The picker's mod menu on Four Swords Adventures: Back, vanilla, 2p, 3p, 4p](docs/ui-mods-menu.png)
 
 Uninstall is the one row that stays about the game: `gotg uninstall` takes its
 bytes and every launcher with them, mods included, so offering it per mod would

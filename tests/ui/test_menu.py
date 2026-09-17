@@ -131,7 +131,7 @@ def test_the_plain_game_can_be_chosen_back():
     m.confirm()
     assert m.variant == "2p"
     m.confirm()  # the mods row again
-    m.select(1)  # the game as it shipped
+    m.select(1)  # vanilla
     m.confirm()
     assert m.variant is None
 
