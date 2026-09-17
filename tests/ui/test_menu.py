@@ -197,3 +197,36 @@ def test_uninstall_is_about_the_game_rather_than_a_mod():
     assert m.variant == "2p"
     m.selected = len(m.actions) - 1
     assert m.confirm() == "uninstall"
+
+
+# --- where the panel goes --------------------------------------------------
+
+
+def _game():
+    from gotg_ui.catalog import Game
+
+    return Game(id="usa.a", platform="n64", title="A Game", handler="rom")
+
+
+def test_a_menu_in_a_list_opens_towards_the_room():
+    # The list is against the left edge and the art fills the right, so there
+    # is only one side with anywhere to put a panel.
+    from gotg_ui.menu import Menu
+
+    assert Menu(_game(), 11, False, columns=1).side == "right"
+
+
+def test_a_menu_in_a_grid_still_opens_away_from_the_edge():
+    from gotg_ui.layout import COLUMNS
+    from gotg_ui.menu import Menu
+
+    assert Menu(_game(), 0, False).side == "right"
+    assert Menu(_game(), COLUMNS - 1, False).side == "left"
+
+
+def test_the_shape_defaults_to_the_grids():
+    # Every caller that predates the second view keeps working unchanged.
+    from gotg_ui.layout import COLUMNS
+    from gotg_ui.menu import Menu
+
+    assert Menu(_game(), 0, False).columns == COLUMNS

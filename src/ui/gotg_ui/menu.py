@@ -63,9 +63,13 @@ class Menu:
         installed: bool = False,
         variants: tuple[str, ...] | Sequence[str] = (),
         versions: tuple[str, ...] | Sequence[str] = (),
+        columns: int = COLUMNS,
     ):
         self.game = game
         self.tile_index = tile_index
+        # The shape the menu was opened in. The grid's five by default, so
+        # every existing caller is unchanged; the shelf passes its one.
+        self.columns = max(1, columns)
         self.installed = installed
         self.variants = tuple(variants)
         # Newest first, as the client lists them — a version list reads like a
@@ -132,9 +136,16 @@ class Menu:
         """Where the panel goes: beside the tile, on the side with room.
 
         Decided by column alone so both rows agree — a tile in the right
-        columns would push a right-hand panel off screen.
+        columns would push a right-hand panel off screen. By *this menu's*
+        columns, not the grid module's: the shelf is one column wide, and
+        asking the grid's five about it gives an answer about a shape that is
+        not on screen.
         """
-        return "right" if (self.tile_index % COLUMNS) < COLUMNS - 2 else "left"
+        if self.columns == 1:
+            # A list lives against the left edge and the whole right-hand side
+            # is the art, so there is only one side with room.
+            return "right"
+        return "right" if (self.tile_index % self.columns) < self.columns - 2 else "left"
 
     @property
     def action(self) -> str:

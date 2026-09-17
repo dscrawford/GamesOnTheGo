@@ -144,6 +144,20 @@ def filling(picture, key, width: int, height: int):
     return _scaled.put((key, "fill", size), pygame.transform.smoothscale(picture, size))
 
 
+def view_rects(browser, size) -> list:
+    """The rectangles the view on screen draws its games in.
+
+    Asked of the view rather than assumed to be the grid's. The menu anchors
+    to one of these, and the shelf's twelve rows are not the grid's ten tiles:
+    opening a menu on the eleventh row indexed past the end of a list that was
+    not the one on screen, and the picker died with an IndexError.
+    """
+    if browser.view == SHELF:
+        _hero, rows = shelf(*size, STRIP_HEIGHT)
+        return rows
+    return grid(*size, STRIP_HEIGHT)
+
+
 def hovering(browser, pos, size) -> int | None:
     """Which cover the pointer is on, in whichever view is drawn.
 
@@ -361,24 +375,37 @@ def draw(
     screen.blit(label, (label.get_height(), height - label.get_height() * 2))
 
 
-def menu_rects(menu: Menu, tiles, font_at) -> list[tuple[int, int, int, int]]:
+def menu_rects(menu: Menu, tiles, font_at, bounds=None) -> list[tuple[int, int, int, int]]:
     """One rect per action row, beside the tile on the side with room.
 
     Computed here and only here, so the drawing and the pointer hit-testing
     cannot disagree about where a row is.
+
+    `bounds` is the window, and the panel is kept inside it. In a grid of two
+    rows a panel centred on a tile always fitted; against the twelfth row of a
+    list it hangs off the bottom of the screen, and the verbs at the end of it
+    -- uninstall among them -- cannot be reached or read.
     """
-    tile = tiles[menu.tile_index]
+    # Clamped rather than indexed blind. The caller passes the view's own
+    # rectangles, so this should always be in range -- and if a view ever grows
+    # a shape nobody updated, a menu in the wrong place beats a traceback on a
+    # television.
+    tile = tiles[min(menu.tile_index, len(tiles) - 1)]
     row_h = font_at(22).get_height() + 14
     width = max(font_at(22).size(label)[0] for label, _ in menu.actions) + 32
     height = row_h * len(menu.actions) + 8
     gap = 10
     x = tile.x + tile.width + gap if menu.side == "right" else tile.x - gap - width
     y = tile.y + (tile.height - height) // 2
+    if bounds is not None:
+        screen_width, screen_height = bounds
+        y = max(STRIP_HEIGHT + 4, min(y, screen_height - height - 4))
+        x = max(4, min(x, screen_width - width - 4))
     return [(x, y + 4 + i * row_h, width, row_h) for i in range(len(menu.actions))]
 
 
 def draw_menu(screen, menu: Menu, tiles, font_at) -> None:
-    rows = menu_rects(menu, tiles, font_at)
+    rows = menu_rects(menu, tiles, font_at, screen.get_size())
     x, y = rows[0][0], rows[0][1] - 4
     height = rows[-1][1] + rows[-1][3] - y + 8
     pygame.draw.rect(screen, TILE, (x, y, rows[0][2], height), border_radius=8)
@@ -858,12 +885,16 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             else:
                                 menu = None
                     elif event.type == pygame.MOUSEMOTION:
-                        rows = menu_rects(menu, grid(*screen.get_size(), STRIP_HEIGHT), font_at)
+                        rows = menu_rects(
+                            menu, view_rects(browser, screen.get_size()), font_at, screen.get_size()
+                        )
                         for i, (rx, ry, rw, rh) in enumerate(rows):
                             if rx <= event.pos[0] < rx + rw and ry <= event.pos[1] < ry + rh:
                                 menu.select(i)
                     elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                        rows = menu_rects(menu, grid(*screen.get_size(), STRIP_HEIGHT), font_at)
+                        rows = menu_rects(
+                            menu, view_rects(browser, screen.get_size()), font_at, screen.get_size()
+                        )
                         hit = None
                         for i, (rx, ry, rw, rh) in enumerate(rows):
                             if rx <= event.pos[0] < rx + rw and ry <= event.pos[1] < ry + rh:
@@ -986,6 +1017,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 browser.is_installed(state.game),
                                 variants_for(state.game),
                                 version_names(versions_for(state.game)),
+                                columns=browser.columns,
                             )
                     elif event.key == pygame.K_i:
                         browser.toggle_installed()
@@ -1012,6 +1044,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 browser.is_installed(state.game),
                                 variants_for(state.game),
                                 version_names(versions_for(state.game)),
+                                columns=browser.columns,
                             )
                     # No button 4/5 here: SDL2 reports a wheel as MOUSEWHEEL *and*
                     # as those two for compatibility, so handling both turns the
@@ -1033,6 +1066,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 browser.is_installed(state.game),
                                 variants_for(state.game),
                                 version_names(versions_for(state.game)),
+                                columns=browser.columns,
                             )
                     elif pressed == pads.B:
                         running = False
@@ -1121,15 +1155,18 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     art.pop(game.key, None)
                 for game in state.page:
                     surface_for(game)
-                if browser.view == SHELF and menu is None and typing is None:
+                if browser.view == SHELF and typing is None:
+                    # The menu is drawn over the list rather than swapping the
+                    # screen back to the grid underneath it, which is what
+                    # happened before and moved every game on screen.
                     draw_shelf(screen, state, font_at, art, browser.status, browser.installed)
                 else:
-                    # The menu and the search box are the grid's own furniture;
-                    # a shelf that had to grow both would be a second copy of
-                    # them to keep in step.
+                    # Typing still belongs to the grid: the search box is drawn
+                    # there, and a shelf with its own copy would be two to keep
+                    # in step.
                     draw(screen, state, font_at, art, browser.status, typing, menu, browser.installed)
                 if menu is not None:
-                    draw_menu(screen, menu, grid(*screen.get_size(), STRIP_HEIGHT), font_at)
+                    draw_menu(screen, menu, view_rects(browser, screen.get_size()), font_at)
 
             # Last, and over everything: which seat a person is in is the one
             # thing worth knowing on every screen, and drawing it after the
