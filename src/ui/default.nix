@@ -67,6 +67,9 @@ stdenvNoCC.mkDerivation {
   buildPhase = ''
     runHook preBuild
     python3 build-controllers.py assets/controllers assets/built
+    # The strip's icons: a second pass, because these carry no anchors and
+    # the diagram build refuses an SVG without them.
+    python3 build-controllers.py --icons assets/icons assets/built/icons
     runHook postBuild
   '';
 

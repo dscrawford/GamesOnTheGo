@@ -7,6 +7,15 @@ seat. Not the same thing as `../controllers/`, which holds one diagram per
 labelled. These have no anchors and are never annotated; they are read at about
 28 pixels.
 
+Rasterised at build time, like the diagrams next door and for the same reason
+(`build-controllers.py --icons`), to one height so a row of them shares a
+baseline. The artwork is a black silhouette and the runtime tints it to the
+player's colour, so nothing here needs a light and a dark copy.
+
+`generic.svg` is the one that matters most: it stands in for every controller
+without a rule of its own, which on a shelf of third-party pads is most of
+them.
+
 ## Where these came from
 
 | File | Source | Licence |
@@ -20,6 +29,11 @@ labelled. These have no anchors and are never annotated; they are read at about
 | `keyboard-mouse.svg` | ES-DE `keyboard_and_mouse_generic.svg` | MIT |
 | `mouse.svg` | ES-DE `mouse_generic.svg` | MIT |
 | `steam.svg` | Drawn here | CC0 |
+| `generic.svg` | ES-DE `gamepad_generic.svg` | MIT |
+| `n64.svg` | ES-DE `gamepad_nintendo_64.svg` | MIT |
+| `nes.svg` | ES-DE `gamepad_nintendo_nes.svg` | MIT |
+| `snes.svg` | ES-DE `gamepad_nintendo_snes.svg` | MIT |
+| `megadrive.svg` | ES-DE `gamepad_sega_md_6_buttons.svg` | MIT |
 
 ES-DE is [EmulationStation Desktop Edition](https://gitlab.com/es-de/emulationstation-de),
 MIT, © Northwestern Software AB / Leon Styhre / Alec Lofquist. The grant is kept

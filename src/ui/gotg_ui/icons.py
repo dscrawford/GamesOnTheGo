@@ -12,6 +12,7 @@ a screen, which is what lets it be tested.
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 
@@ -83,3 +84,40 @@ def icon_path(pad_name: str | None) -> pathlib.Path | None:
             return candidate
     fallback = controllers_dir() / f"{_fallback()}.svg"
     return fallback if fallback.exists() else None
+
+
+def built_dir() -> pathlib.Path:
+    """Where the rasterised icons are.
+
+    Beside the console diagrams, under whatever the wrapper set as the built
+    assets -- the SVGs themselves never ship, and are never loaded at runtime.
+    Same reason as the diagrams: pygame's own SVG support clamps to the source
+    aspect ratio, so the size is decided at build time where it can be checked.
+    """
+    override = os.environ.get("GOTG_UI_ASSETS")
+    base = pathlib.Path(override) if override else pathlib.Path(__file__).resolve().parent.parent / "assets" / "built"
+    return base / "icons"
+
+
+def icon_image(pad_name: str | None) -> pathlib.Path | None:
+    """The PNG to draw for this controller, or None when none was built.
+
+    The generic pad stands in for anything unrecognised *and* for anything
+    whose own drawing is missing: a picture of a controller answers "somebody
+    is holding a pad" either way, which is the question the strip asks. None
+    only when there are no built icons at all -- a tree nobody has run the
+    build in -- and the strip then draws what it drew before.
+    """
+    directory = built_dir()
+    try:
+        manifest = json.loads((directory / "icons.json").read_text())
+    except (OSError, ValueError):
+        return None
+    files = manifest.get("icons", {})
+    for name in (icon_name(pad_name), _fallback(), FALLBACK):
+        filename = files.get(name)
+        if filename:
+            candidate = directory / str(filename)
+            if candidate.exists():
+                return candidate
+    return None
