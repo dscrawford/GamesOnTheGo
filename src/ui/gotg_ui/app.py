@@ -10,6 +10,8 @@ come after this has been sat in front of on a Deck.
 
 from __future__ import annotations
 
+import math
+
 import pygame
 
 from . import around, config, filters, pads, prepare, profiles
@@ -24,6 +26,7 @@ from .filters import Filters
 from .gate import layout_for
 from .grid import Grid
 from .installed import installed_games
+from .installs import Installs
 from .layout import grid, shelf, shelf_at, tile_at
 from .menu import Menu
 from .padmap import Padmap, ensure_daemon
@@ -98,6 +101,25 @@ def draw_badge(screen, tile) -> None:
     pygame.draw.polygon(screen, TEXT, [(cx - head, cy), (cx + head, cy), (cx, cy + head)])
     pygame.draw.aalines(screen, TEXT, True, [(cx - head, cy), (cx + head, cy), (cx, cy + head)])
     pygame.draw.line(screen, TEXT, (cx - head, cy + head + 2), (cx + head, cy + head + 2), stroke)
+
+
+def draw_ring(screen, centre, radius: int, fraction: float | None, failed: bool) -> None:
+    """An install on its way: a ring filling clockwise from the top, or a
+    short arc going round when there are no figures yet (a build). Red and
+    whole when it failed."""
+    stroke = max(3, radius // 5)
+    box = pygame.Rect(centre[0] - radius, centre[1] - radius, 2 * radius, 2 * radius)
+    pygame.draw.aacircle(screen, BACKGROUND, centre, radius + stroke)
+    pygame.draw.circle(screen, TILE, centre, radius, stroke)
+    colour = (224, 96, 96) if failed else TILE_SELECTED
+    if fraction is None:
+        start = -(pygame.time.get_ticks() / 400.0) % (2 * math.pi)
+        pygame.draw.arc(screen, colour, box, start, start + math.pi / 2, stroke)
+    elif fraction > 0:
+        # pygame's arcs run anticlockwise from the +x axis; this one runs
+        # clockwise from twelve, which is how a clock and a person read it.
+        top = math.pi / 2
+        pygame.draw.arc(screen, colour, box, top - 2 * math.pi * fraction, top, stroke)
 
 
 # Every cover that has been scaled to fit a tile, by game and size.
@@ -200,7 +222,9 @@ def draw_cover(screen, tile, game, picture, font_at, selected: bool) -> None:
     screen.set_clip(before)
 
 
-def draw_row(screen, row, game, picture, font_at, selected: bool, installed: bool) -> None:
+def draw_row(
+    screen, row, game, picture, font_at, selected: bool, installed: bool, ring: tuple[float | None, bool] | None = None
+) -> None:
     """One line of the list: an icon, a title, and the platform under it.
 
     The icon is the game's own art cropped to a square rather than fitted into
@@ -228,7 +252,13 @@ def draw_row(screen, row, game, picture, font_at, selected: bool, installed: boo
         title = _fit(font_at, text, room, size).render(text, True, TEXT)
     screen.blit(title, (left, row.y + 4))
 
-    under = game.platform + ("   ·   installed" if installed else "")
+    if ring is not None:
+        fraction, failed = ring
+        under = game.platform + ("   ·   install failed" if failed else "   ·   installing")
+        r = max(6, side // 3)
+        draw_ring(screen, (row.x + row.width - r - 12, row.y + row.height // 2), r, fraction, failed)
+    else:
+        under = game.platform + ("   ·   installed" if installed else "")
     small = font_at(max(11, size - 8)).render(under, True, TEXT_DIM)
     screen.blit(small, (left, row.y + 6 + title.get_height()))
 
@@ -240,6 +270,7 @@ def draw_shelf(
     art=None,
     status: str = "",
     installed: set[tuple[str, str]] | None = None,
+    rings: dict[tuple[str, str], tuple[float | None, bool]] | None = None,
 ) -> None:
     """The list on the left, and the art of the one under the cursor on the
     right — the other way to look at the same library."""
@@ -282,6 +313,7 @@ def draw_shelf(
             font_at,
             index == state.selected,
             bool(installed and game.key in installed),
+            rings.get(game.key) if rings else None,
         )
 
     if status:
@@ -298,6 +330,7 @@ def draw(
     typing: str | None = None,
     menu=None,
     installed: set[tuple[str, str]] | None = None,
+    rings: dict[tuple[str, str], tuple[float | None, bool]] | None = None,
 ) -> None:
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
@@ -347,6 +380,16 @@ def draw(
 
         if installed and game.key in installed:
             draw_badge(screen, tile)
+        if rings and game.key in rings:
+            fraction, failed = rings[game.key]
+            radius = max(14, tile.width // 5)
+            draw_ring(screen, (tile.x + tile.width // 2, tile.y + tile.height // 2), radius, fraction, failed)
+            if fraction is not None and not failed:
+                pct = font_at(max(14, radius // 2)).render(f"{int(fraction * 100)}%", True, TEXT)
+                screen.blit(
+                    pct,
+                    (tile.x + (tile.width - pct.get_width()) // 2, tile.y + (tile.height - pct.get_height()) // 2),
+                )
         if selected:
             pygame.draw.rect(screen, TEXT, tile.rect, width=3, border_radius=8)
         if dim is not None and index != menu.tile_index:
@@ -720,6 +763,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # The loader phase: a verb that needs work spawns the client and the grid
     # gives way to its output until it finishes, fails, or is cancelled.
     preparer: Preparer | None = None
+    installs = Installs()
     prepare_failed = False
     # What happens when the loader succeeds: exec the verb, or come back here.
     after_prepare: str | None = None
@@ -745,11 +789,14 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             after_prepare = None
             return
         if verb == "install":
-            # The loader, then the grid: the badge fills in, the game waits.
-            # Per variant, like play -- a mod is its own environment, and
-            # installing it here is what makes its Play instant later.
-            preparer = Preparer(game, ["install"], variant, version)
-            after_prepare = "install"
+            # Behind the grid, as a ring on the tile: the badge fills in when
+            # it lands, and the grid stays usable meanwhile. Per variant,
+            # like play -- a mod is its own environment, and installing it
+            # here is what makes its Play instant later.
+            installs.start(game, variant, version)
+            return
+        if verb == "cancel-install":
+            installs.cancel(game.key)
             return
         if verb == "uninstall":
             # Through the loader like steam-add, so what was removed is read
@@ -761,6 +808,11 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             after_prepare = "uninstall"
             return
         after_prepare = verb
+        # A game already on its way: the loader adopts that install rather
+        # than starting a second one to queue behind the client's lock.
+        if verb == "play" and installs.running(game.key):
+            preparer = installs.take(game.key)
+            return
         # Readiness is per variant: a mod is its own environment, and the one
         # built for the plain game says nothing about whether this one is.
         if is_ready(game, variant):
@@ -1069,6 +1121,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 variants_for(state.game),
                                 version_names(versions_for(state.game)),
                                 columns=browser.columns,
+                                installing=installs.running(state.game.key),
                             )
                     elif event.key == pygame.K_i:
                         browser.toggle_installed()
@@ -1096,6 +1149,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 variants_for(state.game),
                                 version_names(versions_for(state.game)),
                                 columns=browser.columns,
+                                installing=installs.running(state.game.key),
                             )
                     # No button 4/5 here: SDL2 reports a wheel as MOUSEWHEEL *and*
                     # as those two for compatibility, so handling both turns the
@@ -1118,6 +1172,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 variants_for(state.game),
                                 version_names(versions_for(state.game)),
                                 columns=browser.columns,
+                                installing=installs.running(state.game.key),
                             )
                     elif pressed == pads.B:
                         running = False
@@ -1139,6 +1194,11 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         # for options, so that is what it opens.
                         panel = Filters()
 
+            # Installs running behind the grid: one landing is a badge, and
+            # the versions the client listed were about a game not yet there.
+            if installs.poll():
+                browser.set_installed(installed_games())
+                forget_versions()
             # Completion first, drawing second: a finished steam-add clears
             # the preparer, and this same frame must already be the grid's.
             if preparer is not None and not prepare_failed and not preparer.running:
@@ -1184,9 +1244,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 # The grid behind it, so changing a filter is visibly changing
                 # the thing underneath rather than a number on a form.
                 if browser.view == SHELF:
-                    draw_shelf(below, state, font_at, art, browser.status, browser.installed)
+                    draw_shelf(below, state, font_at, art, browser.status, browser.installed, installs.rings())
                 else:
-                    draw(below, state, font_at, art, browser.status, None, None, browser.installed)
+                    draw(below, state, font_at, art, browser.status, None, None, browser.installed, installs.rings())
                 draw_filters(below, font_at, browser, panel, typing)
             elif controllers is not None:
                 if seating.open or seating.view.finished:
@@ -1214,12 +1274,12 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     # The menu is drawn over the list rather than swapping the
                     # screen back to the grid underneath it, which is what
                     # happened before and moved every game on screen.
-                    draw_shelf(screen, state, font_at, art, browser.status, browser.installed)
+                    draw_shelf(screen, state, font_at, art, browser.status, browser.installed, installs.rings())
                 else:
                     # Typing still belongs to the grid: the search box is drawn
                     # there, and a shelf with its own copy would be two to keep
                     # in step.
-                    draw(screen, state, font_at, art, browser.status, typing, menu, browser.installed)
+                    draw(screen, state, font_at, art, browser.status, typing, menu, browser.installed, installs.rings())
                 if menu is not None:
                     draw_menu(screen, menu, view_rects(browser, screen.get_size()), font_at)
 
