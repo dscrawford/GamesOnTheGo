@@ -119,3 +119,21 @@ def test_a_window_too_small_to_be_sensible_still_produces_rectangles():
     hero, rows = shelf(200, 150, STRIP)
     assert hero.width >= 1 and hero.height >= 1
     assert all(row.width >= 1 and row.height >= 1 for row in rows)
+
+
+# --- the menu, which is anchored to whichever view is on screen ---------------
+
+
+def test_the_list_has_rows_the_grid_has_no_tile_for():
+    """The crash this pins.
+
+    A menu opened on the eleventh row of the list was drawn against the grid's
+    ten tiles — `tiles[11]` — and the picker died with an IndexError. Any fix
+    has to keep this true: the two views have different numbers of places, so
+    nothing may index one with the other's position.
+    """
+    from gotg_ui.layout import PER_PAGE
+
+    assert SHELF_PER_PAGE > PER_PAGE
+    _hero, rows = shelf(1280, 800, STRIP)
+    assert len(rows) == SHELF_PER_PAGE
