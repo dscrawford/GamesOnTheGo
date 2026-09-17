@@ -1,7 +1,7 @@
 # Requests to padmap
 
 GOTG is replacing its own controller handling with padmap
-(`github:chadac/padmap`, branch `rustify`). Everything GOTG needs and padmap
+(`github:dscrawford/padmap`, branch `rustify`). Everything GOTG needs and padmap
 does not yet do is written down here, one file per request, for whoever is
 working on padmap to pick up.
 
