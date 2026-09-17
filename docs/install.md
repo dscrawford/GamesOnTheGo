@@ -1,5 +1,9 @@
 # Installing GOTG
 
+This installs the client. It comes with no games: the library it connects to is
+one you host, filled with games you own and have dumped yourself or bought
+digitally. See the note at the top of the [README](../README.md).
+
 ## On a Steam Deck
 
 In Desktop Mode, open Konsole and paste:

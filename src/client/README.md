@@ -3,6 +3,10 @@
 Downloads a game from the server the first time you launch it, then runs it in
 the right emulator. Meant to be driven from Steam.
 
+The server is your own, and the games on it are ones you have obtained legally
+— your own dumps, or digital purchases. Console keys and firmware, where a
+platform needs them, are dumped from a console you own.
+
 ```
 gotg login                  save the service URL and token (mode 600)
 gotg refresh                re-fetch the catalog
