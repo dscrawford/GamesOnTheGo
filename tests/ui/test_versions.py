@@ -12,7 +12,17 @@ import pytest
 from gotg_ui.catalog import Game
 from gotg_ui.launch import command_for
 from gotg_ui.menu import AUTOMATIC, MODS, VERSIONS, Menu
-from gotg_ui.versions import names, running, versions_for
+from gotg_ui.versions import forget, names, running, versions_for
+
+
+@pytest.fixture(autouse=True)
+def _fresh():
+    """The client's answer is cached for the session, so a test that stubs a
+    different client has to say so. Real code invalidates on an uninstall;
+    here every test is a different machine."""
+    forget()
+    yield
+    forget()
 
 
 def game(id="world.totk", platform="switch"):
@@ -139,3 +149,48 @@ def test_backing_out_of_the_version_list_keeps_what_was_chosen():
     m.select(0)  # Back
     assert m.confirm() is None
     assert m.version == "1.4.2" and m.expanded is None
+
+
+def test_the_client_is_asked_once_per_game(monkeypatch):
+    """Opening a menu spawned `gotg complete versions` every time: 31 ms on a
+    Steam Deck, on the press that opens the menu, which is where a stall shows.
+    The answer only changes when something is installed or removed."""
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return type("Done", (), {"returncode": 0, "stdout": "*1.4.3\n1.2.1\n"})()
+
+    monkeypatch.setattr("gotg_ui.versions.subprocess.run", fake_run)
+    assert versions_for(game()) == (("1.4.3", True), ("1.2.1", False))
+    assert versions_for(game()) == (("1.4.3", True), ("1.2.1", False))
+    assert len(calls) == 1
+
+
+def test_a_variant_is_its_own_question(monkeypatch):
+    # A mod can take a different version from the plain game, so the two must
+    # not share an answer.
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return type("Done", (), {"returncode": 0, "stdout": "*1.4.3\n"})()
+
+    monkeypatch.setattr("gotg_ui.versions.subprocess.run", fake_run)
+    versions_for(game())
+    versions_for(game(), "bse")
+    assert len(calls) == 2
+
+
+def test_a_client_that_could_not_answer_is_asked_again(monkeypatch):
+    # Caching the silence would make one busy moment permanent.
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        raise OSError("busy")
+
+    monkeypatch.setattr("gotg_ui.versions.subprocess.run", fake_run)
+    assert versions_for(game()) == ()
+    assert versions_for(game()) == ()
+    assert len(calls) == 2
