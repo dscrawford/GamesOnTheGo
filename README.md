@@ -19,7 +19,7 @@ curl -sSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/insta
 nix run github:dscrawford/GamesOnTheGo#install
 ```
 
-Safe to re-run, and worth it after a SteamOS update. Details: [docs/install.md](docs/install.md).
+Re-run to upgrade, and after a SteamOS update. `--dry-run` shows what it would change. Details: [docs/install.md](docs/install.md).
 
 ## Game ids
 
