@@ -13,22 +13,16 @@ Three components share one contract:
 
 ## Installing it
 
-On a Steam Deck, in Desktop Mode, from Konsole:
-
 ```bash
+# Steam Deck or any Linux, Nix not required (on a Deck: Desktop Mode, Konsole)
 curl -sSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash
+
+# Nix already installed
+nix run github:dscrawford/GamesOnTheGo#install
 ```
 
-That installs Nix if it is missing, turns on flakes, puts `gotg` and the picker
-in your profile, lets GOTG publish controllers, and adds **Games On The Go** to
-your Steam library. Running it again does nothing but say what was already
-there — which is also how you put the controller permission back after a
-SteamOS update takes it.
-
-With Nix already on the machine: `nix run github:dscrawford/GamesOnTheGo#install`.
-
-[docs/install.md](docs/install.md) has the rest, including why this is a script
-and not an AppImage or a Flatpak.
+Safe to re-run, and worth it after a SteamOS update. What it does, and why it is
+a script rather than an AppImage: [docs/install.md](docs/install.md).
 
 ## The entry-id contract
 
