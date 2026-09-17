@@ -54,13 +54,12 @@ grid:
   gap_fraction: 0.02
   margin_fraction: 0.04
 
-# The other view: rows of covers, with the one under the cursor shown full
-# size beside them. More of the library at once than the grid, smaller.
+# The other view: a list down the left, one game per row the way Steam's
+# library reads, with the art of the one under the cursor filling the right.
 shelf:
-  columns: 8
-  rows: 3
-  # How much of the window the full art gets.
-  hero_fraction: 0.5
+  rows: 12
+  # How much of the width the list takes; the rest is the art.
+  list_fraction: 0.38
 
 # Seconds, everywhere.
 timeouts:
