@@ -16,19 +16,67 @@ is the Deck's own password, not your Steam one.
 Then restart Steam. **Games On The Go** will be in your library, and works from
 Game Mode with a controller.
 
-## Anywhere else
+## Anywhere else without Nix
 
-The same line. On a machine that already has Nix (2.30 or newer) and flakes:
+The same line:
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash
+```
+
+## With Nix already there
+
+GOTG is a flake. Nix 2.30 or newer, with flakes on, needs no installer.
+
+Install both commands into your profile:
+
+```bash
+nix profile add github:dscrawford/GamesOnTheGo#gotg github:dscrawford/GamesOnTheGo#gotg-ui
+```
+
+Upgrade them later:
+
+```bash
+nix profile upgrade gotg gotg-ui
+```
+
+Try the picker without installing:
+
+```bash
+nix run github:dscrawford/GamesOnTheGo#gotg-ui
+```
+
+NixOS or home-manager, as a flake input:
+
+```nix
+inputs.gotg.url = "github:dscrawford/GamesOnTheGo";
+```
+
+```nix
+environment.systemPackages = [
+  inputs.gotg.packages.${pkgs.stdenv.hostPlatform.system}.gotg
+  inputs.gotg.packages.${pkgs.stdenv.hostPlatform.system}.gotg-ui
+];
+```
+
+Two things the installer would have done, which you do once by hand:
+
+```bash
+gotg steam picker
+```
+
+```bash
+sudo tee /etc/udev/rules.d/99-gotg-uinput.rules <<'EOF'
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
+EOF
+```
+
+The first puts the picker in Steam; the second lets padmap publish
+controllers through `/dev/uinput` (on NixOS: `hardware.uinput.enable = true;`
+instead). The installer itself also works here:
 
 ```bash
 nix run github:dscrawford/GamesOnTheGo#install
-```
-
-or skip the installer entirely and take the two packages:
-
-```bash
-nix profile add github:dscrawford/GamesOnTheGo#gotg \
-                    github:dscrawford/GamesOnTheGo#gotg-ui
 ```
 
 ## Why not an AppImage or a Flatpak

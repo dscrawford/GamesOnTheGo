@@ -16,15 +16,29 @@ game picked up on the Deck continues where the desktop left it.
 
 ## Install
 
-```bash
-# Steam Deck or any Linux, Nix not required (on a Deck: Desktop Mode, Konsole)
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash
+Steam Deck (Desktop Mode, Konsole) or any Linux without Nix:
 
-# Nix already installed
-nix run github:dscrawford/GamesOnTheGo#install
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash
 ```
 
-Re-run to upgrade, and after a SteamOS update. `--dry-run` shows what it would change. Details: [docs/install.md](docs/install.md).
+Already have Nix? It is a flake, so no installer:
+
+```bash
+nix profile add github:dscrawford/GamesOnTheGo#gotg github:dscrawford/GamesOnTheGo#gotg-ui
+```
+
+Or run it without installing anything:
+
+```bash
+nix run github:dscrawford/GamesOnTheGo#gotg-ui
+```
+
+NixOS or home-manager: add `github:dscrawford/GamesOnTheGo` as a flake input
+and put `.packages.${system}.gotg` and `.gotg-ui` in your package list.
+
+Upgrade: re-run the installer, or `nix profile upgrade gotg gotg-ui`.
+Details, and what the installer does besides: [docs/install.md](docs/install.md).
 
 ## Game ids
 
