@@ -26,7 +26,7 @@ indexer at material you do not have the right to copy.
 Steam Deck (Desktop Mode, Konsole) or any Linux without Nix:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install.sh | bash
 ```
 
 Already have Nix? It is a flake, so no installer:
@@ -45,6 +45,13 @@ NixOS or home-manager: add `github:dscrawford/GamesOnTheGo` as a flake input
 and put `.packages.${system}.gotg` and `.gotg-ui` in your package list.
 
 Upgrade: re-run the installer, or `nix profile upgrade gotg gotg-ui`.
+
+Uninstall (games and saves stay; `--games` removes them too; Nix stays, and it says how to remove that):
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/uninstall.sh | bash
+```
+
 Details, and what the installer does besides: [docs/install.md](docs/install.md).
 
 ## Game ids
@@ -109,7 +116,7 @@ gotg steam picker                   # put it in Steam as "Games On The Go"
 
 ## Controllers
 
-Launches run through [padmap](https://github.com/chadac/padmap): pads are republished via `/dev/uinput`, seated by holding a button, and mapped before the emulator starts.
+Launches run through [padmap](https://github.com/dscrawford/padmap): pads are republished via `/dev/uinput`, seated by holding a button, and mapped before the emulator starts.
 
 ```bash
 gotg controllers list               # what SDL sees

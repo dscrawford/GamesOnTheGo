@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Put GOTG on a machine that has never heard of Nix.
 #
-#   curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash
+#   curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install.sh | bash
 #
 # Or, on a Steam Deck, download it and run it from Konsole in Desktop Mode.
 #
@@ -273,7 +273,7 @@ main() {
     case "$arg" in
       --dry-run | -n) DRY_RUN=1 ;;
       -h | --help)
-        say "usage: gotg-install [--dry-run]"
+        say "usage: install.sh [--dry-run]"
         say "  --dry-run   print what would change, change nothing"
         exit 0
         ;;

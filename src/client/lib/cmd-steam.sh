@@ -32,7 +32,7 @@ usage: gotg steam <command> [args]
 
   picker                 put GOTG itself in Steam, to pick a game from a sofa
   add <id> [variant]     put it in Steam, writing the launcher if needed
-  remove <id> [variant]  take it out again
+  remove <id> [variant]  take it out again; `remove picker` takes GOTG out
   art <id> [variant]     fetch its artwork again, --force to replace
                          --from <file|url> to choose the picture yourself
   list                   every non-Steam game Steam knows about
@@ -600,7 +600,7 @@ steam_picker() {
     picker="$(command -v gotg-ui 2>/dev/null)" || picker=""
   fi
   [[ -x "$picker" ]] ||
-    die "no gotg-ui here. Install the picker first: nix profile install $GOTG_REMOTE_FLAKE#gotg-ui"
+    die "no gotg-ui here. Install the picker first: nix profile add $GOTG_REMOTE_FLAKE#gotg-ui"
 
   ! steam_defer picker "" "" || return 0
 
@@ -690,12 +690,17 @@ steam_remove() {
     shift
   fi
 
-  manifest_ensure
-  steam_variant_ok "$variant"
-
   local game launcher result
-  game="$(manifest_find "$want")"
-  launcher="$(launcher_path "$game" "$variant")"
+  if [[ "$want" == picker ]]; then
+    # The picker's own entry, which `gotg steam picker` wrote and no game id
+    # names. What uninstall.sh asks for.
+    launcher="$GOTG_STATE_DIR/launchers/gotg-ui.sh"
+  else
+    manifest_ensure
+    steam_variant_ok "$variant"
+    game="$(manifest_find "$want")"
+    launcher="$(launcher_path "$game" "$variant")"
+  fi
 
   ! steam_defer remove "$want" "$variant" || return 0
 
