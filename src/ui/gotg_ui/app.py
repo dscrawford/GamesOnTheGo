@@ -28,9 +28,9 @@ from .layout import grid, shelf, shelf_at, tile_at
 from .menu import Menu
 from .padmap import Padmap, ensure_daemon
 from .padstrip import HEIGHT as STRIP_HEIGHT
-from .padstrip import PANEL
+from .padstrip import PANEL, status_text, strip_status
 from .prepare import Preparer, is_ready
-from .recent import Recent, status_text, strip_status
+from .recent import Recent
 from .storage import Storage, human
 from .variants import variants_for
 from .versions import forget as forget_versions
@@ -129,6 +129,21 @@ def fitted(picture, key, width: int, height: int):
     return _scaled.put((key, size), pygame.transform.smoothscale(picture, size))
 
 
+def filling(picture, key, width: int, height: int):
+    """`picture` scaled so it *covers* a box, for cropping to a square icon.
+
+    The other half of `fitted`: that one leaves bars, which is right for a
+    cover in a tile and wrong for a 40-pixel icon in a list row.
+    """
+    pw, ph = picture.get_size()
+    scale = max(width / pw, height / ph)
+    size = (max(1, int(pw * scale)), max(1, int(ph * scale)))
+    remembered = _scaled.get((key, "fill", size))
+    if remembered is not None:
+        return remembered
+    return _scaled.put((key, "fill", size), pygame.transform.smoothscale(picture, size))
+
+
 def hovering(browser, pos, size) -> int | None:
     """Which cover the pointer is on, in whichever view is drawn.
 
@@ -171,6 +186,39 @@ def draw_cover(screen, tile, game, picture, font_at, selected: bool) -> None:
     screen.set_clip(before)
 
 
+def draw_row(screen, row, game, picture, font_at, selected: bool, installed: bool) -> None:
+    """One line of the list: an icon, a title, and the platform under it.
+
+    The icon is the game's own art cropped to a square rather than fitted into
+    one. A row is wide and short, and art letterboxed into that leaves a
+    postage stamp with bars either side; a square crop of a cover is what
+    Steam's list shows and what reads at this size.
+    """
+    if selected:
+        pygame.draw.rect(screen, TILE_SELECTED, row.rect, border_radius=8)
+
+    side = max(8, row.height - 8)
+    icon = pygame.Rect(row.x + 6, row.y + 4, side, side)
+    if picture is not None:
+        art_surface = filling(picture, game.key, side, side)
+        screen.blit(art_surface, icon.topleft, pygame.Rect(0, 0, side, side))
+    else:
+        pygame.draw.rect(screen, TILE, icon, border_radius=4)
+
+    left = icon.right + 12
+    room = max(24, row.x + row.width - left - 12)
+    text = game.title[:120]
+    size = max(14, min(24, row.height // 2))
+    title = font_at(size).render(text, True, TEXT)
+    if title.get_width() > room:
+        title = _fit(font_at, text, room, size).render(text, True, TEXT)
+    screen.blit(title, (left, row.y + 4))
+
+    under = game.platform + ("   ·   installed" if installed else "")
+    small = font_at(max(11, size - 8)).render(under, True, TEXT_DIM)
+    screen.blit(small, (left, row.y + 6 + title.get_height()))
+
+
 def draw_shelf(
     screen,
     state: Grid,
@@ -179,51 +227,52 @@ def draw_shelf(
     status: str = "",
     installed: set[tuple[str, str]] | None = None,
 ) -> None:
-    """Rows of covers, with the one under the cursor shown full size.
-
-    The other way to look at the same library: the grid shows ten games big
-    enough to read, this shows twenty-four and puts the art of the one you are
-    on where it can actually be seen.
-    """
+    """The list on the left, and the art of the one under the cursor on the
+    right — the other way to look at the same library."""
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
     page = state.page
-    hero, tiles = shelf(width, height, STRIP_HEIGHT)
+    hero, rows = shelf(width, height, STRIP_HEIGHT)
 
     chosen = page[state.selected] if 0 <= state.selected < len(page) else None
     if chosen is not None:
         picture = art.get(chosen.key) if art else None
-        draw_cover(screen, hero, chosen, picture, font_at, True)
+        if picture is not None:
+            art_surface = fitted(picture, chosen.key, hero.width, hero.height)
+            size = art_surface.get_size()
+            screen.blit(
+                art_surface,
+                (hero.x + (hero.width - size[0]) // 2, hero.y + (hero.height - size[1]) // 2),
+            )
+        else:
+            # No art anywhere: the title, large, in the space the art would
+            # have had. Better than an empty half of the screen.
+            pygame.draw.rect(screen, TILE, hero.rect, border_radius=12)
+            text = chosen.title[:120]
+            shown = _fit(font_at, text, hero.width - 32, 44).render(text, True, TEXT)
+            screen.blit(
+                shown,
+                (hero.x + (hero.width - shown.get_width()) // 2,
+                 hero.y + hero.height // 2 - shown.get_height() // 2),
+            )
 
-        # Beside the art rather than under it: a cover is 2:3, so the space
-        # this view has going spare is to its right.
-        left = hero.x + hero.width + max(16, hero.width // 8)
-        room = max(80, width - left - 40)
-        text = chosen.title[:120]
-        title = font_at(40).render(text, True, TEXT)
-        if title.get_width() > room:
-            title = _fit(font_at, text, room, 40).render(text, True, TEXT)
-        screen.blit(title, (left, hero.y + 8))
-
-        line = chosen.platform
-        if installed and chosen.key in installed:
-            line += "   ·   installed"
-        screen.blit(font_at(24).render(line, True, TEXT_DIM), (left, hero.y + 16 + title.get_height()))
-
-    for index, tile in enumerate(tiles):
+    for index, row in enumerate(rows):
         if index >= len(page):
             break
         game = page[index]
-        selected = index == state.selected
-        draw_cover(screen, tile, game, art.get(game.key) if art else None, font_at, selected)
-        if installed and game.key in installed:
-            draw_badge(screen, tile)
-        if selected:
-            pygame.draw.rect(screen, TEXT, tile.rect, width=3, border_radius=8)
+        draw_row(
+            screen,
+            row,
+            game,
+            art.get(game.key) if art else None,
+            font_at,
+            index == state.selected,
+            bool(installed and game.key in installed),
+        )
 
     if status:
         shown = font_at(22).render(status, True, TEXT_DIM)
-        screen.blit(shown, ((width - shown.get_width()) // 2, height - shown.get_height() - 10))
+        screen.blit(shown, (rows[0].x, height - shown.get_height() - 10))
 
 
 def draw(

@@ -158,3 +158,62 @@ def test_selecting_on_an_empty_grid_is_refused():
     state = Grid(library(0))
     assert state.select(0) is False
     assert state.game is None
+
+
+# --- a list is one sequence --------------------------------------------------
+
+
+def _list_grid(count=30, rows=12):
+    from gotg_ui.catalog import Game, Library
+    from gotg_ui.grid import Grid
+
+    games = [Game(id=f"usa.g{i:02d}", platform="n64", title=f"G{i}", handler="rom") for i in range(count)]
+    return Grid(Library(games, rows), columns=1, rows=rows)
+
+
+def test_a_list_carries_to_the_next_page_going_down():
+    # Steam's library scrolls; it does not stop at the twelfth line and wait
+    # for somebody to find the page buttons.
+    state = _list_grid()
+    for _ in range(13):
+        state.move(0, 1)
+    assert state.page_index == 1
+    assert state.game.id == "usa.g13"
+
+
+def test_a_list_carries_back_up():
+    state = _list_grid()
+    for _ in range(13):
+        state.move(0, 1)
+    for _ in range(13):
+        state.move(0, -1)
+    assert state.page_index == 0
+    assert state.game.id == "usa.g00"
+
+
+def test_a_list_stops_at_the_end_of_the_library():
+    state = _list_grid()
+    for _ in range(100):
+        state.move(0, 1)
+    assert state.game.id == "usa.g29"
+
+
+def test_a_short_last_page_does_not_leave_the_cursor_past_the_end():
+    # 30 games in pages of 12 is a last page of six.
+    state = _list_grid()
+    for _ in range(100):
+        state.move(0, 1)
+    assert state.selected < len(state.page)
+
+
+def test_a_grid_still_clamps_downwards():
+    # The row below the bottom one is nothing, and paging there would move the
+    # cursor two places for one press.
+    from gotg_ui.catalog import Game, Library
+    from gotg_ui.grid import Grid
+
+    games = [Game(id=f"usa.g{i:02d}", platform="n64", title=f"G{i}", handler="rom") for i in range(30)]
+    state = Grid(Library(games, 10), columns=5, rows=2)
+    for _ in range(9):
+        state.move(0, 1)
+    assert state.page_index == 0

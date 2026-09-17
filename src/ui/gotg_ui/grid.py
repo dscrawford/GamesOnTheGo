@@ -43,7 +43,17 @@ class Grid:
         if not page:
             return
         column, row = self.selected % self.columns, self.selected // self.columns
-        if dy:
+        if dy and self.columns == 1:
+            # A list is one sequence, so down from the last line carries to the
+            # next page the way a scroll does. In a grid it clamps instead: the
+            # row below the bottom one is nothing, and paging there would move
+            # the cursor two places for one press.
+            row += dy
+            if row < 0:
+                row = self.rows - 1 if self.turn(-1) else 0
+            elif row >= self.rows or row >= len(self.page):
+                row = 0 if self.turn(1) else min(row, len(self.page) - 1)
+        elif dy:
             row = max(0, min(self.rows - 1, row + dy))
         if dx:
             column += dx
