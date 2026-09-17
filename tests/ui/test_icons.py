@@ -7,9 +7,11 @@ reasonable rule would pick the wrong picture.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from gotg_ui.icons import FALLBACK, icon_name, icon_path
+from gotg_ui.icons import FALLBACK, icon_image, icon_name, icon_path
 
 
 @pytest.mark.parametrize(
@@ -60,11 +62,11 @@ def test_every_rule_resolves_to_a_file_that_exists():
 
 
 def test_the_path_falls_back_to_the_console_diagrams():
-    # n64 has no icon of its own: it is drawn once, next door, with anchors the
-    # strip ignores.
-    path = icon_path("N64 Adapter")
+    # A handheld has no controller to draw, so there is no strip icon for it:
+    # it is drawn once, next door, with anchors the strip ignores.
+    path = icon_path("Game Boy Advance")
     assert path is not None
-    assert path.name == "n64.svg"
+    assert path.name == "gba.svg"
     assert path.parent.name == "controllers"
 
 
@@ -80,3 +82,63 @@ def test_a_keyboard_is_a_keyboard():
     assert icon_name("AT Translated Set 2 keyboard") == "keyboard"
     assert icon_name("Logitech USB Keyboard and Mouse") == "keyboard-mouse"
     assert icon_name("Razer Mouse") == "mouse"
+
+
+# --- the built PNGs the strip actually draws ----------------------------------
+#
+# The SVGs are never loaded at runtime: they are rasterised at build time, like
+# the console diagrams next to them, and the strip loads a PNG. Until this the
+# whole icon path was unreachable -- the package installs `assets/built`, and
+# `assets/icons` was not in it.
+
+
+def built(tmp_path, *names):
+    """A stand-in for what build-controllers.py --icons writes."""
+    out = tmp_path / "icons"
+    out.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (out / f"{name}.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (out / "icons.json").write_text(
+        json.dumps({"version": 1, "height": 96, "icons": {n: f"{n}.png" for n in names}})
+    )
+    return tmp_path
+
+
+def test_a_known_pad_draws_its_own_icon(tmp_path, monkeypatch):
+    monkeypatch.setenv("GOTG_UI_ASSETS", str(built(tmp_path, "xbox", "generic")))
+    assert icon_image("Xbox 360 Controller").name == "xbox.png"
+
+
+def test_an_unknown_pad_draws_the_generic_one(tmp_path, monkeypatch):
+    # The whole point of the fallback: an unrecognised controller is still a
+    # controller, and a drawing of a pad says so where its name does not.
+    monkeypatch.setenv("GOTG_UI_ASSETS", str(built(tmp_path, "xbox", "generic")))
+    assert icon_image("Some Pad Nobody Has Heard Of").name == "generic.png"
+
+
+def test_a_pad_whose_icon_was_not_built_still_gets_the_generic_one(tmp_path, monkeypatch):
+    monkeypatch.setenv("GOTG_UI_ASSETS", str(built(tmp_path, "generic")))
+    assert icon_image("Nintendo Switch Pro Controller").name == "generic.png"
+
+
+def test_no_built_icons_at_all_is_no_icon_rather_than_a_crash(tmp_path, monkeypatch):
+    monkeypatch.setenv("GOTG_UI_ASSETS", str(tmp_path))
+    assert icon_image("Xbox 360 Controller") is None
+
+
+def test_every_rule_has_a_drawing_to_build_from():
+    # Each rule's icon must exist as an SVG somewhere, or the build produces
+    # no PNG for it and the strip quietly falls back for ever.
+    from gotg_ui.icons import _rules, controllers_dir, icons_dir
+
+    for _, icon in _rules():
+        assert (icons_dir() / f"{icon}.svg").exists() or (controllers_dir() / f"{icon}.svg").exists(), icon
+
+
+def test_the_fallback_has_an_icon_of_its_own_without_anchors():
+    # The console diagram called `generic` carries anchor circles for the
+    # binding screen; at 28 pixels those are speckle. The strip needs its own.
+    from gotg_ui.icons import icons_dir
+
+    assert (icons_dir() / "generic.svg").exists()
+    assert "anchor-" not in (icons_dir() / "generic.svg").read_text()

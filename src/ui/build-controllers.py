@@ -92,6 +92,35 @@ def rasterise(svg: pathlib.Path, out_dir: pathlib.Path, base_width: float) -> di
     return written
 
 
+# How tall a strip icon is rasterised. One height rather than one width,
+# because a row of them is read along a common baseline: a keyboard is wider
+# than a pad and they should still look like one set. Generous enough that the
+# runtime only ever scales down, which is the direction that looks right.
+ICON_HEIGHT = 96
+
+
+def build_icons(source_dir: pathlib.Path, out_dir: pathlib.Path) -> dict:
+    """The strip's icons: one PNG per controller model, no anchors.
+
+    A separate pass from the console diagrams because these answer a different
+    question -- "who is holding what", at 28 pixels -- and carry no anchors at
+    all. Running them through `build` would refuse every one of them.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    icons = {}
+    for svg in sorted(source_dir.glob("*.svg")):
+        name = f"{svg.stem}.png"
+        subprocess.run(
+            ["resvg", "--height", str(ICON_HEIGHT), str(svg), str(out_dir / name)],
+            check=True,
+        )
+        icons[svg.stem] = name
+        print(f"{svg.name}: icon at {ICON_HEIGHT}px", file=sys.stderr)
+    if not icons:
+        raise BuildError(f"no SVGs in {source_dir}")
+    return {"version": 1, "height": ICON_HEIGHT, "icons": icons}
+
+
 def build(source_dir: pathlib.Path, out_dir: pathlib.Path) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     controllers = {}
@@ -113,8 +142,13 @@ def build(source_dir: pathlib.Path, out_dir: pathlib.Path) -> dict:
 
 
 def main(argv: list[str]) -> int:
+    if len(argv) == 4 and argv[1] == "--icons":
+        out = pathlib.Path(argv[3])
+        manifest = build_icons(pathlib.Path(argv[2]), out)
+        (out / "icons.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        return 0
     if len(argv) != 3:
-        print("usage: build-controllers.py <svg-dir> <out-dir>", file=sys.stderr)
+        print("usage: build-controllers.py [--icons] <svg-dir> <out-dir>", file=sys.stderr)
         return 2
     manifest = build(pathlib.Path(argv[1]), pathlib.Path(argv[2]))
     (pathlib.Path(argv[2]) / "controllers.json").write_text(json.dumps(manifest, indent=2) + "\n")

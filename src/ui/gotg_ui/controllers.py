@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 import pygame
 
-from . import config
+from . import config, icons
 from .bindings import bindings_for, console_for, players_for
 from .leaders import Anchor, place
 from .padstrip import (
@@ -337,6 +337,44 @@ def _note(screen, font_at, headline: str, detail: str) -> None:
     screen.blit(two, ((width - two.get_width()) // 2, height // 2 + 10))
 
 
+# Tinted icons, by (file, height, colour). A strip is redrawn every frame and
+# these change only when somebody picks up a different controller.
+_icons: dict[tuple[str, int, tuple[int, int, int]], object] = {}
+
+
+def icon_surface(pad_name: str | None, height: int, colour: tuple[int, int, int]):
+    """The drawing of this controller, `height` tall, in one colour.
+
+    The artwork is a black silhouette, which on a dark strip is a black
+    rectangle's worth of nothing. Adding the colour rather than multiplying it
+    keeps the anti-aliased edge -- black plus the colour is the colour, and the
+    alpha channel is left alone -- where a mask would have to pick a threshold
+    and would show it at 28 pixels.
+
+    In the player's own colour, because that is already how a seat is read:
+    the number says which player and the colour is what makes it answerable
+    from a sofa without reading anything.
+    """
+    path = icons.icon_image(pad_name)
+    if path is None:
+        return None
+    key = (str(path), height, colour)
+    if key not in _icons:
+        source = pygame.image.load(str(path)).convert_alpha()
+        width = max(1, round(source.get_width() * height / source.get_height()))
+        scaled = pygame.transform.smoothscale(source, (width, height))
+        # Flattened to a silhouette first. Not every drawing is pure black --
+        # the keyboard is grey, one pad has coloured buttons -- and adding a
+        # colour to those washes them toward white while the black ones come
+        # out saturated, so a row of seats would not look like one set.
+        # Multiplying by black zeroes the colour and leaves the alpha, which is
+        # the anti-aliased edge worth keeping.
+        scaled.fill((0, 0, 0), special_flags=pygame.BLEND_RGB_MULT)
+        scaled.fill(colour, special_flags=pygame.BLEND_RGB_ADD)
+        _icons[key] = scaled
+    return _icons[key]
+
+
 def draw_strip(screen, font_at, players: list[dict], slots: int, status: str) -> int:
     """Draw the strip along the top. Returns the height it used.
 
@@ -353,21 +391,29 @@ def draw_strip(screen, font_at, players: list[dict], slots: int, status: str) ->
     middle = HEIGHT // 2
     occupied = seats(players, slots)
 
+    icon_height = HEIGHT - GAP * 2
+
     if not occupied:
-        # Nothing is connected, and that is worth saying once rather than as a
-        # row of empty rings. An X is the only thing on the strip that means
-        # "none", so it cannot be read as a seat.
-        reach = PAD_RADIUS - 4
-        for dx, dy in ((-1, -1), (-1, 1)):
-            pygame.draw.aaline(
-                screen,
-                EMPTY_RING,
-                (x + dx * reach, middle + dy * reach),
-                (x - dx * reach, middle - dy * reach),
-                2,
-            )
+        # Nothing is connected: the generic pad, in the colour that means
+        # "something for you to do", rather than a row of empty rings. Drawn
+        # rather than written for the same reason as the seats -- a picture of
+        # a controller is read from a sofa and "no controllers" is not.
+        icon = icon_surface(None, icon_height, EMPTY_RING)
+        if icon is not None:
+            screen.blit(icon, (x - PAD_RADIUS, middle - icon.get_height() // 2))
+            x += icon.get_width()
+        else:
+            reach = PAD_RADIUS - 4
+            for dx, dy in ((-1, -1), (-1, 1)):
+                pygame.draw.aaline(
+                    screen,
+                    EMPTY_RING,
+                    (x + dx * reach, middle + dy * reach),
+                    (x - dx * reach, middle - dy * reach),
+                    2,
+                )
         label = tiny.render("no controllers", True, EMPTY_TEXT)
-        screen.blit(label, (x + PAD_RADIUS + 6, middle - label.get_height() // 2))
+        screen.blit(label, (x + 8, middle - label.get_height() // 2))
     for player, seat in occupied:
         colour = colour_for(player)
         # aacircle, not circle: a hard-edged disc at this size is visibly
@@ -378,12 +424,22 @@ def draw_strip(screen, font_at, players: list[dict], slots: int, status: str) ->
         number = small.render(str(player), True, (20, 20, 24))
         screen.blit(number, number.get_rect(center=(x, middle)))
 
-        written = name_for(seat)
+        # The controller itself, drawn rather than named: "Xbox 360 Controller"
+        # across the top of a game library is a string nobody reads, and the
+        # shape of the pad in a player's hands is the thing they can check
+        # against what they are holding. An unrecognised pad is the generic
+        # drawing, which still says a pad is there.
+        icon = icon_surface(seat.get("model") or seat.get("name"), icon_height, colour)
         width_used = 0
-        if written:
-            label = tiny.render(written, True, LABEL)
-            screen.blit(label, (x + PAD_RADIUS + 6, middle - label.get_height() // 2))
-            width_used = 6 + label.get_width()
+        if icon is not None:
+            screen.blit(icon, (x + PAD_RADIUS + 6, middle - icon.get_height() // 2))
+            width_used = 6 + icon.get_width()
+        else:
+            written = name_for(seat)
+            if written:
+                label = tiny.render(written, True, LABEL)
+                screen.blit(label, (x + PAD_RADIUS + 6, middle - label.get_height() // 2))
+                width_used = 6 + label.get_width()
         x += PAD_RADIUS * 2 + width_used + GAP * 2
 
     word = tiny.render(status, True, LABEL_DIM)
@@ -391,7 +447,7 @@ def draw_strip(screen, font_at, players: list[dict], slots: int, status: str) ->
     return HEIGHT
 
 
-def draw_assign(screen, font_at, view, icon_surface=None) -> None:
+def draw_assign(screen, font_at, view) -> None:
     """The assignment screen: what to hold, what has been taken, what is left.
 
     Deliberately large and plain. It is read from a sofa by somebody holding a
@@ -437,10 +493,22 @@ def draw_assign(screen, font_at, view, icon_surface=None) -> None:
         number = font_at(38).render(str(player), True, (20, 20, 24) if seat else EMPTY_TEXT)
         screen.blit(number, number.get_rect(center=centre))
 
-        label = font_at(20).render(
-            (seat.name if seat else "waiting")[:22], True, TEXT if seat else EMPTY_TEXT
+        # The controller under the seat, drawn rather than named -- the same
+        # picture the strip uses, so a pad claimed here is recognisable up
+        # there. A seat nobody is in gets the generic pad in the empty colour:
+        # what is missing is a controller, and that is what it looks like.
+        icon = icon_surface(
+            getattr(seat, "model", None) or (seat.name if seat else None),
+            44,
+            colour_for(player) if seat else EMPTY_RING,
         )
-        screen.blit(label, label.get_rect(center=(centre[0], middle + 56)))
+        if icon is not None:
+            screen.blit(icon, icon.get_rect(center=(centre[0], middle + 62)))
+        else:
+            label = font_at(20).render(
+                (seat.name if seat else "waiting")[:22], True, TEXT if seat else EMPTY_TEXT
+            )
+            screen.blit(label, label.get_rect(center=(centre[0], middle + 56)))
 
     if view.message:
         note = font_at(22).render(view.message, True, (232, 140, 140))
