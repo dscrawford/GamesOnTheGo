@@ -21,7 +21,7 @@ nix run .#gotg-ui -- --platform snes --refresh # forget cached art and look agai
 |---|---|
 | d-pad / arrows | move; off either side turns the page |
 | shoulders / PgUp PgDn | previous and next page |
-| A / Enter | open the action menu — Play, Configure, Controllers, Storage, Add to Steam; Install for a game that is not here, Uninstall for one that is |
+| A / Enter | open the action menu — Play, Configure, Controllers, Storage, Add to Steam; Install for a game that is not here (runs behind the grid, as a ring on the tile; Cancel install while it does), Uninstall for one that is |
 | Start / I | only installed games — the ones badged with a download arrow |
 | S (or Storage in the menu) | where games are kept: each directory with its device's free space; A makes one the download target, Y adds one, X forgets one |
 | Y / Tab | next platform |

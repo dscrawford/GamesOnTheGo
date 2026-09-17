@@ -261,3 +261,10 @@ def test_install_is_still_there_with_a_mod_chosen():
     m.open_list(MODS)
     m.choose("variant:60fps")
     assert ("Install", "install") in m.actions
+
+
+def test_a_game_on_its_way_offers_to_stop_rather_than_start_again():
+    m = Menu(game(), 0, installed=False, installing=True)
+    verbs = [verb for _, verb in m.actions]
+    assert verbs[:2] == ["play", "cancel-install"]
+    assert "install" not in verbs

@@ -40,6 +40,8 @@ UNINSTALL: tuple[str, str] = ("Uninstall", "uninstall")
 # from a sofa that is the wrong pair when what is wanted is the download now
 # and the game some other evening. Right under Play, where the eye is.
 INSTALL: tuple[str, str] = ("Install", "install")
+# While one is on its way, the same row is the way to stop it.
+CANCEL_INSTALL: tuple[str, str] = ("Cancel install", "cancel-install")
 
 # The rows that open a list, and the one that comes back from them. Their
 # verbs never leave this program: the menu handles them itself.
@@ -68,6 +70,7 @@ class Menu:
         variants: tuple[str, ...] | Sequence[str] = (),
         versions: tuple[str, ...] | Sequence[str] = (),
         columns: int = COLUMNS,
+        installing: bool = False,
     ):
         self.game = game
         self.tile_index = tile_index
@@ -75,6 +78,7 @@ class Menu:
         # every existing caller is unchanged; the shelf passes its one.
         self.columns = max(1, columns)
         self.installed = installed
+        self.installing = installing
         self.variants = tuple(variants)
         # Newest first, as the client lists them — a version list reads like a
         # changelog, and the one somebody wants is usually at the top.
@@ -98,7 +102,10 @@ class Menu:
             rows = [("Back", BACK), (AUTOMATIC, "version:")]
             return rows + [(name, f"version:{name}") for name in self.versions]
 
-        verbs = [*ACTIONS, UNINSTALL] if self.installed else [ACTIONS[0], INSTALL, *ACTIONS[1:]]
+        if self.installed:
+            verbs = [*ACTIONS, UNINSTALL]
+        else:
+            verbs = [ACTIONS[0], CANCEL_INSTALL if self.installing else INSTALL, *ACTIONS[1:]]
         # Above the verbs, because they decide what every row under them means.
         # A game with one version has nothing to choose, so it gets no row.
         chooser = []
