@@ -133,3 +133,18 @@ def test_diff_catalog_against_a_down_api_is_a_hard_failure(monkeypatch, tmp_path
     (tmp_path / "Games").mkdir()
     (tmp_path / "state").mkdir()
     assert main(["--diff-catalog"]) == EXIT_FAILED
+
+
+def test_match_without_scan_is_a_config_error(monkeypatch, tmp_path):
+    # A match narrows a scan; with explicit paths there is nothing to narrow.
+    for k, v in ENV.items():
+        monkeypatch.setenv(k, v)
+    (tmp_path / "a").mkdir()
+    assert main(["--bootstrap", str(tmp_path / "a"), "--match", "zelda"]) == EXIT_CONFIG
+
+
+def test_a_bad_match_regex_is_a_config_error(monkeypatch, tmp_path):
+    for k, v in ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("SOURCE_ROOT", str(tmp_path))
+    assert main(["--scan", str(tmp_path), "--match", "zelda("]) == EXIT_CONFIG

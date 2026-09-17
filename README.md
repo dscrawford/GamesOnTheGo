@@ -200,6 +200,7 @@ gotg admin tokens
 gotg admin revoke alice-deck
 
 gotg admin import [--follow]        # run the importer now (needs kubectl)
+gotg admin import --match "Breath of the Wild"   # only sources matching; seconds, no sweep
 gotg admin scan [--since <when>] [--all] [--json]
 
 gotg admin art warm [--limit N] [--platform p] [--refresh]

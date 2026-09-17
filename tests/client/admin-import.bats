@@ -30,7 +30,16 @@ mode="$mode"
 EOF
   cat >>"$GOTG_KUBECTL" <<'EOF'
 case "$1" in
-  create) exit 0 ;;
+  create)
+    # `create job --dry-run=client -o json` answers with the cloned spec, for
+    # a caller that edits it; `create -f -` takes the edited one on stdin.
+    if [[ "$*" == *"--dry-run=client"* ]]; then
+      echo '{"kind":"Job","spec":{"template":{"spec":{"containers":[{"name":"importer","args":["--scan","/data/Torrents"]}]}}}}'
+    elif [[ "$*" == *"-f -"* ]]; then
+      cat >"$KUBECTL_LOG.manifest"
+    fi
+    exit 0
+    ;;
   wait) [ "$mode" = ok ] && exit 0 || exit 1 ;;
   get)
     # jsonpath {.status.failed}
@@ -132,4 +141,24 @@ EOF
   gotg admin help
   [[ "$output" == *"import"* ]]
   [[ "$output" == *"--follow"* ]]
+}
+
+@test "--match narrows the run to sources whose name matches, on the same pod spec" {
+  # A full scan is twenty minutes; the one update just dropped in is seconds.
+  # The clone is still the CronJob's spec -- the same image and mounts -- with
+  # the match appended to the importer's own arguments.
+  stub_kubectl ok
+  gotg admin import --match "Breath of the Wild"
+  [ "$status" -eq 0 ]
+  grep -qE '^create job gotg-import-manual-[0-9]{8}-[0-9]{6} --from=cronjob/gotg-import --dry-run=client -o json$' "$KUBECTL_LOG"
+  grep -qE '^create -f -$' "$KUBECTL_LOG"
+  [ "$(jq -r '.spec.template.spec.containers[0].args | join(" ")' "$KUBECTL_LOG.manifest")" = "--scan /data/Torrents --match Breath of the Wild" ]
+  grep -qE '^wait --for=condition=complete job/gotg-import-manual-' "$KUBECTL_LOG"
+}
+
+@test "--match takes a pattern" {
+  stub_kubectl ok
+  gotg admin import --match
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"--match takes"* ]]
 }
