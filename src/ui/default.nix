@@ -10,6 +10,7 @@
   makeWrapper,
   python3,
   resvg,
+  mesa,
   gotg,
   padmap,
   # Everything under config/: the controller descriptions, the theme, the icon
@@ -30,6 +31,21 @@ let
     ps.pygame-ce
     ps.pyyaml
   ]);
+  # On NixOS, /run/opengl-driver carries the GPU userspace and pygame's SDL
+  # just works. On a foreign distro -- SteamOS -- that path does not exist
+  # and the host's mesa is unloadable from our glibc. Under Desktop Mode SDL
+  # draws through X11 without GL and nobody notices; under Game Mode it is
+  # Wayland, whose only path to a window surface is a GL renderer, and the
+  # picker died with "Window framebuffer support not available". The same
+  # inlined nixGL trick the emulator environments use, applied only when the
+  # host provides nothing.
+  foreignGl = ''
+    if [ ! -e /run/opengl-driver ]; then
+      export LIBGL_DRIVERS_PATH=${mesa}/lib/dri
+      export __EGL_VENDOR_LIBRARY_FILENAMES=${mesa}/share/glvnd/egl_vendor.d/50_mesa.json
+      export LD_LIBRARY_PATH=${mesa}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+    fi
+  '';
 in
 stdenvNoCC.mkDerivation {
   pname = "gotg-ui";
@@ -76,6 +92,7 @@ stdenvNoCC.mkDerivation {
     # exported it, which is the case for anything the client itself started.
     makeWrapper ${python}/bin/python3 $out/bin/gotg-ui \
       --add-flags "-m gotg_ui" \
+      --run ${lib.escapeShellArg foreignGl} \
       --set PYTHONPATH "$out/share/gotg-ui:${gotg}/share/gotg/steam" \
       --set GOTG_UI_DATA "${gotg}/share/gotg/data" \
       --set GOTG_UI_ENV "${gotg}/share/gotg/env" \
@@ -92,6 +109,7 @@ stdenvNoCC.mkDerivation {
     # client never has to know about this one.
     makeWrapper ${python}/bin/python3 $out/bin/gotg-seat \
       --add-flags "-m gotg_ui.seat" \
+      --run ${lib.escapeShellArg foreignGl} \
       --set PYTHONPATH "$out/share/gotg-ui:${gotg}/share/gotg/steam" \
       --set GOTG_UI_DATA "${gotg}/share/gotg/data" \
       --set GOTG_UI_ENV "${gotg}/share/gotg/env" \
