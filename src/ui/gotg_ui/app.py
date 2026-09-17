@@ -28,10 +28,12 @@ from .layout import grid, shelf, shelf_at, tile_at
 from .menu import Menu
 from .padmap import Padmap, ensure_daemon
 from .padstrip import HEIGHT as STRIP_HEIGHT
-from .padstrip import PANEL, status_text, strip_status
+from .padstrip import PANEL
 from .prepare import Preparer, is_ready
+from .recent import Recent, status_text, strip_status
 from .storage import Storage, human
 from .variants import variants_for
+from .versions import forget as forget_versions
 from .versions import names as version_names
 from .versions import versions_for
 
@@ -98,6 +100,35 @@ def draw_badge(screen, tile) -> None:
     pygame.draw.line(screen, TEXT, (cx - head, cy + head + 2), (cx + head, cy + head + 2), stroke)
 
 
+# Every cover that has been scaled to fit a tile, by game and size.
+#
+# The picker was rescaling all of them on every frame: 7.4 ms of a 16.7 ms
+# frame on a Steam Deck for the grid's ten, 9.0 ms for the shelf's twenty-four.
+# Art does not change between frames and neither does a tile, so the second
+# scale of the same pair is work nobody asked for.
+#
+# Module level rather than passed around: two views and a hero all want the
+# same surfaces, and threading a cache through every drawing function is how
+# one of them ends up with its own.
+_scaled = Recent(96)
+
+
+def fitted(picture, key, width: int, height: int):
+    """`picture` scaled to fit a `width` x `height` box, kept for next frame.
+
+    Fitted, never stretched: a tile is 2:3 and a cartridge box is landscape, so
+    most of this library's art arrives the wrong shape for its slot and scaling
+    to fill would squash every one.
+    """
+    pw, ph = picture.get_size()
+    scale = min(width / pw, height / ph)
+    size = (max(1, int(pw * scale)), max(1, int(ph * scale)))
+    remembered = _scaled.get((key, size))
+    if remembered is not None:
+        return remembered
+    return _scaled.put((key, size), pygame.transform.smoothscale(picture, size))
+
+
 def hovering(browser, pos, size) -> int | None:
     """Which cover the pointer is on, in whichever view is drawn.
 
@@ -116,12 +147,11 @@ def draw_cover(screen, tile, game, picture, font_at, selected: bool) -> None:
     twice is two places for the art to start being squashed in one of them.
     """
     if picture is not None:
-        pw, ph = picture.get_size()
-        scale = min(tile.width / pw, tile.height / ph)
-        size = (max(1, int(pw * scale)), max(1, int(ph * scale)))
+        art = fitted(picture, game.key, tile.width, tile.height)
+        size = art.get_size()
         pygame.draw.rect(screen, TILE, tile.rect, border_radius=8)
         screen.blit(
-            pygame.transform.smoothscale(picture, size),
+            art,
             (tile.x + (tile.width - size[0]) // 2, tile.y + (tile.height - size[1]) // 2),
         )
         return
@@ -214,8 +244,13 @@ def draw(
     # other tile drops to ~90% so the chosen one reads as chosen.
     dim = None
     if menu is not None:
-        dim = pygame.Surface((tiles[0].width, tiles[0].height), pygame.SRCALPHA)
-        dim.fill((*BACKGROUND, 26))
+        # Cached, which the comment here used to claim and the code did not do:
+        # it built one of these every frame the menu was open.
+        dim = _scaled.get(("dim", tiles[0].width, tiles[0].height))
+        if dim is None:
+            dim = pygame.Surface((tiles[0].width, tiles[0].height), pygame.SRCALPHA)
+            dim.fill((*BACKGROUND, 26))
+            _scaled.put(("dim", tiles[0].width, tiles[0].height), dim)
 
     for index, tile in enumerate(tiles):
         if index >= len(page):
@@ -225,15 +260,11 @@ def draw(
         picture = art.get(game.key) if art else None
 
         if picture is not None:
-            # Fitted, never stretched. A tile is 2:3 and a cartridge box is
-            # landscape, so most of this library's art arrives the wrong shape
-            # for the slot it goes in; scaling to fill would squash every one.
-            pw, ph = picture.get_size()
-            scale = min(tile.width / pw, tile.height / ph)
-            size = (max(1, int(pw * scale)), max(1, int(ph * scale)))
+            art_surface = fitted(picture, game.key, tile.width, tile.height)
+            size = art_surface.get_size()
             pygame.draw.rect(screen, TILE, tile.rect, border_radius=8)
             screen.blit(
-                pygame.transform.smoothscale(picture, size),
+                art_surface,
                 (tile.x + (tile.width - size[0]) // 2, tile.y + (tile.height - size[1]) // 2),
             )
         else:
@@ -331,8 +362,11 @@ def draw_filters(screen, font_at, browser, panel) -> None:
     reach at all.
     """
     width, height = screen.get_size()
-    overlay = pygame.Surface((width, height), pygame.SRCALPHA)
-    overlay.fill((*BACKGROUND, 232))
+    overlay = _scaled.get(("panel", width, height))
+    if overlay is None:
+        overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+        overlay.fill((*BACKGROUND, 232))
+        _scaled.put(("panel", width, height), overlay)
     screen.blit(overlay, (0, 0))
 
     title = font_at(40).render("Menu", True, TEXT)
@@ -979,6 +1013,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         preparer = None  # steam add done — back to the grid
                     elif after_prepare == "uninstall":
                         browser.set_installed(installed_games())
+                        # What the client said about versions was about a game
+                        # that is no longer there.
+                        forget_versions()
                         preparer = None
                     else:
                         chosen = (preparer.game, after_prepare, preparer.variant, preparer.version)
