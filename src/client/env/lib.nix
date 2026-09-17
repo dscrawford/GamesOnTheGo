@@ -209,6 +209,10 @@ let
   foreignGl = ''
     if [ ! -e /run/opengl-driver ]; then
       export LIBGL_DRIVERS_PATH=${pkgs.mesa}/lib/dri
+      # GBM too: a nested compositor (the split-screen sway) allocates its
+      # buffers through it, and mesa looks for dri_gbm.so under
+      # /run/opengl-driver as well -- "Failed to create allocator" on a Deck.
+      export GBM_BACKENDS_PATH=${pkgs.mesa}/lib/gbm
       export __EGL_VENDOR_LIBRARY_FILENAMES=${pkgs.mesa}/share/glvnd/egl_vendor.d/50_mesa.json
       export VK_DRIVER_FILES=${pkgs.mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/intel_icd.x86_64.json
       export LD_LIBRARY_PATH=${pkgs.mesa}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
