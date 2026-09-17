@@ -760,3 +760,21 @@ publish_bundle_game_plus_update() {
   run _meter_line 1048576 $((100 * 1048576 * 1024)) 0 1000 1001
   [[ "$output" == *"eta "*h*m ]]
 }
+
+@test "the picker's loader is told where a download is, as lines it can parse" {
+  # No tty and no dialog: under the picker curl used to be --silent, and a
+  # 30 GB game was minutes of a screen that looked frozen. GOTG_PROGRESS_LINES
+  # asks for one tab-separated line per tick on stderr, and a last one at the
+  # end so a transfer shorter than a tick still reports where it finished.
+  add_game n64 "usa.zelda.z64" "rom-content" "Zelda"
+  gotg refresh
+  GOTG_PROGRESS_LINES=1 gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  local last
+  last="$(grep -P '^progress\t' <<<"$stderr" | tail -1)"
+  [ -n "$last" ]
+  [ "$(cut -f2 <<<"$last")" = "$(stat -c %s "$GOTG_GAMES_DIR/n64/usa.zelda.z64")" ]
+  [[ "$(cut -f3 <<<"$last")" =~ ^[0-9]+$ ]]
+  [[ "$(cut -f4 <<<"$last")" =~ ^[0-9]+$ ]]
+  [[ "$(cut -f5 <<<"$last")" == "Zelda: usa.zelda.z64" ]]
+}

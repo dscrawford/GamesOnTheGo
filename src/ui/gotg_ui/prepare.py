@@ -19,6 +19,8 @@ import os
 import signal
 import subprocess
 import threading
+import time
+from dataclasses import dataclass
 
 from . import config
 from .catalog import Game
@@ -57,12 +59,82 @@ def is_ready(game: Game, variant: str | None = None) -> bool:
     return done.returncode == 0 and done.stdout.strip() == b"ready"
 
 
+# What the client says while a download runs, one line per tick on stderr:
+#
+#     progress <bytes so far> <bytes expected> <bytes per second> <what>
+#
+# tab-separated, asked for with GOTG_PROGRESS_LINES=1. Kept as the latest
+# figure rather than as text, because a screen full of numbers is not a bar.
+PROGRESS_PREFIX = "progress\t"
+
+
+@dataclass(frozen=True)
+class Progress:
+    done: int
+    total: int  # 0 when the server did not say
+    rate: int  # bytes per second, averaged since the transfer began
+    what: str
+
+    @property
+    def fraction(self) -> float | None:
+        if self.total <= 0:
+            return None
+        return min(1.0, self.done / self.total)
+
+    def describe(self) -> str:
+        """The figures, in words for a television: how far, how fast, how long."""
+        parts = []
+        if self.total > 0:
+            parts.append(f"{int(self.done * 100 // self.total)}% · {_human(self.done)} of {_human(self.total)}")
+        else:
+            parts.append(_human(self.done))
+        if self.rate > 0:
+            parts.append(f"{_human(self.rate)}/s")
+            if self.total > self.done:
+                parts.append(f"{elapsed_text((self.total - self.done) // self.rate)} left")
+        return " · ".join(parts)
+
+
+def parse_progress(line: str) -> Progress | None:
+    """One of the client's progress lines, or None for anything else."""
+    if not line.startswith(PROGRESS_PREFIX):
+        return None
+    fields = line.split("\t")
+    if len(fields) < 5:
+        return None
+    try:
+        return Progress(done=int(fields[1]), total=int(fields[2]), rate=int(fields[3]), what="\t".join(fields[4:]))
+    except ValueError:
+        return None
+
+
+def _human(size: int) -> str:
+    """1.5 GB, 300.0 MB, 12 B: the same scale the client prints."""
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB":
+            return f"{int(value)} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} TB"
+
+
+def elapsed_text(seconds: float) -> str:
+    """5s, 1m 05s, 1h 01m. A build says this so a long one is visibly alive."""
+    whole = int(seconds)
+    if whole >= 3600:
+        return f"{whole // 3600}h {(whole % 3600) // 60:02d}m"
+    if whole >= 60:
+        return f"{whole // 60}m {whole % 60:02d}s"
+    return f"{whole}s"
+
+
 class Preparer:
     """One `gotg install`, streaming.
 
     The child gets GOTG_NO_DIALOG so the client raises no zenity beside the
-    loader view that is already showing its output. Lines land in a bounded
-    deque from a reader thread; the frame loop polls `running` and `tail()`
+    loader view that is already showing its output, and GOTG_PROGRESS_LINES so
+    a download reports where it is. Lines land in a bounded deque from a
+    reader thread; the frame loop polls `running`, `tail()` and `progress`
     and never blocks.
     """
 
@@ -80,9 +152,12 @@ class Preparer:
         # same loader, since both are long, narrated, and cancellable.
         self.argv = argv or ["install"]
         self._lines: collections.deque[str] = collections.deque(maxlen=TAIL_LINES)
+        self._progress: Progress | None = None
         self._lock = threading.Lock()
+        self.started = time.monotonic()
         env = dict(os.environ)
         env["GOTG_NO_DIALOG"] = "1"
+        env["GOTG_PROGRESS_LINES"] = "1"
         try:
             # stderr folded into stdout: the client narrates on stderr
             # (log/warn), nix reports on stderr, and the loader wants one
@@ -118,9 +193,24 @@ class Preparer:
     def _read(self) -> None:
         assert self.process.stdout is not None
         for line in self.process.stdout:
+            text = line.rstrip("\n")
+            progress = parse_progress(text)
             with self._lock:
-                self._lines.append(line.rstrip("\n"))
+                if progress is not None:
+                    self._progress = progress
+                else:
+                    self._lines.append(text)
         self.process.stdout.close()
+
+    @property
+    def progress(self) -> Progress | None:
+        """Where the current download is, or None outside one."""
+        with self._lock:
+            return self._progress
+
+    @property
+    def elapsed(self) -> float:
+        return time.monotonic() - self.started
 
     @property
     def running(self) -> bool:

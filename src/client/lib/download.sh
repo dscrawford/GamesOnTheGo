@@ -78,6 +78,37 @@ _download_quiet() {
   _curl_download "$url" "$out" "$etag" --silent --show-error
 }
 
+# Progress for a caller that draws its own -- the picker -- as one line per
+# tick on stderr, tab-separated: progress <bytes> <expected> <bytes/s> <what>.
+# The same figures as the terminal meter, minus the words; and one last line
+# after curl ends, so a transfer shorter than a tick still says where it
+# finished. Asked for with GOTG_PROGRESS_LINES=1.
+_download_lines() {
+  local url="$1" out="$2" etag="$3" title="$4" expected="${5:-0}"
+  local resumed_from start now size curl_pid status=0
+  resumed_from="$(stat -c '%s' "$out" 2>/dev/null || echo 0)"
+  start="$(date +%s)"
+  _curl_download "$url" "$out" "$etag" --silent --show-error &
+  curl_pid=$!
+  while kill -0 "$curl_pid" 2>/dev/null; do
+    _progress_line "$out" "$expected" "$resumed_from" "$start" "$title"
+    sleep "$PROGRESS_TICK"
+  done
+  wait "$curl_pid" || status=$?
+  _progress_line "$out" "$expected" "$resumed_from" "$start" "$title"
+  return "$status"
+}
+
+_progress_line() {
+  local out="$1" expected="$2" resumed_from="$3" start="$4" title="$5"
+  local size now elapsed rate=0
+  size="$(stat -c '%s' "$out" 2>/dev/null || echo 0)"
+  now="$(date +%s)"
+  elapsed=$((now - start))
+  ((elapsed > 0)) && rate=$(((size - resumed_from) / elapsed))
+  printf 'progress\t%s\t%s\t%s\t%s\n' "$size" "$expected" "$rate" "$title" >&2
+}
+
 # Graphical progress. curl runs in the background and the dialog is driven from
 # the size of the partial file, which also works for the streamed zips that have
 # no Content-Length.
@@ -147,6 +178,8 @@ _download_with_progress() {
   local url="$1" out="$2" etag="$3" title="$4" expected="$5"
   if is_tty; then
     _download_terminal "$url" "$out" "$etag" "$expected"
+  elif [[ "${GOTG_PROGRESS_LINES:-}" == "1" ]]; then
+    _download_lines "$url" "$out" "$etag" "$title" "$expected"
   elif has_display && command -v zenity >/dev/null 2>&1; then
     _download_zenity "$url" "$out" "$etag" "$title" "$expected"
   else

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pygame
 
-from . import around, config, filters, pads, profiles
+from . import around, config, filters, pads, prepare, profiles
 from .art import ArtStore
 from .assign import Session
 from .browser import SHELF, Browser
@@ -561,10 +561,21 @@ def draw_storage(screen, font_at, storage: Storage, typing: str | None) -> None:
     screen.blit(label, (margin, height - margin - label.get_height()))
 
 
-def draw_prepare(screen, font_at, game: Game, lines: list[str], failed: bool) -> None:
-    """The loader screen: heading, `gotg install`'s output verbatim, the way out.
+def draw_prepare(
+    screen,
+    font_at,
+    game: Game,
+    lines: list[str],
+    failed: bool,
+    progress: prepare.Progress | None = None,
+    elapsed: float = 0.0,
+) -> None:
+    """The loader screen: heading, a bar while a download runs, `gotg install`'s
+    output verbatim, the way out.
 
-    Verbatim so a build failure reads on the TV, not only in a log file.
+    Verbatim so a build failure reads on the TV, not only in a log file. The
+    bar and the running clock are there because a 30 GB download and a
+    first emulator build are minutes of a screen that otherwise looks frozen.
     """
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
@@ -580,8 +591,34 @@ def draw_prepare(screen, font_at, game: Game, lines: list[str], failed: bool) ->
         colour = TEXT
 
     screen.blit(font_at(30).render(heading, True, colour), (margin, margin))
+    if not failed:
+        # The clock, at the right of the heading: the one thing that moves
+        # through a build that prints nothing for a minute.
+        clock = font_at(20).render(prepare.elapsed_text(elapsed), True, TEXT_DIM)
+        screen.blit(clock, (width - margin - clock.get_width(), margin + 6))
 
     y = margin + font_at(30).get_height() + margin // 2
+    if progress is not None and not failed:
+        bar_h = max(10, height // 45)
+        bar = pygame.Rect(margin, y, width - 2 * margin, bar_h)
+        pygame.draw.rect(screen, TILE, bar, border_radius=bar_h // 2)
+        fraction = progress.fraction
+        if fraction is None:
+            # Size unknown: a short segment sweeping back and forth, so the
+            # bar still says "moving" rather than "stuck at zero".
+            sweep = (pygame.time.get_ticks() // 8) % (2 * (bar.width - bar.width // 5))
+            if sweep > bar.width - bar.width // 5:
+                sweep = 2 * (bar.width - bar.width // 5) - sweep
+            fill = pygame.Rect(bar.x + sweep, bar.y, bar.width // 5, bar_h)
+        else:
+            fill = pygame.Rect(bar.x, bar.y, max(bar_h, int(bar.width * fraction)), bar_h)
+        pygame.draw.rect(screen, TILE_SELECTED, fill, border_radius=bar_h // 2)
+        y += bar_h + 8
+        figures = font_at(20).render(progress.describe(), True, TEXT)
+        screen.blit(figures, (margin, y))
+        what = font_at(16).render(progress.what[:120], True, TEXT_DIM)
+        screen.blit(what, (width - margin - what.get_width(), y + 2))
+        y += figures.get_height() + margin // 2
     line_font = font_at(16)
     for line in lines:
         if y > height - margin * 2:
@@ -1129,7 +1166,11 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 (0, STRIP_HEIGHT, screen.get_width(), screen.get_height() - STRIP_HEIGHT)
             )
             if preparer is not None:
-                draw_prepare(below, font_at, preparer.game, preparer.tail(28), prepare_failed)
+                draw_prepare(
+                    below, font_at, preparer.game, preparer.tail(28), prepare_failed,
+                    progress=preparer.progress if preparer.running else None,
+                    elapsed=preparer.elapsed,
+                )
             elif storage is not None:
                 draw_storage(below, font_at, storage, storage_typing)
             elif panel is not None:
