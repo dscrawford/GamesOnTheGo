@@ -42,19 +42,19 @@
         ]
       },
       "locked": {
-        "lastModified": 1789613807,
-        "narHash": "sha256-pZYMKO1LXiROyZOxkfkCFdkEwHZ6bdxxgnfhB/aKRp8=",
+        "lastModified": 1789616720,
+        "narHash": "sha256-BYvIdjH09lpY39uo63gJSU7LzLRwoAK/2/uEGr0kVWc=",
         "ref": "rustify",
-        "rev": "169c741760621d5c7ad6ec582fe9a3e05e92b9c0",
-        "revCount": 120,
+        "rev": "20f50de55ec3b128715b890bc0ab75cb26046e32",
+        "revCount": 121,
         "type": "git",
-        "url": "ssh://git@github.com/chadac/padmap"
+        "url": "ssh://git@github.com/dscrawford/padmap"
       },
       "original": {
         "ref": "rustify",
-        "rev": "169c741760621d5c7ad6ec582fe9a3e05e92b9c0",
+        "rev": "20f50de55ec3b128715b890bc0ab75cb26046e32",
         "type": "git",
-        "url": "ssh://git@github.com/chadac/padmap"
+        "url": "ssh://git@github.com/dscrawford/padmap"
       }
     },
     "pyproject-build-systems": {
