@@ -30,11 +30,12 @@ INSTALLED = "installed"
 SEARCH = "search"
 CLEAR = "clear"
 CONTROLLER = "controller"
+VIEW = "view"
 
 # In the order somebody reaches for them: what console, then where it is from,
 # then whether it is on this machine. Search last because typing is the slow
 # one, and clear at the bottom because it undoes the four above it.
-ROWS = (PLATFORM, REGION, INSTALLED, SEARCH, CLEAR, CONTROLLER)
+ROWS = (PLATFORM, REGION, INSTALLED, SEARCH, CLEAR, VIEW, CONTROLLER)
 
 LABELS = {
     PLATFORM: "Platform",
@@ -42,6 +43,7 @@ LABELS = {
     INSTALLED: "Installed",
     SEARCH: "Search",
     CLEAR: "Clear all",
+    VIEW: "View",
     CONTROLLER: "Controller for…",
 }
 
@@ -52,6 +54,12 @@ TYPING = "typing"
 # toggle can ask for what is downloaded and cannot ask for what is not, which
 # is the question somebody browsing for something new is asking.
 INSTALLED_OPTIONS = (PRESENCE_ALL, PRESENCE_INSTALLED, PRESENCE_MISSING)
+
+# The two ways to look at the library: ten tiles big enough to read, or rows of
+# covers with the one under the cursor shown full size.
+GRID = "grid"
+SHELF = "rows"
+VIEW_OPTIONS = (GRID, SHELF)
 
 
 @dataclass
@@ -105,6 +113,10 @@ class Filters:
         elif row == CONTROLLER:
             # Nothing to nudge: it is a way in, not a value.
             return
+        elif row == VIEW:
+            options = VIEW_OPTIONS
+            index = options.index(value_of(browser, VIEW))
+            browser.set_view(options[(index + delta) % len(options)])
         elif row == INSTALLED:
             # Round the three, both ways, like every other row here.
             options = INSTALLED_OPTIONS
@@ -186,6 +198,8 @@ def options_for(browser, row: str) -> tuple[str, ...]:
         return tuple(browser.regions)
     if row == INSTALLED:
         return INSTALLED_OPTIONS
+    if row == VIEW:
+        return VIEW_OPTIONS
     if row == CONTROLLER:
         # Every platform, and not "all": there is no controller diagram for
         # everything at once, and a row that offered one would be offering a
@@ -202,10 +216,14 @@ def set_value(browser, row: str, value: str) -> None:
         browser.set_region(value)
     elif row == INSTALLED:
         browser.set_presence(value)
+    elif row == VIEW:
+        browser.set_view(value)
 
 
 def value_of(browser, row: str) -> str:
     """What the row currently says, in words rather than state."""
+    if row == VIEW:
+        return browser.view
     if row == PLATFORM:
         return browser.platform
     if row == REGION:

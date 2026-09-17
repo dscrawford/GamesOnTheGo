@@ -105,3 +105,85 @@ def tile_at(x: int, y: int, width: int, height: int, reserved: int = 0) -> int |
         if tile.x <= x < tile.x + tile.width and tile.y <= y < tile.y + tile.height:
             return index
     return None
+
+
+# The shelf: the other way to look at the same library. Many small covers in
+# rows, with the one under the cursor shown full size beside them.
+SHELF_COLUMNS = int(config.get("theme.shelf.columns", 8))
+SHELF_ROWS = int(config.get("theme.shelf.rows", 3))
+SHELF_PER_PAGE = SHELF_COLUMNS * SHELF_ROWS
+
+# How much of the window the full art gets. Half, so the art is the thing being
+# looked at and the rows are what is being looked *through*.
+HERO_FRACTION = float(config.get("theme.shelf.hero_fraction", 0.5))
+
+
+def shelf(width: int, height: int, reserved: int = 0) -> tuple[Tile, list[Tile]]:
+    """The full art, and the rows of covers under it.
+
+    Same rules as `grid`: reading order, centred, sized to whichever axis runs
+    out first. The hero keeps a cover's own 2:3 rather than filling its band,
+    because art stretched to fit a box is the one thing this view exists to
+    avoid.
+    """
+    reserved = max(0, min(reserved, height - 1))
+    height = height - reserved
+    short = max(1, min(width, height))
+    gap = max(1, int(short * GAP_FRACTION))
+    margin = max(1, int(short * MARGIN_FRACTION))
+
+    hero_band = max(1, int(height * HERO_FRACTION))
+    hero_height = max(1, hero_band - 2 * margin)
+    hero_width = max(1, int(hero_height / TILE_ASPECT))
+    if hero_width > width - 2 * margin:
+        hero_width = max(1, width - 2 * margin)
+        hero_height = max(1, int(hero_width * TILE_ASPECT))
+    # Left, not centred: a cover is 2:3, so a centred one in a band this shape
+    # leaves a third of the window empty on each side. Against the margin there
+    # is room beside it for the title of the thing being looked at.
+    hero = Tile(
+        x=margin * 2,
+        y=reserved + margin + (hero_band - 2 * margin - hero_height) // 2,
+        width=hero_width,
+        height=hero_height,
+    )
+
+    rows_band = max(1, height - hero_band)
+    usable_width = max(1, width - 2 * margin - gap * (SHELF_COLUMNS - 1))
+    usable_height = max(1, rows_band - 2 * margin - gap * (SHELF_ROWS - 1))
+
+    tile_width = usable_width // SHELF_COLUMNS
+    if tile_width * TILE_ASPECT * SHELF_ROWS > usable_height:
+        tile_height = usable_height // SHELF_ROWS
+        tile_width = int(tile_height / TILE_ASPECT)
+    else:
+        tile_height = int(tile_width * TILE_ASPECT)
+    tile_width = max(1, tile_width)
+    tile_height = max(1, tile_height)
+
+    span_x = tile_width * SHELF_COLUMNS + gap * (SHELF_COLUMNS - 1)
+    span_y = tile_height * SHELF_ROWS + gap * (SHELF_ROWS - 1)
+    left = (width - span_x) // 2
+    top = reserved + hero_band + (rows_band - span_y) // 2
+
+    tiles = [
+        Tile(
+            x=left + column * (tile_width + gap),
+            y=top + row * (tile_height + gap),
+            width=tile_width,
+            height=tile_height,
+        )
+        for row in range(SHELF_ROWS)
+        for column in range(SHELF_COLUMNS)
+    ]
+    return hero, tiles
+
+
+def shelf_at(x: int, y: int, width: int, height: int, reserved: int = 0) -> int | None:
+    """Which cover a point is on, or None. Against the rectangles, as
+    `tile_at` is, so the pointer and the drawing cannot drift apart."""
+    _hero, tiles = shelf(width, height, reserved)
+    for index, tile in enumerate(tiles):
+        if tile.x <= x < tile.x + tile.width and tile.y <= y < tile.y + tile.height:
+            return index
+    return None
