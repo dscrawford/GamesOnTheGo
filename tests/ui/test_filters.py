@@ -27,9 +27,11 @@ def browser():
 
 
 def test_the_rows_are_in_the_order_somebody_reaches_for_them():
-    # Search is slow to use and clear undoes the rest, so both are at the end.
+    # Search is slow to use and clear undoes the rest, so both are near the
+    # end; the controller row is last because it leaves the panel entirely.
     assert filters.ROWS[0] == filters.PLATFORM
-    assert filters.ROWS[-1] == filters.CLEAR
+    assert filters.ROWS[-1] == filters.CONTROLLER
+    assert filters.ROWS.index(filters.CLEAR) < filters.ROWS.index(filters.CONTROLLER)
 
 
 def test_down_walks_the_rows():
@@ -40,11 +42,10 @@ def test_down_walks_the_rows():
 
 
 def test_it_wraps_at_both_ends():
-    # Five rows on a handheld: one press from the bottom back to the top beats
-    # four presses back up.
+    # One press from the bottom back to the top beats walking back up it.
     panel = filters.Filters()
     panel.move(-1)
-    assert panel.row == filters.CLEAR
+    assert panel.row == filters.ROWS[-1]
     panel.move(1)
     assert panel.row == filters.PLATFORM
 
@@ -274,3 +275,53 @@ def test_search_and_clear_have_no_list():
     ours = browser()
     for row in (filters.SEARCH, filters.CLEAR):
         assert filters.options_for(ours, row) == ()
+
+
+# --- the way to a controller screen ------------------------------------------
+
+
+def test_the_controller_row_offers_every_platform_but_not_all_of_them():
+    # There is no diagram for "everything at once", so offering it would be
+    # offering a screen that cannot be drawn.
+    ours = browser()
+    options = filters.options_for(ours, filters.CONTROLLER)
+    assert "n64" in options
+    assert ALL not in options
+
+
+def test_choosing_a_platform_hands_it_back_rather_than_filtering_by_it():
+    # It is a way in, not a filter: picking n64 here should open that
+    # controller's screen, not narrow the grid to N64 games.
+    ours = browser()
+    panel = filters.Filters(index=filters.ROWS.index(filters.CONTROLLER))
+    panel.press(ours)
+    panel.choice.index = panel.choice.options.index("n64")
+    assert panel.choose(ours) == "n64"
+    assert ours.platform == ALL
+
+
+def test_choosing_a_filter_hands_nothing_back():
+    ours = browser()
+    panel = filters.Filters()
+    panel.press(ours)
+    panel.choice.index = panel.choice.options.index("n64")
+    assert panel.choose(ours) is None
+    assert ours.platform == "n64"
+
+
+def test_the_controller_row_does_not_nudge():
+    # Left and right on a row that is a door would do nothing visible, so it
+    # does nothing at all rather than half-opening something.
+    ours = browser()
+    panel = filters.Filters(index=filters.ROWS.index(filters.CONTROLLER))
+    panel.adjust(ours, 1)
+    assert not panel.open
+    assert ours.platform == ALL
+
+
+def test_closing_the_controller_list_opens_nothing():
+    ours = browser()
+    panel = filters.Filters(index=filters.ROWS.index(filters.CONTROLLER))
+    panel.press(ours)
+    panel.close()
+    assert panel.choose(ours) is None

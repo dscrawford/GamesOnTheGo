@@ -237,7 +237,7 @@ def draw_filters(screen, font_at, browser, panel) -> None:
     overlay.fill((*BACKGROUND, 232))
     screen.blit(overlay, (0, 0))
 
-    title = font_at(40).render("Filter", True, TEXT)
+    title = font_at(40).render("Menu", True, TEXT)
     rows = filter_rects(panel, font_at, (width, height))
     screen.blit(title, ((width - title.get_width()) // 2, rows[0][1] - title.get_height() - 24))
 
@@ -719,7 +719,11 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             panel.adjust(browser, 1)
                         elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
                             if panel.open:
-                                panel.choose(browser)
+                                # A platform back means the controller row: it
+                                # is a door out of the panel, not a filter.
+                                chosen = panel.choose(browser)
+                                if chosen:
+                                    controllers, panel = chosen, None
                             elif panel.press(browser) == filters.TYPING:
                                 typing = browser.search
                     else:
@@ -733,7 +737,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 panel.adjust(browser, dx)
                         elif pressed == pads.A:
                             if panel.open:
-                                panel.choose(browser)
+                                chosen = panel.choose(browser)
+                                if chosen:
+                                    controllers, panel = chosen, None
                             elif panel.press(browser) == filters.TYPING:
                                 typing = browser.search
                         elif pressed == pads.B:
