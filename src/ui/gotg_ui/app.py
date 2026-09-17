@@ -430,7 +430,7 @@ def filter_rects(panel, font_at, size) -> list[tuple[int, int, int, int]]:
     return [(left, top + i * row_h, panel_w, row_h) for i in range(len(panel.rows))]
 
 
-def draw_filters(screen, font_at, browser, panel) -> None:
+def draw_filters(screen, font_at, browser, panel, typing: str | None = None) -> None:
     """The filter panel: a row per thing to narrow by, and its value.
 
     A list rather than more buttons. Everything on it was already possible and
@@ -449,7 +449,7 @@ def draw_filters(screen, font_at, browser, panel) -> None:
     rows = filter_rects(panel, font_at, (width, height))
     screen.blit(title, ((width - title.get_width()) // 2, rows[0][1] - title.get_height() - 24))
 
-    for (label, value, selected), (rx, ry, rw, rh) in zip(filters.rows_for(browser, panel), rows, strict=True):
+    for (label, value, selected), (rx, ry, rw, rh) in zip(filters.rows_for(browser, panel, typing), rows, strict=True):
         if selected:
             pygame.draw.rect(screen, TILE_SELECTED, (rx, ry, rw, rh - 6), border_radius=8)
         name = font_at(26).render(label, True, TEXT if selected else TEXT_DIM)
@@ -648,6 +648,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
 
     chosen: tuple[Game, str, str | None, str | None] | None = None
     typing: str | None = None
+    typing_from = ""  # the search before typing began, for Escape
     menu: Menu | None = None
     # Which platform's bindings are being looked at, or None for the grid.
     # A screen rather than an overlay: it is a page of reference, not an
@@ -937,7 +938,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 if chosen:
                                     controllers, panel = chosen, None
                             elif panel.press(browser) == filters.TYPING:
-                                typing = browser.search
+                                typing = typing_from = browser.search
                     else:
                         step = pads.direction(event)
                         pressed = pads.button(event)
@@ -953,7 +954,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 if chosen:
                                     controllers, panel = chosen, None
                             elif panel.press(browser) == filters.TYPING:
-                                typing = browser.search
+                                typing = typing_from = browser.search
                         elif pressed == pads.B:
                             if panel.open:
                                 panel.close()
@@ -970,21 +971,27 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     if event.type != pygame.KEYDOWN:
                         continue
                     if event.key == pygame.K_ESCAPE:
+                        # Cancelled: the grid goes back to the search it had.
+                        browser.set_search(typing_from)
                         typing = None
                     elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                         browser.set_search(typing)
                         typing = None
                     elif event.key == pygame.K_BACKSPACE:
                         typing = typing[:-1]
+                        browser.set_search(typing)
                     elif event.unicode and event.unicode.isprintable():
                         typing += event.unicode
+                        # Applied as it is typed: the grid narrowing under the
+                        # letters is the feedback that the letters went in.
+                        browser.set_search(typing)
                     continue
 
                 if event.type == pygame.KEYDOWN:
                     if event.key in (pygame.K_ESCAPE, pygame.K_q):
                         running = False
                     elif event.key in (pygame.K_SLASH, pygame.K_f):
-                        typing = browser.search
+                        typing = typing_from = browser.search
                     elif event.key == pygame.K_c:
                         # The selected game names the platform; the diagram is
                         # per-platform, because that is the grain the bindings
@@ -1080,7 +1087,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         browser.cycle_platform(1)
                     elif pressed == pads.X:
                         # Search. A Deck raises the Steam keyboard over this.
-                        typing = browser.search
+                        typing = typing_from = browser.search
                     elif pressed == pads.START:
                         # Start: the filter panel, which is where installed-only
                         # now lives along with everything else that narrows the
@@ -1132,7 +1139,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     draw_shelf(below, state, font_at, art, browser.status, browser.installed)
                 else:
                     draw(below, state, font_at, art, browser.status, None, None, browser.installed)
-                draw_filters(below, font_at, browser, panel)
+                draw_filters(below, font_at, browser, panel, typing)
             elif controllers is not None:
                 if seating.open or seating.view.finished:
                     draw_assign(below, font_at, seating.view)

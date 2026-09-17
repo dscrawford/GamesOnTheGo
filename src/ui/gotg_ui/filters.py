@@ -235,9 +235,18 @@ def value_of(browser, row: str) -> str:
     return ""
 
 
-def rows_for(browser, panel: Filters) -> list[tuple[str, str, bool]]:
-    """(label, value, selected) for every row, which is the whole drawing."""
+def rows_for(browser, panel: Filters, typing: str | None = None) -> list[tuple[str, str, bool]]:
+    """(label, value, selected) for every row, which is the whole drawing.
+
+    `typing` is a search being entered right now, shown on its row with a
+    cursor. The panel stays up while the letters go in, and a row that kept
+    the old search until Enter was a box typed into blind.
+    """
     return [
-        (LABELS[row], value_of(browser, row), index == panel.index)
+        (
+            LABELS[row],
+            f"{typing}_" if row == SEARCH and typing is not None else value_of(browser, row),
+            index == panel.index,
+        )
         for index, row in enumerate(panel.rows)
     ]

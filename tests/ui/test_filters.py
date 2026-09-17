@@ -374,3 +374,27 @@ def test_clearing_the_filters_leaves_the_view_alone():
     filters.clear(ours)
     assert ours.platform == ALL
     assert ours.view == "rows"
+
+
+def test_the_search_row_shows_what_is_being_typed():
+    # Search is started from this panel, and the panel stays up while the
+    # letters go in. A row that kept showing the old search until Enter was a
+    # box you typed into blind.
+    ours = browser()
+    ours.set_search("mario")
+    panel = filters.Filters()
+    rows = filters.rows_for(ours, panel, typing="zel")
+    by_label = {label: value for label, value, _ in rows}
+    assert by_label[filters.LABELS[filters.SEARCH]] == "zel_"
+    # And nothing else about the panel changes because a search is open.
+    assert rows == [
+        (label, "zel_" if label == filters.LABELS[filters.SEARCH] else value, selected)
+        for label, value, selected in filters.rows_for(ours, panel)
+    ]
+
+
+def test_an_empty_search_being_typed_is_a_cursor_not_a_dash():
+    panel = filters.Filters()
+    rows = filters.rows_for(browser(), panel, typing="")
+    by_label = {label: value for label, value, _ in rows}
+    assert by_label[filters.LABELS[filters.SEARCH]] == "_"
