@@ -312,6 +312,24 @@ pkgs.runCommand "check-recipes" { nativeBuildInputs = [ pkgs.zip ]; } ''
   [ ! -e $TMPDIR/out/world.bundle/extras/update_1.4.3-readme.txt ]
   [ -z "$(ls -A $TMPDIR/out | grep gotg-recipe || true)" ]
 
+  # An update attached after that bundle was installed: only the new release
+  # is staged, and it lands beside the ones already there. The game and the
+  # earlier update are not touched.
+  grep -q '"extras"' ${switch}/share/gotg/recipe.json
+  raw=$TMPDIR/raw-topup && mkdir -p $raw/extras/update_1.4.2
+  touch $raw/extras/update_1.4.2/u2.rar $raw/extras/update_1.4.2/u2.r00
+  ${switch}/bin/gotg-recipe extras $raw $TMPDIR/out/world.bundle
+  [ "$(cat $TMPDIR/out/world.bundle/extras/update_1.4.2-game.xci)" = big ]
+  [ "$(cat $TMPDIR/out/world.bundle/extras/update_1.4.3-game.xci)" = big ]
+  [ "$(cat $TMPDIR/out/world.bundle/world.bundle.xci)" = big ]
+  [ -z "$(ls -A $TMPDIR/out | grep gotg-recipe || true)" ]
+  # And with nothing installed to join, a refusal rather than a bundle made
+  # of extras alone.
+  if ${switch}/bin/gotg-recipe extras $raw $TMPDIR/out/world.nothing 2>$TMPDIR/err-topup; then
+    echo "extras onto no bundle should fail"; exit 1
+  fi
+  grep -q "needs an installed bundle" $TMPDIR/err-topup
+
   # A loose container as the base: pick-base takes the file beside extras/,
   # never a bigger file inside it.
   raw=$TMPDIR/raw-loose && mkdir -p $raw/extras/dlc_big

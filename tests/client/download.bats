@@ -464,7 +464,7 @@ stub_bundle_recipe_env() {
     cat <<'SHIM'
 handler="$1"; raw="$2"; dest="$3"
 mkdir -p "$dest/extras"
-cp "$raw"/world.zelda.nsp "$dest/world.zelda.nsp"
+[ -f "$raw"/world.zelda.nsp ] && cp "$raw"/world.zelda.nsp "$dest/world.zelda.nsp"
 for release in "$raw"/extras/*/; do
   name="$(basename "$release")"
   for f in "$release"/*; do cp "$f" "$dest/extras/$name-$(basename "$f")"; done
@@ -473,7 +473,88 @@ printf '%s' "$handler" >"$dest/handler"
 SHIM
   } >"$GOTG_ROOTS_DIR/env-switch/bin/gotg-recipe"
   chmod +x "$GOTG_ROOTS_DIR/env-switch/bin/gotg-recipe"
+  jq -n '{handlers: ["single_file", "extras"]}' >"$GOTG_ROOTS_DIR/env-switch/share/gotg/recipe.json"
+}
+
+# The same game after the importer attached one more update to it.
+publish_bundle_game_plus_update() {
+  local dir="$SERVICE_LIBRARY_DIR/switch"
+  mkdir -p "$dir/Zelda_Update_v1.4.2"
+  printf 'older-update-rar' >"$dir/Zelda_Update_v1.4.2/u2.rar"
+  local files
+  files="$(jq -n --arg d "$dir" \
+    --arg s1 "$(sha256sum "$dir/world.zelda.nsp" | cut -d' ' -f1)" \
+    --arg s2 "$(sha256sum "$dir/Zelda_Update_v1.4.3/u.rar" | cut -d' ' -f1)" \
+    --arg s3 "$(sha256sum "$dir/dlc/pack.nsp" | cut -d' ' -f1)" \
+    --arg s4 "$(sha256sum "$dir/Zelda_Update_v1.4.2/u2.rar" | cut -d' ' -f1)" \
+    '[{name: "world.zelda.nsp", path: ($d + "/world.zelda.nsp"), size_bytes: 10, mtime: 1, sha256: $s1},
+      {name: "extras/update_1.4.3/u.rar", path: ($d + "/Zelda_Update_v1.4.3/u.rar"), size_bytes: 10, mtime: 1, sha256: $s2},
+      {name: "extras/dlc_pack/pack.nsp", path: ($d + "/dlc/pack.nsp"), size_bytes: 9, mtime: 1, sha256: $s3},
+      {name: "extras/update_1.4.2/u2.rar", path: ($d + "/Zelda_Update_v1.4.2/u2.rar"), size_bytes: 16, mtime: 1, sha256: $s4}]')"
+  add_member_game switch world.zelda "Zelda" single_file "$files"
+}
+
+@test "an update that arrives after a bundle is installed is fetched without reinstalling it" {
+  # Tears of the Kingdom: a 32 GB install with 1.4.3 beside it, and the
+  # catalog then gained 1.4.2 -- the one version the mods run on. Fetching
+  # half a gigabyte must not cost the 32.
+  publish_bundle_game
+  stub_bundle_recipe_env
+  gotg refresh
+  gotg download world.zelda
+  [ "$status" -eq 0 ]
+  local install="$GOTG_GAMES_DIR/switch/world.zelda"
+  printf 'left alone' >"$install/sentinel"
+
+  publish_bundle_game_plus_update
+  gotg refresh
+  gotg download world.zelda
+  [ "$status" -eq 0 ]
+  [ "$(cat "$install/extras/update_1.4.2-u2.rar")" = older-update-rar ]
+  [ "$(cat "$install/extras/update_1.4.3-u.rar")" = update-rar ]
+  [ "$(cat "$install/sentinel")" = "left alone" ]
+  [ "$(cat "$install/handler")" = extras ]
+  [[ "$stderr" != *"uninstall"* ]]
+  [[ "$stderr" == *"update_1.4.2"* ]]
+  [ ! -e "$GOTG_PARTIAL_DIR/world.zelda" ]
+}
+
+@test "a bundle with every extra already beside it is left alone" {
+  publish_bundle_game
+  stub_bundle_recipe_env
+  gotg refresh
+  gotg download world.zelda
+  [ "$status" -eq 0 ]
+  local install="$GOTG_GAMES_DIR/switch/world.zelda"
+  gotg download world.zelda
+  [ "$status" -eq 0 ]
+  # The recipe did not run again: the handler file is the install's own.
+  [ "$(cat "$install/handler")" = single_file ]
+}
+
+@test "an environment built before it knew the extras handler is rebuilt for the top-up" {
+  publish_bundle_game
+  stub_bundle_recipe_env
+  gotg refresh
+  gotg download world.zelda
+  [ "$status" -eq 0 ]
+  # An older root: the recipe declares no extras handler. The refresh that
+  # the client runs is stubbed to declare it, which is what a rebuild does.
   jq -n '{handlers: ["single_file"]}' >"$GOTG_ROOTS_DIR/env-switch/share/gotg/recipe.json"
+  publish_bundle_game_plus_update
+  gotg refresh
+  # A `nix build` that produces a root declaring it.
+  export GOTG_FLAKE="$TEST_TMP/flake" GOTG_NIX="$TEST_TMP/bin/nix"
+  mkdir -p "$GOTG_FLAKE" "$TEST_TMP/bin"
+  : >"$GOTG_FLAKE/flake.nix"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf "jq -n '{handlers: [\"single_file\", \"extras\"]}' >'%s'\n" "$GOTG_ROOTS_DIR/env-switch/share/gotg/recipe.json"
+  } >"$GOTG_NIX"
+  chmod +x "$GOTG_NIX"
+  gotg download world.zelda
+  [ "$status" -eq 0 ]
+  [ -f "$GOTG_GAMES_DIR/switch/world.zelda/extras/update_1.4.2-u2.rar" ]
 }
 
 @test "attached extras stage under their release directories and install as a bundle" {

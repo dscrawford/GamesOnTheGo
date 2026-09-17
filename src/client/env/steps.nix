@@ -222,6 +222,23 @@
     '';
   };
 
+  # Terminal: what collect-extras unpacked, put beside a bundle that is already
+  # installed. The top-up: a game installed with 1.4.3, and 1.4.2 -- the one
+  # version its mods run on -- attached to the catalog afterwards. Only
+  # extras/ is touched; the game and the releases already there stay as they
+  # are, and a name that is already taken is left rather than replaced.
+  mergeExtras = {
+    name = "merge-extras";
+    script = ''
+      [ -d "$dest" ] || fail "merge-extras needs an installed bundle at $dest"
+      mkdir -p "$dest/extras"
+      if [ -d "$stage/extras" ]; then
+        find "$stage/extras" -mindepth 1 -maxdepth 1 -exec mv -n -t "$dest/extras" {} +
+      fi
+      cur="$dest"
+    '';
+  };
+
   # Terminal: whatever disc image came out of the archive, stored as the RVZ
   # the emulator wants.
   convertRvz = {
