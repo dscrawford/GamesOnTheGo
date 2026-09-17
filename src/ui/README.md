@@ -1,7 +1,9 @@
 # gotg-ui
 
 A grid to pick a game from. `gotg list` is a good way to find a game and a bad
-way to browse one; in Big Picture on a Deck there is no terminal at all.
+way to browse one; in Big Picture on a Deck there is no terminal at all. What
+it browses is your own library — games you own and have dumped, or bought
+digitally.
 
 Design and the decisions behind it: [docs/ui-plan.md](../../docs/ui-plan.md).
 

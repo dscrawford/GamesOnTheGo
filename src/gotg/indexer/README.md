@@ -4,6 +4,10 @@ Searches a folder for games and organizes what it finds into the canonical
 `/Games/<platform>/<entry>` tree using renamed hardlinks, so the originals stay
 where they are at zero extra space.
 
+The folder is yours to fill, with games you have the right to copy: dumps of
+cartridges and discs you own, or titles bought digitally. The indexer
+recognises files by name and does not — cannot — check where they came from.
+
 The pipeline is split so that everything except two thin I/O layers is pure and
 testable off-cluster:
 

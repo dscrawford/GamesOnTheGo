@@ -7,6 +7,13 @@ whatever controllers are plugged in, and runs it — from a terminal, from
 Steam, or from a controller-driven picker. Saves go back to the server, so a
 game picked up on the Deck continues where the desktop left it.
 
+**GOTG ships no games and downloads none from anyone but your own server.**
+It is a library manager and launcher for games you have obtained legally:
+cartridges and discs you own and have dumped yourself, or titles bought
+digitally. The same goes for console keys and firmware, which some platforms
+need to run a game — they come from a console you own. Do not point the
+indexer at material you do not have the right to copy.
+
 | Component | Does | Runs |
 |---|---|---|
 | [indexer](src/gotg/indexer/) | searches a folder for games and indexes them into the catalog, hardlinked into `/Games` | CronJob |
