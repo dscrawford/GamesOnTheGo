@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Put GOTG on a machine that has never heard of Nix.
 #
-#   curl -sSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash
+#   curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install/gotg-install | bash
 #
 # Or, on a Steam Deck, download it and run it from Konsole in Desktop Mode.
 #
@@ -34,7 +34,8 @@ warn() { printf '%s!!%s %s\n' "$C_WARN" "$C_OFF" "$*" >&2; }
 die() { printf '%serror:%s %s\n' "$C_ERR" "$C_OFF" "$*" >&2; exit 1; }
 
 # Every change goes through here, so --dry-run can show them instead.
-DRY_RUN="${DRY_RUN:-0}"
+# Namespaced: a DRY_RUN some other tool left exported must not quietly skip it.
+DRY_RUN="${GOTG_DRY_RUN:-0}"
 change() {
   if [[ "$DRY_RUN" == "1" ]]; then
     printf '%s   would run:%s %s\n' "$C_DIM" "$C_OFF" "$*" >&2
@@ -100,7 +101,7 @@ use_nix() {
 }
 
 # A pipe cannot go through `change`, so the download and the run are one command.
-nix_installer() { curl -sSL "$NIX_INSTALLER" | sh -s -- "$@"; }
+nix_installer() { curl --proto '=https' --tlsv1.2 -fsSL "$NIX_INSTALLER" | sh -s -- "$@"; }
 
 install_nix_steamos() {
   # SteamOS 3.5 and later ship /nix already, bind-mounted to the home
@@ -180,16 +181,22 @@ ensure_uinput() {
     # is not permanent. Said out loud at the end rather than discovered later.
     change sudo steamos-readonly disable || die "could not unlock the system partition"
     relock=1
+    if [[ "$DRY_RUN" != "1" ]]; then
+      # A failure or Ctrl-C from here on must not leave / writable.
+      trap 'sudo steamos-readonly enable || warn "the system partition is still writable; run: sudo steamos-readonly enable"' EXIT
+      trap 'exit 130' INT TERM
+    fi
   fi
   if [[ "$DRY_RUN" == "1" ]]; then
     change write "$UDEV_RULE" to "$UDEV_PATH"
   else
-    printf '%s\n' "$UDEV_RULE" | sudo tee "$UDEV_PATH" >/dev/null
+    printf '%s\n' "$UDEV_RULE" | sudo tee "$UDEV_PATH" >/dev/null || die "could not write $UDEV_PATH"
   fi
   change sudo udevadm control --reload-rules || true
   change sudo udevadm trigger --subsystem-match=misc --sysname-match=uinput || true
   change sudo modprobe -q uinput || true
   if ((relock)); then
+    trap - EXIT INT TERM
     change sudo steamos-readonly enable || warn "could not put the system partition back to read-only"
   fi
 }
@@ -254,7 +261,7 @@ main() {
       *) die "unknown option: $arg (try --help)" ;;
     esac
   done
-  ((DRY_RUN)) && say "  (dry run: nothing will be changed)"
+  [[ "$DRY_RUN" == "1" ]] && say "  (dry run: nothing will be changed)"
   say ""
   say "  GOTG — installing onto $(is_steamos && echo "SteamOS" || echo "this machine")"
   say ""
@@ -268,6 +275,10 @@ main() {
   add_to_steam
 
   say ""
+  if [[ "$DRY_RUN" == "1" ]]; then
+    say "${C_OK}Dry run done. Nothing was changed.${C_OFF}"
+    return 0
+  fi
   say "${C_OK}Done.${C_OFF}"
   say ""
   say "  gotg list                 what is in the catalog"
@@ -280,8 +291,8 @@ main() {
     say ""
     say "${C_WARN}  A SteamOS update wipes the system partition, which takes the"
     say "  controller permission with it. Your games and Nix survive — they are on"
-    say "  the home partition. Run this installer again after an update and it will"
-    say "  put back only what is missing.${C_OFF}"
+    say "  the home partition. Run this installer again after an update to put it"
+    say "  back.${C_OFF}"
     say ""
   fi
 }
