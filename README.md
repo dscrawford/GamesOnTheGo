@@ -118,6 +118,8 @@ gotg controllers apply [<id>|--all] # write bindings without launching
 | Ryujinx | Switch | `Config.json` |
 | Cemu | Wii U | `controllerProfiles/*.xml` |
 
+**Motion:** padmap serves every seated pad's gyro and accelerometer over DSU (`127.0.0.1:26760`, slot = player − 1) and writes each environment's Ryujinx, Cemu and Dolphin config to read it. `PADMAP_DSU_PORT=0` turns it off.
+
 **Stop any game:** hold a shoulder or trigger on each side + Start for 3 s.
 
 **Before a launch**, `gotg-seat` asks for a controller if none is seated, or walks the buttons if the pad is unmapped.

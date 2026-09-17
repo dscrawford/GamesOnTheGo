@@ -170,3 +170,118 @@ teardown() { stop_saves_service; }
   [ "$status" -eq 0 ]
   grep -q -- "--platform n64" "$SEAT_LOG"
 }
+
+# --- padmap's configs, into the environment rather than the home ----------------
+#
+# The daemon writes Ryujinx, Cemu and Dolphin configuration -- bindings, and
+# since motion arrived, where to find its DSU server -- under ~/.config. Every
+# emulator gotg runs is isolated, so `padmap-rs emit` is pointed at the
+# environment's own files, and told every other destination too, because an
+# unnamed one means the home.
+
+stub_emit() {
+  export EMIT_ARGS="$TEST_TMP/emit.args" EMIT_STDIN="$TEST_TMP/emit.stdin"
+  export EMIT_WRITES="${1:-}"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    cat <<'SHIM'
+[[ "$1" == emit ]] || exit 1
+shift
+printf '%s\n' "$@" >"$EMIT_ARGS"
+cat >"$EMIT_STDIN"
+# Say which file was written, the way the real one does.
+for ((i = 1; i <= $#; i++)); do
+  [[ "${!i}" == "--ryujinx-config" ]] && { j=$((i + 1)); printf '%s\n' "${!j}"; }
+done
+[[ -z "$EMIT_WRITES" ]] || eval "$EMIT_WRITES"
+SHIM
+  } >"$FAKE_BIN/padmap-rs"
+  chmod +x "$FAKE_BIN/padmap-rs"
+}
+
+# What the daemon leaves in its runtime directory after seating two pads.
+published_two() {
+  export GOTG_PADMAP_RUNTIME="$TEST_TMP/padmap-runtime"
+  mkdir -p "$GOTG_PADMAP_RUNTIME"
+  cat >"$GOTG_PADMAP_RUNTIME/env.sh" <<'EOS'
+# Written by padmap on every republish.
+SDL_GAMECONTROLLERCONFIG='0300c9a7de2800000413000001000000,padmap Player 1,a:b0,b:b1,platform:Linux,
+0300c9a7de2800000413000002000000,padmap Player 2,a:b0,b:b1,platform:Linux,'
+export SDL_GAMECONTROLLERCONFIG
+EOS
+}
+
+ryujinx_env() {
+  mkdir -p "$GOTG_ROOTS_DIR/env-switch/share/gotg"
+  jq -n '{emulator: "ryujinx"}' >"$GOTG_ROOTS_DIR/env-switch/share/gotg/pads.json"
+}
+
+@test "the pads padmap published are read off its env.sh, by player" {
+  published_two
+  run padmap_published
+  [ "$status" -eq 0 ]
+  [ "$(jq 'length' <<<"$output")" = 2 ]
+  [ "$(jq -r '.[1].player' <<<"$output")" = 2 ]
+  [ "$(jq -r '.[0].guid' <<<"$output")" = 0300c9a7de2800000413000001000000 ]
+  [ "$(jq -r '.[0].name' <<<"$output")" = "padmap Player 1" ]
+  [[ "$(jq -r '.[1].sdl_line' <<<"$output")" == "0300c9a7de2800000413000002000000,padmap Player 2,"* ]]
+}
+
+@test "no daemon output means nothing to emit" {
+  export GOTG_PADMAP_RUNTIME="$TEST_TMP/nowhere"
+  stub_emit
+  ryujinx_env
+  run padmap_emit env-switch
+  [ "$status" -ne 0 ]
+  [ ! -e "$EMIT_ARGS" ]
+}
+
+@test "padmap writes into the environment's own Ryujinx config, and nothing into the home" {
+  published_two
+  stub_emit
+  ryujinx_env
+  run padmap_emit env-switch
+  [ "$status" -eq 0 ]
+  local state="$GOTG_STATE_DIR/env/env-switch"
+  grep -qxF -- "--ryujinx-config" "$EMIT_ARGS"
+  grep -qxF -- "$state/config/Ryujinx/Config.json" "$EMIT_ARGS"
+  # Every other destination is named too, and none of them is under the home.
+  for flag in --cemu-dir --dolphin-dir --ares-settings --env-file; do
+    grep -qxF -- "$flag" "$EMIT_ARGS"
+  done
+  ! grep -q "$HOME/.config" "$EMIT_ARGS"
+  [ "$(jq 'length' "$EMIT_STDIN")" = 2 ]
+  [ "$(jq -r '.[0].name' "$EMIT_STDIN")" = "padmap Player 1" ]
+}
+
+@test "a Dolphin environment gets its own config directory" {
+  published_two
+  stub_emit
+  mkdir -p "$GOTG_ROOTS_DIR/env-gamecube/share/gotg"
+  jq -n '{emulator: "dolphin"}' >"$GOTG_ROOTS_DIR/env-gamecube/share/gotg/pads.json"
+  EMIT_WRITES='printf "%s\n" "$GOTG_STATE_DIR/env/env-gamecube/config/dolphin-emu/DSUClient.ini"' \
+    run padmap_emit env-gamecube
+  [ "$status" -eq 0 ]
+  grep -A1 -xF -- "--dolphin-dir" "$EMIT_ARGS" | grep -qxF "$GOTG_STATE_DIR/env/env-gamecube/config/dolphin-emu"
+}
+
+@test "an isolated Cemu environment gets its own profiles directory" {
+  published_two
+  stub_emit
+  mkdir -p "$GOTG_ROOTS_DIR/env-wiiu/share/gotg"
+  jq -n '{emulator: "cemu", isolate: true}' >"$GOTG_ROOTS_DIR/env-wiiu/share/gotg/pads.json"
+  EMIT_WRITES='printf "%s\n" "$GOTG_STATE_DIR/env/env-wiiu/config/Cemu/controllerProfiles/controller0.xml"' \
+    run padmap_emit env-wiiu
+  [ "$status" -eq 0 ]
+  grep -A1 -xF -- "--cemu-dir" "$EMIT_ARGS" | grep -qxF "$GOTG_STATE_DIR/env/env-wiiu/config/Cemu/controllerProfiles"
+}
+
+@test "an emulator padmap does not write for is left to gotg" {
+  published_two
+  stub_emit
+  mkdir -p "$GOTG_ROOTS_DIR/env-n64/share/gotg"
+  jq -n '{emulator: "ares"}' >"$GOTG_ROOTS_DIR/env-n64/share/gotg/pads.json"
+  run padmap_emit env-n64
+  [ "$status" -ne 0 ]
+  [ ! -e "$EMIT_ARGS" ]
+}

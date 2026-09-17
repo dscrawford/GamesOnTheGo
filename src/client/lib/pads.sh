@@ -356,9 +356,18 @@ pads_configure() {
       ares_heal_audio "$attr"
       pads_ares_configure "$attr"
       ;;
-    dolphin) pads_dolphin_configure "$attr" ;;
+    # After gotg's own writer, so what padmap knows -- the player order it
+    # seated, and its DSU server for motion -- is what the emulator reads.
+    # Ryujinx's runs inside its snapshot cycle instead.
+    dolphin)
+      pads_dolphin_configure "$attr"
+      padmap_emit "$attr" || true
+      ;;
     ryujinx) pads_ryujinx_configure "$attr" ;;
-    cemu) pads_cemu_configure "$attr" ;;
+    cemu)
+      pads_cemu_configure "$attr"
+      padmap_emit "$attr" || true
+      ;;
     *) return 0 ;;
   esac
 }

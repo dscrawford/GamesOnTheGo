@@ -37,7 +37,12 @@ pads_ryujinx_configure() {
   # launch rather than from the next one: a config restored a launch later
   # would otherwise arrive with motion off and turn it on again, which reads in
   # the log as something flapping.
-  if pads_ryujinx_motion "$attr"; then
+  local changed=0
+  # padmap's writer binds its seated pads and points each at its DSU server
+  # for motion; the SDL-sensor path below is for a pad that is not padmap's.
+  padmap_emit "$attr" && changed=1
+  pads_ryujinx_motion "$attr" && changed=1
+  if ((changed)); then
     pads_ryujinx_keep "$attr"
   fi
   # Never fatal, like every other binding writer: no pad attached, or one SDL
