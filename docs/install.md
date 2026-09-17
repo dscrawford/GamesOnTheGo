@@ -18,7 +18,7 @@ Game Mode with a controller.
 
 ## Anywhere else
 
-The same line. On a machine that already has Nix and flakes:
+The same line. On a machine that already has Nix (2.30 or newer) and flakes:
 
 ```bash
 nix run github:dscrawford/GamesOnTheGo#install
