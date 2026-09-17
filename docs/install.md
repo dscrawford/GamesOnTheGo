@@ -121,7 +121,7 @@ curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawfo
 | turn on flakes | GOTG is a flake and they are still behind a flag |
 | `nix profile add` / `upgrade` | `gotg` and `gotg-ui`, from `github:dscrawford/GamesOnTheGo`; upgraded in place when already there |
 | a udev rule | padmap publishes each controller as a new device through `/dev/uinput`, and cannot open it without permission. The rule tags it `uaccess`, which gives it to whoever is logged in at the seat. |
-| a Steam shortcut | so Game Mode can launch the picker |
+| a Steam shortcut | so Game Mode can launch the picker. Steam only takes a new entry while closed, so with Steam open the installer asks, closes it, adds GOTG, and starts it again; declined, the entry is queued and `gotg steam picker` with Steam closed applies it |
 
 ## After a SteamOS update
 

@@ -450,3 +450,90 @@ stub_steps() {
   load_installer
   [ "$DRY_RUN" = "1" ]
 }
+
+# --- the Steam shortcut, with Steam open ----------------------------------------
+#
+# Steam rewrites its shortcut file when it exits and reads it once at start,
+# so the picker can only be added while Steam is closed. The usual Deck has
+# Steam open in Desktop Mode, and the installer used to say "queued" and
+# queue nothing: GOTG never reached the library.
+
+# A Steam that is open, as a script rather than a function: the relaunch goes
+# through setsid, which runs a program, and a function would be a real Steam.
+steam_open() {
+  export STEAM_STATE="$TMP/steam-state"
+  printf 'running\n' >"$STEAM_STATE"
+  pgrep() { [[ "$*" == *steam* ]] && [[ "$(cat "$STEAM_STATE")" == running ]]; }
+  export GOTG_STEAM_BIN="$TMP/bin/steam"
+  mkdir -p "$TMP/bin"
+  cat >"$GOTG_STEAM_BIN" <<EOF
+#!$(command -v bash)
+printf 'steam%s\n' "\${*:+ \$*}" >>"$SIDE"
+[[ "\${1:-}" == -shutdown ]] && printf 'closed\n' >"$STEAM_STATE"
+exit 0
+EOF
+  chmod +x "$GOTG_STEAM_BIN"
+  STEAM_BIN="$GOTG_STEAM_BIN"
+}
+
+@test "with Steam open and a person to ask, Steam is closed, the picker added, Steam started again" {
+  other_linux
+  load_installer
+  stub_side_effects
+  steam_open
+  confirm() { return 0; }
+  STEAM_WAIT=5 run add_to_steam
+  [ "$status" -eq 0 ]
+  # The relaunch is detached, so give it a moment to be recorded.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do grep -qx "steam" "$SIDE" && break; sleep 0.2; done
+  [ "$(grep -E '^(steam|gotg)' "$SIDE" | tr '\n' ';')" = "steam -shutdown;gotg steam picker;steam;" ]
+}
+
+@test "with Steam open and no answer, the shortcut is queued and the way to apply it said" {
+  other_linux
+  load_installer
+  stub_side_effects
+  steam_open
+  confirm() { return 1; }
+  run add_to_steam
+  [ "$status" -eq 0 ]
+  grep -qx "gotg steam picker" "$SIDE"
+  ! grep -q "steam -shutdown" "$SIDE"
+  [[ "$output" == *"queued"* ]]
+  [[ "$output" == *"gotg steam picker"* ]]
+}
+
+@test "with Steam closed the picker is simply added" {
+  other_linux
+  load_installer
+  stub_side_effects
+  run add_to_steam
+  [ "$status" -eq 0 ]
+  [ "$(grep -E '^(steam|gotg)' "$SIDE" | tr '\n' ';')" = "gotg steam picker;" ]
+}
+
+@test "a Steam that will not close in time is not waited on for ever" {
+  other_linux
+  load_installer
+  stub_side_effects
+  steam_open
+  confirm() { return 0; }
+  printf '#!%s\nprintf "steam %%s\\n" "$*" >>"%s"\nexit 0\n' "$(command -v bash)" "$SIDE" >"$GOTG_STEAM_BIN"  # never actually closes
+  STEAM_WAIT=1 run add_to_steam
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"did not close"* ]]
+  grep -qx "gotg steam picker" "$SIDE"
+}
+
+@test "a dry run with Steam open says what it would do to Steam and does nothing" {
+  other_linux
+  load_installer
+  stub_side_effects
+  steam_open
+  DRY_RUN=1 run add_to_steam
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"would run: $GOTG_STEAM_BIN -shutdown"* ]]
+  [[ "$output" == *"would run: gotg steam picker"* ]]
+  [[ "$output" == *"would run: $GOTG_STEAM_BIN"* ]]
+  [ ! -s "$SIDE" ]
+}

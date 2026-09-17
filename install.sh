@@ -253,16 +253,66 @@ install_gotg() {
   fi
 }
 
+# A yes-or-no put to the person, on the terminal if there is one. Through a
+# pipe (curl | bash) stdin is the script itself, so the question goes to
+# /dev/tty; with no terminal at all the answer is no.
+confirm() {
+  local answer
+  [[ "$DRY_RUN" != "1" ]] || return 1
+  { read -r -p "$1 [Y/n] " answer </dev/tty; } 2>/dev/null || return 1
+  [[ -z "$answer" || "$answer" =~ ^[Yy] ]]
+}
+
+# How long to give Steam to shut down before giving up on it, and which
+# program Steam is -- named so a test can stand one in.
+STEAM_WAIT="${STEAM_WAIT:-30}"
+STEAM_BIN="${GOTG_STEAM_BIN:-steam}"
+
+# The picker, in Steam's library. Steam rewrites its shortcut file when it
+# exits and reads it once at start, so this only lands while Steam is closed
+# -- and on a Deck in Desktop Mode it is open. Asked, then: closed, added,
+# started again. Declined, or with nobody to ask: gotg queues the shortcut
+# itself, and the next `gotg steam` command run with Steam closed applies it.
 add_to_steam() {
   # In a dry run gotg may not be installed yet, and is only named.
   [[ "$DRY_RUN" == "1" ]] || command -v gotg >/dev/null 2>&1 || return 0
-  if pgrep -x steam >/dev/null 2>&1; then
-    warn "Steam is running, so the shortcut is queued.
-     Close Steam, then run: gotg steam picker"
+  step "putting GOTG in your Steam library"
+  if ! pgrep -x steam >/dev/null 2>&1; then
+    change gotg steam picker || warn "could not add the Steam shortcut; run 'gotg steam picker' yourself"
     return 0
   fi
-  step "putting GOTG in your Steam library"
-  change gotg steam picker || warn "could not add the Steam shortcut; run 'gotg steam picker' yourself"
+
+  if [[ "$DRY_RUN" == "1" ]]; then
+    say "   Steam is open; it would be closed, GOTG added, and Steam started again"
+    change "$STEAM_BIN" -shutdown
+    change gotg steam picker
+    change "$STEAM_BIN"
+    return 0
+  fi
+  if ! confirm "   Steam is open, and can only take a new entry while closed. Close it now?"; then
+    gotg steam picker >/dev/null 2>&1 || true
+    warn "the shortcut is queued. Close Steam, run: gotg steam picker
+     and start Steam again -- it reads its library once, at startup."
+    return 0
+  fi
+
+  say "   closing Steam"
+  "$STEAM_BIN" -shutdown >/dev/null 2>&1 || true
+  local waited=0
+  while pgrep -x steam >/dev/null 2>&1 && ((waited < STEAM_WAIT)); do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  if pgrep -x steam >/dev/null 2>&1; then
+    gotg steam picker >/dev/null 2>&1 || true
+    warn "Steam did not close in ${STEAM_WAIT}s; the shortcut is queued. Close Steam, run:
+     gotg steam picker, and start Steam again."
+    return 0
+  fi
+  gotg steam picker || warn "could not add the Steam shortcut; run 'gotg steam picker' yourself"
+  say "   starting Steam again"
+  # Detached: Steam must outlive this script, and its output is its own.
+  (setsid "$STEAM_BIN" >/dev/null 2>&1 &)
 }
 
 # --- the run -----------------------------------------------------------------
