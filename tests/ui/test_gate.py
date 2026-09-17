@@ -29,8 +29,18 @@ def state_event(players, state=None):
     return {"event": "state", "state": state, "slots": 4, "players": players}
 
 
-def seated(player=1, name="Xbox Wireless Controller", mappings=()):
-    return {"player": player, "name": name, "mappings": list(mappings)}
+def seated(player=1, name="Xbox Wireless Controller", mappings=(), configured=None):
+    """A player as the daemon reports one.
+
+    `configured` defaults to whether there is a capture, which is what padmap
+    does: it is "mapped, not merely known".
+    """
+    return {
+        "player": player,
+        "name": name,
+        "mappings": list(mappings),
+        "configured": bool(mappings) if configured is None else configured,
+    }
 
 
 # --- which console's buttons -------------------------------------------------
@@ -70,21 +80,46 @@ def test_a_mapped_controller_goes_straight_to_the_game():
     assert gate.done
 
 
-def test_a_pad_mapped_for_another_console_is_still_asked_about():
-    # A session first. Binding buttons is refused without one, so a seated pad
-    # that needs mapping means opening a session it is already seated in.
+def test_a_pad_mapped_for_another_console_is_not_asked_about_again():
+    """Bound once is bound for everything.
+
+    padmap falls back to its universal capture when a console has none of its
+    own, so a pad mapped on GameCube already works on an N64 game. Asking again
+    on each new platform was a wizard in front of a controller that was fine.
+    """
     gate = Gate(platform="n64")
     gate = apply(gate, state_event([seated(mappings=["console:gamecube"])]))
     gate, command = decide(gate)
-    assert command == {"cmd": "begin", "players": 4}
-    gate = apply(gate, state_event([seated(mappings=["console:gamecube"])], state="assigning"))
+    assert gate.state == READY
+    assert command is None
+
+
+def test_a_pad_that_bound_itself_is_left_alone():
+    # padmap reads the kernel's BTN_ codes, so a standard controller arrives
+    # correctly bound and has no capture of its own to show for it. That is a
+    # working pad, and the gate must not open a wizard in front of it.
+    gate = Gate(platform="gamecube")
+    gate = apply(gate, state_event([seated(mappings=[], configured=True)]))
+    gate, command = decide(gate)
+    assert gate.state == READY
+    assert command is None
+
+
+def test_a_pad_with_nothing_at_all_is_still_asked_about():
+    # The case the gate exists for: seated, and padmap does not know where its
+    # buttons are.
+    gate = Gate(platform="gamecube")
+    gate = apply(gate, state_event([seated(mappings=[], configured=False)], state="assigning"))
     gate, command = decide(gate)
     assert gate.state == MAPPING
-    assert command == {"cmd": "map", "player": 1, "layout": "n64", "scope": "console:n64"}
+    assert command == {"cmd": "map", "player": 1, "layout": "gamecube", "scope": "console:gamecube"}
 
 
 def test_the_first_unmapped_pad_is_the_one_asked_about():
-    players = [seated(player=1, mappings=["console:snes"]), seated(player=2, mappings=[])]
+    players = [
+        seated(player=1, mappings=["console:snes"]),
+        seated(player=2, mappings=[], configured=False),
+    ]
     gate = Gate(platform="snes")
     gate = apply(gate, state_event(players, state="assigning"))
     gate, command = decide(gate)
