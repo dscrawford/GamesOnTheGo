@@ -166,6 +166,7 @@ stub_nix() {
         printf '{"version":3,"elements":{%s}}\n' "$elements"
         ;;
       "config show experimental-features") printf '%s\n' "${NIX_FEATURES:-}" ;;
+      "--version") printf 'nix (Nix) %s\n' "${NIX_VERSION:-2.30.0}" ;;
     esac
     return 0
   }
@@ -315,4 +316,137 @@ stub_side_effects() {
   export DRY_RUN=1
   load_installer
   [ "$DRY_RUN" = "0" ]
+}
+
+# --- how old a Nix this can work with -----------------------------------------
+#
+# `nix profile add` and upgrading by name both arrived in 2.30. An older Nix
+# is told so, rather than handed commands it does not know and a profile
+# listing this cannot read.
+
+@test "a Nix older than 2.30 is told to upgrade, not fed commands it lacks" {
+  other_linux
+  load_installer
+  stub_nix
+  NIX_VERSION="2.18.1" run check_nix_version
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"2.18.1"* ]]
+  [[ "$output" == *"upgrade-nix"* ]]
+}
+
+@test "a new enough Nix passes the version check quietly" {
+  other_linux
+  load_installer
+  stub_nix
+  NIX_VERSION="2.35.1" run check_nix_version
+  [ "$status" -eq 0 ]
+  NIX_VERSION="2.30.0" run check_nix_version
+  [ "$status" -eq 0 ]
+}
+
+@test "a Nix whose version cannot be read is not turned away" {
+  other_linux
+  load_installer
+  nix() { printf 'nix (Determinate Nix) something-odd\n'; }
+  run check_nix_version
+  [ "$status" -eq 0 ]
+}
+
+@test "a nix that cannot list a profile is treated as an empty one" {
+  other_linux
+  load_installer
+  stub_nix
+  nix() { [[ "$*" == "profile list --json" ]] && return 1; return 0; }
+  run install_gotg
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"installing GOTG"* ]]
+}
+
+# --- main's own arguments ------------------------------------------------------
+#
+# Never reached by sourcing, but still defined, so it is called here with its
+# steps replaced by nothing.
+
+stub_steps() {
+  ensure_nix() { :; }
+  ensure_flakes() { :; }
+  install_gotg() { :; }
+  ensure_uinput() { :; }
+  add_to_steam() { :; }
+}
+
+@test "-n is --dry-run, and the steps see it" {
+  other_linux
+  load_installer
+  stub_steps
+  ensure_nix() { printf 'ensure_nix DRY_RUN=%s\n' "$DRY_RUN"; }
+  run main -n
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ensure_nix DRY_RUN=1"* ]]
+  [[ "$output" == *"Dry run done"* ]]
+}
+
+@test "--help prints usage and runs no step" {
+  other_linux
+  load_installer
+  ensure_nix() { echo "SHOULD NOT RUN"; }
+  run main --dry-run --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"usage: gotg-install"* ]]
+  [[ "$output" != *"SHOULD NOT RUN"* ]]
+}
+
+@test "an unknown option dies before touching anything" {
+  other_linux
+  load_installer
+  ensure_nix() { echo "SHOULD NOT RUN"; }
+  run main --bogus
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unknown option: --bogus"* ]]
+  [[ "$output" != *"SHOULD NOT RUN"* ]]
+}
+
+# --- the udev rule's other branches --------------------------------------------
+
+@test "a rule already on disk but not yet live says reboot and asks for nothing" {
+  other_linux
+  export GOTG_UINPUT="$TMP/no-such-uinput"
+  load_installer
+  printf '%s\n' "$UDEV_RULE" >"$GOTG_UDEV_PATH"
+  stub_side_effects
+  run ensure_uinput
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"reboot"* ]]
+  [ ! -s "$SIDE" ]
+}
+
+@test "a dry run on a locked Deck unlocks and relocks only on paper" {
+  steamos
+  export GOTG_UINPUT="$TMP/no-such-uinput"
+  load_installer
+  stub_side_effects
+  steamos-readonly() { printf 'enabled\n'; }
+  DRY_RUN=1 run ensure_uinput
+  [ "$status" -eq 0 ]
+  [ ! -s "$SIDE" ]
+  [[ "$output" == *"would run: sudo steamos-readonly disable"* ]]
+  [[ "$output" == *"would run: sudo steamos-readonly enable"* ]]
+}
+
+@test "a refused rule write on a desktop is an error, not a silent Done" {
+  other_linux
+  export GOTG_UINPUT="$TMP/no-such-uinput"
+  load_installer
+  stub_side_effects
+  sudo() { [[ "$1" != tee ]]; }
+  run ensure_uinput
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"could not write"* ]]
+}
+
+@test "GOTG_DRY_RUN in the environment is honoured" {
+  other_linux
+  export GOTG_DRY_RUN=1
+  load_installer
+  [ "$DRY_RUN" = "1" ]
 }

@@ -127,9 +127,28 @@ install_nix_generic() {
   change nix_installer --daemon
 }
 
+# `nix profile add`, and upgrading a profile entry by name, both arrived in
+# 2.30. An older Nix would be handed commands it does not know.
+NIX_MIN="2.30"
+check_nix_version() {
+  local found major minor
+  found="$(nix --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
+  if [[ -z "$found" ]]; then
+    warn "could not read this Nix's version; continuing as if it were new enough"
+    return 0
+  fi
+  IFS=. read -r major minor _ <<<"$found"
+  if ((major < ${NIX_MIN%.*} || (major == ${NIX_MIN%.*} && minor < ${NIX_MIN#*.}))); then
+    die "Nix $found is older than $NIX_MIN, which this needs.
+     Upgrade it and run this again: nix upgrade-nix
+     (with sudo on a machine that runs the Nix daemon)"
+  fi
+}
+
 ensure_nix() {
   if have_nix && use_nix; then
     skip "Nix is here"
+    check_nix_version
     return 0
   fi
   if is_steamos; then install_nix_steamos; else install_nix_generic; fi
