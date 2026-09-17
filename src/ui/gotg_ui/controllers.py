@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+from dataclasses import dataclass
 
 import pygame
 
@@ -119,8 +120,9 @@ def anchors_for(
     diagram: Diagram,
     bindings: dict[str, str],
     rect,
-    bound: bool = True,
+    with_binding: bool = True,
     alias: dict[str, str] | None = None,
+    pressed: dict[str, str] | None = None,
 ) -> list[Anchor]:
     """Every bound input that the artwork has a place for.
 
@@ -145,27 +147,39 @@ def anchors_for(
         # With a binding, the label is the input and what drives it. Without
         # one it is what the button is called, because "dpup — " reads as a
         # line somebody forgot to finish.
-        label = f"{name} — {description}" if bound else description or name
+        label = f"{name} — {description}" if with_binding else description or name
+        actual = (pressed or {}).get(name)
+        if actual:
+            label = f"{label}   {actual}"
         out.append(Anchor(input=name, x=left + uv[0] * width, y=top + uv[1] * height, label=label))
     return out
 
 
-def draw(screen, assets: pathlib.Path, platform: str, font_at, cache: dict, highlight: str | None = None) -> None:
-    """The whole screen: pad, labels, leaders, and whatever is missing."""
-    width, height = screen.get_size()
-    screen.fill(BACKGROUND)
+@dataclass(frozen=True)
+class Shown:
+    """What a platform's diagram is made of, resolved once.
 
-    title = font_at(46).render(f"Controller — {platform}", True, TEXT)
-    screen.blit(title, ((width - title.get_width()) // 2, int(height * 0.045)))
+    draw() and the cursor both need it, and two answers to "which controls does
+    this console have" is two places for them to disagree about what is on
+    screen.
+    """
 
+    console: str
+    bindings: dict
+    artwork: str
+    seats: int
+    with_binding: bool
+    alias: dict
+
+
+def resolve(platform: str) -> Shown:
     console = console_for(platform)
     if console is not None:
         bindings = bindings_for(console)
         known = for_ares(console)
         artwork = known.artwork if known else FALLBACK
         seats = players_for(console)
-        bound = True
-        alias = {}
+        return Shown(console, bindings, artwork, seats, True, {})
     else:
         # No ares console. For most platforms that means the environment has
         # not been built yet and playing a game once fills it in -- but for
@@ -181,21 +195,68 @@ def draw(screen, assets: pathlib.Path, platform: str, font_at, cache: dict, high
         # What the controller seats, from its own file. The ares table has
         # never heard of this console and would answer one for a pad that
         # takes four.
-        seats = scheme.players
-        bound = False
-        alias = scheme.anchors
-        if not bindings:
-            # Not "play one and they appear here", which is only true for the
-            # emulators that publish a console. Dolphin and Ryujinx never do,
-            # so for their platforms that sentence promises something that
-            # cannot happen. Starting a game is what captures them, either way.
-            _note(
-                screen,
-                font_at,
-                "No bindings for this platform yet.",
-                "They are captured the first time you start a game.",
-            )
-            return
+        return Shown(console, bindings, artwork, scheme.players, False, scheme.anchors)
+
+
+
+def control_places(assets: pathlib.Path, platform: str, cache: dict) -> dict[str, tuple[float, float]]:
+    """Every control's place on the drawing, normalised, for moving around it.
+
+    The intersection of what the console has and what the artwork marks, which
+    is the same set the labels are drawn from -- a cursor that could land on a
+    control with no circle would vanish.
+    """
+    shown = resolve(platform)
+    diagram = diagram_for(assets, shown.artwork, cache)
+    if diagram is None:
+        return {}
+    places = {}
+    for name in shown.bindings:
+        for candidate in (name, shown.alias.get(name)):
+            if candidate and candidate in diagram.anchors:
+                places[name] = diagram.anchors[candidate]
+                break
+    return places
+
+
+def draw(
+    screen,
+    assets: pathlib.Path,
+    platform: str,
+    font_at,
+    cache: dict,
+    highlight: str | None = None,
+    bound: dict[str, str] | None = None,
+) -> None:
+    """The whole screen: pad, labels, leaders, and whatever is missing.
+
+    `bound` is what each control is actually bound to on the controller in
+    hand, read off padmap's profile. Without it the screen can say a console
+    has a Z button; with it, it can say which button Z is.
+    """
+    width, height = screen.get_size()
+    screen.fill(BACKGROUND)
+
+    bound_map = bound or {}
+    title = font_at(46).render(f"Controller — {platform}", True, TEXT)
+    screen.blit(title, ((width - title.get_width()) // 2, int(height * 0.045)))
+
+    shown = resolve(platform)
+    console, bindings = shown.console, shown.bindings
+    artwork, seats = shown.artwork, shown.seats
+    bound, alias = shown.with_binding, shown.alias
+    if not bindings:
+        # Not "play one and they appear here", which is only true for the
+        # emulators that publish a console. Dolphin and Ryujinx never do, so
+        # for their platforms that sentence promises something that cannot
+        # happen. Starting a game is what captures them, either way.
+        _note(
+            screen,
+            font_at,
+            "No bindings for this platform yet.",
+            "They are captured the first time you start a game.",
+        )
+        return
 
     diagram = diagram_for(assets, artwork, cache)
     if diagram is None or not bindings:
@@ -220,7 +281,7 @@ def draw(screen, assets: pathlib.Path, platform: str, font_at, cache: dict, high
     art = diagram.surface(pad_width)
     screen.blit(art, (int(rect[0]), int(rect[1])))
 
-    anchors = anchors_for(diagram, bindings, rect, bound=bound, alias=alias)
+    anchors = anchors_for(diagram, bindings, rect, with_binding=bound, alias=alias, pressed=bound_map)
     label_height = label_font.get_linesize()
     for item in place(anchors, rect, label_height, PINNED):
         lit = highlight is not None and item.anchor.input == highlight
@@ -245,6 +306,12 @@ def draw(screen, assets: pathlib.Path, platform: str, font_at, cache: dict, high
         font_at(24).render(line, True, TEXT_DIM),
         ((width - font_at(24).size(line)[0]) // 2, int(height * 0.93)),
     )
+
+    # Said, because a cursor that moves is not obviously a cursor that can be
+    # moved. Nothing about adding a second input: padmap holds one binding per
+    # control, so offering it would be offering something with nowhere to go.
+    keys = font_at(20).render("d-pad or arrows to move around the pad", True, TEXT_DIM)
+    screen.blit(keys, ((width - keys.get_width()) // 2, int(height * 0.055)))
 
     # Said out loud rather than left to be noticed: a diagram that quietly drew
     # twenty-one of twenty-two would read as a complete answer.
