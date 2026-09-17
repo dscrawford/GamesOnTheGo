@@ -8,6 +8,11 @@
   in controllers.py's TABLE and carrying the same anchor ids; nothing else has
   to change.
 
+  The viewBox is the drawing's own bounding box, measured rather than assumed.
+  It used to be 0 0 800 480, which cut 35 units off the left grip and left 84
+  units of nothing above the shoulders, so the pad was clipped on one side and
+  floating on the other.
+
   Two rules a replacement has to keep:
 
     - Every button carries an `anchor-<input>` circle on the anchors layer,
@@ -21,7 +26,7 @@
   Flat, unbranded line art on purpose: see docs/controller-diagram-research.md
   for why that is the licence answer and the trademark answer at the same time.
 -->
-<svg xmlns="http://www.w3.org/2000/svg" width="800" height="480" viewBox="0 0 800 480">
+<svg xmlns="http://www.w3.org/2000/svg" width="850" height="392" viewBox="-43 76 850 392">
   <g id="artwork" fill="none">
     <!-- shell -->
     <path d="M 232 118
