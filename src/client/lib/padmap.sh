@@ -103,3 +103,80 @@ padmap_exec() {
   fi
   exec "$@"
 }
+
+# --- what padmap wrote, into the emulator this launch is about ---------------
+#
+# The daemon writes Ryujinx's, Cemu's and Dolphin's bindings -- and, since
+# motion arrived, where each finds padmap's DSU server -- into the *default*
+# config directories under the home. Every emulator gotg runs is isolated
+# under its own environment, so those files are never the ones it reads.
+# `padmap-rs emit` exists for exactly this: the same writer, pointed at the
+# directories the launch will use.
+
+# padmap's own rule for where its daemon leaves things (runtime::dir_under).
+padmap_runtime_dir() {
+  printf '%s' "${GOTG_PADMAP_RUNTIME:-${XDG_RUNTIME_DIR:-/tmp}/padmap}"
+}
+
+# The pads padmap has published, in the shape `emit` takes on stdin.
+#
+# Read off env.sh rather than asked of the daemon: it is rewritten on every
+# republish, it is what `padmap-rs exec` hands the game, and each mapping line
+# in it already names the pad -- GUID first, then "padmap Player N". Nothing
+# else in it is needed here: the capabilities the list can carry are for the
+# ares writer, and gotg binds ares itself.
+padmap_published() {
+  local file value
+  file="$(padmap_runtime_dir)/env.sh"
+  [[ -f "$file" ]] || return 1
+  # padmap's own file, sourced the way exec would source it, in a shell that
+  # cannot touch this one.
+  # shellcheck disable=SC1090
+  value="$(set +u; . "$file" 2>/dev/null; printf '%s' "${SDL_GAMECONTROLLERCONFIG:-}")" || return 1
+  [[ -n "$value" ]] || return 1
+  jq -cR '
+    select(length > 0)
+    | (split(",")) as $f
+    | ($f[1] // "" | capture("^padmap Player (?<n>[0-9]+)$")? // empty) as $m
+    | {player: ($m.n | tonumber), guid: $f[0], name: $f[1], sdl_line: .}
+  ' <<<"$value" | jq -cs 'select(length > 0)'
+}
+
+# Have padmap write this environment's emulator configuration. Returns 0 when
+# something was written, so a caller that snapshots the result knows to.
+#
+# Every destination is named, including the three this environment is not:
+# an unnamed one means the real location, and the point is that nothing lands
+# in the home. ares is gotg's own writer, so padmap's goes to scratch.
+padmap_emit() {
+  local attr="$1" manifest emulator state pads scratch
+  command -v "$(padmap_rs_bin)" >/dev/null 2>&1 || return 1
+  manifest="$(env_pads_manifest "$attr")"
+  [[ -f "$manifest" ]] || return 1
+  emulator="$(jq -r '.emulator // ""' "$manifest")"
+  case "$emulator" in ryujinx | cemu | dolphin) ;; *) return 1 ;; esac
+  pads="$(padmap_published)" || return 1
+
+  state="$(env_state_dir "$attr")"
+  scratch="$state/padmap-scratch"
+  mkdir -p "$scratch" || return 1
+  local ryujinx="$scratch/Config.json" cemu="$scratch/cemu" dolphin="$scratch/dolphin-emu"
+  case "$emulator" in
+    ryujinx) ryujinx="$(pads_ryujinx_config "$attr")" ;;
+    cemu) cemu="$(pads_cemu_config_dir "$attr")/controllerProfiles" ;;
+    dolphin) dolphin="$state/config/dolphin-emu" ;;
+  esac
+
+  local written
+  written="$("$(padmap_rs_bin)" emit \
+    --ryujinx-config "$ryujinx" \
+    --cemu-dir "$cemu" \
+    --dolphin-dir "$dolphin" \
+    --ares-settings "$scratch/settings.bml" \
+    --env-file "$scratch/env.sh" <<<"$pads" 2>/dev/null)" || return 1
+  rm -rf "$scratch"
+  # Only the file this environment reads counts as written; the scratch ones
+  # were the price of naming every destination.
+  grep -qF "$state/" <<<"$written" || return 1
+  log "padmap wrote the $emulator bindings and motion for $attr"
+}
