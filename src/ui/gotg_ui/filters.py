@@ -29,11 +29,12 @@ REGION = "region"
 INSTALLED = "installed"
 SEARCH = "search"
 CLEAR = "clear"
+CONTROLLER = "controller"
 
 # In the order somebody reaches for them: what console, then where it is from,
 # then whether it is on this machine. Search last because typing is the slow
 # one, and clear at the bottom because it undoes the four above it.
-ROWS = (PLATFORM, REGION, INSTALLED, SEARCH, CLEAR)
+ROWS = (PLATFORM, REGION, INSTALLED, SEARCH, CLEAR, CONTROLLER)
 
 LABELS = {
     PLATFORM: "Platform",
@@ -41,6 +42,7 @@ LABELS = {
     INSTALLED: "Installed",
     SEARCH: "Search",
     CLEAR: "Clear all",
+    CONTROLLER: "Controller for…",
 }
 
 # What a row does when it is pressed rather than nudged.
@@ -100,6 +102,9 @@ class Filters:
             browser.cycle_platform(delta)
         elif row == REGION:
             browser.cycle_region(delta)
+        elif row == CONTROLLER:
+            # Nothing to nudge: it is a way in, not a value.
+            return
         elif row == INSTALLED:
             # Round the three, both ways, like every other row here.
             options = INSTALLED_OPTIONS
@@ -131,12 +136,21 @@ class Filters:
         )
         return None
 
-    def choose(self, browser) -> None:
-        """A on an open list: take the highlighted option and close."""
+    def choose(self, browser) -> str | None:
+        """A on an open list: take the highlighted option and close.
+
+        Returns a platform when the row was the controller one, because that
+        is not a filter -- it is a screen to open, and the panel does not open
+        screens.
+        """
         if self.choice is None:
-            return
-        set_value(browser, self.choice.row, self.choice.value)
+            return None
+        row, value = self.choice.row, self.choice.value
         self.choice = None
+        if row == CONTROLLER:
+            return value
+        set_value(browser, row, value)
+        return None
 
     def close(self) -> None:
         """B on an open list. Closes the list, not the panel -- one press, one
@@ -172,6 +186,11 @@ def options_for(browser, row: str) -> tuple[str, ...]:
         return tuple(browser.regions)
     if row == INSTALLED:
         return INSTALLED_OPTIONS
+    if row == CONTROLLER:
+        # Every platform, and not "all": there is no controller diagram for
+        # everything at once, and a row that offered one would be offering a
+        # screen that cannot be drawn.
+        return tuple(p for p in browser.platforms if p != PRESENCE_ALL)
     return ()
 
 
