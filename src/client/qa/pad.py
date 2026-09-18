@@ -96,6 +96,17 @@ def main():
         press(ui, e.BTN_START)
         time.sleep(1.5)
 
+    # A before anything moves the selection. The recomp launchers open on
+    # their own "Start game" item, and the loop below moves the stick four
+    # times before it first presses anything -- so it walked down the menu
+    # and pressed A on Exit, which looked like the game quitting on its own
+    # a few seconds after the inputs began.
+    for _ in range(3):
+        if not running:
+            break
+        press(ui, e.BTN_SOUTH)
+        time.sleep(1.0)
+
     full = 32767
     while running:
         for x, y in [(-full, 0), (full, 0), (0, -full), (0, full), (0, 0)]:

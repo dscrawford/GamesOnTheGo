@@ -104,11 +104,23 @@ in
 
     ${installMods}
 
-    # $target is the bare .z64 the recipe left in the games directory, so
-    # there is nothing to unpack here — only the one thing this port cannot
-    # be told from the outside.
+    # The ROM, put where the port keeps the copy it makes for itself, so its
+    # picker never opens. N64ModernRuntime stores a picked ROM as
+    # `<game_id>.z64` beside the settings — GameEntry::stored_filename() is
+    # `game_id + u8".z64"` — and check_all_stored_roms() looks there first.
+    #
+    # `DK64`, capitals and all, taken from upstream's own registration
+    # (`.game_id = u8"DK64"`). Not the `dk64` its mods declare: that is the
+    # separate mod_game_id, and a file named after it is simply never looked
+    # at. See the same note in usa.snowboard_kids_2.nix, where the two ids
+    # differ more visibly.
+    #
+    # A copy rather than a link: this is the port's file to manage — it
+    # deletes it outright when the hash does not match — and it must not be
+    # able to reach the player's only dump through it.
     if [ ! -f "$state/.config/DK64Recompiled/DK64.z64" ]; then
-      echo "first run: choose Load ROM and pick $target — asked once, then stored" >&2
+      echo "first run: handing the port its copy of the ROM" >&2
+      cp -f "$target" "$state/.config/DK64Recompiled/DK64.z64"
     fi
   '';
 

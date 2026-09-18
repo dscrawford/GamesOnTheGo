@@ -70,13 +70,30 @@
 
   preLaunch = ''
     export HOME="$state"
-    mkdir -p "$state/.config/SnowboardKids2Recompiled/mods"
+    config="$state/.config/SnowboardKids2Recompiled"
+    mkdir -p "$config/mods"
 
-    # $target is the bare .z64 the recipe left in the games directory, so
-    # there is nothing to unpack here — only the one thing this port cannot
-    # be told from the outside.
-    if [ -z "$(find "$state/.config/SnowboardKids2Recompiled" -maxdepth 1 -name '*.z64' -print -quit 2>/dev/null)" ]; then
-      echo "first run: choose Load ROM and pick $target — asked once, then stored" >&2
+    # The ROM, put where the port keeps the copy it makes for itself, so its
+    # picker never opens. N64ModernRuntime stores a picked ROM as
+    # `<game_id>.z64` beside the settings — GameEntry::stored_filename() is
+    # `game_id + u8".z64"` — and check_all_stored_roms() looks there before
+    # asking anyone anything.
+    #
+    # The id is the long one. Every port of this kind carries two, and the
+    # short one is the wrong one: upstream registers
+    # `.game_id = u8"snowboardkids2.n64.us"` beside
+    # `.mod_game_id = "snowboardkids2"`, and it is the former that names the
+    # file. A name that is merely wrong fails silently — the runtime finds
+    # nothing to check, leaves the file alone, and the launcher still says
+    # "Select ROM", which is exactly what a copy called snowboardkids2.z64
+    # did here.
+    #
+    # A copy rather than a link: this is the port's file to manage — it
+    # deletes it outright when the hash does not match — and it must not be
+    # able to reach the player's only dump through it.
+    if [ ! -f "$config/snowboardkids2.n64.us.z64" ]; then
+      echo "first run: handing the port its copy of the ROM" >&2
+      cp -f "$target" "$config/snowboardkids2.n64.us.z64"
     fi
   '';
 
