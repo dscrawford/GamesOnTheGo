@@ -648,6 +648,23 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   [ "$status" -eq 0 ]
 }
 
+@test "the launcher is rewritten even while Steam is open" {
+  # Only the shortcut has to wait for Steam to close. The launcher is our
+  # file, read fresh each press -- and on a Deck, where Steam is up from boot
+  # to shutdown, deferring it too meant every fix to it sat in the queue.
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  fake_picker
+  local launcher="$GOTG_STATE_DIR/launchers/gotg-ui.sh"
+  mkdir -p "$(dirname "$launcher")"
+  printf '#!/bin/sh\necho stale\n' >"$launcher"
+
+  GOTG_STEAM_RUNNING=1 gotg steam picker
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"Steam is running"* ]]
+  ! grep -q "echo stale" "$launcher"
+  grep -q "gotg_ui_root" "$launcher"
+}
+
 @test "the launcher runs the synced picker before anything on PATH" {
   # Three builds of the picker were live on one machine at once: the one
   # sync had just made, the one direnv had loaded, and the one Steam had
@@ -659,7 +676,9 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   local launcher="$GOTG_STATE_DIR/launchers/gotg-ui.sh"
 
   mkdir -p "$GOTG_STATE_DIR/picker/bin"
-  printf '#!/usr/bin/env bash\ntouch "%s/ran-synced-root"\n' "$TEST_TMP" \
+  # A builtin, not touch: the launcher runs on a PATH with almost nothing on
+  # it, and that is the point of the test.
+  printf '#!/usr/bin/env bash\n: >"%s/ran-synced-root"\n' "$TEST_TMP" \
     >"$GOTG_STATE_DIR/picker/bin/gotg-ui"
   chmod +x "$GOTG_STATE_DIR/picker/bin/gotg-ui"
   # PATH still holds the stand-in picker; it must not be the one chosen.

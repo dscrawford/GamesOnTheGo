@@ -608,8 +608,32 @@ steam_picker() {
   [[ -x "$picker" ]] ||
     die "no gotg-ui here. Install the picker first: nix profile add $GOTG_REMOTE_FLAKE#gotg-ui"
 
+  # The launcher is written whether Steam is open or not. It is our file,
+  # read fresh each time the entry is pressed, and only the shortcut file
+  # has to wait for Steam to close -- on a Deck, where Steam is up from boot
+  # to shutdown, deferring the launcher too meant it was never rewritten and
+  # every fix to it sat in the queue.
+  steam_write_picker_launcher "$launcher"
+
   ! steam_defer picker "" "" || return 0
 
+  local result
+  result="$(steam_helper --file "$(steam_shortcuts_file)" add \
+    --name "$name" --exe "$launcher" --start-dir "$(dirname "$launcher")" \
+    --tag "GOTG")" ||
+    die "could not write the Steam shortcut"
+
+  log "$(jq -r '"\(.action): \(.name)"' <<<"$result")"
+  log "  $launcher -> $picker"
+  log ""
+  log "Restart Steam and it will be in your library — it reads its shortcut"
+  log "file once, at startup, so a Steam that is already open will not see it."
+}
+
+# What `gotg steam picker` writes for Steam to press. Its own function so the
+# launcher can be refreshed while the shortcut waits.
+steam_write_picker_launcher() {
+  local launcher="$1"
   mkdir -p "$(dirname "$launcher")"
   # By name, not by path, for the reason above -- resolved against PATH each
   # time it is pressed.
@@ -702,18 +726,6 @@ printf 'Install it with: nix profile add github:dscrawford/GamesOnTheGo#gotg-ui\
 exit 127
 LAUNCHER
   chmod +x "$launcher"
-
-  local result
-  result="$(steam_helper --file "$(steam_shortcuts_file)" add \
-    --name "$name" --exe "$launcher" --start-dir "$(dirname "$launcher")" \
-    --tag "GOTG")" ||
-    die "could not write the Steam shortcut"
-
-  log "$(jq -r '"\(.action): \(.name)"' <<<"$result")"
-  log "  $launcher -> $picker"
-  log ""
-  log "Restart Steam and it will be in your library — it reads its shortcut"
-  log "file once, at startup, so a Steam that is already open will not see it."
 }
 
 steam_add() {
