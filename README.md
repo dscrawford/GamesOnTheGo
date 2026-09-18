@@ -184,7 +184,7 @@ A variant whose version range matches nothing installed is hidden; `gotg info <i
 disabled:  enhanced (needs 1.1.0 to 1.4.2)
 ```
 
-Native ports, not emulated: Ocarina of Time and Master Quest (Ship of Harkinian), Majora's Mask (2 Ship 2 Harkinian), Donkey Kong 64 (recomp), Snowboard Kids 2 (recomp), Super Smash Bros. (BattleShip), Pikmin (Open Nectar), Super Mario 64 `pc` (sm64coopdx), Paper Mario `recut` (Wine).
+Native ports, not emulated: Ocarina of Time and Master Quest (Ship of Harkinian), Majora's Mask (2 Ship 2 Harkinian), Donkey Kong 64 (recomp), Snowboard Kids 2 (recomp), Super Smash Bros. (BattleShip), Pikmin (Open Nectar), Super Mario 64 `pc` (sm64coopdx), Paper Mario `recut` (Wine), Animal Crossing (ACGC PC Port, Wine).
 
 ## Saves
 

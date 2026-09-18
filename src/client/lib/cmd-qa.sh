@@ -65,7 +65,7 @@ qa_golden_path() {
 # scratch mirrors the real state dir's layout, <scratch>/<attr>, so a path
 # relative to one maps straight onto the other.
 qa_seed_bootstrap() {
-  local attr="$1" scratch="$2" real o2r dest assets
+  local attr="$1" scratch="$2" real o2r dest derived
   real="$GOTG_STATE_DIR/env/$attr"
   [[ -d "$real" ]] || return 0
   while IFS= read -r -d '' o2r; do
@@ -74,16 +74,27 @@ qa_seed_bootstrap() {
     cp -f "$o2r" "$dest"
   done < <(find "$real" -name '*.o2r' -print0 2>/dev/null)
 
-  # The same idea for a port that unpacks its assets into a directory rather
-  # than into one archive -- Pikmin's is 642MB and takes minutes, which a run
-  # would otherwise spend on extracting instead of on playing, every time.
-  # Linked rather than copied: it is read-only to the game, and copying it
-  # per run would cost more than the extraction it saves.
-  while IFS= read -r -d '' assets; do
-    dest="$scratch/$attr/${assets#"$real"/}"
+  # The same idea for the ports that make a directory rather than one
+  # archive, and for the same reason: Pikmin's assets are 642MB and take
+  # minutes to unpack, Animal Crossing's disc is a conversion out of RVZ, and
+  # a run that redoes either spends itself on that instead of on playing.
+  # Linked rather than copied -- both are read-only to the game.
+  while IFS= read -r -d '' derived; do
+    dest="$scratch/$attr/${derived#"$real"/}"
     mkdir -p "$(dirname "$dest")"
-    [[ -e "$dest" ]] || ln -s "$assets" "$dest"
-  done < <(find "$real" -maxdepth 2 -type d -name assets -print0 2>/dev/null)
+    [[ -e "$dest" ]] || ln -s "$derived" "$dest"
+  done < <(
+    find "$real" -maxdepth 2 -type d \( -name assets -o -name rom \) -print0 2>/dev/null
+  )
+
+  # A Wine prefix is the third shape of the same problem: wineboot costs the
+  # best part of a minute and the run would pay it every time. Copied rather
+  # than linked, because unlike the other two the game writes to it -- and a
+  # few hundred megabytes of copy is still much faster than making one.
+  if [[ -d "$real/prefix" && ! -e "$scratch/$attr/prefix" ]]; then
+    mkdir -p "$scratch/$attr"
+    cp -a "$real/prefix" "$scratch/$attr/prefix"
+  fi
 }
 
 # Stop before a run that is only going to hang. A harkinian environment whose
