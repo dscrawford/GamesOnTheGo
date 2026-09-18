@@ -584,3 +584,52 @@ fake_zenity() {
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"build stopped: the progress dialog was cancelled"* ]]
 }
+
+# --- a root built by an older gotg ---------------------------------------------
+#
+# `play` built a missing environment and never looked at one that was there,
+# so a client upgraded under a person kept launching the environments the
+# old one had built -- the Deck after every `nix profile upgrade`, and a
+# checkout after every pull. Four Swords 3p died on a wrapper three pins old.
+
+@test "a root built by an older client is rebuilt on the next launch" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  gotg download usa.zelda
+  rm -rf "$GOTG_ROOTS_DIR/env-n64"
+  stub_nix
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [ "$(grep -c "build $GOTG_FLAKE#env-n64" "$NIX_LOG")" -eq 1 ]
+  # The root remembers who built it.
+  [ -s "$GOTG_ROOTS_DIR/env-n64.by" ]
+
+  # The same client again: nothing to do.
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [ "$(grep -c "build $GOTG_FLAKE#env-n64" "$NIX_LOG")" -eq 1 ]
+
+  # A root some older gotg built: rebuilt, then launched.
+  printf '/nix/store/00000000000000000000000000000000-gotg-0.0.1\n' >"$GOTG_ROOTS_DIR/env-n64.by"
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [ "$(grep -c "build $GOTG_FLAKE#env-n64" "$NIX_LOG")" -eq 2 ]
+  [[ "$stderr" == *"built by an older gotg"* ]]
+  [[ "$output" == *"launched with:"* ]]
+}
+
+@test "a rebuild that fails still launches what is there" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  gotg download usa.zelda
+  rm -rf "$GOTG_ROOTS_DIR/env-n64"
+  stub_nix
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  printf '/nix/store/00000000000000000000000000000000-gotg-0.0.1\n' >"$GOTG_ROOTS_DIR/env-n64.by"
+  stub_nix fail
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"could not rebuild"* ]]
+  [[ "$output" == *"launched with:"* ]]
+}

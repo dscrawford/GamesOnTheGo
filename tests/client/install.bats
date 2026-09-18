@@ -537,3 +537,19 @@ EOF
   [[ "$output" == *"would run: $GOTG_STEAM_BIN"* ]]
   [ ! -s "$SIDE" ]
 }
+
+@test "an upgrade rebuilds the environments already here" {
+  # A newer gotg launching yesterday's environments is the Deck after every
+  # upgrade: the roots only ever caught up when somebody ran gotg sync.
+  other_linux
+  load_installer
+  stub_nix
+  stub_side_effects
+  NIX_HAVE="gotg gotg-ui" run install_gotg
+  [ "$status" -eq 0 ]
+  grep -qx "gotg sync" "$SIDE"
+  # A first install has nothing to catch up.
+  : >"$SIDE"
+  NIX_HAVE="" run install_gotg
+  ! grep -q "gotg sync" "$SIDE"
+}
