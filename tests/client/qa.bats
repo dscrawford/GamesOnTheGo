@@ -292,3 +292,31 @@ make_rundir() {
   GOTG_HOST_GL="$TEST_TMP/opengl-driver" run qa_host_lacks_gl
   [ "$status" -ne 0 ]
 }
+
+@test "a machine's shims stand in for a tool, first on the game's PATH" {
+  # The Deck's xrandr describes a portrait panel shown rotated; a frame sized
+  # from its starred mode came up on its side, and only a Deck says that.
+  run qa_machine_env deck "$TEST_TMP/machine-bin"
+  [ "$status" -eq 0 ]
+  [ -x "$TEST_TMP/machine-bin/xrandr" ]
+  [[ "$output" == *"export PATH="*"machine-bin"* ]]
+  local seen
+  seen="$(bash -c "$(qa_machine_env deck "$TEST_TMP/machine-bin"); xrandr --current | head -2")"
+  [[ "$seen" == *"current 1280 x 800"* ]]
+  [[ "$seen" == *"eDP-1 connected primary 1280x800+0+0 right"* ]]
+}
+
+@test "asked for no directory, a profile installs no shims and says nothing about PATH" {
+  run qa_machine_env deck
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"PATH"* ]]
+}
+
+@test "a shim the profile names must exist" {
+  cp "$GOTG_DATA/qa-machines.json" "$TEST_TMP/machines.json"
+  jq '.deck.shims += ["nonesuch"]' "$TEST_TMP/machines.json" >"$TEST_TMP/m2.json"
+  qa_machines_json() { printf '%s' "$TEST_TMP/m2.json"; }
+  run --separate-stderr qa_machine_env deck "$TEST_TMP/machine-bin"
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"no file: qa-shims/deck/nonesuch"* ]]
+}

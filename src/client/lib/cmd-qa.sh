@@ -176,7 +176,7 @@ qa_machine_names() { jq -r 'keys[] | select(. != "_")' "$(qa_machines_json)" | t
 # `unset` for what it takes away. Written rather than passed as one string
 # because a value with a space in it is one export, not two.
 qa_machine_env() {
-  local machine="$1" file
+  local machine="$1" bindir="${2:-}" file shim
   file="$(qa_machines_json)"
   jq -e --arg m "$machine" 'has($m) and $m != "_"' "$file" >/dev/null 2>&1 ||
     die "no such machine profile: $machine (known: $(qa_machine_names))"
@@ -186,6 +186,21 @@ qa_machine_env() {
   jq -r --arg m "$machine" '
     (.[$m].env // {}) | to_entries[] | "export " + .key + "=" + (.value | @sh)
   ' "$file"
+  # Shims: a real machine's answer, verbatim, put first on the game's PATH --
+  # for a difference in what a tool says rather than in what is installed.
+  # The Deck's xrandr describes a portrait panel shown rotated, and nothing
+  # else does. Only when given somewhere to put them.
+  [[ -n "$bindir" ]] || return 0
+  while IFS= read -r shim; do
+    [[ -n "$shim" ]] || continue
+    [[ -f "$GOTG_DATA/qa-shims/$machine/$shim" ]] ||
+      die "machine profile $machine names a shim with no file: qa-shims/$machine/$shim"
+    mkdir -p "$bindir"
+    cp "$GOTG_DATA/qa-shims/$machine/$shim" "$bindir/$shim"
+    chmod +x "$bindir/$shim"
+    # shellcheck disable=SC2016  # $PATH is the session's to expand, not ours
+    printf 'export PATH=%q:"$PATH"\n' "$bindir"
+  done < <(jq -r --arg m "$machine" '(.[$m].shims // [])[]' "$file" | sort -u)
 }
 
 # Whether the run's tools -- the compositor, its Xwayland, the recorder --
@@ -349,7 +364,7 @@ EOF
     log "the compositor and recorder use nixpkgs' mesa (no host GL)"
     eval "$(gotg-qa-gl-env)"
   fi
-  qa_machine_env "$machine" >"$rundir/machine.env"
+  qa_machine_env "$machine" "$rundir/machine-bin" >"$rundir/machine.env"
   printf '%s\n' "$machine" >"$rundir/machine"
   log "running $(manifest_field "$PLAY_GAME" title) headless for ${duration}s as a $machine"
   # SDL_AUDIODRIVER (and SDL3's spelling): route SDL-audio emulators through
