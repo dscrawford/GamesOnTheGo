@@ -320,3 +320,18 @@ make_rundir() {
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"no file: qa-shims/deck/nonesuch"* ]]
 }
+
+@test "a profile can name a shim by path, for a program whose own PATH prefix would win" {
+  run qa_machine_env deck "$TEST_TMP/machine-bin"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"export SPLITSCREEN_XRANDR='$TEST_TMP/machine-bin/xrandr'"* ]]
+}
+
+@test "a Deck carries no desktop's compositor preferences into the game" {
+  # WLR_RENDERER=vulkan from a desktop's own sway reached the split-screen
+  # frame under the deck profile, and with the Deck's GL -- nixpkgs' mesa,
+  # no NVIDIA driver -- the nested sway could find no Vulkan device and
+  # never came up. A Deck sets no such thing; neither does the profile.
+  run qa_machine_env deck
+  [[ "$output" == *"unset WLR_RENDERER"* ]]
+}
