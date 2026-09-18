@@ -171,6 +171,10 @@ play_prepare() {
 # Rebuild the GC roots after pulling a new version of the flake.
 cmd_sync() {
   local flake force=""
+  # No dialog. Sync narrates itself, a line per environment, and a progress
+  # window on top of that is the same news twice — and under the installer,
+  # which runs a sync after every upgrade, it is a window nobody asked for.
+  export GOTG_NO_DIALOG=1
   [[ "${1:-}" != "--force" && "${1:-}" != "-f" ]] || force=1
   flake="$(gotg_flake)"
   # A URL ref answers from nix's fetch cache for up to an hour; sync exists
@@ -208,7 +212,13 @@ cmd_sync() {
   # Only rebuild the environments that are already in use here. One line
   # each, and a failure marks its line rather than ending the pass — a
   # platform whose build broke should not keep the others stale.
+  #
+  # Several at a time: the builds are independent, most of a sync is waiting
+  # on nix, and a machine with a dozen environments spent that wait one
+  # environment at a time. The cap is what keeps a Deck from trying to
+  # compile twelve emulators at once; nix does its own scheduling under it.
   local root name changed=0 failed=0
+  local -a wanted=()
   if [[ -d "$GOTG_ROOTS_DIR" ]]; then
     for root in "$GOTG_ROOTS_DIR"/*; do
       [[ -e "$root" ]] || continue
@@ -222,18 +232,44 @@ cmd_sync() {
         _sync_mark skipped "$name" "not an environment name; rm $root"
         continue
       fi
-      before="$(readlink -f "$root" 2>/dev/null || true)"
-      if (GOTG_BUILD_QUIET=1 env_build "$name") 2>"$GOTG_STATE_DIR/sync-$name.log"; then
-        after="$(readlink -f "$root" 2>/dev/null || true)"
-        if [[ "$before" != "$after" ]]; then
-          _sync_mark changed "$name"
-          changed=$((changed + 1))
+      wanted+=("$name")
+      # Taken before anything starts: what the root pointed at when this sync
+      # began is what "changed" is measured against.
+      printf '%s\n' "$(readlink -f "$root" 2>/dev/null || true)" \
+        >"$GOTG_STATE_DIR/sync-$name.before"
+    done
+
+    local jobs="${GOTG_SYNC_JOBS:-4}"
+    [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || jobs=4
+    for name in "${wanted[@]+"${wanted[@]}"}"; do
+      # One slot at a time, so the cap is a cap rather than a suggestion.
+      while (($(jobs -rp | wc -l) >= jobs)); do wait -n; done
+      (
+        if (GOTG_BUILD_QUIET=1 env_build "$name") 2>"$GOTG_STATE_DIR/sync-$name.log"; then
+          printf 'built\n' >"$GOTG_STATE_DIR/sync-$name.result"
         else
-          _sync_mark same "$name"
+          printf 'failed\n' >"$GOTG_STATE_DIR/sync-$name.result"
         fi
-      else
+      ) &
+    done
+    wait
+
+    # Reported in the order they were found, never the order they finished:
+    # which build was quickest is not something to read a list by.
+    for name in "${wanted[@]+"${wanted[@]}"}"; do
+      before="$(cat "$GOTG_STATE_DIR/sync-$name.before" 2>/dev/null || true)"
+      rm -f "$GOTG_STATE_DIR/sync-$name.before"
+      if [[ "$(cat "$GOTG_STATE_DIR/sync-$name.result" 2>/dev/null || true)" != built ]]; then
         _sync_mark failed "$name" "$GOTG_STATE_DIR/sync-$name.log"
         failed=$((failed + 1))
+        continue
+      fi
+      after="$(readlink -f "$GOTG_ROOTS_DIR/$name" 2>/dev/null || true)"
+      if [[ "$before" != "$after" ]]; then
+        _sync_mark changed "$name"
+        changed=$((changed + 1))
+      else
+        _sync_mark same "$name"
       fi
     done
   fi
