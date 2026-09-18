@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# What `xrandr --current` says on a Steam Deck in Desktop Mode, verbatim,
+# captured 2026-09-17 on SteamOS 3.8.16 under KDE's Xwayland. The panel is
+# portrait and shown rotated: the starred mode is 800x1280 while the output's
+# geometry is 1280x800 -- and a frame sized from the mode came up on its side.
+# Under Game Mode gamescope's Xwayland answers with the geometry alone.
+cat <<'XRANDR'
+Screen 0: minimum 16 x 16, current 1280 x 800, maximum 32767 x 32767
+eDP-1 connected primary 1280x800+0+0 right (normal left inverted right x axis y axis) 100mm x 160mm
+   800x1280      89.87*+
+   800x600       89.85  
+   640x480       89.73  
+   320x240       87.89  
+XRANDR
