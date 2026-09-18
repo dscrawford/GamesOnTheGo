@@ -183,8 +183,10 @@ qa_machine_env() {
   jq -r --arg m "$machine" '
     (.[$m].unset // [])[] | "unset " + .
   ' "$file"
-  jq -r --arg m "$machine" '
-    (.[$m].env // {}) | to_entries[] | "export " + .key + "=" + (.value | @sh)
+  # {shims} in a value is where this run's shims are: a program the game
+  # has to be told about by path, because its own PATH prefix would win.
+  jq -r --arg m "$machine" --arg shims "$bindir" '
+    (.[$m].env // {}) | to_entries[] | "export " + .key + "=" + (.value | gsub("\\{shims\\}"; $shims) | @sh)
   ' "$file"
   # Shims: a real machine's answer, verbatim, put first on the game's PATH --
   # for a difference in what a tool says rather than in what is installed.
