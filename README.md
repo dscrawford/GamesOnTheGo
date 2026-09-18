@@ -277,6 +277,7 @@ gotg qa <id> --machine deck         # as a Steam Deck: no host GL, X11 only, C l
 GOTG_QA_HOST_DECK=deck@10.0.0.5 gotg qa <id> --machine deck   # run it on the real Deck when it answers, stand in when it does not
 gotg qa <id> --bless                # store this run's frame as the golden image
 gotg qa <id> --duration 30 --boot-wait 5
+gotg qa --rerun latest              # that run again; --rerun <dir> for a particular one
 ```
 
 Runs and `verdict.json` land in `~/.local/state/gotg/qa/runs/`. Machine profiles: `src/client/data/qa-machines.json`.

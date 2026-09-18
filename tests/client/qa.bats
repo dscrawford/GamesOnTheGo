@@ -394,3 +394,58 @@ stub_ssh() {
   [[ "$output" == *"standing in"* ]]
   [[ "$output" == *"deck"* ]]
 }
+
+# --- a run that can be run again ------------------------------------------------
+#
+# The artifacts were kept and the invocation was not: the game survived only
+# as the name of a directory under env-state, and the timings only inside the
+# video check. "Run that one again" meant reconstructing it from memory.
+
+@test "a run writes down what it was" {
+  run qa_record_run "$TEST_TMP/run1" usa.zelda 60fps deck 30 10 1
+  [ "$status" -eq 0 ]
+  local rec="$TEST_TMP/run1/run.json"
+  [ -f "$rec" ]
+  [ "$(jq -r .id "$rec")" = usa.zelda ]
+  [ "$(jq -r .variant "$rec")" = 60fps ]
+  [ "$(jq -r .machine "$rec")" = deck ]
+  [ "$(jq -r .duration "$rec")" = 30 ]
+  [ "$(jq -r .boot_wait "$rec")" = 10 ]
+  [ "$(jq -r .bless "$rec")" = true ]
+  # Which build produced it, so a result is attributable to one.
+  [ -n "$(jq -r .gotg "$rec")" ]
+}
+
+@test "a run with no variant says so rather than inventing one" {
+  qa_record_run "$TEST_TMP/run2" usa.zelda "" desktop 60 15 ""
+  [ "$(jq -r '.variant // "null"' "$TEST_TMP/run2/run.json")" = null ]
+  [ "$(jq -r .bless "$TEST_TMP/run2/run.json")" = false ]
+}
+
+@test "what was written down is what runs again" {
+  qa_record_run "$TEST_TMP/run3" usa.zelda 60fps deck 30 10 1
+  run qa_rerun_args "$TEST_TMP/run3"
+  [ "$status" -eq 0 ]
+  [ "$output" = "usa.zelda 60fps --machine deck --duration 30 --boot-wait 10" ]
+}
+
+@test "a rerun does not bless again unless asked" {
+  # Blessing stores a golden frame. Doing that again by accident would
+  # quietly move the reference every rerun.
+  qa_record_run "$TEST_TMP/run4" usa.zelda "" deck 30 10 1
+  run qa_rerun_args "$TEST_TMP/run4"
+  [[ "$output" != *"--bless"* ]]
+  [ "$output" = "usa.zelda --machine deck --duration 30 --boot-wait 10" ]
+}
+
+@test "the newest run is what latest means, and an unknown one is an error" {
+  mkdir -p "$GOTG_STATE_DIR/qa/runs/20260101-000000-aaaa" "$GOTG_STATE_DIR/qa/runs/20260202-000000-bbbb"
+  run qa_run_dir latest
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"20260202-000000-bbbb"* ]]
+  run qa_run_dir 20260101-000000-aaaa
+  [ "$status" -eq 0 ]
+  run --separate-stderr qa_run_dir nonesuch
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"no such run"* ]]
+}
