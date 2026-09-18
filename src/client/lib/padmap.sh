@@ -44,7 +44,7 @@ padmap_ensure() {
 # picker's directory made it onto PATH -- which is the ordinary case, because
 # nothing puts a second entry there for a command nobody types.
 padmap_seat_bin() {
-  local named="${GOTG_SEAT:-}" beside
+  local named="${GOTG_SEAT:-}" beside dir
   if [[ -n "$named" ]]; then
     printf '%s' "$named"
     return 0
@@ -53,10 +53,25 @@ padmap_seat_bin() {
     printf 'gotg-seat'
     return 0
   fi
-  beside="$(command -v gotg-ui 2>/dev/null)" || return 1
-  beside="$(dirname "$(readlink -f "$beside")")/gotg-seat"
-  [[ -x "$beside" ]] || return 1
-  printf '%s' "$beside"
+  if beside="$(command -v gotg-ui 2>/dev/null)"; then
+    beside="$(dirname "$(readlink -f "$beside")")/gotg-seat"
+    if [[ -x "$beside" ]]; then
+      printf '%s' "$beside"
+      return 0
+    fi
+  fi
+  # The Nix profiles, by name, because a launch from Steam has none of them on
+  # PATH -- the same list the generated Steam launcher walks to find the picker
+  # itself. This is what "the check was skipped" actually was: not a machine
+  # without gotg-seat, but a PATH without the directory holding it, on the one
+  # launch path where nobody sees the warning that says so.
+  for dir in "$HOME/.nix-profile/bin" "$HOME/.local/state/nix/profile/bin" \
+    /nix/var/nix/profiles/default/bin; do
+    [[ -x "$dir/gotg-seat" ]] || continue
+    printf '%s' "$dir/gotg-seat"
+    return 0
+  done
+  return 1
 }
 
 # Ask about controllers before the game takes the screen.

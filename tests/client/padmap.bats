@@ -79,6 +79,26 @@ teardown() { stop_saves_service; }
   grep -q "padmap-rs exec --" "$PADMAP_LOG"
 }
 
+@test "the check is found in a Nix profile when PATH has none" {
+  # Which is every launch from Steam: its environment carries no profile
+  # directory, so `command -v gotg-seat` finds nothing and the check was
+  # skipped -- with the warning going to a log nobody reads.
+  local profile="$TEST_TMP/home/.nix-profile/bin"
+  mkdir -p "$profile"
+  printf '#!/bin/sh\n' >"$profile/gotg-seat"
+  chmod +x "$profile/gotg-seat"
+  run env -u GOTG_SEAT HOME="$TEST_TMP/home" PATH=/usr/bin:/bin bash -c \
+    "source '$GOTG_LIB/common.sh'; source '$GOTG_LIB/padmap.sh'; padmap_seat_bin"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "$profile/gotg-seat" ]]
+}
+
+@test "a machine with no check anywhere still says so" {
+  run env -u GOTG_SEAT HOME="$TEST_TMP/empty" PATH=/usr/bin:/bin bash -c \
+    "source '$GOTG_LIB/common.sh'; source '$GOTG_LIB/padmap.sh'; padmap_seat_bin"
+  [ "$status" -ne 0 ]
+}
+
 @test "a session that owns its compositor is launched outside the sandbox" {
   # padmap's sandbox is a user namespace, where every root-owned file reads as
   # `nobody`. wlroots then refuses /tmp/.X11-unix, Xwayland never starts, and
