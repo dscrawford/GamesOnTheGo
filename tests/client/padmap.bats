@@ -79,6 +79,30 @@ teardown() { stop_saves_service; }
   grep -q "padmap-rs exec --" "$PADMAP_LOG"
 }
 
+@test "a session that owns its compositor is launched outside the sandbox" {
+  # padmap's sandbox is a user namespace, where every root-owned file reads as
+  # `nobody`. wlroots then refuses /tmp/.X11-unix, Xwayland never starts, and
+  # a split-screen game opens to a black screen saying nothing about sandboxes.
+  export GOTG_STATE_DIR="$TEST_TMP/state"
+  mkdir -p "$GOTG_STATE_DIR/roots/env-split/share/gotg"
+  touch "$GOTG_STATE_DIR/roots/env-split/share/gotg/owns-session"
+  run bash -c 'source "$GOTG_LIB/common.sh"; source "$GOTG_LIB/env.sh"
+    source "$GOTG_LIB/padmap.sh"; PLAY_ATTR=env-split padmap_exec \
+    sh -c "echo isolate=\''${PADMAP_NO_ISOLATE:-unset}"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"isolate=1"* ]]
+}
+
+@test "an ordinary game keeps the sandbox" {
+  export GOTG_STATE_DIR="$TEST_TMP/state"
+  mkdir -p "$GOTG_STATE_DIR/roots/env-plain/share/gotg"
+  run bash -c 'source "$GOTG_LIB/common.sh"; source "$GOTG_LIB/env.sh"
+    source "$GOTG_LIB/padmap.sh"; PLAY_ATTR=env-plain padmap_exec \
+    sh -c "echo isolate=\''${PADMAP_NO_ISOLATE:-unset}"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"isolate=unset"* ]]
+}
+
 @test "no padmap installed still launches the game" {
   rm -f "$FAKE_BIN/padmap" "$FAKE_BIN/padmap-rs"
   export GOTG_PADMAP="$FAKE_BIN/padmap" GOTG_PADMAP_RS="$FAKE_BIN/padmap-rs"

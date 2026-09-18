@@ -39,6 +39,24 @@
   configFiles ? { },
   # Point XDG at {state}, so this environment's settings are its own.
   isolate ? false,
+  # This environment brings up a compositor of its own -- the split-screen
+  # sessions do, a nested sway with a gamescope per copy inside it.
+  #
+  # It is here because such a session cannot run inside padmap's sandbox. That
+  # sandbox is a user namespace, and in one of those every file owned by root
+  # reads as `nobody`, /tmp/.X11-unix included. wlroots refuses to put an X
+  # socket in a directory that is "not owned by root or us", so Xwayland never
+  # starts, gamescope is handed no output, and what reaches the screen is
+  # black. Nothing in the logs says "sandbox": it says
+  #
+  #     /tmp/.X11-unix not owned by root or us
+  #     No display available in the first 33
+  #     Failed to start Xwayland
+  #
+  # Losing that sandbox costs these sessions nothing, because they already do
+  # the same job better: each copy is given its own seat, so a game sees its
+  # own pad and no one else's -- see mods/coop-seats.nix.
+  ownsSession ? false,
   # What is worth carrying between machines: globs under {state}, and what to
   # leave out of them. These live here rather than in data/overrides.json
   # because the glob and the emulator flag that *creates* the path it matches
@@ -377,6 +395,9 @@ pkgs.runCommand "gotg-env-${name}"
     mkdir -p $out/bin $out/share/gotg
     ln -s ${app}/bin/gotg-play $out/bin/gotg-play
     cp ${pkgs.writeText "saves.json" (builtins.toJSON manifest)} $out/share/gotg/saves.json
+    ${lib.optionalString ownsSession ''
+      touch $out/share/gotg/owns-session
+    ''}
     ${lib.optionalString (keys != null) ''
       cp ${pkgs.writeText "keys.json" (builtins.toJSON keys)} $out/share/gotg/keys.json
     ''}
