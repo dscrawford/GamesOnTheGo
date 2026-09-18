@@ -38,6 +38,22 @@ in
     test -f $out/romfs/data/battle/weapon/data_battle_weapon_party.elf.zst
   '';
 
+  # Any other folder out of the same archive, by name.
+  #
+  # The download is the author's whole pack for this game, and the 60 FPS
+  # patch is one folder of about twenty. The rest are in-engine resolutions
+  # from 720p to 8K, the lighting fix the ones above 1080p need, level of
+  # detail, and switches for the game's own sharpening and colour filters.
+  # Copied out to a name without spaces or brackets in it, for the same reason
+  # the 60 FPS one is.
+  paperMarioTtydMod =
+    folder:
+    pkgs.runCommand "paper-mario-ttyd-${lib.replaceStrings [ " " "." ] [ "-" "-" ] folder}" { }
+      ''
+        cp -R --no-preserve=mode ${lib.escapeShellArg "${mods}/[${folder}]"} $out
+        test -d $out/exefs
+      '';
+
   # Which cheats start switched on, in the one format Ryujinx reads them in:
   # "<build id>-<<cheat name> Cheat>", one per line, where the build id is the
   # cheat file's name and the cheat name is a bracketed section heading inside
