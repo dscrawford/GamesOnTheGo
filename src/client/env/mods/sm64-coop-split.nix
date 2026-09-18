@@ -78,6 +78,10 @@ in
       # The frame is what gotg launches; the frame launches the games.
       emulator = split;
       bin = "splitscreen-session";
+      # A nested sway with a gamescope per copy, which is why this
+      # cannot run inside padmap's user namespace. See ownsSession in
+      # env/lib.nix for what that breaks and why nothing is lost.
+      ownsSession = true;
       # --workdir as well as the session: without it the frame keeps its logs
       # in a fresh /tmp directory per launch, which is where they were the one
       # time anybody needed them.

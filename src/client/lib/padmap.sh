@@ -99,9 +99,29 @@ padmap_seat_gate() {
 padmap_exec() {
   padmap_ensure
   if command -v "$(padmap_rs_bin)" >/dev/null 2>&1; then
+    padmap_no_sandbox_for "${PLAY_ATTR:-}" && export PADMAP_NO_ISOLATE=1
     exec "$(padmap_rs_bin)" exec -- "$@"
   fi
   exec "$@"
+}
+
+# Does this environment bring up a compositor of its own?
+#
+# padmap's sandbox is a user namespace, and inside one every file owned by
+# root reads as `nobody` -- /tmp/.X11-unix among them. wlroots will not put an
+# X socket in a directory "not owned by root or us", so a nested sway never
+# starts Xwayland, the gamescope inside it is handed no output, and the
+# screen stays black. It says nothing about sandboxes while doing it.
+#
+# So those sessions run outside it. They lose nothing: each copy inside gets
+# its own seat, which isolates a game from the other players' pads more
+# precisely than one sandbox around the lot ever did.
+#
+# The environment says so itself, with a marker file its derivation carries.
+padmap_no_sandbox_for() {
+  local attr="$1"
+  [[ -n "$attr" ]] || return 1
+  [[ -e "$(env_root "$attr")/share/gotg/owns-session" ]]
 }
 
 # --- what padmap wrote, into the emulator this launch is about ---------------
