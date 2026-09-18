@@ -272,11 +272,14 @@ src/client/env/games/<platform>/<id>.<variant>.nix   a variant
 ```bash
 gotg qa <id> [variant]              # run headless for a minute with a virtual pad; grade boot, audio, video, input
 gotg qa <id> --machine deck         # as a Steam Deck: no host GL, X11 only, C locale (also: deck-desktop)
+GOTG_QA_HOST_DECK=deck@10.0.0.5 gotg qa <id> --machine deck   # run it on the real Deck when it answers, stand in when it does not
 gotg qa <id> --bless                # store this run's frame as the golden image
 gotg qa <id> --duration 30 --boot-wait 5
 ```
 
 Runs and `verdict.json` land in `~/.local/state/gotg/qa/runs/`. Machine profiles: `src/client/data/qa-machines.json`.
+
+Every run says which machine it exercised — the real one or a stand-in — because those are two different results. Each difference found only on real hardware is added to that machine's profile, so the next run without it finds the same thing.
 
 ## Development
 

@@ -215,6 +215,45 @@ qa_host_lacks_gl() {
   [[ ! -e "${GOTG_HOST_GL:-/run/opengl-driver}" ]]
 }
 
+# The real machine first, the stand-in second.
+#
+# A profile is a stand-in, and worth less than the thing it stands in for:
+# the Deck is where these differences were found, and a pass there is a fact
+# about a Deck where a pass here is a fact about a good impression of one. So
+# a run that names a machine looks for the real one and only pretends when it
+# cannot be had -- and says which it did either way, because the two are not
+# the same result.
+#
+# The host is a person's own, not the repository's: GOTG_QA_HOST_DECK, and
+# GOTG_QA_HOST_DECK_DESKTOP for the other. Nothing is configured by default,
+# so a machine nobody has told gotg about is simply stood in for.
+qa_ssh_bin() { printf '%s' "${GOTG_SSH:-ssh}"; }
+
+qa_host_for() {
+  local machine="$1" var
+  var="GOTG_QA_HOST_$(printf '%s' "$machine" | tr '[:lower:]-' '[:upper:]_')"
+  [[ -n "${!var:-}" ]] || return 1
+  printf '%s' "${!var}"
+}
+
+# Whether it answers, cheaply. BatchMode so an unreachable machine costs
+# seconds rather than a password prompt nobody is sitting in front of.
+qa_host_reachable() {
+  local host="$1"
+  "$(qa_ssh_bin)" -o BatchMode=yes -o ConnectTimeout="${GOTG_QA_SSH_TIMEOUT:-5}" \
+    "$host" true >/dev/null 2>&1
+}
+
+# The line a person reads to know what was exercised.
+qa_where() {
+  local machine="$1" host="${2:-}"
+  if [[ -n "$host" ]]; then
+    printf 'on the real %s at %s' "$machine" "$host"
+  else
+    printf 'here, standing in for a %s' "$machine"
+  fi
+}
+
 cmd_qa() {
   local want="" variant="" duration=60 boot_wait=15 bless="" machine="desktop"
   while [[ $# -gt 0 ]]; do
@@ -260,6 +299,23 @@ EOF
   # Checked before anything is built or downloaded: a typo here is the
   # cheapest thing to be wrong about after the id.
   qa_machine_env "$machine" >/dev/null
+
+  # The real machine, if there is one and it answers. Everything after this
+  # point is the stand-in.
+  local host=""
+  if [[ "$machine" != desktop ]] && host="$(qa_host_for "$machine")"; then
+    if qa_host_reachable "$host"; then
+      log "running $(qa_where "$machine" "$host")"
+      local -a there=("$want")
+      [[ -z "$variant" ]] || there+=("$variant")
+      there+=(--duration "$duration" --boot-wait "$boot_wait")
+      [[ -z "$bless" ]] || there+=(--bless)
+      "$(qa_ssh_bin)" -o BatchMode=yes "$host" gotg qa "${there[@]}"
+      return
+    fi
+    warn "$host did not answer; $(qa_where "$machine")"
+    host=""
+  fi
 
   # The game first: an id that is not in the catalog is the cheapest thing
   # to be wrong about. A game imported since the cache was written is the
@@ -368,7 +424,7 @@ EOF
   fi
   qa_machine_env "$machine" "$rundir/machine-bin" >"$rundir/machine.env"
   printf '%s\n' "$machine" >"$rundir/machine"
-  log "running $(manifest_field "$PLAY_GAME" title) headless for ${duration}s as a $machine"
+  log "running $(manifest_field "$PLAY_GAME" title) headless for ${duration}s $(qa_where "$machine" "$host")"
   # SDL_AUDIODRIVER (and SDL3's spelling): route SDL-audio emulators through
   # libpulse, the one backend that honors PULSE_SINK — SDL's native-pipewire
   # pick plays to the person's speakers and records nothing here. The outer
