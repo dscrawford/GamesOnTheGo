@@ -684,7 +684,11 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     """
     pygame.init()
     pygame.display.set_caption("GamesOnTheGo")
-    screen = pygame.display.set_mode(WINDOW)
+    # SCALED with FULLSCREEN: the layout is worked out at one size and the
+    # display scales it, so a 1280x800 panel and a television at 1080p get
+    # the same grid rather than one with different margins.
+    flags = (pygame.FULLSCREEN | pygame.SCALED) if config.fullscreen() else 0
+    screen = pygame.display.set_mode(WINDOW, flags)
     clock = pygame.time.Clock()
     # Held open for as long as the picker runs: a pad that goes out of scope is
     # closed by SDL, and a closed one stops producing events. Opened through
