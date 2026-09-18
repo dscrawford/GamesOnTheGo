@@ -20,6 +20,14 @@ pkgs.buildEnv {
     # glxinfo and eglinfo: what a client inside the session actually gets for
     # GL, which the emulator's own log only says when it succeeds.
     mesa-demos
+    # What a run on a foreign distro exports before starting its compositor:
+    # cage, its Xwayland and the recorder all need GL, and on a Deck they
+    # found none, fell back to software, and recorded a second of nothing.
+    (writeShellScriptBin "gotg-qa-gl-env" ''
+      cat <<'EOF'
+      ${(import ../env/foreign-gl.nix { inherit (pkgs) mesa; }).exports}
+      EOF
+    '')
     # Under its own name, not python3: the client carries a python3 of its own
     # (for vdf), and whichever lands first on PATH would otherwise decide
     # whether the virtual pad can be created at all. In the image the client's

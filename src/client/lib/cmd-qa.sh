@@ -188,6 +188,16 @@ qa_machine_env() {
   ' "$file"
 }
 
+# Whether the run's tools -- the compositor, its Xwayland, the recorder --
+# should use nixpkgs' mesa: only on a host with no GL of its own. The game
+# follows the machine profile through its own launcher; the harness around
+# it follows the host, because a profile cannot conjure a GPU. Pretending
+# to be a Deck on an NVIDIA desktop gave cage nixpkgs' mesa, which drives no
+# NVIDIA card, and the harness recorded twenty seconds of one frame.
+qa_host_lacks_gl() {
+  [[ ! -e "${GOTG_HOST_GL:-/run/opengl-driver}" ]]
+}
+
 cmd_qa() {
   local want="" variant="" duration=60 boot_wait=15 bless="" machine="desktop"
   while [[ $# -gt 0 ]]; do
@@ -333,7 +343,12 @@ EOF
   QA_ROUTER_PID=$!
 
   # The machine this run pretends to be. Applied by the session, to the game
-  # alone: the recorder, the pad and cage itself stay what they are here.
+  # alone: the recorder, the pad and cage itself stay what they are here --
+  # except for GL, which the tools need too and a Deck does not have.
+  if qa_host_lacks_gl; then
+    log "the compositor and recorder use nixpkgs' mesa (no host GL)"
+    eval "$(gotg-qa-gl-env)"
+  fi
   qa_machine_env "$machine" >"$rundir/machine.env"
   printf '%s\n' "$machine" >"$rundir/machine"
   log "running $(manifest_field "$PLAY_GAME" title) headless for ${duration}s as a $machine"
@@ -348,6 +363,12 @@ EOF
   # loses, the viewport comes up black and stays black. Windowed is the one
   # behavior that lands every time, and a capture with the emulator's chrome
   # in it grades the same.
+  # WLR_RENDERER is inherited on purpose. It is a person's choice for their
+  # own compositor, and on the one desktop this was measured on it is also
+  # the choice that works: sway on Vulkan handed cage Vulkan, and cage on
+  # NVIDIA records fine that way, where its own pick -- GLES2 -- recorded
+  # twenty seconds of one frame. A machine with no such choice, the Deck,
+  # lets cage pick, and it picks right there.
   env -u DISPLAY -u WAYLAND_DISPLAY \
     WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
     GOTG_FULLSCREEN=0 \

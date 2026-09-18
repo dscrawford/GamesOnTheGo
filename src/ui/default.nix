@@ -31,21 +31,12 @@ let
     ps.pygame-ce
     ps.pyyaml
   ]);
-  # On NixOS, /run/opengl-driver carries the GPU userspace and pygame's SDL
-  # just works. On a foreign distro -- SteamOS -- that path does not exist
-  # and the host's mesa is unloadable from our glibc. Under Desktop Mode SDL
-  # draws through X11 without GL and nobody notices; under Game Mode it is
-  # Wayland, whose only path to a window surface is a GL renderer, and the
-  # picker died with "Window framebuffer support not available". The same
-  # inlined nixGL trick the emulator environments use, applied only when the
-  # host provides nothing.
-  foreignGl = ''
-    if [ "''${GOTG_FOREIGN_GL:-0}" = 1 ] || [ ! -e /run/opengl-driver ]; then
-      export LIBGL_DRIVERS_PATH=${mesa}/lib/dri
-      export __EGL_VENDOR_LIBRARY_FILENAMES=${mesa}/share/glvnd/egl_vendor.d/50_mesa.json
-      export LD_LIBRARY_PATH=${mesa}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
-    fi
-  '';
+  # GL on a machine that is not NixOS. Under Desktop Mode SDL draws through
+  # X11 without GL and nobody notices; under Game Mode it is Wayland, whose
+  # only path to a window surface is a GL renderer, and the picker died with
+  # "Window framebuffer support not available". The same block the emulator
+  # environments and the QA tools use.
+  foreignGl = (import ../client/env/foreign-gl.nix { inherit mesa; }).guarded;
 in
 stdenvNoCC.mkDerivation {
   pname = "gotg-ui";
