@@ -165,13 +165,36 @@ qa_audio_route() {
   done
 }
 
+# Where the machine profiles live: a table beside overrides.json, one entry
+# per kind of machine a launch has to work on.
+qa_machines_json() { printf '%s/qa-machines.json' "$GOTG_DATA"; }
+
+qa_machine_names() { jq -r 'keys[] | select(. != "_")' "$(qa_machines_json)" | tr '\n' ' '; }
+
+# The shell lines that turn this run into that machine, for the session to
+# source right before it runs the game: `export` for what the profile sets,
+# `unset` for what it takes away. Written rather than passed as one string
+# because a value with a space in it is one export, not two.
+qa_machine_env() {
+  local machine="$1" file
+  file="$(qa_machines_json)"
+  jq -e --arg m "$machine" 'has($m) and $m != "_"' "$file" >/dev/null 2>&1 ||
+    die "no such machine profile: $machine (known: $(qa_machine_names))"
+  jq -r --arg m "$machine" '
+    (.[$m].unset // [])[] | "unset " + .
+  ' "$file"
+  jq -r --arg m "$machine" '
+    (.[$m].env // {}) | to_entries[] | "export " + .key + "=" + (.value | @sh)
+  ' "$file"
+}
+
 cmd_qa() {
-  local want="" variant="" duration=60 boot_wait=15 bless=""
+  local want="" variant="" duration=60 boot_wait=15 bless="" machine="desktop"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -h | --help)
         cat <<'EOF'
-usage: gotg qa <id> [variant] [--duration N] [--boot-wait N] [--bless]
+usage: gotg qa <id> [variant] [--duration N] [--boot-wait N] [--bless] [--machine M]
 
   Runs the game with no window, no speakers and no one holding the pad: a
   virtual controller mashes through it while the screen and the audio are
@@ -181,6 +204,11 @@ usage: gotg qa <id> [variant] [--duration N] [--boot-wait N] [--bless]
     --duration N   seconds to run the game for (default 60)
     --boot-wait N  seconds before the pad starts pressing (default 15)
     --bless        store this run's reference frame as the golden image
+    --machine M    pretend to be that machine: desktop (default), deck,
+                   deck-desktop. A profile is the conditions that told a
+                   machine apart when a launch worked here and failed there
+                   — no host GL, X11 only, a C locale — applied to the game
+                   and nothing else, so one box can stand in for several.
 
   Artifacts and verdict.json land under ~/.local/state/gotg/qa/runs.
 EOF
@@ -189,6 +217,7 @@ EOF
       --duration) duration="${2:-}"; shift 2 ;;
       --boot-wait) boot_wait="${2:-}"; shift 2 ;;
       --bless) bless=1; shift ;;
+      --machine) machine="${2:-}"; shift 2 ;;
       -*) die "unknown option: $1 (gotg qa --help)" ;;
       *)
         if [[ -z "$want" ]]; then want="$1"
@@ -201,6 +230,9 @@ EOF
   [[ -n "$want" ]] || die "usage: gotg qa <id> [variant] [--duration N] [--boot-wait N] [--bless]"
   [[ "$duration" =~ ^[0-9]+$ && "$boot_wait" =~ ^[0-9]+$ ]] ||
     die "--duration and --boot-wait take whole seconds"
+  # Checked before anything is built or downloaded: a typo here is the
+  # cheapest thing to be wrong about after the id.
+  qa_machine_env "$machine" >/dev/null
 
   # The game first: an id that is not in the catalog is the cheapest thing
   # to be wrong about. A game imported since the cache was written is the
@@ -300,7 +332,11 @@ EOF
   qa_audio_route "$rundir" "gotgqa$$" &
   QA_ROUTER_PID=$!
 
-  log "running $(manifest_field "$PLAY_GAME" title) headless for ${duration}s"
+  # The machine this run pretends to be. Applied by the session, to the game
+  # alone: the recorder, the pad and cage itself stay what they are here.
+  qa_machine_env "$machine" >"$rundir/machine.env"
+  printf '%s\n' "$machine" >"$rundir/machine"
+  log "running $(manifest_field "$PLAY_GAME" title) headless for ${duration}s as a $machine"
   # SDL_AUDIODRIVER (and SDL3's spelling): route SDL-audio emulators through
   # libpulse, the one backend that honors PULSE_SINK — SDL's native-pipewire
   # pick plays to the person's speakers and records nothing here. The outer
@@ -353,6 +389,7 @@ EOF
 
   log ""
   log "run:     $rundir"
+  log "machine: $machine"
   jq -r '.checks | to_entries[] |
     "  " + (.key + "        " | .[0:10]) +
     (if .value.pass == true then "pass" elif .value.pass == false then "FAIL" else "skip" end)' \

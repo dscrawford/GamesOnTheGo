@@ -15,6 +15,13 @@ printf '%s\n' "$$" >"$GOTG_QA_DIR/session.pid"
 wf-recorder -f "$GOTG_QA_DIR/video.mkv" &
 recorder=$!
 
+# The machine this run pretends to be, applied here and to the game alone:
+# what the profile exports and what it takes away. The recorder above has
+# already started with the real environment.
+if [ -f "$GOTG_QA_DIR/machine.env" ]; then
+  # shellcheck disable=SC1091
+  . "$GOTG_QA_DIR/machine.env"
+fi
 status=0
 timeout -k 5 "$GOTG_QA_DURATION" "$@" || status=$?
 

@@ -288,6 +288,9 @@ pkgs.runCommand "check-recipes" { nativeBuildInputs = [ pkgs.zip ]; } ''
   # ares reports a missing save path as read-only and the progress
   # of the session is lost. The wrapper creates the static prefix
   # of every declared saves glob, and only the static prefix.
+  # The SteamOS GL branch can be asked for on any machine: what qa --machine
+  # deck relies on to find a Deck-only failure without a Deck.
+  grep -qF 'GOTG_FOREIGN_GL' ${probe}/bin/gotg-play
   grep -qF 'mkdir -p "$state"/saves' ${probe}/bin/gotg-play
   grep -qF 'mkdir -p "$state"/data/probe' ${probe}/bin/gotg-play
   ! grep -F 'probe*' ${probe}/bin/gotg-play | grep -q mkdir
