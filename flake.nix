@@ -317,7 +317,14 @@
           # at build time from the SVGs, and rasterising it on shell entry would
           # charge every `nix develop` for something that changes about twice a
           # year.
-          uiDev = name: module: pkgs.writeShellScriptBin name ''
+          # The check first, so the picker can point at it. In the packaged
+          # install the two sit in one bin/ and the client finds the check
+          # beside the picker; here each shim is its own store path, so a
+          # picker started from Steam launched games past the check with
+          # "no gotg-seat here" in a log nobody reads, and Ryujinx then asked
+          # for a controller itself. GOTG_SEAT is the client's explicit
+          # override, and the picker sets it on its way in.
+          uiDev = name: module: extra: pkgs.writeShellScriptBin name ''
             root="''${GOTG_DEV_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
             if [ ! -d "$root/src/ui/gotg_ui" ]; then
               echo "${name}: no src/ui/gotg_ui under $root" >&2
@@ -329,15 +336,20 @@
             export GOTG_UI_ENV="''${GOTG_UI_ENV:-${gotgPkg}/share/gotg/env}"
             export GOTG_UI_ASSETS="''${GOTG_UI_ASSETS:-${uiPkg}/share/gotg-ui/assets}"
             export GOTG_CONFIG="''${GOTG_CONFIG:-$root/config}"
+            ${extra}
             exec ${uiPython}/bin/python3 -m ${module} "$@"
+          '';
+          seatDev = uiDev "gotg-seat" "gotg_ui.seat" "";
+          pickerDev = uiDev "gotg-ui" "gotg_ui" ''
+            export GOTG_SEAT="''${GOTG_SEAT:-${seatDev}/bin/gotg-seat}"
           '';
         in
         {
           default = pkgs.mkShell {
             packages = [
               gotg-dev
-              (uiDev "gotg-ui" "gotg_ui")
-              (uiDev "gotg-seat" "gotg_ui.seat")
+              pickerDev
+              seatDev
             ]
             ++ [
               # The importer's own dependencies, out of its lock rather than a

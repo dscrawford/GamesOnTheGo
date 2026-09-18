@@ -33,8 +33,30 @@ padmap_ensure() {
   command -v "$(padmap_bin)" >/dev/null 2>&1 || return 0
   if ! "$(padmap_bin)" ensure-daemon >/dev/null 2>&1; then
     warn "padmap has no current daemon; controllers will be whatever SDL finds"
+  else
+    padmap_wait_published
   fi
   export PADMAP_SKIP_DAEMON_CHECK=1
+}
+
+# ensure-daemon returns once the daemon is *running*, which is before it has
+# published anything. A launch on a machine where nothing had started it yet
+# went straight on to `padmap-rs exec`, which read the mappings file a moment
+# before it existed:
+#
+#     no mappings at /run/user/1000/padmap/env.sh (No such file or directory)
+#     ... will see whatever SDL already knows
+#
+# and the game came up with no controller. A few seconds of waiting covers
+# it; a daemon that never publishes gets the same warning it always did.
+padmap_wait_published() {
+  local file waited=0 limit="${GOTG_PADMAP_PUBLISH_WAIT:-30}"
+  file="$(padmap_runtime_dir)/env.sh"
+  while [[ ! -s "$file" ]] && ((waited < limit)); do
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  [[ -s "$file" ]] || warn "padmap started but has published no controllers yet"
 }
 
 # Where the launch-time controller check is, or nothing.
