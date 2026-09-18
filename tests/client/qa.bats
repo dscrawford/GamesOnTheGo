@@ -335,3 +335,62 @@ make_rundir() {
   run qa_machine_env deck
   [[ "$output" == *"unset WLR_RENDERER"* ]]
 }
+
+# --- the real machine first, the stand-in second --------------------------------
+#
+# A profile is a stand-in, and a stand-in is worth less than the machine it
+# stands in for: the Deck is where the differences were found in the first
+# place. So a run that names a machine looks for the real one, and only
+# pretends when it cannot be had -- saying which it did, because "passed on a
+# deck" and "passed pretending to be one" are two different facts.
+
+stub_ssh() {
+  export SSH_LOG="$TEST_TMP/ssh.log"
+  export GOTG_SSH="$TEST_TMP/bin/ssh"
+  mkdir -p "$TEST_TMP/bin"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'printf "%%s\\n" "$*" >>"$SSH_LOG"\n'
+    printf 'exit "${SSH_EXIT:-0}"\n'
+  } >"$GOTG_SSH"
+  chmod +x "$GOTG_SSH"
+}
+
+@test "a machine with no host configured is stood in for, quietly" {
+  stub_ssh
+  run qa_host_for deck
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "a host that answers is where the run goes" {
+  stub_ssh
+  export GOTG_QA_HOST_DECK="deck@192.168.0.80"
+  run qa_host_for deck
+  [ "$status" -eq 0 ]
+  [ "$output" = "deck@192.168.0.80" ]
+  SSH_EXIT=0 run qa_host_reachable "deck@192.168.0.80"
+  [ "$status" -eq 0 ]
+  grep -q "deck@192.168.0.80" "$SSH_LOG"
+  # Asked with a short timeout and no prompting: an unreachable Deck must
+  # cost seconds, not a password prompt nobody is there to answer.
+  grep -q "BatchMode=yes" "$SSH_LOG"
+  grep -qE "ConnectTimeout=[0-9]+" "$SSH_LOG"
+}
+
+@test "a host that does not answer is not where the run goes" {
+  stub_ssh
+  SSH_EXIT=255 run qa_host_reachable "deck@192.168.0.80"
+  [ "$status" -ne 0 ]
+}
+
+@test "qa says which machine it actually exercised" {
+  # The line a person reads to know whether this was hardware or a stand-in.
+  run qa_where deck "deck@192.168.0.80"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"deck@192.168.0.80"* ]]
+  run qa_where deck ""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"standing in"* ]]
+  [[ "$output" == *"deck"* ]]
+}
