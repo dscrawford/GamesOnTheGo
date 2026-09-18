@@ -263,11 +263,40 @@ env_build() {
 
   env_is_built "$attr" ||
     die "built $attr but $(env_bin "$attr") is missing — check src/client/env for that platform"
+  printf '%s\n' "$(env_build_key)" >"$root.by"
+}
+
+# What a root is built by: this client, and -- from a clean checkout, where
+# it costs a git call -- the tree it came from. Written beside the root when
+# it is built, compared on every launch. A URL flake's revision is not in it
+# on purpose: knowing it means asking the network, and the client's own
+# store path already changes with every upgrade.
+env_build_key() {
+  local flake key="$GOTG_ROOT"
+  flake="$(gotg_flake)"
+  if flake_is_path "$flake"; then
+    key+="|$(flake_fingerprint "$flake")"
+  fi
+  printf '%s' "$key"
 }
 
 env_ensure() {
-  local attr="$1"
-  env_is_built "$attr" || env_build "$attr"
+  local attr="$1" by
+  if ! env_is_built "$attr"; then
+    env_build "$attr"
+    return
+  fi
+  # Built by an older gotg, or from an older tree: rebuilt before it runs.
+  # A root only ever got built when it was missing, so a client upgraded
+  # under a person kept launching the environments the old one had built --
+  # the Deck after every `nix profile upgrade`, a checkout after every pull
+  # -- until somebody thought to run `gotg sync`. Best effort, like sync:
+  # a rebuild that fails leaves what is here, which still runs.
+  by="$(env_root "$attr").by"
+  if [[ -f "$by" && "$(cat "$by")" != "$(env_build_key)" ]]; then
+    log "$attr was built by an older gotg; rebuilding it"
+    env_refresh "$attr" || warn "could not rebuild $attr — launching the build already here"
+  fi
 }
 
 # Rebuild something that is already here, tolerating failure. Used where the

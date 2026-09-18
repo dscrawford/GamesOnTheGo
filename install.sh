@@ -244,6 +244,11 @@ install_gotg() {
   if ((${#upgrade[@]})); then
     step "upgrading ${upgrade[*]}"
     change nix profile upgrade "${upgrade[@]}" || die "could not upgrade ${upgrade[*]}"
+    # The environments already built here follow the upgrade now rather than
+    # on each game's next launch: a first launch that is also a rebuild is a
+    # long wait behind a loader, and a build error is better read here.
+    step "rebuilding the environments already here"
+    change gotg sync || warn "could not rebuild the environments; each rebuilds on its next launch"
   fi
   if ((${#want[@]})); then
     step "installing GOTG from $FLAKE"
