@@ -190,6 +190,9 @@
           # zelda64recomp and n64recomp are.
           dk64recomp = pkgs.callPackage ./pkgs/dk64recomp { };
 
+          # Pikmin — the native port off the projectPiki decompilation.
+          open-nectar = pkgs.callPackage ./pkgs/open-nectar { };
+
           # Super Smash Bros. (N64) — the libultraship port, not a recomp.
           battleship = pkgs.callPackage ./pkgs/battleship { };
 

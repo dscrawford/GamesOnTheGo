@@ -23,6 +23,7 @@ let
     dk64recomp = pkgs.callPackage ../../../pkgs/dk64recomp { };
     snowboardkids2recomp = pkgs.callPackage ../../../pkgs/snowboardkids2recomp { };
     battleship = pkgs.callPackage ../../../pkgs/battleship { };
+    open-nectar = pkgs.callPackage ../../../pkgs/open-nectar { };
     # nixpkgs' Ryubing with the JIT cache size upstream Ryujinx shipped; see
     # the package for the crash the 1.3.3 default has.
     ryubing = pkgs.callPackage ../../../pkgs/ryubing { };
