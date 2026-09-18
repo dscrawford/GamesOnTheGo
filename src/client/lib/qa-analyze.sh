@@ -18,12 +18,22 @@ qa_media_duration() {
   ffprobe -v error -show_entries format=duration -of csv=p=0 "$1"
 }
 
-# {rms_db, silence_total, longest_silence, duration}
+# {rms_db, silence_total, longest_silence, longest_silence_in_window,
+#  duration, window_start}
+#
+# Silence is graded over the input window for the reason black is: a game's
+# first seconds are a logo screen with nothing to hear, and on the Deck
+# Animal Crossing spends about twelve of them there -- long enough to fail a
+# run whose sound was fine the moment it started. The whole-capture numbers
+# stay for the eye; the in-window one is what the verdict grades.
 qa_audio_stats() {
-  local wav="$1" lines dur
+  local wav="$1" window_start="${2:-0}" lines windowed dur
   dur="$(qa_media_duration "$wav")"
   lines="$(ffmpeg -hide_banner -nostats -i "$wav" \
     -af "silencedetect=n=${GOTG_QA_SILENCE_DB:--50dB}:d=0.5,astats=metadata=0" \
+    -f null - 2>&1)"
+  windowed="$(ffmpeg -hide_banner -nostats -ss "$window_start" -i "$wav" \
+    -af "silencedetect=n=${GOTG_QA_SILENCE_DB:--50dB}:d=0.5" \
     -f null - 2>&1)"
 
   # The last "RMS level dB" is astats' Overall section, after the per-channel
@@ -35,9 +45,16 @@ qa_audio_stats() {
   total="$(awk -F'silence_duration: ' '/silence_duration/ {s+=$2} END {printf "%.3f", s}' <<<"$lines")"
   longest="$(awk -F'silence_duration: ' '/silence_duration/ {if ($2>m) m=$2} END {printf "%.3f", m}' <<<"$lines")"
 
+  local in_window
+  in_window="$(awk -F'silence_duration: ' \
+    '/silence_duration/ {if ($2>m) m=$2} END {printf "%.3f", m}' <<<"$windowed")"
+
   jq -n --argjson rms "$rms" --argjson total "$total" \
-    --argjson longest "$longest" --argjson dur "$dur" \
-    '{rms_db: $rms, silence_total: $total, longest_silence: $longest, duration: $dur}'
+    --argjson longest "$longest" --argjson in_window "$in_window" \
+    --argjson dur "$dur" --argjson window "$window_start" \
+    '{rms_db: $rms, silence_total: $total, longest_silence: $longest,
+      longest_silence_in_window: $in_window, duration: $dur,
+      window_start: $window}'
 }
 
 # {black_total, freeze_in_window, duration, window_start}
@@ -116,7 +133,7 @@ qa_verdict() {
   boots="$(jq -n --argjson s "$status" '$s == 0 or $s == 124 or $s == 143 or $s == 137')"
 
   local audio video
-  audio="$(qa_audio_stats "$rundir/audio.wav")"
+  audio="$(qa_audio_stats "$rundir/audio.wav" "$window_start")"
   video="$(qa_video_stats "$rundir/video.mkv" "$window_start")"
 
   # Graphics only grades against a golden frame, taken at the same offset
@@ -149,7 +166,7 @@ qa_verdict() {
     {
       checks: {
         boots: {pass: $boots, status: $status},
-        audio: ($audio + {pass: ($audio.rms_db > $rms_min and $audio.longest_silence <= $silence_max)}),
+        audio: ($audio + {pass: ($audio.rms_db > $rms_min and $audio.longest_silence_in_window <= $silence_max)}),
         video: ($video + {expected_duration: $expected,
                           pass: ($captured and $video.black_in_window <= $black_max)}),
         controller: {pass: ($captured and $freeze_frac <= $freeze_frac_max),
