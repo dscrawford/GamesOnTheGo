@@ -149,7 +149,9 @@ gotg steam art <id> [variant] [--force]
 gotg steam art <id> --from <file|url> [--as tile|capsule|hero|logo|icon]
 ```
 
-Close Steam before changes apply; restart it to see them.
+Close Steam before changes apply; restart it to see them — it reads that file once, at startup, and rewrites it from memory when it exits.
+
+What Steam does not tell you, and what it cost to find out: [docs/steam.md](docs/steam.md).
 
 ## Variants
 
