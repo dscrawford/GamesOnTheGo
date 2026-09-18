@@ -556,6 +556,26 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   grep -q 'GOTG_DEV_ROOT:=' "$launcher"
 }
 
+@test "the picker launcher drops Steam's overlay preload and nothing else" {
+  # On a Deck the picker died before drawing anything: Steam preloads its
+  # overlay into everything it starts, and a nix-wrapped program cannot load
+  # it ("libGL.so.1: cannot open shared object file").
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  fake_picker
+  # A picker that reports what it was handed.
+  printf '#!/usr/bin/env bash\necho "preload=${LD_PRELOAD-unset}"\n' >"$TEST_TMP/pickerbin/gotg-ui"
+  gotg steam picker || true
+  local launcher="$GOTG_STATE_DIR/launchers/gotg-ui.sh"
+  [ -x "$launcher" ]
+
+  run env LD_PRELOAD="/steam/ubuntu12_64/gameoverlayrenderer.so:/mine/keep.so" \
+    XDG_STATE_HOME="$TEST_TMP/xdg" HOME="$TEST_TMP/home" "$launcher"
+  [ "$status" -eq 0 ]
+  local log="$TEST_TMP/xdg/gotg/logs/gotg-ui.log"
+  [ -f "$log" ]
+  grep -q "preload=/mine/keep.so" "$log"
+}
+
 @test "a picker added from a packaged install carries no checkout" {
   export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
   fake_picker

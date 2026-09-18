@@ -96,6 +96,43 @@ padmap_seat_bin() {
   return 1
 }
 
+# What Steam leaves in the environment of anything it starts, taken back out.
+#
+# Steam hands a game it launches SDL_GAMECONTROLLER_IGNORE_DEVICES naming the
+# controllers Steam Input is handling on its behalf, so the game uses Steam's
+# virtual gamepad instead of the physical one. These emulators do not speak
+# Steam Input, and padmap's clones mirror the physical pad's identity -- so an
+# ignore rule Steam wrote for the Steam Controller silenced its clone too, and
+# Ryujinx sat on "Waiting for controller connection" for a pad that was there.
+# Measured: inside the sandbox, SDL listed the clone until the variable was
+# set, and not after.
+#
+# The per-game Steam launcher has undone this since the first Steam entry. The
+# picker does not go through that launcher: it calls `gotg play` itself, so a
+# game started from the picker, from Steam, inherited all of it through the
+# picker. Here, then -- the one place every route passes -- and before the
+# seat gate, which is SDL too.
+#
+# LD_PRELOAD is Steam's overlay, which nix-wrapped programs cannot load
+# ("libGL.so.1: cannot open shared object file", the picker on a Deck). Only
+# that entry is dropped; anything else in there is somebody's own doing.
+padmap_clear_steam_env() {
+  unset SDL_GAMECONTROLLER_IGNORE_DEVICES SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT
+  export SDL_JOYSTICK_HIDAPI=0 SDL_JOYSTICK_DISABLE_UDEV=0
+  if [[ "${LD_PRELOAD:-}" == *gameoverlayrenderer* ]]; then
+    local kept=() entry
+    for entry in ${LD_PRELOAD//:/ }; do
+      [[ "$entry" == *gameoverlayrenderer* ]] || kept+=("$entry")
+    done
+    if ((${#kept[@]})); then
+      LD_PRELOAD="$(IFS=:; printf '%s' "${kept[*]}")"
+      export LD_PRELOAD
+    else
+      unset LD_PRELOAD
+    fi
+  fi
+}
+
 # Ask about controllers before the game takes the screen.
 #
 # Only ever asks when there is something to ask -- no controller seated, or one

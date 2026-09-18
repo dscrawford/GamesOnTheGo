@@ -368,6 +368,37 @@ teardown() {
   [[ "$output" == *"env-n64-usa_zelda-emulate launched with:"* ]]
 }
 
+@test "play takes Steam's controller and overlay settings out, on every route" {
+  # Steam hands what it starts a list of controllers to ignore and preloads
+  # its overlay. The per-game Steam launcher has always undone both, but the
+  # picker launches games through `gotg play` directly -- so a game started
+  # from the picker, from Steam, kept Steam's ignore list, and padmap's clone
+  # of the Steam Controller was ignored right along with the real one.
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  gotg download usa.zelda
+  fake_env env-n64
+  # A launcher that reports the environment it was handed.
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'echo "ignore=${SDL_GAMECONTROLLER_IGNORE_DEVICES-unset}"\n'
+    printf 'echo "except=${SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT-unset}"\n'
+    printf 'echo "hidapi=${SDL_JOYSTICK_HIDAPI-unset}"\n'
+    printf 'echo "preload=${LD_PRELOAD-unset}"\n'
+  } >"$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
+
+  SDL_GAMECONTROLLER_IGNORE_DEVICES="0x28de/0x1304" \
+    SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT="0x28de/0x11ff" \
+    LD_PRELOAD="/steam/ubuntu12_64/gameoverlayrenderer.so:/mine/keep.so" \
+    gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ignore=unset"* ]]
+  [[ "$output" == *"except=unset"* ]]
+  [[ "$output" == *"hidapi=0"* ]]
+  # Only Steam's entry goes; anything else in there is somebody's own doing.
+  [[ "$output" == *"preload=/mine/keep.so"* ]]
+}
+
 @test "an emulator argument is not mistaken for a variant" {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
