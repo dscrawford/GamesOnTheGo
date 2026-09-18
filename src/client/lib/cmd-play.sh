@@ -223,6 +223,19 @@ cmd_sync() {
   after="$(readlink -f "$GOTG_APP_ROOT" 2>/dev/null || true)"
   _sync_mark "$([[ "$before" != "$after" ]] && echo changed || echo same)" gotg
 
+  # The picker too, into a root of its own. The Steam entry runs whichever
+  # gotg-ui it finds, and finding it on PATH meant finding whichever build
+  # was on PATH when Steam started -- on a machine that develops this, three
+  # builds behind by the evening. The launcher looks here first. Best effort:
+  # a machine without the picker's dependencies still syncs its games.
+  before="$(readlink -f "$GOTG_UI_ROOT" 2>/dev/null || true)"
+  if "$(nix_bin)" build "$flake#gotg-ui" -o "$GOTG_UI_ROOT" "${refresh[@]}" 2>"$GOTG_STATE_DIR/sync-gotg-ui.log"; then
+    after="$(readlink -f "$GOTG_UI_ROOT" 2>/dev/null || true)"
+    _sync_mark "$([[ "$before" != "$after" ]] && echo changed || echo same)" gotg-ui
+  else
+    _sync_mark failed gotg-ui "$GOTG_STATE_DIR/sync-gotg-ui.log"
+  fi
+
   # Only rebuild the environments that are already in use here. One line
   # each, and a failure marks its line rather than ending the pass — a
   # platform whose build broke should not keep the others stale.
