@@ -16,19 +16,12 @@ let
   #
   # vsyncMode is 0 Switch (60Hz), 1 Unbounded, 2 Custom — measured by starting
   # Ryujinx against each value and reading back what it logged.
-  vsync =
-    {
-      vsyncMode,
-      customInterval ? null,
-    }:
-    let
-      custom = customInterval != null;
-      edits = [
-        ".vsync_mode = ${toString vsyncMode}"
-        ".enable_custom_vsync_interval = ${if custom then "true" else "false"}"
-      ]
-      ++ lib.optional custom ".custom_vsync_interval = ${toString customInterval}";
-    in
+  # One or more jq edits against the generated config. Pulled out of vsync
+  # below because the frame rate is not the only machine-side setting a game
+  # needs: Paper Mario's resolution mods want more emulated memory than the
+  # console has, and crash without it.
+  configEdit =
+    edits:
     ''
       # The platform's own preLaunch runs first and generates the default
       # config on a first run — see switch.nix — so by here there is one to
@@ -43,9 +36,25 @@ let
           rm -f "$config.gotg"
         fi
       else
-        echo "gotg: no Ryujinx config yet; the frame rate applies next launch" >&2
+        echo "gotg: no Ryujinx config yet; this applies next launch" >&2
       fi
     '';
+
+  vsync =
+    {
+      vsyncMode,
+      customInterval ? null,
+    }:
+    let
+      custom = customInterval != null;
+    in
+    configEdit (
+      [
+        ".vsync_mode = ${toString vsyncMode}"
+        ".enable_custom_vsync_interval = ${if custom then "true" else "false"}"
+      ]
+      ++ lib.optional custom ".custom_vsync_interval = ${toString customInterval}"
+    );
 in
 {
   # A Ryujinx mod that is a single executable patch, together with the VSync
@@ -95,6 +104,32 @@ in
   # switched on. Ryujinx reads that list from one place per game rather than per
   # mod — so it is written only when there is none, leaving both a second mod's
   # cheats and the player's own choices in Ryujinx's cheat manager alone.
+  # How much memory the emulated console has. The Switch has 4GiB and that is
+  # the default; a game asking for more is a game running mods the hardware was
+  # never expected to run. Paper Mario's in-engine resolution mods are one:
+  # at the stock size the game dies about ten seconds in with an invalid
+  # access at address zero, and at 8GiB it runs.
+  #
+  # 0 is 4GiB, 1 is 6GiB, 2 is 8GiB, 3 is 12GiB -- read off the emulator's own
+  # MemoryConfiguration enum rather than guessed.
+  ryujinxDram = size: { preLaunch = configEdit [ ".dram_size = ${toString size}" ]; };
+
+  # A mod directory and nothing else: no frame rate, no memory. For a game
+  # that installs several, where saying the same vsync three times would be
+  # three chances to say it differently.
+  ryujinxModOnly =
+    { titleId, name, dir }:
+    {
+      preLaunch = ''
+        contents="$XDG_CONFIG_HOME/Ryujinx/mods/contents/${titleId}"
+        if [ ! -d "$contents/${name}" ]; then
+          mkdir -p "$contents/${name}"
+          cp -R --no-preserve=mode ${lib.escapeShellArg dir}/. "$contents/${name}/"
+          echo "installed the ${name} mod" >&2
+        fi
+      '';
+    };
+
   ryujinxModDir =
     {
       titleId,
