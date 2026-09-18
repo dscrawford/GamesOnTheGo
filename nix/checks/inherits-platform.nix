@@ -27,6 +27,7 @@ let
     gamecube = [
       "BackgroundInput"
       "SkipNKitWarning"
+      "PermissionAsked"
     ];
     wiiu = [ ];
     switch = [

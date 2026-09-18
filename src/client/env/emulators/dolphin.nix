@@ -126,6 +126,15 @@
           gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini" \
             Interface SkipNKitWarning True
 
+          # "Allow Usage Statistics Reporting?" -- Dolphin's first-run question,
+          # a modal that nobody can answer from a sofa or inside a split-screen
+          # frame, where it came up as a window with no slot on a Deck. Asked
+          # and answered here: no, and do not ask again.
+          gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini" \
+            Analytics PermissionAsked True
+          gotg_ini_set "$XDG_CONFIG_HOME/dolphin-emu/Dolphin.ini" \
+            Analytics Enabled False
+
           # "Do you want to stop the current emulation?" — which nobody can
           # answer with a controller, and which is the last thing between a
           # game and the kill switch.
