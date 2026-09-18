@@ -62,6 +62,34 @@ teardown() { stop_saves_service; }
   [ "$(grep -c "ensure-daemon" "$PADMAP_LOG")" = 1 ]
 }
 
+@test "a daemon that has just started is given a moment to publish" {
+  # ensure-daemon returns before the first publish. A launch that started
+  # the daemon read the mappings file a moment before it existed and handed
+  # the game no controllers at all.
+  export GOTG_PADMAP_RUNTIME="$TEST_TMP/padmap-rt"
+  mkdir -p "$GOTG_PADMAP_RUNTIME"
+  # A daemon that publishes half a second after it is asked to start.
+  cat >"$FAKE_BIN/padmap" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$PADMAP_LOG"
+[ "\$1" = ensure-daemon ] && (sleep 0.5; echo 'export X=1' >"$GOTG_PADMAP_RUNTIME/env.sh") &
+exit 0
+EOF
+  chmod +x "$FAKE_BIN/padmap"
+  run --separate-stderr padmap_ensure
+  [ "$status" -eq 0 ]
+  [ -s "$GOTG_PADMAP_RUNTIME/env.sh" ]
+  [[ "$stderr" != *"published no controllers"* ]]
+}
+
+@test "a daemon that never publishes is waited on only so long" {
+  export GOTG_PADMAP_RUNTIME="$TEST_TMP/padmap-rt-never"
+  mkdir -p "$GOTG_PADMAP_RUNTIME"
+  GOTG_PADMAP_PUBLISH_WAIT=3 run --separate-stderr padmap_ensure
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"published no controllers"* ]]
+}
+
 @test "a daemon that will not start does not stop the game" {
   # A machine where padmap cannot reach uinput still plays games, with
   # whatever SDL finds by itself.
