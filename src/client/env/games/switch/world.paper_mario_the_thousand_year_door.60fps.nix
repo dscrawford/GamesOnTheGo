@@ -24,6 +24,15 @@
 #     itself, and at the internal resolution it was tuned for it reads as
 #     ringing along every edge.
 #
+#   * **Lighting Fix V3.** The author files it under "for 1440p and above",
+#     and at 1080p it still earns its place: in dialogue, where the game draws
+#     its own cinematic bars, the top bar filled with bright specks -- coin
+#     yellow and white, fragments of the scene. That is an effects buffer the
+#     resolution patch did not resize, glow landing at the wrong offset and
+#     wrapping to the top, which is the class of fault this fix's three
+#     patched words and three replaced light files are for. None of its
+#     addresses overlap the other three patches; checked, not assumed.
+#
 #   * **8GiB of emulated memory.** Not a preference: with the resolution
 #     patch and the console's own 4GiB the game dies about ten seconds in --
 #     "Invalid memory access at virtual address 0x0", then abort. Measured
@@ -55,5 +64,10 @@ base
       titleId = "0100ecd018ebe000";
       name = "no-sharpening";
       dir = helpers.paperMarioTtydMod "Disabled Sharpening Filter v1.0.1";
+    }).preLaunch
+    + (helpers.ryujinxModOnly {
+      titleId = "0100ecd018ebe000";
+      name = "lighting-fix";
+      dir = helpers.paperMarioTtydMod "Lighting Fix V3 1.0.1";
     }).preLaunch;
 }
