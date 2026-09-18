@@ -200,28 +200,9 @@ let
     lib.mapAttrsToList (k: v: "export ${k}=${render (toString v)}") (baseEnv // env)
   );
 
-  # On NixOS, /run/opengl-driver carries the GPU userspace and nix-built
-  # emulators just work. On a foreign distro — SteamOS — that path does not
-  # exist and the host's mesa is unloadable from our glibc, so Vulkan and GL
-  # both come up empty ("No RDP rendering support" is ares saying exactly
-  # that). Ship our own nixpkgs mesa and point the loaders at it, only when
-  # the host provides nothing: the nixGL trick, inlined.
-  # GOTG_FOREIGN_GL=1 takes the branch on a machine that has the host path
-  # too: it is how `gotg qa --machine deck` exercises nixpkgs' mesa on a
-  # desktop, where the only other way to find "Failed to create allocator"
-  # was a Deck.
-  foreignGl = ''
-    if [ "''${GOTG_FOREIGN_GL:-0}" = 1 ] || [ ! -e /run/opengl-driver ]; then
-      export LIBGL_DRIVERS_PATH=${pkgs.mesa}/lib/dri
-      # GBM too: a nested compositor (the split-screen sway) allocates its
-      # buffers through it, and mesa looks for dri_gbm.so under
-      # /run/opengl-driver as well -- "Failed to create allocator" on a Deck.
-      export GBM_BACKENDS_PATH=${pkgs.mesa}/lib/gbm
-      export __EGL_VENDOR_LIBRARY_FILENAMES=${pkgs.mesa}/share/glvnd/egl_vendor.d/50_mesa.json
-      export VK_DRIVER_FILES=${pkgs.mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/intel_icd.x86_64.json
-      export LD_LIBRARY_PATH=${pkgs.mesa}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
-    fi
-  '';
+  # GL on a machine that is not NixOS: see foreign-gl.nix, which is also
+  # what the picker and the QA tools use.
+  foreignGl = (import ./foreign-gl.nix { inherit (pkgs) mesa; }).guarded;
 
   sourceOf = v: if lib.isDerivation v || lib.isPath v then v else pkgs.writeText "gotg-config" v;
 

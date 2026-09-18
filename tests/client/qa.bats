@@ -280,3 +280,15 @@ make_rundir() {
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"no such machine profile: moon"* ]]
 }
+
+@test "the tools use nixpkgs' mesa only where the host has none" {
+  # The game follows the machine profile through its own launcher; cage,
+  # its Xwayland and the recorder follow the host. A profile cannot conjure
+  # a GPU: on an NVIDIA desktop nixpkgs' mesa drives nothing, and a
+  # compositor handed it recorded twenty seconds of one frame.
+  GOTG_HOST_GL="$TEST_TMP/no-such-driver" run qa_host_lacks_gl
+  [ "$status" -eq 0 ]
+  mkdir -p "$TEST_TMP/opengl-driver"
+  GOTG_HOST_GL="$TEST_TMP/opengl-driver" run qa_host_lacks_gl
+  [ "$status" -ne 0 ]
+}
