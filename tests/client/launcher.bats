@@ -633,3 +633,82 @@ fake_zenity() {
   [[ "$stderr" == *"could not rebuild"* ]]
   [[ "$output" == *"launched with:"* ]]
 }
+
+# --- sync: no dialog, and several at once --------------------------------------
+
+@test "sync raises no progress dialog" {
+  # It narrates itself, one line per environment. A dialog on top of that is
+  # the same news twice -- and under the installer, which runs sync after an
+  # upgrade, it is a window nobody asked for.
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  stub_nix
+  fake_zenity ok
+  fake_env env-n64
+  fake_env env-snes
+
+  gotg sync --force
+  [ "$status" -eq 0 ]
+  [ ! -s "$ZENITY_LOG" ]
+}
+
+@test "environments are built at the same time, not one after another" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  stub_nix
+  fake_env env-n64
+  fake_env env-snes
+  fake_env env-nes
+  # A nix that says when each build starts and ends. Built in parallel, a
+  # second starts before the first has finished.
+  export BUILD_ORDER="$TEST_TMP/build-order"
+  : >"$BUILD_ORDER"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    cat <<'SHIM'
+out=""; prev=""
+for arg in "$@"; do [[ "$prev" == "-o" ]] && out="$arg"; prev="$arg"; done
+name="$(basename "${out:-unknown}")"
+printf 'start %s\n' "$name" >>"$BUILD_ORDER"
+sleep 1
+printf 'end %s\n' "$name" >>"$BUILD_ORDER"
+[[ -n "$out" ]] || exit 0
+mkdir -p "$out/bin"
+printf '#!%s\necho built\n' "$(command -v bash)" >"$out/bin/gotg-play"
+chmod +x "$out/bin/gotg-play"
+SHIM
+  } >"$GOTG_NIX"
+  chmod +x "$GOTG_NIX"
+
+  gotg sync --force
+  [ "$status" -eq 0 ]
+  # Two environments were building at once: a second environment started
+  # before the first finished. Only the environments -- gotg itself is built
+  # before them, and on its own.
+  local envs first_end second_start
+  envs="$(grep -E '^(start|end) env-' "$BUILD_ORDER")"
+  first_end="$(grep -n '^end ' <<<"$envs" | head -1 | cut -d: -f1)"
+  second_start="$(grep -n '^start ' <<<"$envs" | sed -n 2p | cut -d: -f1)"
+  [ -n "$first_end" ] && [ -n "$second_start" ]
+  [ "$second_start" -lt "$first_end" ]
+}
+
+@test "a parallel sync still marks every environment, in a settled order" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  stub_nix
+  fake_env env-n64
+  fake_env env-snes
+  fake_env env-nes
+
+  gotg sync --force
+  [ "$status" -eq 0 ]
+  # Each environment named once, and the platform lines in a fixed order --
+  # whichever build happened to finish first must not reorder the report.
+  [ "$(grep -c "env-n64" <<<"$stderr")" -ge 1 ]
+  [ "$(grep -c "env-nes" <<<"$stderr")" -ge 1 ]
+  [ "$(grep -c "env-snes" <<<"$stderr")" -ge 1 ]
+  local order
+  order="$(grep -oE "env-(n64|nes|snes)" <<<"$stderr" | head -3 | tr '\n' ' ')"
+  [ "$order" = "env-n64 env-nes env-snes " ]
+}
