@@ -190,6 +190,9 @@
           # zelda64recomp and n64recomp are.
           dk64recomp = pkgs.callPackage ./pkgs/dk64recomp { };
 
+          # Super Smash Bros. (N64) — the libultraship port, not a recomp.
+          battleship = pkgs.callPackage ./pkgs/battleship { };
+
           # Snowboard Kids 2: Recompiled — the same N64Recomp/RT64 stack as
           # dk64recomp above, and likewise not in nixpkgs.
           snowboardkids2recomp = pkgs.callPackage ./pkgs/snowboardkids2recomp { };
