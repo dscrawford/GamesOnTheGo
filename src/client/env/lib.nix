@@ -206,8 +206,12 @@ let
   # both come up empty ("No RDP rendering support" is ares saying exactly
   # that). Ship our own nixpkgs mesa and point the loaders at it, only when
   # the host provides nothing: the nixGL trick, inlined.
+  # GOTG_FOREIGN_GL=1 takes the branch on a machine that has the host path
+  # too: it is how `gotg qa --machine deck` exercises nixpkgs' mesa on a
+  # desktop, where the only other way to find "Failed to create allocator"
+  # was a Deck.
   foreignGl = ''
-    if [ ! -e /run/opengl-driver ]; then
+    if [ "''${GOTG_FOREIGN_GL:-0}" = 1 ] || [ ! -e /run/opengl-driver ]; then
       export LIBGL_DRIVERS_PATH=${pkgs.mesa}/lib/dri
       # GBM too: a nested compositor (the split-screen sway) allocates its
       # buffers through it, and mesa looks for dri_gbm.so under

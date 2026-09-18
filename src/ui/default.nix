@@ -40,7 +40,7 @@ let
   # inlined nixGL trick the emulator environments use, applied only when the
   # host provides nothing.
   foreignGl = ''
-    if [ ! -e /run/opengl-driver ]; then
+    if [ "''${GOTG_FOREIGN_GL:-0}" = 1 ] || [ ! -e /run/opengl-driver ]; then
       export LIBGL_DRIVERS_PATH=${mesa}/lib/dri
       export __EGL_VENDOR_LIBRARY_FILENAMES=${mesa}/share/glvnd/egl_vendor.d/50_mesa.json
       export LD_LIBRARY_PATH=${mesa}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}

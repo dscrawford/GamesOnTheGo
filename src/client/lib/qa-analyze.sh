@@ -157,7 +157,12 @@ qa_verdict() {
         graphics: $graphics
       }
     } | .pass = ([.checks[].pass] | all(. != false))' \
-    >"$rundir/verdict.json"
+    >"$rundir/verdict.json.checks"
+  # Which machine the run pretended to be, beside the checks: a pass on a
+  # desktop and a fail as a Deck are two facts about one game.
+  jq --arg m "$(cat "$rundir/machine" 2>/dev/null || echo desktop)" '. + {machine: $m}' \
+    "$rundir/verdict.json.checks" >"$rundir/verdict.json"
+  rm -f "$rundir/verdict.json.checks"
 
   jq -e '.pass' "$rundir/verdict.json" >/dev/null
 }

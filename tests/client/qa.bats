@@ -230,3 +230,53 @@ make_rundir() {
   # has never mapped, that is a run which never starts and never says why.
   grep -A6 'export GOTG_NO_DIALOG=1' "$GOTG_LIB/cmd-qa.sh" | grep -qx '  export GOTG_SEAT_GATE=0'
 }
+
+# --- machines: one box pretending to be several ------------------------------
+#
+# Every launch that worked here and failed on the Deck failed on a condition
+# that could have been reproduced here: no host GL, X11 only, a C locale. A
+# profile is those conditions, applied to the game alone.
+
+@test "a machine profile is the exports and unsets the session applies" {
+  run qa_machine_env deck
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"unset WAYLAND_DISPLAY"* ]]
+  [[ "$output" == *"export GOTG_FOREIGN_GL='1'"* ]]
+  [[ "$output" == *"export LANG='C'"* ]]
+  # And the session can source what it is given, and end up in that machine.
+  local out
+  out="$(env WAYLAND_DISPLAY=wayland-9 bash -c "$(qa_machine_env deck); printf '%s|%s|%s' \"\${WAYLAND_DISPLAY:-gone}\" \"\$GOTG_FOREIGN_GL\" \"\$LANG\"")"
+  [ "$out" = "gone|1|C" ]
+}
+
+@test "the desktop is the machine this is, and changes nothing" {
+  run qa_machine_env desktop
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a machine nobody has described is refused, naming the ones that are" {
+  run --separate-stderr qa_machine_env steamos-4
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"no such machine profile: steamos-4"* ]]
+  [[ "$stderr" == *"deck"* ]]
+  [[ "$stderr" == *"desktop"* ]]
+  # The table's own note is not a machine.
+  run qa_machine_env _
+  [ "$status" -ne 0 ]
+}
+
+@test "every profile exports only strings and unsets only names" {
+  # A value with a space is one export; a name with a space is not a name.
+  jq -e '
+    to_entries | map(select(.key != "_")) | all(
+      (.value.env // {} | to_entries | all(.value | type == "string")) and
+      (.value.unset // [] | all(test("^[A-Z_][A-Z0-9_]*$")))
+    )' "$GOTG_DATA/qa-machines.json"
+}
+
+@test "qa refuses a bad --machine before it downloads anything" {
+  gotg qa usa.nothing --machine moon
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"no such machine profile: moon"* ]]
+}

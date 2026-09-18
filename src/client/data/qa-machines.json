@@ -1,0 +1,18 @@
+{
+  "_": "What a QA run pretends to be running on. Each profile is the set of conditions that told a machine apart when a launch worked here and failed there; a run under one exercises those paths on whatever box it is on. `env` is exported to the game, `unset` is taken away from it, and neither reaches the recorder or the pad.",
+  "desktop": {
+    "description": "a NixOS desktop: GL from the host, a Wayland session, a UTF-8 locale",
+    "env": {},
+    "unset": []
+  },
+  "deck": {
+    "description": "a Steam Deck in Game Mode: no host GL (nixpkgs' mesa through GOTG_FOREIGN_GL), X11 only under gamescope, a C locale",
+    "env": { "GOTG_FOREIGN_GL": "1", "LANG": "C" },
+    "unset": [ "WAYLAND_DISPLAY", "LC_ALL" ]
+  },
+  "deck-desktop": {
+    "description": "a Steam Deck in Desktop Mode: no host GL, KDE's Wayland with Xwayland beside it, a UTF-8 locale",
+    "env": { "GOTG_FOREIGN_GL": "1", "LANG": "en_US.UTF-8" },
+    "unset": [ "LC_ALL" ]
+  }
+}
