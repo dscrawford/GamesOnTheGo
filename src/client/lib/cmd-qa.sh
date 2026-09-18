@@ -215,6 +215,61 @@ qa_host_lacks_gl() {
   [[ ! -e "${GOTG_HOST_GL:-/run/opengl-driver}" ]]
 }
 
+# What a run was, written down beside what it produced.
+#
+# The artifacts were always kept and the invocation was not: the game
+# survived only as the name of a directory under env-state, the timings only
+# inside the video check, and "run that one again" meant reconstructing it
+# from memory. A result is worth what the build behind it is, so the
+# client's own path goes in too.
+qa_record_run() {
+  local rundir="$1" id="$2" variant="$3" machine="$4" duration="$5" boot_wait="$6" bless="$7"
+  mkdir -p "$rundir"
+  jq -n --arg id "$id" --arg variant "$variant" --arg machine "$machine" \
+    --argjson duration "$duration" --argjson boot_wait "$boot_wait" \
+    --argjson bless "$([[ -n "$bless" ]] && echo true || echo false)" \
+    --arg gotg "$GOTG_ROOT" --arg at "$(date -Is 2>/dev/null || true)" \
+    '{version: 1, id: $id, variant: (if $variant == "" then null else $variant end),
+      machine: $machine, duration: $duration, boot_wait: $boot_wait,
+      bless: $bless, gotg: $gotg, at: $at}' >"$rundir/run.json"
+}
+
+# One run directory, by name or `latest`.
+qa_run_dir() {
+  local want="$1" dir
+  if [[ "$want" == latest ]]; then
+    # By name, not by mtime: a run's name carries the moment it started, and
+    # mtime moves whenever anything writes into an old run directory.
+    local -a runs=("$GOTG_STATE_DIR"/qa/runs/*/)
+    [[ -d "${runs[0]}" ]] || die "no runs yet; gotg qa <id> makes one"
+    dir="$(printf '%s\n' "${runs[@]}" | sort | tail -1)"
+    printf '%s' "${dir%/}"
+    return 0
+  fi
+  dir="$GOTG_STATE_DIR/qa/runs/$want"
+  [[ -d "$dir" ]] || die "no such run: $want (try --rerun latest, or look in $GOTG_STATE_DIR/qa/runs)"
+  printf '%s' "$dir"
+}
+
+# The arguments that would run it again.
+#
+# Never --bless: blessing stores the golden frame later runs are graded
+# against, and doing it again by accident moves the reference every time. A
+# rerun meant to re-bless says so itself.
+qa_rerun_args() {
+  local rec="$1/run.json" id variant machine duration boot_wait
+  [[ -f "$rec" ]] ||
+    die "$1 was made before runs were written down; its game is the directory under $1/env-state"
+  id="$(jq -r '.id' "$rec")"
+  variant="$(jq -r '.variant // empty' "$rec")"
+  machine="$(jq -r '.machine // "desktop"' "$rec")"
+  duration="$(jq -r '.duration' "$rec")"
+  boot_wait="$(jq -r '.boot_wait' "$rec")"
+  printf '%s' "$id"
+  [[ -z "$variant" ]] || printf ' %s' "$variant"
+  printf ' --machine %s --duration %s --boot-wait %s' "$machine" "$duration" "$boot_wait"
+}
+
 # The real machine first, the stand-in second.
 #
 # A profile is a stand-in, and worth less than the thing it stands in for:
@@ -267,6 +322,9 @@ usage: gotg qa <id> [variant] [--duration N] [--boot-wait N] [--bless] [--machin
   recorded, then the recording is graded — did it boot, is there sound, did
   the inputs move anything, does the picture match the blessed frame.
 
+    --rerun R      run the run R again -- a directory name under
+                   ~/.local/state/gotg/qa/runs, or `latest`. Flags after it
+                   still win, so a rerun can be longer than the original.
     --duration N   seconds to run the game for (default 60)
     --boot-wait N  seconds before the pad starts pressing (default 15)
     --bless        store this run's reference frame as the golden image
@@ -284,6 +342,16 @@ EOF
       --boot-wait) boot_wait="${2:-}"; shift 2 ;;
       --bless) bless=1; shift ;;
       --machine) machine="${2:-}"; shift 2 ;;
+      --rerun)
+        # Whatever that run was, again -- and flags after it still win, so
+        # `--rerun x --duration 90` is a longer run of the same thing.
+        local rerun_args
+        rerun_args="$(qa_rerun_args "$(qa_run_dir "${2:-latest}")")"
+        log "running it again: gotg qa $rerun_args"
+        # shellcheck disable=SC2086  # the recorded arguments, as arguments
+        set -- $rerun_args "${@:3}"
+        continue
+        ;;
       -*) die "unknown option: $1 (gotg qa --help)" ;;
       *)
         if [[ -z "$want" ]]; then want="$1"
@@ -336,6 +404,10 @@ EOF
   local rundir
   rundir="$(qa_new_rundir)"
   mkdir -p "$rundir/env-state"
+
+  # What this run is, before it starts: one that dies half way is still one
+  # somebody may want to repeat.
+  qa_record_run "$rundir" "$want" "$variant" "$machine" "$duration" "$boot_wait" "$bless"
 
   # Scratch launch state, set before play_prepare so every helper that derives
   # a path from env_state_dir agrees on it.
