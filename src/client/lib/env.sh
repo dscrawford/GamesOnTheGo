@@ -97,6 +97,25 @@ env_attr() {
       printf 'env-%s-%s-%s' "$platform" "${id/./_}" "$variant"
       return 0
     fi
+    # `emulate`, reserved: the platform's own emulator, for a game whose
+    # ordinary launch is something else. More and more of them are -- a native
+    # port off a decompilation, which is better nearly always and not always:
+    # a port is younger than the emulator, and when one of them has the bug
+    # this is how you find out which.
+    #
+    # It is the platform environment itself rather than a file per game,
+    # because that is precisely what it means: the way this platform runs a
+    # game nobody wrote anything special for. A real <id>.emulate.nix, if one
+    # ever existed, is checked above and wins -- this is the fallback.
+    if [[ "$variant" == emulate ]]; then
+      [[ -f "$GOTG_ENV_DIR/$platform.nix" ]] ||
+        die "no emulator for platform '$platform', so there is nothing to fall back to"
+      if [[ ! -f "$GOTG_ENV_DIR/games/$platform/$id.nix" ]]; then
+        die "$id already runs on $platform's emulator; 'emulate' would change nothing"
+      fi
+      printf 'env-%s' "$platform"
+      return 0
+    fi
     local available
     available="$(env_variants "$platform" "$id")"
     die "no '$variant' variant of $id.
@@ -121,6 +140,18 @@ env_attr() {
 # wants the sentence.
 env_variant_names() {
   local platform="$1" id="$2" file name
+  # The reserved one, offered only where it would do something. Which is not
+  # "this game has an environment of its own": most of those are the platform's
+  # emulator with settings added, and swapping one for the bare platform would
+  # only drop the settings. The environment says whether it replaces the
+  # emulator, with a marker its derivation carries, so this is the built root
+  # rather than the source file -- and a game with nothing built yet is a game
+  # nobody is choosing how to run. See nativePort in env/lib.nix.
+  if [[ -e "$(env_root "env-$platform-${id/./_}")/share/gotg/native-port" &&
+    -f "$GOTG_ENV_DIR/$platform.nix" &&
+    ! -f "$GOTG_ENV_DIR/games/$platform/$id.emulate.nix" ]]; then
+    printf 'emulate\n'
+  fi
   for file in "$GOTG_ENV_DIR/games/$platform/$id".*.nix; do
     [[ -e "$file" ]] || continue
     name="$(basename "$file" .nix)"

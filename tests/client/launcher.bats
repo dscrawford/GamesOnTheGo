@@ -311,6 +311,63 @@ teardown() {
   [[ "$stderr" == *"Available: hd"* ]]
 }
 
+@test "emulate runs a ported game on its platform's emulator" {
+  # More and more games launch as a native port off a decompilation. The port
+  # is younger than the emulator it replaces, so this is how a person finds
+  # out which of the two has the bug.
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  gotg download usa.zelda
+  mkdir -p "$GOTG_ENV_DIR/games/n64"
+  : >"$GOTG_ENV_DIR/games/n64/usa.zelda.nix"
+  fake_env env-n64-usa_zelda
+
+  gotg play usa.zelda emulate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"env-n64 launched with:"* ]]
+}
+
+@test "the flag spelling of emulate does the same thing" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  gotg download usa.zelda
+  mkdir -p "$GOTG_ENV_DIR/games/n64"
+  : >"$GOTG_ENV_DIR/games/n64/usa.zelda.nix"
+  fake_env env-n64-usa_zelda
+
+  gotg play usa.zelda --force-emu
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"env-n64 launched with:"* ]]
+  # And it is not handed to the emulator as an argument.
+  [[ "$output" != *"--force-emu"* ]]
+}
+
+@test "emulate is refused where the emulator is already what runs" {
+  # Nothing to swap back to, and a row that changes nothing is worse than no
+  # row: it teaches that the option does not work.
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  gotg download usa.zelda
+
+  gotg play usa.zelda emulate
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"already runs on n64's emulator"* ]]
+}
+
+@test "a real emulate file wins over the reserved name" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  gotg download usa.zelda
+  mkdir -p "$GOTG_ENV_DIR/games/n64"
+  : >"$GOTG_ENV_DIR/games/n64/usa.zelda.nix"
+  : >"$GOTG_ENV_DIR/games/n64/usa.zelda.emulate.nix"
+  fake_env env-n64-usa_zelda-emulate
+
+  gotg play usa.zelda emulate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"env-n64-usa_zelda-emulate launched with:"* ]]
+}
+
 @test "an emulator argument is not mistaken for a variant" {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh

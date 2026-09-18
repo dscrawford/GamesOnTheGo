@@ -93,6 +93,9 @@ in
 {
   emulator = launcher;
   bin = "gotg-animal-crossing";
+  # Not the platform emulator: a native port. `gotg play <id> emulate`
+  # is the way back to ares/dolphin when this one misbehaves.
+  nativePort = true;
   # Settings are the keybindings ini and the in-game menus; there is no
   # separate configuration program to open.
   configurable = false;

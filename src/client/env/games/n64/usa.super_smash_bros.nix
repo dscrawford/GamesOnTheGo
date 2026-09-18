@@ -47,6 +47,7 @@ in
 helpers.harkinianPort {
   inherit port appName;
   bin = "BattleShip";
+  # nativePort comes from the helper: everything it builds is a port.
   archives = [ "BattleShip.o2r" ];
 }
 // {

@@ -185,6 +185,7 @@ disabled:  enhanced (needs 1.1.0 to 1.4.2)
 ```
 
 Native ports, not emulated: Ocarina of Time and Master Quest (Ship of Harkinian), Majora's Mask (2 Ship 2 Harkinian), Donkey Kong 64 (recomp), Snowboard Kids 2 (recomp), Super Smash Bros. (BattleShip), Pikmin (Open Nectar), Super Mario 64 `pc` (sm64coopdx), Paper Mario `recut` (Wine), Animal Crossing (ACGC PC Port, Wine), Super Smash Bros. Melee (melee-pc).
+Any of those can be put back on the emulator for a launch: `gotg play <id> emulate`, or the same row in the picker. A port is younger than the emulator it replaces, so this is how you find out which of the two has the bug.
 
 ## Saves
 
