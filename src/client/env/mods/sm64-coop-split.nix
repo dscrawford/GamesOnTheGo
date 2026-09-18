@@ -172,9 +172,12 @@ in
               printf '%s\n' "''${gotg_argv[@]}" |
                 ${pkgs.jq}/bin/jq -Rsc 'split("\n")[:-1]'
             )"
+            # Under a gamescope of its own, sized to the slot: the copy sees a
+            # monitor exactly that big, so one that fullscreens itself, or a
+            # graphics setting somebody changed, cannot leave its slot.
             gotg_instance="$(
               ${pkgs.jq}/bin/jq -nc --arg id "p$gotg_n" --argjson command "$gotg_command" \
-                '{ id: $id, command: $command }'
+                '{ id: $id, command: $command, gamescope: true }'
             )"
             if [ "$gotg_n" -gt 1 ]; then
               gotg_instance="$(

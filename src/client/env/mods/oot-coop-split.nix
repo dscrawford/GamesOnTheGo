@@ -153,10 +153,14 @@ in
               gotg_devices="$(${pkgs.jq}/bin/jq -nc --arg d "$gotg_dev" '[$d]')"
             fi
 
+            # Under a gamescope of its own, sized to the slot: the copy sees a
+            # monitor exactly that big, so a fullscreen setting somebody saved,
+            # or the extra windows the port opens, cannot leave the slot or
+            # take a seat meant for another copy.
             gotg_instance="$(
               ${pkgs.jq}/bin/jq -nc --arg id "p$gotg_n" --arg soh ${lib.escapeShellArg soh} \
                 --arg home "$gotg_home" --argjson devices "$gotg_devices" \
-                '{ id: $id, command: [$soh], cwd: $home, devices: $devices,
+                '{ id: $id, command: [$soh], cwd: $home, devices: $devices, gamescope: true,
                    env: { SHIP_HOME: $home, SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS: "1" } }'
             )"
             gotg_instances="$(
