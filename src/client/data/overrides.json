@@ -29,6 +29,7 @@
   ],
 
   "n64/usa.donkey_kong_64": { "unzip": true, "target": "*.z64" },
+  "n64/usa.snowboard_kids_2": { "unzip": true, "target": "*.z64" },
 
   "wiiu/usa.legend_of_zelda_twilight_princess_hd": { "target": "code/*.rpx" },
   "wiiu/usa.legend_of_zelda_the_wind_waker_hd": { "target": "code/*.rpx" }
