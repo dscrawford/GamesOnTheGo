@@ -10,6 +10,11 @@
 {
   pkgs,
   lib ? pkgs.lib,
+  # padmap's launcher, for the one environment that has to sandbox the game
+  # itself. Optional so this file still evaluates from a checkout with no
+  # flake inputs -- the split-screen variants are what need it, and they say
+  # so by failing to build rather than by launching a game with no isolation.
+  padmap-rs ? null,
 }:
 
 let
@@ -33,6 +38,7 @@ let
     # Only the Four Swords Adventures split-screen variants name this, so only
     # they build it — sway, gamescope and bwrap are not the client's problem.
     splitscreen = pkgs.callPackage ../../../pkgs/splitscreen { };
+    inherit padmap-rs;
     # The relay Ship of Harkinian's co-op talks through, run locally so four
     # copies of Ocarina of Time on one sofa need no internet.
     anchor-server = pkgs.callPackage ../../../pkgs/anchor-server { };

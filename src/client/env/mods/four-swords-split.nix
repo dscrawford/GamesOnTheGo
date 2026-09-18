@@ -28,7 +28,29 @@
       # The same Dolphin the platform would have used. Named from the base
       # rather than reached for again, so the split launch and the plain one
       # can never end up on different emulators.
-      dolphin = "${base.emulator}/bin/${base.bin}";
+      #
+      # Wrapped, though, and this is the whole reason the wrapper exists: the
+      # session runs outside padmap's sandbox (ownsSession, below) because a
+      # nested compositor cannot start Xwayland inside one, and that left the
+      # game seeing every raw pad on the machine beside padmap's. The other
+      # split modes do not care -- they hand each copy its own seat -- but
+      # this one is a single Dolphin binding pads by name, and with the raw
+      # pads visible it bound the Steam Controller where player 1 was an Xbox
+      # pad. So the sandbox goes around the game instead of around the
+      # session: the compositor stays outside it, Dolphin goes inside, and
+      # what Dolphin can see is padmap's pads and nothing else.
+      #
+      # Which is half of it. The step that writes those bindings runs in the
+      # session, outside the sandbox, so it enumerates every pad on the
+      # machine and "the first one" is not the first one Dolphin will see --
+      # it wrote `GBA1 <- SDL/0/Steam Deck`, a name that does not exist
+      # inside. So the pads are named rather than counted: --pad
+      # "sdl:padmap Player N" below, which is what padmap calls its clones,
+      # and the only pads Dolphin has.
+      dolphin = pkgs.writeShellScript "gotg-fsa-dolphin" ''
+        exec ${gotgPkgs.padmap-rs}/bin/padmap-rs exec -- \
+          ${base.emulator}/bin/${base.bin} "$@"
+      '';
     in
     {
       title = "Four Swords Adventures (${toString players} players)";
@@ -77,6 +99,9 @@
           mkdir -p "$state/splitscreen"
           ${split}/bin/splitscreen-fsa \
             --players ${toString players} \
+            ${lib.concatMapStringsSep " " (n: ''--pad "sdl:padmap Player ${toString n}"'') (
+              lib.range 1 players
+            )} \
             --gc "$target" \
             --gba-bios "$state/bios/gba_bios.bin" \
             --dolphin ${lib.escapeShellArg dolphin} \

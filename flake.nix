@@ -105,7 +105,12 @@
         let
           # One launchable environment per platform, plus one per game that needs
           # its own settings — see src/client/env. `gotg play` builds these by name.
-          envs = import ./src/client/env { inherit pkgs; };
+          envs = import ./src/client/env {
+            inherit pkgs;
+            # For the split-screen sessions, which put the game inside padmap's
+            # sandbox themselves -- see mods/four-swords-split.nix.
+            inherit (padmap.packages.${pkgs.stdenv.hostPlatform.system}) padmap-rs;
+          };
           py = pythonSets.${pkgs.stdenv.hostPlatform.system};
         in
         envs
