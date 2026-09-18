@@ -21,6 +21,7 @@ let
   # reach back up the tree with a relative path.
   gotgPkgs = {
     dk64recomp = pkgs.callPackage ../../../pkgs/dk64recomp { };
+    snowboardkids2recomp = pkgs.callPackage ../../../pkgs/snowboardkids2recomp { };
     # nixpkgs' Ryubing with the JIT cache size upstream Ryujinx shipped; see
     # the package for the crash the 1.3.3 default has.
     ryubing = pkgs.callPackage ../../../pkgs/ryubing { };

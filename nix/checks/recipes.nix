@@ -34,6 +34,7 @@ let
     };
     gotgPkgs = {
       dk64recomp = pkgs.coreutils;
+      snowboardkids2recomp = pkgs.coreutils;
     };
   };
   overrides = builtins.fromJSON (builtins.readFile ../../src/client/data/overrides.json);

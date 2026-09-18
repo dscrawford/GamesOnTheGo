@@ -190,6 +190,10 @@
           # zelda64recomp and n64recomp are.
           dk64recomp = pkgs.callPackage ./pkgs/dk64recomp { };
 
+          # Snowboard Kids 2: Recompiled — the same N64Recomp/RT64 stack as
+          # dk64recomp above, and likewise not in nixpkgs.
+          snowboardkids2recomp = pkgs.callPackage ./pkgs/snowboardkids2recomp { };
+
           # Not in nixpkgs, though its sibling wiimms-iso-tools is. Needed to
           # open and rebuild the Yaz0 archives GameCube games keep their data in.
           wiimms-szs-tools = pkgs.callPackage ./pkgs/wiimms-szs-tools { };
