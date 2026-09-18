@@ -78,9 +78,16 @@ qa_seed_bootstrap() {
 # Stop before a run that is only going to hang. A harkinian environment whose
 # first-run extraction has never happened cannot start unattended; say so, and
 # say the one command that fixes it.
+#
+# What is tested for is the handover, not the extracting. The dialog path is
+# the one that stages the ROM as gotg-extract.z64 and hands the process to the
+# port's own wizard -- that is the window nothing here can click. A port that
+# ships a separate extractor and runs it itself, like BattleShip with Torch,
+# also prints "first run: extracting", and grepping for that used to stop it
+# from ever running headless.
 qa_require_bootstrap() {
   local attr="$1" scratch="$2"
-  grep -q 'first run: extracting game assets' "$(env_bin "$attr")" 2>/dev/null || return 0
+  grep -q 'gotg-extract.z64' "$(env_bin "$attr")" 2>/dev/null || return 0
   find "$scratch" -name '*.o2r' -print -quit 2>/dev/null | grep -q . && return 0
   die "this game extracts its assets on first run, behind a dialog no headless
      run can answer. Bootstrap it once with a real window:
