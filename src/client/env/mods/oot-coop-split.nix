@@ -11,24 +11,11 @@
 # Controllers are the one part that is not a setting. Ship of Harkinian maps
 # whatever gamepad it finds first to port 1, and four copies would all find
 # the same one -- so each copy is started in a sandbox where the only gamepad
-# under /dev/input is its player's, the trick SplitScreenWrapper took from
-# PartyDeck. The device is padmap's clone for that player, "padmap Player N",
-# which is what every controller is once gotg has seated it.
+# under /dev/input is its player's. See coop-seats.nix.
 { pkgs, lib }:
 let
   anchorPort = 43383; # the relay listens here and nowhere else; it has no flag
-
-  # Which /dev/input node carries the controller with this name.
-  deviceFor = pkgs.writeShellScript "gotg-oot-coop-device" ''
-    for n in /sys/class/input/event*/device/name; do
-      [ -f "$n" ] || continue
-      if [ "$(cat "$n")" = "$1" ]; then
-        printf '/dev/input/%s\n' "$(basename "$(dirname "$(dirname "$n")")")"
-        exit 0
-      fi
-    done
-    exit 1
-  '';
+  seat = import ./coop-seats.nix { inherit pkgs; };
 in
 {
   harkinianCoopSplit =
@@ -145,13 +132,8 @@ in
               "$gotg_cfg" >"$gotg_cfg.gotg" && mv "$gotg_cfg.gotg" "$gotg_cfg"
 
             # This player's controller, as the one input device the copy can
-            # see. No padmap clone for this seat means no sandbox: the copy
-            # sees every pad, which for one player is the right answer and
-            # for a missing one is a keyboard rather than nothing.
-            gotg_devices='[]'
-            if gotg_dev="$(${deviceFor} "padmap Player $gotg_n")"; then
-              gotg_devices="$(${pkgs.jq}/bin/jq -nc --arg d "$gotg_dev" '[$d]')"
-            fi
+            # see -- or none. See coop-seats.nix for why never everyone's.
+            gotg_seat="$(${seat} "$gotg_n")"
 
             # Under a gamescope of its own, sized to the slot: the copy sees a
             # monitor exactly that big, so a fullscreen setting somebody saved,
@@ -159,8 +141,9 @@ in
             # take a seat meant for another copy.
             gotg_instance="$(
               ${pkgs.jq}/bin/jq -nc --arg id "p$gotg_n" --arg soh ${lib.escapeShellArg soh} \
-                --arg home "$gotg_home" --argjson devices "$gotg_devices" \
-                '{ id: $id, command: [$soh], cwd: $home, devices: $devices, gamescope: true,
+                --arg home "$gotg_home" --argjson seat "$gotg_seat" \
+                '{ id: $id, command: [$soh], cwd: $home, gamescope: true,
+                   devices: $seat.devices, isolate_input: $seat.isolate,
                    env: { SHIP_HOME: $home, SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS: "1" } }'
             )"
             gotg_instances="$(

@@ -13,6 +13,7 @@
 # directory and which controller all agree.
 { pkgs, lib }:
 let
+  seat = import ./coop-seats.nix { inherit pkgs; };
   # A UDP port nobody is using. coopdx binds AF_INET6 with in6addr_any, so the
   # probe has to look the same way round or it would report a port free that
   # the game cannot have.
@@ -104,36 +105,28 @@ in
           # "the port is taken" and neither is worth explaining to anybody.
           gotg_port="$(${freePort}/bin/gotg-sm64-coop-port)"
 
-          # Which controller each player reads, in the order gotg seats them.
-          # `gotg controllers order` pins that order for every emulator on the
-          # machine, and the number coopdx wants — SDL's device index — is the
-          # second half of the key it pins. No pinned order means SDL's own,
-          # which is what every other environment falls back to.
-          gotg_pads=()
-          if [ -f "$GOTG_USER_CONFIG/controllers.json" ]; then
-            mapfile -t gotg_pads < <(
-              ${pkgs.jq}/bin/jq -r '.order[]? | split("/") | .[1] // empty' \
-                "$GOTG_USER_CONFIG/controllers.json" 2>/dev/null || true
-            )
-          fi
-
           gotg_instances='[]'
           for gotg_n in $(seq 1 ${toString players}); do
             gotg_save="$gotg_coop/p$gotg_n"
             mkdir -p "$gotg_save"
 
+            # Which controller this copy reads: the one in its sandbox. Each
+            # copy sees only its player's pad (coop-seats.nix), so the number
+            # coopdx wants -- SDL's device index -- is always the first. It used
+            # to be the player's place in `gotg controllers order`, which under
+            # padmap counted the physical pad and its clone both.
+            gotg_seat="$(${seat} "$gotg_n")"
             # Written into each player's own config because it is a *setting*,
             # not a flag: coopdx takes the controller number and the
             # read-it-without-focus switch from sm64config.txt and from nowhere
             # else. Only those two lines are touched, so everything a player
             # changes in the game's own menus survives the next launch.
-            gotg_pad="''${gotg_pads[$((gotg_n - 1))]:-$((gotg_n - 1))}"
             gotg_config="$gotg_save/sm64config.txt"
             touch "$gotg_config"
             ${pkgs.gnused}/bin/sed -i \
               -e '/^gamepad_number /d' -e '/^background_gamepad /d' "$gotg_config"
             {
-              printf 'gamepad_number %s\n' "$gotg_pad"
+              printf 'gamepad_number 0\n'
               # Three of the four windows are unfocused at any moment, and a pad
               # that only reports to the focused window would leave those three
               # players watching.
@@ -177,7 +170,9 @@ in
             # graphics setting somebody changed, cannot leave its slot.
             gotg_instance="$(
               ${pkgs.jq}/bin/jq -nc --arg id "p$gotg_n" --argjson command "$gotg_command" \
-                '{ id: $id, command: $command, gamescope: true }'
+                --argjson seat "$gotg_seat" \
+                '{ id: $id, command: $command, gamescope: true,
+                   devices: $seat.devices, isolate_input: $seat.isolate }'
             )"
             if [ "$gotg_n" -gt 1 ]; then
               gotg_instance="$(
