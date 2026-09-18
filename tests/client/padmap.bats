@@ -72,7 +72,10 @@ teardown() { stop_saves_service; }
   cat >"$FAKE_BIN/padmap" <<EOF
 #!/usr/bin/env bash
 echo "\$*" >>"$PADMAP_LOG"
-[ "\$1" = ensure-daemon ] && (sleep 0.5; echo 'export X=1' >"$GOTG_PADMAP_RUNTIME/env.sh") &
+if [ "\$1" = ensure-daemon ]; then
+  echo "no daemon running; starting one"; echo "daemon up, build test"
+  (sleep 0.5; echo 'export X=1' >"$GOTG_PADMAP_RUNTIME/env.sh") &
+fi
 exit 0
 EOF
   chmod +x "$FAKE_BIN/padmap"
@@ -85,9 +88,119 @@ EOF
 @test "a daemon that never publishes is waited on only so long" {
   export GOTG_PADMAP_RUNTIME="$TEST_TMP/padmap-rt-never"
   mkdir -p "$GOTG_PADMAP_RUNTIME"
+  printf '#!/usr/bin/env bash\necho "daemon up, build test"\n' >"$FAKE_BIN/padmap"
+  chmod +x "$FAKE_BIN/padmap"
   GOTG_PADMAP_PUBLISH_WAIT=3 run --separate-stderr padmap_ensure
   [ "$status" -eq 0 ]
   [[ "$stderr" == *"published no controllers"* ]]
+}
+
+@test "a leftover mappings file from an earlier daemon does not count as published" {
+  # The file survives its daemon within a login session, so an existence
+  # test passed on a leftover while the new daemon had said nothing yet.
+  export GOTG_PADMAP_RUNTIME="$TEST_TMP/padmap-rt-stale"
+  mkdir -p "$GOTG_PADMAP_RUNTIME"
+  echo 'export STALE=1' >"$GOTG_PADMAP_RUNTIME/env.sh"
+  sleep 0.05
+  printf '#!/usr/bin/env bash\necho "daemon up, build test"\n' >"$FAKE_BIN/padmap"
+  chmod +x "$FAKE_BIN/padmap"
+  GOTG_PADMAP_PUBLISH_WAIT=3 run --separate-stderr padmap_ensure
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"published no controllers"* ]]
+}
+
+@test "a daemon that was already current is not waited on" {
+  export GOTG_PADMAP_RUNTIME="$TEST_TMP/padmap-rt-current"
+  mkdir -p "$GOTG_PADMAP_RUNTIME"
+  printf '#!/usr/bin/env bash\necho "daemon is current (build test)"\n' >"$FAKE_BIN/padmap"
+  chmod +x "$FAKE_BIN/padmap"
+  # No mappings file at all -- nobody seated yet -- and no waiting for one:
+  # that would be waiting on a button press.
+  local before after
+  before=$(date +%s)
+  GOTG_PADMAP_PUBLISH_WAIT=30 run --separate-stderr padmap_ensure
+  after=$(date +%s)
+  [ "$status" -eq 0 ]
+  [ $((after - before)) -lt 2 ]
+  [[ "$stderr" != *"published no controllers"* ]]
+}
+
+@test "a check that failed is asked again next time" {
+  # The latch used to be set on the way out regardless, so one bad start at
+  # the picker disabled the check for every game launched from it.
+  FAKE_PADMAP_EXIT=1 run padmap_ensure
+  [ "$status" -eq 0 ]
+  FAKE_PADMAP_EXIT=1 padmap_ensure
+  [ -z "${PADMAP_SKIP_DAEMON_CHECK:-}" ]
+  padmap_ensure
+  [ "${PADMAP_SKIP_DAEMON_CHECK:-}" = 1 ]
+}
+
+# --- the keeper ---
+
+# A stand-in daemon whose --check answer is scripted: one line per call.
+keeper_daemon() {
+  export CHECK_SCRIPT="$TEST_TMP/check-script"
+  export CHECK_COUNT="$TEST_TMP/check-count"
+  printf '%s\n' "$@" >"$CHECK_SCRIPT"
+  : >"$CHECK_COUNT"
+  cat >"$FAKE_BIN/padmap" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$PADMAP_LOG"
+if [ "\$1" = ensure-daemon ] && [ "\$2" = --check ]; then
+  n=\$(wc -l <"$CHECK_COUNT"); echo x >>"$CHECK_COUNT"
+  line=\$(sed -n "\$((n + 1))p" "$CHECK_SCRIPT")
+  [ -n "\$line" ] || line="daemon is current"
+  echo "\$line"
+  case "\$line" in *current*) exit 0 ;; *) exit 1 ;; esac
+fi
+exit 0
+EOF
+  chmod +x "$FAKE_BIN/padmap"
+}
+
+@test "the keeper starts a daemon that has gone, once" {
+  keeper_daemon "no daemon running" "daemon is current"
+  sleep 1.2 &
+  local game=$!
+  GOTG_PADMAP_KEEPER_INTERVAL=0.2 padmap_keeper_start "$game"
+  wait "$game"
+  sleep 0.6
+  [ "$(grep -cx 'ensure-daemon' "$PADMAP_LOG")" -eq 1 ]
+}
+
+@test "the keeper leaves a daemon running older code alone" {
+  # That is a sync's business; swapping the daemon mid-level would drop the
+  # clones the game is using.
+  keeper_daemon "daemon is running older code:" "daemon is running older code:"
+  sleep 1.0 &
+  local game=$!
+  GOTG_PADMAP_KEEPER_INTERVAL=0.2 padmap_keeper_start "$game"
+  wait "$game"
+  sleep 0.6
+  [ "$(grep -cx 'ensure-daemon' "$PADMAP_LOG")" -eq 0 ]
+  [ "$(grep -c 'ensure-daemon --check' "$PADMAP_LOG")" -ge 1 ]
+}
+
+@test "the keeper stops when the game does" {
+  keeper_daemon "daemon is current"
+  sleep 0.5 &
+  local game=$!
+  GOTG_PADMAP_KEEPER_INTERVAL=0.2 padmap_keeper_start "$game"
+  local keeper=$!
+  wait "$game"
+  sleep 1.0
+  ! kill -0 "$keeper" 2>/dev/null
+}
+
+@test "the keeper can be switched off" {
+  keeper_daemon "no daemon running"
+  sleep 0.6 &
+  local game=$!
+  GOTG_PADMAP_KEEPER=0 GOTG_PADMAP_KEEPER_INTERVAL=0.2 padmap_keeper_start "$game"
+  wait "$game"
+  sleep 0.5
+  [ ! -s "$PADMAP_LOG" ]
 }
 
 @test "a daemon that will not start does not stop the game" {

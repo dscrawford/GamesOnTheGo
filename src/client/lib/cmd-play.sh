@@ -101,6 +101,7 @@ cmd_play() {
 
   # "$$" survives the exec below, so what the watcher holds is the emulator.
   killswitch_start "$$"
+  padmap_keeper_start "$$"
   padmap_exec "$(env_bin "$PLAY_ATTR")" "$PLAY_TARGET" "$@"
 }
 

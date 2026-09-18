@@ -238,3 +238,47 @@ def test_no_padmap_at_all_is_a_sentence_too(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.delenv("PADMAP_SKIP_DAEMON_CHECK", raising=False)
     assert ensure_daemon() == "padmap is not installed"
+
+
+def test_a_daemon_that_would_not_start_is_asked_again(tmp_path, monkeypatch):
+    # The latch used to be set on the way out regardless, so one bad start at
+    # the picker disabled the check for every game launched from it after.
+    import os
+
+    from gotg_ui.padmap import ensure_daemon
+
+    fake_padmap(tmp_path, monkeypatch, exit_code=1, message="no permission for uinput")
+    assert ensure_daemon() is not None
+    assert "PADMAP_SKIP_DAEMON_CHECK" not in os.environ
+    assert ensure_daemon() is not None
+
+
+def test_force_asks_past_the_latch(tmp_path, monkeypatch):
+    # The watch that notices a daemon has gone while the picker is open has
+    # to ask again, and the latch was set by the picker's own first ask.
+    import os
+
+    from gotg_ui.padmap import ensure_daemon
+
+    script = fake_padmap(tmp_path, monkeypatch)
+    assert ensure_daemon() is None
+    assert os.environ["PADMAP_SKIP_DAEMON_CHECK"] == "1"
+    log = tmp_path / "calls"
+    script.write_text(f'#!/bin/sh\necho asked >>{log}\nexit 0\n')
+    assert ensure_daemon() is None
+    assert not log.exists()
+    assert ensure_daemon(force=True) is None
+    assert log.read_text().count("asked") == 1
+
+
+def test_the_watch_asks_on_an_interval_not_every_frame():
+    from gotg_ui.padmap import DaemonWatch
+
+    watch = DaemonWatch(interval=5.0)
+    assert watch.due(100.0)
+    watch.mark(100.0)
+    assert not watch.due(101.0)
+    assert not watch.due(104.9)
+    assert watch.due(105.0)
+    watch.mark(105.0)
+    assert not watch.due(109.0)

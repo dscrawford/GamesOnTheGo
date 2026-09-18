@@ -11,6 +11,7 @@ come after this has been sat in front of on a Deck.
 from __future__ import annotations
 
 import math
+import time
 
 import pygame
 
@@ -29,7 +30,7 @@ from .installed import installed_games
 from .installs import Installs
 from .layout import grid, shelf, shelf_at, tile_at
 from .menu import Menu
-from .padmap import Padmap, ensure_daemon
+from .padmap import DaemonWatch, Padmap, ensure_daemon
 from .padstrip import HEIGHT as STRIP_HEIGHT
 from .padstrip import PANEL, status_text, strip_status
 from .prepare import Preparer, is_ready
@@ -757,6 +758,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # A failure is a sentence in the strip, not a reason to refuse to draw.
     padmap_trouble = ensure_daemon()
     padmap.connect()
+    # And asked after again whenever the connection is gone -- see DaemonWatch
+    # for why reconnecting alone was not enough.
+    padmap_watch = DaemonWatch()
     # The assignment screen. `open` is what decides whether it is on screen,
     # and padmap closes it by accepting rather than this program deciding.
     seating = Session()
@@ -1224,6 +1228,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             # socket fails at once with ENOENT, and a daemon started while the
             # picker is open should be picked up without restarting it.
             if not padmap.connected:
+                if padmap_watch.due(time.monotonic()):
+                    padmap_watch.mark(time.monotonic())
+                    padmap_trouble = ensure_daemon(force=True)
                 padmap.connect()
             for padmap_event in padmap.poll():
                 seating.handle(padmap_event)
