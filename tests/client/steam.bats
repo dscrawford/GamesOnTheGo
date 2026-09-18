@@ -574,3 +574,60 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   run helper list
   [ "$(jq '[.[] | select(.name == "Games On The Go")] | length' <<<"$output")" -eq 1 ]
 }
+
+# --- the launcher Steam presses ------------------------------------------------
+#
+# Steam's environment carries none of Nix's profile directories. `exec gotg-ui`
+# therefore exited 127 before anything was drawn -- from Game Mode that is an
+# entry that opens and closes with nothing to read anywhere.
+
+@test "the picker is found even when Steam's PATH knows nothing of Nix" {
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  fake_picker
+  gotg steam picker
+  [ "$status" -eq 0 ]
+
+  local launcher="$GOTG_STATE_DIR/launchers/gotg-ui.sh"
+  [ -x "$launcher" ]
+  # Steam's own environment: no nix profile, no gotg on PATH. The picker is
+  # where the profile put it, and the launcher has to look there.
+  mkdir -p "$TEST_TMP/home/.nix-profile/bin"
+  cp "$TEST_TMP/pickerbin/gotg-ui" "$TEST_TMP/home/.nix-profile/bin/gotg-ui"
+  run env -i HOME="$TEST_TMP/home" PATH=/usr/bin:/bin bash "$launcher"
+  [ "$status" -eq 0 ]
+}
+
+@test "a picker that is nowhere says so, on a PATH with almost nothing on it" {
+  # Not even mkdir: the first draft died setting up the log it would have
+  # written the reason to, which is the one thing it had to say.
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  fake_picker
+  gotg steam picker
+  local launcher="$GOTG_STATE_DIR/launchers/gotg-ui.sh"
+
+  run env -i HOME="$TEST_TMP/empty-home" PATH=/usr/bin:/bin bash "$launcher"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no gotg-ui"* ]]
+  [[ "$output" == *"nix profile add"* ]]
+}
+
+@test "what the picker says under Steam is kept where it can be read later" {
+  # Game Mode has nowhere to print: the log is the only place a launch that
+  # went wrong can be read afterwards.
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  fake_picker
+  gotg steam picker
+  local home="$TEST_TMP/logged-home"
+  mkdir -p "$home"
+  run env -i HOME="$home" PATH="$PATH" bash "$GOTG_STATE_DIR/launchers/gotg-ui.sh"
+  [ "$status" -eq 0 ]
+  grep -q "launched by Steam" "$home/.local/state/gotg/logs/gotg-ui.log"
+}
+
+@test "the Steam entry asks for a fullscreen picker" {
+  # Pressed from Game Mode it is the whole screen, not a window in a corner.
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  fake_picker
+  gotg steam picker
+  grep -q "GOTG_UI_FULLSCREEN=1" "$GOTG_STATE_DIR/launchers/gotg-ui.sh"
+}

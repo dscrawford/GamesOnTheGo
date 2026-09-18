@@ -84,3 +84,20 @@ def test_a_colour_that_is_not_one_falls_back(tmp_path, monkeypatch):
 def test_the_repository_config_has_the_sections_the_picker_reads():
     monkeypatch_free = config.read(REPO / "config")
     assert set(monkeypatch_free) >= {"theme", "icons", "controllers"}
+
+
+# --- fullscreen, asked for by whoever launched it -----------------------------
+
+
+def test_the_picker_fills_the_screen_when_it_is_asked_to(monkeypatch):
+    # Steam's entry asks: from Game Mode the picker is the whole screen, not
+    # a window in a corner of it.
+    monkeypatch.setenv("GOTG_UI_FULLSCREEN", "1")
+    assert config.fullscreen() is True
+
+
+def test_at_a_desk_it_is_a_window(monkeypatch):
+    monkeypatch.delenv("GOTG_UI_FULLSCREEN", raising=False)
+    assert config.fullscreen() is False
+    monkeypatch.setenv("GOTG_UI_FULLSCREEN", "0")
+    assert config.fullscreen() is False

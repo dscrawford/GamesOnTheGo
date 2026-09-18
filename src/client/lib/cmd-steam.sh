@@ -607,11 +607,45 @@ steam_picker() {
   mkdir -p "$(dirname "$launcher")"
   # By name, not by path, for the reason above -- resolved against PATH each
   # time it is pressed.
-  {
-    printf '#!/usr/bin/env bash\n'
-    printf '# Written by gotg steam picker. Safe to delete; it is rewritten.\n'
-    printf 'exec gotg-ui "$@"\n'
-  } >"$launcher"
+  # Steam's environment carries none of Nix's profile directories, so the
+  # picker is looked for rather than assumed on PATH. `exec gotg-ui` exited
+  # 127 under Steam before anything was drawn -- which from Game Mode is an
+  # entry that opens and closes with nothing to read anywhere. Hence both
+  # halves of this: the search, and a log for whatever it has to say.
+  cat >"$launcher" <<'LAUNCHER'
+#!/usr/bin/env bash
+# Written by gotg steam picker. Safe to delete; it is rewritten.
+#
+# Steam's environment is not a shell's. It carries none of Nix's profile
+# directories, and little enough of a PATH that `mkdir` and `date` are not
+# to be counted on either -- the first draft of this died on `mkdir: command
+# not found` while setting up the log it would have written the reason to.
+# So: the timestamp comes from bash itself, and the log is best effort.
+# Nothing here may stand between Steam and the picker starting.
+gotg_logs="${XDG_STATE_HOME:-$HOME/.local/state}/gotg/logs"
+if mkdir -p "$gotg_logs" 2>/dev/null; then
+  exec >>"$gotg_logs/gotg-ui.log" 2>&1
+fi
+printf '%(%FT%T)T: launched by Steam\n' -1
+
+# The whole screen: this entry is pressed from Game Mode, where a window in
+# the corner of one is not what anybody meant.
+export GOTG_UI_FULLSCREEN=1
+
+# By name first, so an upgrade that moves the store path is followed; then
+# the places a Nix profile puts it, because Steam's PATH has none of them.
+for gotg_ui in \
+  "$(command -v gotg-ui 2>/dev/null)" \
+  "$HOME/.nix-profile/bin/gotg-ui" \
+  "$HOME/.local/state/nix/profile/bin/gotg-ui" \
+  "/nix/var/nix/profiles/default/bin/gotg-ui"; do
+  [ -n "$gotg_ui" ] && [ -x "$gotg_ui" ] && exec "$gotg_ui" "$@"
+done
+
+printf '%(%FT%T)T: no gotg-ui on PATH (%s) or in any Nix profile.\n' -1 "$PATH"
+printf 'Install it with: nix profile add github:dscrawford/GamesOnTheGo#gotg-ui\n'
+exit 127
+LAUNCHER
   chmod +x "$launcher"
 
   local result

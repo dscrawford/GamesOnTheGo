@@ -125,3 +125,14 @@ def colour(path: str, default: tuple[int, int, int]) -> tuple[int, int, int]:
         except (TypeError, ValueError):
             return default
     return default
+
+
+def fullscreen() -> bool:
+    """Whether the picker should take the whole screen.
+
+    Asked of whoever launched it rather than guessed: the launcher `gotg
+    steam picker` writes sets it, because an entry pressed from Game Mode is
+    the screen and a window in the corner of one is not. At a desk, where it
+    is one program among several, it stays a window.
+    """
+    return os.environ.get("GOTG_UI_FULLSCREEN", "0") == "1"
