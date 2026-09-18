@@ -31,11 +31,26 @@ padmap_rs_bin() { printf '%s' "${GOTG_PADMAP_RS:-padmap-rs}"; }
 padmap_ensure() {
   [[ "${PADMAP_SKIP_DAEMON_CHECK:-0}" != "1" ]] || return 0
   command -v "$(padmap_bin)" >/dev/null 2>&1 || return 0
-  if ! "$(padmap_bin)" ensure-daemon >/dev/null 2>&1; then
+  # A moment before the daemon is asked after: anything it publishes from
+  # here on is newer than this file, and anything older is a leftover.
+  local marker said
+  marker="$(mktemp)"
+  if ! said="$("$(padmap_bin)" ensure-daemon 2>&1)"; then
     warn "padmap has no current daemon; controllers will be whatever SDL finds"
-  else
-    padmap_wait_published
+    rm -f "$marker"
+    # Not latched: this failure is worth asking about again. The latch used
+    # to be set on the way out regardless, so one bad start at the picker
+    # disabled the check for every game launched from it afterwards.
+    return 0
   fi
+  # Only a daemon this call started has a first publish to wait for. One
+  # that was already current published long ago, or has nothing to publish
+  # yet because nobody is seated, and waiting on it would be waiting on a
+  # button press.
+  if [[ "$said" == *"daemon up"* ]]; then
+    padmap_wait_published "$marker"
+  fi
+  rm -f "$marker"
   export PADMAP_SKIP_DAEMON_CHECK=1
 }
 
@@ -49,14 +64,50 @@ padmap_ensure() {
 #
 # and the game came up with no controller. A few seconds of waiting covers
 # it; a daemon that never publishes gets the same warning it always did.
+#
+# "Published" means published by *this* daemon: the file has to be newer than
+# the marker made before the daemon was started. A daemon that died in an
+# earlier session leaves its file behind, and an existence test passed on
+# that leftover while the new daemon had said nothing yet.
 padmap_wait_published() {
-  local file waited=0 limit="${GOTG_PADMAP_PUBLISH_WAIT:-30}"
+  local marker="$1" file waited=0 limit="${GOTG_PADMAP_PUBLISH_WAIT:-30}"
   file="$(padmap_runtime_dir)/env.sh"
-  while [[ ! -s "$file" ]] && ((waited < limit)); do
+  while [[ ! "$file" -nt "$marker" ]] && ((waited < limit)); do
     sleep 0.1
     waited=$((waited + 1))
   done
-  [[ -s "$file" ]] || warn "padmap started but has published no controllers yet"
+  [[ "$file" -nt "$marker" ]] || warn "padmap started but has published no controllers yet"
+}
+
+# Keep the daemon alive for as long as the game is.
+#
+# Modelled on killswitch_start, and for the same reason: this shell is about
+# to be replaced by the emulator, so the keeper is a background process that
+# polls the game's pid and exits on its own when the game is gone. What it
+# watches for is the one thing that is its to fix -- no daemon at all, which
+# takes the uinput clones with it and leaves the game holding nothing. A
+# daemon running older code is *not* restarted: that is a sync's business,
+# and swapping the daemon mid-level would drop the clones the game is using.
+# ensure-daemon --check exits 1 for both, so the reason is read off what it
+# prints rather than off its status.
+padmap_keeper_start() {
+  local pid="$1"
+  [[ "${GOTG_PADMAP_KEEPER:-1}" != "0" ]] || return 0
+  command -v "$(padmap_bin)" >/dev/null 2>&1 || return 0
+  (
+    interval="${GOTG_PADMAP_KEEPER_INTERVAL:-5}"
+    while kill -0 "$pid" 2>/dev/null; do
+      sleep "$interval"
+      kill -0 "$pid" 2>/dev/null || break
+      said="$("$(padmap_bin)" ensure-daemon --check 2>&1)" && continue
+      [[ "$said" == *"no daemon running"* ]] || continue
+      if "$(padmap_bin)" ensure-daemon >/dev/null 2>&1; then
+        warn "padmap had stopped; started it again"
+      else
+        warn "padmap stopped and would not start again"
+      fi
+    done
+  ) &
 }
 
 # Where the launch-time controller check is, or nothing.

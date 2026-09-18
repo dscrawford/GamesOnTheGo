@@ -43,7 +43,7 @@ CHUNK = 65536
 DAEMON_TIMEOUT = int(config.get("theme.timeouts.padmap_daemon", 10))
 
 
-def ensure_daemon() -> str | None:
+def ensure_daemon(force: bool = False) -> str | None:
     """Start padmap's daemon, or restart one running older code.
 
     Returns None when there is now a current daemon, and a sentence when there
@@ -53,9 +53,13 @@ def ensure_daemon() -> str | None:
 
     PADMAP_SKIP_DAEMON_CHECK is padmap's own flag for "already asked", and it
     is exported so that a game launched from the grid does not ask again --
-    `gotg play` checks the same variable.
+    `gotg play` checks the same variable. It is set only when the answer was
+    yes: a failure is worth asking about again, and setting it on the way out
+    regardless meant one bad start disabled the check for every game launched
+    afterwards. `force` is for the watch that notices a daemon has gone while
+    the picker is open, which has to ask past the latch.
     """
-    if os.environ.get("PADMAP_SKIP_DAEMON_CHECK") == "1":
+    if not force and os.environ.get("PADMAP_SKIP_DAEMON_CHECK") == "1":
         return None
     padmap = shutil.which("padmap")
     if padmap is None:
@@ -69,10 +73,33 @@ def ensure_daemon() -> str | None:
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return f"padmap would not start: {exc}"
-    os.environ["PADMAP_SKIP_DAEMON_CHECK"] = "1"
     if done.returncode != 0:
         return (done.stderr or done.stdout or "padmap would not start").strip().splitlines()[-1]
+    os.environ["PADMAP_SKIP_DAEMON_CHECK"] = "1"
     return None
+
+
+class DaemonWatch:
+    """When to ask ensure_daemon again, while the picker is open.
+
+    The picker reconnects to the socket every frame, which recovers a
+    *connection* -- a daemon started by somebody else gets picked up -- but a
+    daemon that has died stays dead, and the strip said "padmap not running"
+    for the rest of the evening. So while there is no connection, the daemon is
+    asked after again, on an interval: often enough to feel immediate, rare
+    enough that a machine with no padmap at all is not spawning a process every
+    frame. Model only; the clock is passed in.
+    """
+
+    def __init__(self, interval: float = 5.0) -> None:
+        self.interval = interval
+        self._last: float | None = None
+
+    def due(self, now: float) -> bool:
+        return self._last is None or now - self._last >= self.interval
+
+    def mark(self, now: float) -> None:
+        self._last = now
 
 
 def socket_path() -> Path:
