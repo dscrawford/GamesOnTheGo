@@ -120,3 +120,41 @@ def test_a_client_that_cannot_answer_rules_nothing_out(env, monkeypatch, tmp_pat
     monkeypatch.setenv("GOTG_BIN", str(tmp_path / "not-here"))
     assert disabled_for(game()) == frozenset()
     assert variants_for(game()) == ("rando",)
+
+
+def ported(tmp_path, monkeypatch, id="usa.zelda", platform="n64"):
+    """A built environment that says it replaces the platform's emulator."""
+    roots = tmp_path / "roots"
+    marker = roots / f"env-{platform}-{id.replace('.', '_')}" / "share" / "gotg"
+    marker.mkdir(parents=True, exist_ok=True)
+    (marker / "native-port").touch()
+    monkeypatch.setenv("GOTG_ROOTS_DIR", str(roots))
+    return roots
+
+
+def test_emulate_is_offered_for_a_game_that_replaces_the_emulator(env, tmp_path, monkeypatch):
+    """A native port is the launch, and this is the way back to the emulator."""
+    ported(tmp_path, monkeypatch)
+    (tmp_path / "n64.nix").write_text("{}")
+    assert "emulate" in variants_for(game(), tmp_path)
+
+
+def test_emulate_is_not_offered_for_a_game_with_only_its_own_settings(env, tmp_path, monkeypatch):
+    """The common kind of per-game environment: the same emulator with settings
+    added. Swapping it for the bare platform would only drop them."""
+    monkeypatch.setenv("GOTG_ROOTS_DIR", str(tmp_path / "roots"))
+    (env / "usa.zelda.nix").write_text("{}")
+    (tmp_path / "n64.nix").write_text("{}")
+    assert "emulate" not in variants_for(game(), tmp_path)
+
+
+def test_emulate_needs_a_platform_emulator_to_fall_back_to(env, tmp_path, monkeypatch):
+    ported(tmp_path, monkeypatch)
+    assert "emulate" not in variants_for(game(), tmp_path)
+
+
+def test_emulate_sits_beside_the_mods(env, tmp_path, monkeypatch):
+    ported(tmp_path, monkeypatch)
+    (env / "usa.zelda.60fps.nix").write_text("{}")
+    (tmp_path / "n64.nix").write_text("{}")
+    assert variants_for(game(), tmp_path) == ("60fps", "emulate")

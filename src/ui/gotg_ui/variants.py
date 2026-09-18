@@ -85,4 +85,42 @@ def variants_for(game: Game, where: Path | None = None) -> tuple[str, ...]:
     names = {name for name in names if NAME.match(name)}
     if names:
         names -= disabled_for(game)
-    return tuple(sorted(names))
+    return tuple(sorted(names | emulate_for(game, where)))
+
+
+def roots_dir() -> Path:
+    """Where the client keeps its built environments, by the same rule it uses."""
+    state = os.environ.get("GOTG_STATE_DIR")
+    if not state:
+        base = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+        state = os.path.join(base, "gotg")
+    return Path(os.environ.get("GOTG_ROOTS_DIR") or Path(state) / "roots")
+
+
+def emulate_for(game: Game, where: Path) -> set[str]:
+    """`emulate` where it would do something, and nothing where it would not.
+
+    Some games run on something other than their platform's emulator -- a
+    native port off a decompilation. This is the way back, and it is worth
+    offering: a port is younger than the emulator it replaces, so when one of
+    the two has the bug, this is how a person finds out which.
+
+    Not offered for every game with an environment of its own, which is a
+    different and much larger set: most of those are the platform's emulator
+    with settings added, and swapping one for the bare platform would only
+    drop the settings. The environment says which it is, with a marker its
+    build carries, so this reads the built root -- the client's own rule, in
+    env_variant_names.
+
+    The name is reserved rather than a file (see env_attr), so there is
+    nothing for the glob above to find. A real <id>.emulate.nix wins there,
+    exactly as it does in the client.
+    """
+    platform = where / f"{game.platform}.nix"
+    marker = roots_dir() / f"env-{game.platform}-{game.id.replace('.', '_')}" / "share" / "gotg" / "native-port"
+    try:
+        if marker.exists() and platform.is_file():
+            return {"emulate"}
+    except OSError:
+        return set()
+    return set()

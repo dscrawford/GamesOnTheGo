@@ -33,6 +33,9 @@
     {
       emulator = port;
       inherit bin;
+      # Ports, all of them -- that is what this helper is. `emulate` is the
+      # way back to ares.
+      nativePort = true;
       # These have no launcher to open: their settings are inside the game, and
       # starting them with no arguments starts the game — which `gotg play`
       # already does.

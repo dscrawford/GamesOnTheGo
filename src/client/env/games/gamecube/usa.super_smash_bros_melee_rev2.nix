@@ -32,6 +32,9 @@
 {
   emulator = gotgPkgs.melee-pc;
   bin = "melee";
+  # Not the platform emulator: a native port. `gotg play <id> emulate`
+  # is the way back to ares/dolphin when this one misbehaves.
+  nativePort = true;
   # Settings are in-game on F1; there is no separate configuration program,
   # and starting one would just start the game.
   configurable = false;

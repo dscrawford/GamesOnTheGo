@@ -567,12 +567,29 @@ cmd_info() {
   # The variant environments this game has — bse, bsmso, 60fps — each
   # reachable as `gotg play <id> <mod>`. Silence when there are none: a
   # "mods: none" line answers a question nobody asked.
-  local -a mods=()
-  mapfile -t mods < <(versions_variants_runnable "$game")
+  local -a mods=() all=()
+  mapfile -t all < <(versions_variants_runnable "$game")
+  local name emulate=""
+  for name in "${all[@]+"${all[@]}"}"; do
+    # Not a mod, and said on its own line below: it is the absence of one.
+    if [[ "$name" == emulate ]]; then
+      emulate=1
+      continue
+    fi
+    mods+=("$name")
+  done
   if ((${#mods[@]} > 0)); then
     local joined
     printf -v joined '%s, ' "${mods[@]}"
     printf '%smods:     %s %s\n' "$C_MUTED" "$C_RESET" "${joined%, }"
+  fi
+  # Only for a game that runs on something other than its platform's emulator
+  # -- a native port, nearly always. Worth a line of its own because it is the
+  # first thing to try when a port misbehaves, and nothing else here says the
+  # word.
+  if [[ -n "$emulate" ]]; then
+    printf '%semulate:  %s gotg play %s emulate\n' \
+      "$C_MUTED" "$C_RESET" "$(jq -r '.id' <<<"$game")"
   fi
 
   # And the ones no version here can run, each with what it wants. This is the

@@ -37,6 +37,9 @@
 {
   emulator = gotgPkgs.snowboardkids2recomp;
   bin = "SnowboardKids2Recompiled";
+  # Not the platform emulator: a native port. `gotg play <id> emulate`
+  # is the way back to ares/dolphin when this one misbehaves.
+  nativePort = true;
   # Its settings are in-game — the launcher's own Settings entry — so there
   # is no separate configuration screen to open, and `gotg configure`
   # opening it would just start the game.

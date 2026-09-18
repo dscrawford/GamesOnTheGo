@@ -44,7 +44,8 @@ cmd_play() {
   # this one game. Anything starting with a dash is an emulator argument, so the
   # two cannot be confused; anything else is taken as a variant and must exist,
   # rather than being passed silently to the emulator where a typo would look
-  # like the mod simply not working.
+  # like the mod simply not working. (--emulate is the one exception, handled
+  # in the loop below, because it names a variant rather than an argument.)
   local variant=""
   if [[ $# -gt 0 && "$1" != -* ]]; then
     variant="$1"
@@ -65,6 +66,14 @@ cmd_play() {
         ;;
       --version=*)
         want_version="${1#--version=}"
+        shift
+        ;;
+      # The same thing as the `emulate` variant, spelled as a flag. Both
+      # exist because both get reached for: the word reads better in a list
+      # of variants, the flag reads better after an id somebody already
+      # typed. --force-emu is here because it is what it was asked for by.
+      --emulate | --force-emu)
+        variant=emulate
         shift
         ;;
       *)

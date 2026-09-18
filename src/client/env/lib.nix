@@ -57,6 +57,16 @@
   # the same job better: each copy is given its own seat, so a game sees its
   # own pad and no one else's -- see mods/coop-seats.nix.
   ownsSession ? false,
+  # This environment runs the game on something other than the platform's
+  # emulator -- a native port off a decompilation, in every case so far.
+  #
+  # Declared rather than guessed, because the two kinds of per-game
+  # environment look identical from outside: world.super_metroid.nix is the
+  # platform's emulator with settings of its own, and swapping it for the bare
+  # platform would only drop those settings. Only where the emulator itself is
+  # replaced is there something to swap back to, and that is what `gotg play
+  # <id> emulate` offers.
+  nativePort ? false,
   # What is worth carrying between machines: globs under {state}, and what to
   # leave out of them. These live here rather than in data/overrides.json
   # because the glob and the emulator flag that *creates* the path it matches
@@ -397,6 +407,9 @@ pkgs.runCommand "gotg-env-${name}"
     cp ${pkgs.writeText "saves.json" (builtins.toJSON manifest)} $out/share/gotg/saves.json
     ${lib.optionalString ownsSession ''
       touch $out/share/gotg/owns-session
+    ''}
+    ${lib.optionalString nativePort ''
+      touch $out/share/gotg/native-port
     ''}
     ${lib.optionalString (keys != null) ''
       cp ${pkgs.writeText "keys.json" (builtins.toJSON keys)} $out/share/gotg/keys.json
