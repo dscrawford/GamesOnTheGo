@@ -88,6 +88,11 @@ cmd_play() {
 
   log "launching $(manifest_field "$PLAY_GAME" title) with $PLAY_ATTR"
 
+  # Steam's controller and overlay settings, off, on every route -- see
+  # padmap_clear_steam_env for the launch that found the picker's route
+  # missing it. Before the gate, which is SDL and would be blinded the same.
+  padmap_clear_steam_env
+
   # Before the kill switch rather than after: the gate draws a window, and the
   # watcher is holding the pid that is about to become the game.
   padmap_seat_gate \

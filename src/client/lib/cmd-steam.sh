@@ -631,6 +631,21 @@ printf '%(%FT%T)T: launched by Steam\n' -1
 # The whole screen: this entry is pressed from Game Mode, where a window in
 # the corner of one is not what anybody meant.
 export GOTG_UI_FULLSCREEN=1
+
+# Steam preloads its overlay into everything it starts, and a nix-wrapped
+# program cannot carry it: on a Deck the picker died before drawing anything
+# with "libGL.so.1: cannot open shared object file". The overlay is the only
+# thing lost by dropping that one entry. POSIX sh, no arrays: this runs
+# before anything of ours is on PATH.
+case "${LD_PRELOAD:-}" in
+  *gameoverlayrenderer*)
+    kept=""
+    for entry in $(printf '%s' "$LD_PRELOAD" | tr ':' ' '); do
+      case "$entry" in *gameoverlayrenderer*) ;; *) kept="${kept:+$kept:}$entry" ;; esac
+    done
+    if [ -n "$kept" ]; then export LD_PRELOAD="$kept"; else unset LD_PRELOAD; fi
+    ;;
+esac
 LAUNCHER
 
   # A checkout, when this was added from one. The picker on such a machine is
