@@ -261,10 +261,22 @@ install_gotg() {
 # A yes-or-no put to the person, on the terminal if there is one. Through a
 # pipe (curl | bash) stdin is the script itself, so the question goes to
 # /dev/tty; with no terminal at all the answer is no.
+#
+# The prompt is written to /dev/tty rather than passed to `read -p`, which
+# looks like the same thing and is not: read writes its prompt to stderr, and
+# the redirection that hides "no such device" on a machine without a
+# controlling terminal hid the question too. What that looked like was a
+# hang -- the installer stopped at "putting GOTG in your Steam library" with
+# nothing on screen, waiting for an answer to a question it had never asked.
 confirm() {
   local answer
   [[ "$DRY_RUN" != "1" ]] || return 1
-  { read -r -p "$1 [Y/n] " answer </dev/tty; } 2>/dev/null || return 1
+  # stderr is silenced before /dev/tty is opened, not after: a machine with no
+  # controlling terminal fails the redirection itself, and that complaint is
+  # the shell's, printed before any redirection on the same line has taken
+  # effect. The other order answers no and says "No such device" while doing it.
+  printf '%s [Y/n] ' "$1" 2>/dev/null >/dev/tty || return 1
+  read -r answer 2>/dev/null </dev/tty || return 1
   [[ -z "$answer" || "$answer" =~ ^[Yy] ]]
 }
 

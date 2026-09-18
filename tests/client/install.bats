@@ -538,6 +538,31 @@ EOF
   [ ! -s "$SIDE" ]
 }
 
+@test "the question about closing Steam is actually put on the terminal" {
+  # It was not, and the shape of the bug was a hang: `read -p` writes its
+  # prompt to stderr, the redirection hiding "no /dev/tty" hid the prompt
+  # with it, and the installer sat waiting for an answer to a question
+  # nobody had been asked. A terminal is needed to catch that, so this runs
+  # the thing under a pty rather than calling it directly.
+  load_installer
+  run script -qec \
+    "bash -c 'GOTG_INSTALL_LIB=1 . $BATS_TEST_DIRNAME/../../install.sh; \
+      printf y | confirm \"Close Steam now?\"'" /dev/null
+  [[ "$output" == *"Close Steam now?"* ]]
+  [[ "$output" == *"[Y/n]"* ]]
+}
+
+@test "with no terminal to ask, the answer is no and nothing is said about it" {
+  load_installer
+  # setsid detaches from the controlling terminal, which is the machine this
+  # has to answer for: a service, a Steam-launched shell, anything piped.
+  run setsid bash -c \
+    "GOTG_INSTALL_LIB=1 . $BATS_TEST_DIRNAME/../../install.sh; \
+     confirm 'Close Steam now?' && echo YES || echo NO" </dev/null
+  [[ "$output" == *"NO"* ]]
+  [[ "$output" != *"No such device"* ]]
+}
+
 @test "an upgrade rebuilds the environments already here" {
   # A newer gotg launching yesterday's environments is the Deck after every
   # upgrade: the roots only ever caught up when somebody ran gotg sync.
