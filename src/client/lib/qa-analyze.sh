@@ -26,6 +26,14 @@ qa_media_duration() {
 # Animal Crossing spends about twelve of them there -- long enough to fail a
 # run whose sound was fine the moment it started. The whole-capture numbers
 # stay for the eye; the in-window one is what the verdict grades.
+#
+# The bar that goes with it is 15 seconds rather than 10, which is where the
+# measurement put it: the attract loop in Melee cycles title, fade, demo,
+# and its quiet stretches come in at 9.5 to 10.8 seconds depending on where
+# a run lands in the cycle. At 10 the same healthy game passed on one
+# machine and failed on the other. A check that flips a coin measures
+# nothing, and a game with no sound at all is caught by the other half of
+# this rule, where RMS across the whole capture has to clear -45 dB.
 qa_audio_stats() {
   local wav="$1" window_start="${2:-0}" lines windowed dur
   dur="$(qa_media_duration "$wav")"
@@ -154,8 +162,8 @@ qa_verdict() {
     --argjson audio "$audio" --argjson video "$video" \
     --argjson graphics "$graphics" \
     --argjson rms_min "${GOTG_QA_RMS_MIN:--45}" \
-    --argjson silence_max "${GOTG_QA_SILENCE_MAX:-10}" \
-    --argjson black_max "${GOTG_QA_BLACK_MAX:-5}" \
+    --argjson silence_max "${GOTG_QA_SILENCE_MAX:-15}" \
+    --argjson black_frac_max "${GOTG_QA_BLACK_FRAC_MAX:-0.25}" \
     --argjson freeze_frac_max "${GOTG_QA_FREEZE_FRAC_MAX:-0.65}" \
     --argjson expected "$expected_duration" \
     '($video.duration >= $expected * 0.8) as $captured |
@@ -163,12 +171,18 @@ qa_verdict() {
     # legitimately sit still for seconds, so only a window that is MOSTLY
     # still — inputs moving nothing — is a controller failure.
     ($video.freeze_in_window / ([$expected - $video.window_start, 1] | max)) as $freeze_frac |
+    # Black time as a share of the same window, for the same reason it is a
+    # share for freeze. As a flat number of seconds it asked a 150-second run
+    # and a 30-second one for the same budget, and the longer run failed for
+    # being longer: the attract loop in Melee fades to black between demos, so
+    # black time grows with the run while its share does not.
+    ($video.black_in_window / ([$expected - $video.window_start, 1] | max)) as $black_frac |
     {
       checks: {
         boots: {pass: $boots, status: $status},
         audio: ($audio + {pass: ($audio.rms_db > $rms_min and $audio.longest_silence_in_window <= $silence_max)}),
-        video: ($video + {expected_duration: $expected,
-                          pass: ($captured and $video.black_in_window <= $black_max)}),
+        video: ($video + {expected_duration: $expected, black_frac: $black_frac,
+                          pass: ($captured and $black_frac <= $black_frac_max)}),
         controller: {pass: ($captured and $freeze_frac <= $freeze_frac_max),
                      freeze_in_window: $video.freeze_in_window, freeze_frac: $freeze_frac},
         graphics: $graphics

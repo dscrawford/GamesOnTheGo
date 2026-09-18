@@ -190,6 +190,9 @@
           # zelda64recomp and n64recomp are.
           dk64recomp = pkgs.callPackage ./pkgs/dk64recomp { };
 
+          # Super Smash Bros. Melee — the native port off doldecomp/melee.
+          melee-pc = pkgs.callPackage ./pkgs/melee-pc { };
+
           # Pikmin — the native port off the projectPiki decompilation.
           open-nectar = pkgs.callPackage ./pkgs/open-nectar { };
 
