@@ -409,6 +409,30 @@ teardown() {
   [[ "$stderr" == *"● env-n64"* ]]
 }
 
+@test "the build-key file beside a root is not reported as a stray" {
+  # sync writes these itself, so telling a person to rm one is noise on every
+  # run -- and it arrived in a batch of them, one per environment.
+  stub_nix
+  fake_env env-n64
+  : >"$GOTG_ROOTS_DIR/env-n64.by"
+  gotg sync
+  [ "$status" -eq 0 ]
+  [[ "$stderr" != *"env-n64.by"* ]]
+  [[ "$stderr" == *"● env-n64"* ]]
+}
+
+@test "a refresh builds without a progress dialog" {
+  # Every launch after a client upgrade refreshes before it runs, and from
+  # Steam there is no terminal -- so the dialog this suppresses was a window
+  # in front of a game that was about to start.
+  load_client_libs
+  # Stands in for the real build, and reports the one thing under test.
+  env_build() { echo "dialog=${GOTG_NO_DIALOG:-unset}"; }
+  run env_refresh env-n64
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"dialog=1"* ]]
+}
+
 # --- sync skips a flake that has not changed ---
 
 commit_flake() {

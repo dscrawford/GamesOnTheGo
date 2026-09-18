@@ -228,6 +228,10 @@ cmd_sync() {
       # mistyped `nix build -o`. Checked against the same pattern env_attr
       # produces, and skipped rather than fatal — one stray symlink in here
       # should not stop every other environment from being rebuilt.
+      # The build-key file that sits beside every root. Skipped quietly
+      # rather than reported: sync writes these itself, and telling a person
+      # to `rm` a file the tool just made is noise every single run.
+      [[ "$name" == *.by ]] && continue
       if ! [[ "$name" =~ $GOTG_ATTR_RE ]]; then
         _sync_mark skipped "$name" "not an environment name; rm $root"
         continue

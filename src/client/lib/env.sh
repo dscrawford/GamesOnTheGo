@@ -305,7 +305,20 @@ env_ensure() {
 # worse than being one version behind. The subshell is what makes env_build's
 # die local — it ends the attempt rather than the command.
 env_refresh() {
-  (env_build "$1")
+  # No dialog, ever. A refresh always has something runnable already -- its
+  # whole point is picking up a definition that moved -- so a progress window
+  # is news about work nobody is waiting on, and it lands in front of a game
+  # that is about to start. This is the one that kept appearing: every launch
+  # after a client upgrade goes through here (see env_ensure), and from Steam
+  # there is no terminal, so the dialog was what a person saw.
+  #
+  # A first build is the other case and keeps its dialog: nothing runs yet,
+  # the compile can take minutes, and a blank screen for that long is worse
+  # than a window.
+  (
+    export GOTG_NO_DIALOG=1
+    env_build "$1"
+  )
 }
 
 # The file handed to the emulator. Directory games need a glob (Wii U wants the
