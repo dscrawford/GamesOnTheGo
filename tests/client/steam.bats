@@ -537,6 +537,37 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   grep -q 'exec gotg-ui' "$exe"
 }
 
+@test "a picker added from a checkout carries the checkout with it" {
+  # The picker on a development machine is a wrapper that finds its source by
+  # asking git about the current directory. Steam starts the launcher in the
+  # launchers directory, where that question has no answer, so the wrapper
+  # exited before drawing anything -- and the entry looked like it opened and
+  # closed. It only ever worked when Steam had inherited the variable from a
+  # terminal in the checkout.
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  fake_picker
+  mkdir -p "$TEST_TMP/checkout/src/ui/gotg_ui"
+
+  GOTG_DEV_ROOT="$TEST_TMP/checkout" gotg steam picker || true
+  local launcher="$GOTG_STATE_DIR/launchers/gotg-ui.sh"
+  [ -f "$launcher" ]
+  grep -q "GOTG_DEV_ROOT:=$TEST_TMP/checkout" "$launcher"
+  # A default, not an override: a machine that sets its own still wins.
+  grep -q 'GOTG_DEV_ROOT:=' "$launcher"
+}
+
+@test "a picker added from a packaged install carries no checkout" {
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  fake_picker
+  # Somewhere that is neither a checkout nor inside one.
+  cd "$TEST_TMP"
+
+  GOTG_DEV_ROOT="" gotg steam picker || true
+  local launcher="$GOTG_STATE_DIR/launchers/gotg-ui.sh"
+  [ -f "$launcher" ]
+  ! grep -q 'GOTG_DEV_ROOT' "$launcher"
+}
+
 @test "gotg steam picker with no picker installed says how to get one" {
   export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
   # Named rather than hidden: the packaged client puts a real gotg-ui on PATH,

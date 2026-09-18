@@ -631,6 +631,31 @@ printf '%(%FT%T)T: launched by Steam\n' -1
 # The whole screen: this entry is pressed from Game Mode, where a window in
 # the corner of one is not what anybody meant.
 export GOTG_UI_FULLSCREEN=1
+LAUNCHER
+
+  # A checkout, when this was added from one. The picker on such a machine is
+  # a wrapper that finds its source by asking git about the *current*
+  # directory -- and Steam starts this script in the launchers directory, so
+  # that question has no answer and the wrapper exits before drawing
+  # anything. It only appeared to work because Steam, started from a terminal
+  # in the checkout, had inherited the variable.
+  #
+  # A default rather than an override: a machine that sets its own still wins,
+  # and a packaged picker ignores this entirely.
+  local dev_root=""
+  for dev_root in "${GOTG_DEV_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null || true)"; do
+    [[ -n "$dev_root" && -d "$dev_root/src/ui/gotg_ui" ]] && break
+    dev_root=""
+  done
+  if [[ -n "$dev_root" ]]; then
+    {
+      printf '\n# The checkout this entry was added from; see gotg steam picker.\n'
+      printf '%s\n' ": \"\${GOTG_DEV_ROOT:=$dev_root}\""
+      printf 'export GOTG_DEV_ROOT\n'
+    } >>"$launcher"
+  fi
+
+  cat >>"$launcher" <<'LAUNCHER'
 
 # By name first, so an upgrade that moves the store path is followed; then
 # the places a Nix profile puts it, because Steam's PATH has none of them.
