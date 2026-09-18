@@ -596,6 +596,12 @@ steam_picker() {
   # Overridable like every other tool this shells out to: a test needs to be
   # able to say there is no picker on a machine that has one.
   local picker="${GOTG_PICKER:-}"
+  # The root sync keeps current, before whatever PATH has: PATH is the
+  # shell's, and the shell that started Steam may be a day older than the
+  # one typing this.
+  if [[ -z "$picker" && -x "$GOTG_UI_ROOT/bin/gotg-ui" ]]; then
+    picker="$GOTG_UI_ROOT/bin/gotg-ui"
+  fi
   if [[ -z "$picker" ]]; then
     picker="$(command -v gotg-ui 2>/dev/null)" || picker=""
   fi
@@ -670,11 +676,20 @@ LAUNCHER
     } >>"$launcher"
   fi
 
+  # Where sync leaves the picker, baked in as a path under the state
+  # directory: the symlink moves with every sync, the path to it does not.
+  {
+    printf '\n# The root gotg sync keeps current; see gotg steam picker.\n'
+    printf 'gotg_ui_root=%s\n' "$(printf '%q' "$GOTG_UI_ROOT")"
+  } >>"$launcher"
+
   cat >>"$launcher" <<'LAUNCHER'
 
-# By name first, so an upgrade that moves the store path is followed; then
-# the places a Nix profile puts it, because Steam's PATH has none of them.
+# The synced root first: the build `gotg sync` last made, whatever PATH says.
+# Then by name, so a machine without a synced root still follows an upgrade;
+# then the places a Nix profile puts it, because Steam's PATH has none.
 for gotg_ui in \
+  "$gotg_ui_root/bin/gotg-ui" \
   "$(command -v gotg-ui 2>/dev/null)" \
   "$HOME/.nix-profile/bin/gotg-ui" \
   "$HOME/.local/state/nix/profile/bin/gotg-ui" \

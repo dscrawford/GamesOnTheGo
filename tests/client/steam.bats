@@ -648,6 +648,26 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   [ "$status" -eq 0 ]
 }
 
+@test "the launcher runs the synced picker before anything on PATH" {
+  # Three builds of the picker were live on one machine at once: the one
+  # sync had just made, the one direnv had loaded, and the one Steam had
+  # inherited at startup. The Steam entry ran the oldest. The root sync
+  # keeps is the one it runs now.
+  export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
+  fake_picker
+  gotg steam picker
+  local launcher="$GOTG_STATE_DIR/launchers/gotg-ui.sh"
+
+  mkdir -p "$GOTG_STATE_DIR/picker/bin"
+  printf '#!/usr/bin/env bash\ntouch "%s/ran-synced-root"\n' "$TEST_TMP" \
+    >"$GOTG_STATE_DIR/picker/bin/gotg-ui"
+  chmod +x "$GOTG_STATE_DIR/picker/bin/gotg-ui"
+  # PATH still holds the stand-in picker; it must not be the one chosen.
+  run env -i HOME="$TEST_TMP/home" PATH="$TEST_TMP/pickerbin:/usr/bin:/bin" bash "$launcher"
+  [ "$status" -eq 0 ]
+  [ -e "$TEST_TMP/ran-synced-root" ]
+}
+
 @test "a picker that is nowhere says so, on a PATH with almost nothing on it" {
   # Not even mkdir: the first draft died setting up the log it would have
   # written the reason to, which is the one thing it had to say.

@@ -13,6 +13,11 @@ GOTG_CACHE_FILE="$GOTG_STATE_DIR/manifest.json"
 GOTG_ROOTS_DIR="$GOTG_STATE_DIR/roots"
 GOTG_LOG_DIR="$GOTG_STATE_DIR/logs"
 GOTG_APP_ROOT="$GOTG_STATE_DIR/app"
+# The picker, the same way: a symlink sync keeps current, so what Steam runs
+# is what was built last rather than whatever was on PATH when Steam started.
+# Not "ui": that directory is already the picker's own state -- artwork and
+# the like -- and a symlink cannot be put where a directory is.
+GOTG_UI_ROOT="$GOTG_STATE_DIR/picker"
 GOTG_SAVES_DIR="$GOTG_STATE_DIR/saves"
 
 # Where games land. One directory per platform, mirroring the server layout.

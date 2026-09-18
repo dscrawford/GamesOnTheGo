@@ -468,6 +468,10 @@ teardown() {
   gotg sync
   [ "$status" -eq 0 ]
   [[ "$stderr" == *"● gotg"* ]]
+  # The picker rides along, into a root of its own, so the Steam entry runs
+  # the build sync last made rather than whatever PATH held when Steam began.
+  grep -q -- "#gotg-ui -o $GOTG_STATE_DIR/picker" "$NIX_LOG"
+  [[ "$stderr" == *"● gotg-ui"* ]]
   [[ "$stderr" == *"● env-n64"*"same"* ]]
   [[ "$stderr" == *"● env-snes"*"same"* ]]
   # No prose per environment: the line is the report.
@@ -535,25 +539,26 @@ commit_flake() {
   commit_flake
   gotg sync
   [ "$status" -eq 0 ]
+  # Three per pass: the client, the picker, and the one environment here.
   local builds
   builds="$(grep -c "^build " "$NIX_LOG")"
-  [ "$builds" -eq 2 ]
+  [ "$builds" -eq 3 ]
 
   gotg sync
   [ "$status" -eq 0 ]
   [[ "$stderr" == *"nothing changed since"* ]]
   [[ "$stderr" == *"● env-n64"*"same"* ]]
-  [ "$(grep -c "^build " "$NIX_LOG")" -eq 2 ]
+  [ "$(grep -c "^build " "$NIX_LOG")" -eq 3 ]
 
   # A new commit, or a dirty checkout, or --force: built again.
   commit_flake again
   gotg sync
-  [ "$(grep -c "^build " "$NIX_LOG")" -eq 4 ]
-  gotg sync --force
   [ "$(grep -c "^build " "$NIX_LOG")" -eq 6 ]
+  gotg sync --force
+  [ "$(grep -c "^build " "$NIX_LOG")" -eq 9 ]
   echo edit >>"$GOTG_FLAKE/flake.nix"
   gotg sync
-  [ "$(grep -c "^build " "$NIX_LOG")" -eq 8 ]
+  [ "$(grep -c "^build " "$NIX_LOG")" -eq 12 ]
 }
 
 @test "a sync that failed does not stamp the flake as done" {
