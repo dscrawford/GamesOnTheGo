@@ -65,7 +65,7 @@ qa_golden_path() {
 # scratch mirrors the real state dir's layout, <scratch>/<attr>, so a path
 # relative to one maps straight onto the other.
 qa_seed_bootstrap() {
-  local attr="$1" scratch="$2" real o2r dest
+  local attr="$1" scratch="$2" real o2r dest assets
   real="$GOTG_STATE_DIR/env/$attr"
   [[ -d "$real" ]] || return 0
   while IFS= read -r -d '' o2r; do
@@ -73,6 +73,17 @@ qa_seed_bootstrap() {
     mkdir -p "$(dirname "$dest")"
     cp -f "$o2r" "$dest"
   done < <(find "$real" -name '*.o2r' -print0 2>/dev/null)
+
+  # The same idea for a port that unpacks its assets into a directory rather
+  # than into one archive -- Pikmin's is 642MB and takes minutes, which a run
+  # would otherwise spend on extracting instead of on playing, every time.
+  # Linked rather than copied: it is read-only to the game, and copying it
+  # per run would cost more than the extraction it saves.
+  while IFS= read -r -d '' assets; do
+    dest="$scratch/$attr/${assets#"$real"/}"
+    mkdir -p "$(dirname "$dest")"
+    [[ -e "$dest" ]] || ln -s "$assets" "$dest"
+  done < <(find "$real" -maxdepth 2 -type d -name assets -print0 2>/dev/null)
 }
 
 # Stop before a run that is only going to hang. A harkinian environment whose
