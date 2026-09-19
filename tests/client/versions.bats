@@ -44,10 +44,14 @@ installed_with() {
   local files="[]" version name
   files="$(_zelda_file "$files" "world.zelda.nsp" "$lib/world.zelda.nsp")"
   for version in "$@"; do
+    # On disk as collect-extras names it, <release>-<file>; in the catalog
+    # as the indexer lists it, extras/<release>/<file>. Both are read: the
+    # names here by versions.sh, the catalog by the top-up that fetches a
+    # release not yet beside the game -- which every one of these already is.
     name="extras/update_${version}-sxs_v1.nsp"
     printf 'update' >"$dir/$name"
     printf 'update' >"$lib/$name"
-    files="$(_zelda_file "$files" "$name" "$lib/$name")"
+    files="$(_zelda_file "$files" "extras/update_${version}/sxs_v1.nsp" "$lib/$name")"
   done
 
   jq -n --argjson f "$files" \

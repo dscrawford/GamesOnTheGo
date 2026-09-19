@@ -70,7 +70,7 @@ teardown() { stop_saves_service; }
   mkdir -p "$GOTG_PADMAP_RUNTIME"
   # A daemon that publishes half a second after it is asked to start.
   cat >"$FAKE_BIN/padmap" <<EOF
-#!/usr/bin/env bash
+#!$(command -v bash)
 echo "\$*" >>"$PADMAP_LOG"
 if [ "\$1" = ensure-daemon ]; then
   echo "no daemon running; starting one"; echo "daemon up, build test"
@@ -88,7 +88,7 @@ EOF
 @test "a daemon that never publishes is waited on only so long" {
   export GOTG_PADMAP_RUNTIME="$TEST_TMP/padmap-rt-never"
   mkdir -p "$GOTG_PADMAP_RUNTIME"
-  printf '#!/usr/bin/env bash\necho "daemon up, build test"\n' >"$FAKE_BIN/padmap"
+  printf '#!%s\necho "daemon up, build test"\n' "$BASH" >"$FAKE_BIN/padmap"
   chmod +x "$FAKE_BIN/padmap"
   GOTG_PADMAP_PUBLISH_WAIT=3 run --separate-stderr padmap_ensure
   [ "$status" -eq 0 ]
@@ -102,7 +102,7 @@ EOF
   mkdir -p "$GOTG_PADMAP_RUNTIME"
   echo 'export STALE=1' >"$GOTG_PADMAP_RUNTIME/env.sh"
   sleep 0.05
-  printf '#!/usr/bin/env bash\necho "daemon up, build test"\n' >"$FAKE_BIN/padmap"
+  printf '#!%s\necho "daemon up, build test"\n' "$BASH" >"$FAKE_BIN/padmap"
   chmod +x "$FAKE_BIN/padmap"
   GOTG_PADMAP_PUBLISH_WAIT=3 run --separate-stderr padmap_ensure
   [ "$status" -eq 0 ]
@@ -112,7 +112,7 @@ EOF
 @test "a daemon that was already current is not waited on" {
   export GOTG_PADMAP_RUNTIME="$TEST_TMP/padmap-rt-current"
   mkdir -p "$GOTG_PADMAP_RUNTIME"
-  printf '#!/usr/bin/env bash\necho "daemon is current (build test)"\n' >"$FAKE_BIN/padmap"
+  printf '#!%s\necho "daemon is current (build test)"\n' "$BASH" >"$FAKE_BIN/padmap"
   chmod +x "$FAKE_BIN/padmap"
   # No mappings file at all -- nobody seated yet -- and no waiting for one:
   # that would be waiting on a button press.
@@ -145,7 +145,7 @@ keeper_daemon() {
   printf '%s\n' "$@" >"$CHECK_SCRIPT"
   : >"$CHECK_COUNT"
   cat >"$FAKE_BIN/padmap" <<EOF
-#!/usr/bin/env bash
+#!$(command -v bash)
 echo "\$*" >>"$PADMAP_LOG"
 if [ "\$1" = ensure-daemon ] && [ "\$2" = --check ]; then
   n=\$(wc -l <"$CHECK_COUNT"); echo x >>"$CHECK_COUNT"
@@ -228,14 +228,14 @@ EOF
   mkdir -p "$profile"
   printf '#!/bin/sh\n' >"$profile/gotg-seat"
   chmod +x "$profile/gotg-seat"
-  run env -u GOTG_SEAT HOME="$TEST_TMP/home" PATH=/usr/bin:/bin bash -c \
+  run env -u GOTG_SEAT HOME="$TEST_TMP/home" PATH=/usr/bin:/bin "$BASH" -c \
     "source '$GOTG_LIB/common.sh'; source '$GOTG_LIB/padmap.sh'; padmap_seat_bin"
   [ "$status" -eq 0 ]
   [[ "$output" == "$profile/gotg-seat" ]]
 }
 
 @test "a machine with no check anywhere still says so" {
-  run env -u GOTG_SEAT HOME="$TEST_TMP/empty" PATH=/usr/bin:/bin bash -c \
+  run env -u GOTG_SEAT HOME="$TEST_TMP/empty" PATH=/usr/bin:/bin "$BASH" -c \
     "source '$GOTG_LIB/common.sh'; source '$GOTG_LIB/padmap.sh'; padmap_seat_bin"
   [ "$status" -ne 0 ]
 }
