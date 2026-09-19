@@ -32,7 +32,7 @@ helper() { python3 "$GOTG_STEAM_HELPER" --file "$SHORTCUTS" "$@"; }
 # A picker on PATH, since a shortcut to it is what `gotg steam picker` writes.
 fake_picker() {
   mkdir -p "$TEST_TMP/pickerbin"
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$TEST_TMP/pickerbin/gotg-ui"
+  printf '#!%s\nexit 0\n' "$BASH" >"$TEST_TMP/pickerbin/gotg-ui"
   chmod +x "$TEST_TMP/pickerbin/gotg-ui"
   export PATH="$TEST_TMP/pickerbin:$PATH"
 }
@@ -534,7 +534,7 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   exe="$(jq -r '.[0].exe' <<<"$output" | tr -d '"')"
   [[ "$exe" != /nix/store/* ]]
   [ -x "$exe" ]
-  grep -q 'exec gotg-ui' "$exe"
+  grep -q 'exec "$gotg_ui"' "$exe"
 }
 
 @test "a picker added from a checkout carries the checkout with it" {
@@ -563,13 +563,13 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   export GOTG_STEAM_SHORTCUTS="$SHORTCUTS"
   fake_picker
   # A picker that reports what it was handed.
-  printf '#!/usr/bin/env bash\necho "preload=${LD_PRELOAD-unset}"\n' >"$TEST_TMP/pickerbin/gotg-ui"
+  printf '#!%s\necho "preload=${LD_PRELOAD-unset}"\n' "$BASH" >"$TEST_TMP/pickerbin/gotg-ui"
   gotg steam picker || true
   local launcher="$GOTG_STATE_DIR/launchers/gotg-ui.sh"
   [ -x "$launcher" ]
 
   run env LD_PRELOAD="/steam/ubuntu12_64/gameoverlayrenderer.so:/mine/keep.so" \
-    XDG_STATE_HOME="$TEST_TMP/xdg" HOME="$TEST_TMP/home" "$launcher"
+    XDG_STATE_HOME="$TEST_TMP/xdg" HOME="$TEST_TMP/home" "$BASH" "$launcher"
   [ "$status" -eq 0 ]
   local log="$TEST_TMP/xdg/gotg/logs/gotg-ui.log"
   [ -f "$log" ]
@@ -644,7 +644,7 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   # where the profile put it, and the launcher has to look there.
   mkdir -p "$TEST_TMP/home/.nix-profile/bin"
   cp "$TEST_TMP/pickerbin/gotg-ui" "$TEST_TMP/home/.nix-profile/bin/gotg-ui"
-  run env -i HOME="$TEST_TMP/home" PATH=/usr/bin:/bin bash "$launcher"
+  run env -i HOME="$TEST_TMP/home" PATH=/usr/bin:/bin "$BASH" "$launcher"
   [ "$status" -eq 0 ]
 }
 
@@ -678,11 +678,11 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   mkdir -p "$GOTG_STATE_DIR/picker/bin"
   # A builtin, not touch: the launcher runs on a PATH with almost nothing on
   # it, and that is the point of the test.
-  printf '#!/usr/bin/env bash\n: >"%s/ran-synced-root"\n' "$TEST_TMP" \
+  printf '#!%s\n: >"%s/ran-synced-root"\n' "$BASH" "$TEST_TMP" \
     >"$GOTG_STATE_DIR/picker/bin/gotg-ui"
   chmod +x "$GOTG_STATE_DIR/picker/bin/gotg-ui"
   # PATH still holds the stand-in picker; it must not be the one chosen.
-  run env -i HOME="$TEST_TMP/home" PATH="$TEST_TMP/pickerbin:/usr/bin:/bin" bash "$launcher"
+  run env -i HOME="$TEST_TMP/home" PATH="$TEST_TMP/pickerbin:/usr/bin:/bin" "$BASH" "$launcher"
   [ "$status" -eq 0 ]
   [ -e "$TEST_TMP/ran-synced-root" ]
 }
@@ -695,7 +695,7 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   gotg steam picker
   local launcher="$GOTG_STATE_DIR/launchers/gotg-ui.sh"
 
-  run env -i HOME="$TEST_TMP/empty-home" PATH=/usr/bin:/bin bash "$launcher"
+  run env -i HOME="$TEST_TMP/empty-home" PATH=/usr/bin:/bin "$BASH" "$launcher"
   [ "$status" -ne 0 ]
   [[ "$output" == *"no gotg-ui"* ]]
   [[ "$output" == *"nix profile add"* ]]
@@ -709,7 +709,7 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   gotg steam picker
   local home="$TEST_TMP/logged-home"
   mkdir -p "$home"
-  run env -i HOME="$home" PATH="$PATH" bash "$GOTG_STATE_DIR/launchers/gotg-ui.sh"
+  run env -i HOME="$home" PATH="$PATH" "$BASH" "$GOTG_STATE_DIR/launchers/gotg-ui.sh"
   [ "$status" -eq 0 ]
   grep -q "launched by Steam" "$home/.local/state/gotg/logs/gotg-ui.log"
 }

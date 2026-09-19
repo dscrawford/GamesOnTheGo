@@ -546,7 +546,7 @@ EOF
   # the thing under a pty rather than calling it directly.
   load_installer
   run script -qec \
-    "bash -c 'GOTG_INSTALL_LIB=1 . $BATS_TEST_DIRNAME/../../install.sh; \
+    "bash -c 'GOTG_INSTALL_LIB=1 . $INSTALLER; \
       printf y | confirm \"Close Steam now?\"'" /dev/null
   [[ "$output" == *"Close Steam now?"* ]]
   [[ "$output" == *"[Y/n]"* ]]
@@ -557,7 +557,7 @@ EOF
   # setsid detaches from the controlling terminal, which is the machine this
   # has to answer for: a service, a Steam-launched shell, anything piped.
   run setsid bash -c \
-    "GOTG_INSTALL_LIB=1 . $BATS_TEST_DIRNAME/../../install.sh; \
+    "GOTG_INSTALL_LIB=1 . $INSTALLER; \
      confirm 'Close Steam now?' && echo YES || echo NO" </dev/null
   [[ "$output" == *"NO"* ]]
   [[ "$output" != *"No such device"* ]]
