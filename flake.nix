@@ -306,6 +306,17 @@
 
           uiPkg = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-ui;
           uiPython = pkgs.python3.withPackages (ps: [ ps.pygame-ce ps.pyyaml ]);
+          # What the packaged picker puts on PATH, and for the same reasons:
+          # `gotg` because a pick execs it, and padmap because the picker is
+          # what starts the daemon. Without padmap here the dev picker said
+          # "padmap is not installed" at the top of the screen, found no
+          # controllers however many were plugged in, and answered no hold --
+          # a shell in which the one feature that needs a daemon cannot work.
+          padmapPkg = padmap.packages.${pkgs.stdenv.hostPlatform.system}.padmap;
+          uiPath = pkgs.lib.makeBinPath [
+            gotgPkg
+            padmapPkg
+          ];
 
           # The picker and the controller check, from the working tree, for the
           # same reason `gotg` is. These two especially: the check runs in front
@@ -331,6 +342,7 @@
               echo "      set GOTG_DEV_ROOT to your checkout, or use: nix run .#gotg-ui" >&2
               exit 1
             fi
+            export PATH="${uiPath}:$PATH"
             export PYTHONPATH="$root/src/ui:${gotgPkg}/share/gotg/steam''${PYTHONPATH:+:$PYTHONPATH}"
             export GOTG_UI_DATA="''${GOTG_UI_DATA:-${gotgPkg}/share/gotg/data}"
             export GOTG_UI_ENV="''${GOTG_UI_ENV:-${gotgPkg}/share/gotg/env}"
@@ -350,6 +362,11 @@
               gotg-dev
               pickerDev
               seatDev
+              # By hand as well as on the picker's PATH: `padmap list` is the
+              # first question to ask when the strip says no controllers, and
+              # answering it should not mean digging the store path out of a
+              # wrapper script.
+              padmapPkg
             ]
             ++ [
               # The importer's own dependencies, out of its lock rather than a
