@@ -13,6 +13,7 @@ few percent off the button it points at.
 from __future__ import annotations
 
 import json
+import math
 import os
 import pathlib
 from dataclasses import dataclass
@@ -34,6 +35,7 @@ from .padstrip import (
     PANEL,
     colour_for,
     name_for,
+    next_seat,
     seats,
 )
 from .schemes import for_ares, for_platform
@@ -375,11 +377,19 @@ def icon_surface(pad_name: str | None, height: int, colour: tuple[int, int, int]
     return _icons[key]
 
 
-def draw_strip(screen, font_at, players: list[dict], slots: int, status: str) -> int:
+def draw_strip(
+    screen, font_at, players: list[dict], slots: int, status: str, progress: float = 0.0
+) -> int:
     """Draw the strip along the top. Returns the height it used.
 
     The caller offsets everything below by that, so the strip decides its own
     height and the screens under it do not carry a copy of the number.
+
+    `progress` is a hold padmap is reading right now, as a fraction. It is
+    drawn here rather than only on the assignment screen because that is where
+    the hold happens: somebody picks a controller up in front of the library
+    and holds a button, and the ring filling above the games is the only thing
+    that says the machine noticed.
     """
     width = screen.get_width()
     pygame.draw.rect(screen, PANEL, pygame.Rect(0, 0, width, HEIGHT))
@@ -392,6 +402,11 @@ def draw_strip(screen, font_at, players: list[dict], slots: int, status: str) ->
     occupied = seats(players, slots)
 
     icon_height = HEIGHT - GAP * 2
+
+    # Where the next badge would go, which is where a hold in flight is drawn.
+    # With nobody seated that is over the generic pad on the left; with two
+    # seated it is after the second, which is where the third will appear.
+    joining = x
 
     if not occupied:
         # Nothing is connected: the generic pad, in the colour that means
@@ -441,10 +456,29 @@ def draw_strip(screen, font_at, players: list[dict], slots: int, status: str) ->
                 screen.blit(label, (x + PAD_RADIUS + 6, middle - label.get_height() // 2))
                 width_used = 6 + label.get_width()
         x += PAD_RADIUS * 2 + width_used + GAP * 2
+        joining = x
+
+    if progress > 0:
+        draw_hold(screen, (joining, middle), next_seat(players, slots), progress)
 
     word = tiny.render(status, True, LABEL_DIM)
     screen.blit(word, (width - word.get_width() - GAP, middle - word.get_height() // 2))
     return HEIGHT
+
+
+def draw_hold(screen, centre, player: int | None, fraction: float) -> None:
+    """A hold on its way, as a ring filling clockwise from twelve.
+
+    In the colour of the seat it is filling, so a second player watching it go
+    round is already being told which one they are about to be. Clockwise from
+    the top because that is how a clock and a person read a ring; pygame's own
+    arcs run anticlockwise from the +x axis.
+    """
+    radius = PAD_RADIUS + 5
+    box = pygame.Rect(centre[0] - radius, centre[1] - radius, 2 * radius, 2 * radius)
+    colour = colour_for(player) if player else EMPTY_RING
+    top = math.pi / 2
+    pygame.draw.arc(screen, colour, box, top - 2 * math.pi * min(1.0, fraction), top, 3)
 
 
 def draw_assign(screen, font_at, view) -> None:

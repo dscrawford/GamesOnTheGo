@@ -180,3 +180,68 @@ class Session:
         self.view = apply(self.view, event)
         if self.view.finished:
             self.open = False
+
+
+@dataclass
+class Watch:
+    """Keeping padmap listening for a hold, for as long as the picker is up.
+
+    `seating` rather than `begin`: a session grabs every pad and owns the
+    screen, which is right when somebody asked to set controllers up and wrong
+    for a library that is only waiting for the first person to pick a pad up.
+    Seating grabs nothing, claims only free seats, and is what makes "plug one
+    in and hold a button" into player one without leaving the grid.
+
+    padmap does not acknowledge the command, so there is nothing to read back:
+    it is sent again on each connection and after each change of state, which
+    the daemon takes idempotently. Not every frame, which would be a syscall
+    sixty times a second to tell a daemon what it already knows.
+    """
+
+    slots: int = 4
+    # The (state, seated) it was last asked under. None is "not asked", which
+    # is where a lost connection puts it: a restarted daemon remembers nothing.
+    asked: tuple[str, int] | None = None
+    # A daemon too old to know the command. It is never asked again, and the
+    # picker stops holding raw pads at arm's length -- with nothing listening
+    # for a hold, ignoring them would leave a machine no controller can drive.
+    refused: bool = False
+
+    @property
+    def listening(self) -> bool:
+        """Whether padmap can be expected to seat a pad somebody holds."""
+        return not self.refused
+
+    def handle(self, event: dict) -> None:
+        """padmap's answer, when it has one. Only a refusal says anything: the
+        daemon acknowledges `seating` with silence, and names the command it
+        did not understand -- `unknown command "seating"`."""
+        if event.get("event") == "error" and "seating" in str(event.get("message") or ""):
+            self.refused = True
+
+    def wanted(self, connected: bool, state: str, seated: int) -> dict | None:
+        """The command to send now, or None when padmap is already listening."""
+        if self.refused:
+            return None
+        if not connected:
+            self.asked = None
+            return None
+        # Inside a session padmap suspends seating, and the assignment screen
+        # is asking for the same holds anyway. Full seats are the same shape of
+        # nothing-to-do. Both forget what was asked rather than keeping it: a
+        # fourth player who unplugs puts the state back to a tuple that was
+        # already sent, and a `wanted` that only compares would then never
+        # mention the seat they freed.
+        if state == "assigning" or seated >= self.slots:
+            self.asked = None
+            return None
+        here = (state, seated)
+        if here == self.asked:
+            return None
+        self.asked = here
+        return {"cmd": "seating", "open": True, "players": self.slots}
+
+    def closed(self) -> dict:
+        """Stop listening -- the picker is making way for a game."""
+        self.asked = None
+        return {"cmd": "seating", "open": False}

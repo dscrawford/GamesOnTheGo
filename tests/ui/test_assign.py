@@ -7,7 +7,7 @@ event from the daemon. These pin what a given sequence leaves on screen.
 
 from __future__ import annotations
 
-from gotg_ui.assign import Assignment, Session, apply
+from gotg_ui.assign import Assignment, Session, Watch, apply
 
 
 def test_nothing_yet_says_how_to_start():
@@ -106,3 +106,99 @@ def test_the_session_closes_itself_when_padmap_accepts():
     session.handle({"event": "accepted", "players": []})
     assert not session.open
     assert session.view.finished
+
+
+# --- keeping padmap listening, while the picker is up -----------------------
+
+
+def test_it_asks_padmap_to_listen_as_soon_as_there_is_a_connection():
+    watch = Watch()
+    assert watch.wanted(True, "idle", 0) == {"cmd": "seating", "open": True, "players": 4}
+
+
+def test_it_does_not_ask_again_for_the_same_state():
+    # padmap does not acknowledge `seating`, so the only thing stopping this
+    # from being a syscall a frame is not sending it twice for one state.
+    watch = Watch()
+    watch.wanted(True, "idle", 0)
+    assert watch.wanted(True, "idle", 0) is None
+
+
+def test_a_seat_taken_is_worth_asking_again():
+    # Three seats are still free, and the pad that took the first one is not
+    # the only one somebody might pick up.
+    watch = Watch()
+    watch.wanted(True, "idle", 0)
+    assert watch.wanted(True, "ready", 1) is not None
+
+
+def test_nothing_is_asked_while_a_session_is_open():
+    # padmap suspends seating inside a session, and the assignment screen is
+    # already asking for the same holds.
+    assert Watch().wanted(True, "assigning", 0) is None
+
+
+def test_nothing_is_asked_when_every_seat_is_taken():
+    assert Watch().wanted(True, "ready", 4) is None
+
+
+def test_nothing_is_asked_with_no_daemon_to_ask():
+    assert Watch().wanted(False, "offline", 0) is None
+
+
+def test_a_reconnected_daemon_is_asked_again():
+    # A daemon that was restarted remembers nothing, so the picker has to say
+    # it again -- and the state it comes back in is the one it went away in.
+    watch = Watch()
+    watch.wanted(True, "idle", 0)
+    watch.wanted(False, "offline", 0)
+    assert watch.wanted(True, "idle", 0) is not None
+
+
+def test_closing_it_is_one_command_and_forgets_what_was_asked():
+    watch = Watch()
+    watch.wanted(True, "idle", 0)
+    assert watch.closed() == {"cmd": "seating", "open": False}
+    assert watch.wanted(True, "idle", 0) is not None
+
+
+def test_a_daemon_too_old_to_listen_is_not_asked_twice():
+    watch = Watch()
+    watch.wanted(True, "idle", 0)
+    watch.handle({"event": "error", "message": 'unknown command "seating"'})
+    assert watch.wanted(True, "ready", 1) is None
+
+
+def test_and_the_picker_stops_holding_raw_pads_at_arms_length():
+    # Nothing is listening for a hold, so a pad that is ignored until it is
+    # claimed is a pad that is ignored for ever.
+    watch = Watch()
+    assert watch.listening
+    watch.handle({"event": "error", "message": 'unknown command "seating"'})
+    assert not watch.listening
+
+
+def test_somebody_elses_error_is_not_this_one():
+    watch = Watch()
+    watch.handle({"event": "error", "message": "no joypads found"})
+    assert watch.listening
+
+
+def test_a_seat_freed_after_the_last_one_filled_is_asked_about_again():
+    # Four seated is nothing to ask for, and the fourth unplugging puts the
+    # state back to a tuple that was already sent. Comparing alone would then
+    # never mention the seat they freed.
+    watch = Watch()
+    for seated in range(4):
+        watch.wanted(True, "idle", seated)
+    assert watch.wanted(True, "idle", 4) is None
+    assert watch.wanted(True, "idle", 3) is not None
+
+
+def test_a_session_that_opens_and_closes_is_asked_about_again():
+    # padmap suspends seating for the length of a session, so the picker says
+    # it again on the way out rather than assuming what it resumed.
+    watch = Watch()
+    watch.wanted(True, "idle", 0)
+    watch.wanted(True, "assigning", 0)
+    assert watch.wanted(True, "idle", 0) is not None

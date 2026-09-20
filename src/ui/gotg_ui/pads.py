@@ -27,10 +27,11 @@ from .buttons import (
     name_for,
     step_for,
 )
+from .clones import Owners
 
 __all__ = [
     "A", "B", "BACK", "DOWN", "LB", "LEFT", "RB", "RIGHT", "START", "UP", "X", "Y",
-    "Pads", "button", "direction", "init",
+    "Pads", "button", "direction", "init", "only_padmap",
 ]
 
 # SDL's own constants, checked against the numbers buttons.py writes out. If a
@@ -51,9 +52,40 @@ assert STANDARD[pygame.CONTROLLER_BUTTON_A] == A
 # all there is.
 _mapped: set[int] = set()
 
+# What each open pad is called, and whether padmap is running to have named it.
+# A raw pad reaches this program whenever padmap is not holding it -- a failed
+# grab, a Steam Controller it cannot grab, or its own seating mode, which grabs
+# nothing on purpose -- and acting on those presses is the picker taking orders
+# from a controller nobody has assigned. See `clones.py`; the rule is relaxed
+# with no daemon at all, since then no clone is coming and the keyboard would be
+# the only way in.
+_owners = Owners()
+
+
+def only_padmap(on: bool) -> None:
+    """Whether padmap is there to publish a pad, which is what decides whether
+    an unpublished one may drive anything. The picker calls it per frame from
+    the connection it already has; the rule itself is `clones.py`."""
+    _owners.padmap_here = on
+
+
+def _allowed(event) -> bool:
+    """Whether this event came from a pad that may drive the picker.
+
+    `instance_id` on everything SDL2 sends, and `joy` for the older spelling,
+    so a pygame that answers only the second is not a picker that answers
+    nothing.
+    """
+    instance = getattr(event, "instance_id", None)
+    if instance is None:
+        instance = getattr(event, "joy", None)
+    return _owners.may_drive(instance)
+
 
 def button(event) -> str | None:
     """The name of the button this event is, or None if it is not one."""
+    if not _allowed(event):
+        return None
     if event.type == pygame.CONTROLLERBUTTONDOWN:
         return name_for(event.button, standard=True)
     if event.type == pygame.JOYBUTTONDOWN:
@@ -70,6 +102,8 @@ def direction(event) -> tuple[int, int] | None:
     through the joystick one; a screen should not have to know which it got.
     """
     if event.type == pygame.JOYHATMOTION:
+        if not _allowed(event):
+            return None
         # A mapped pad's d-pad arrives as buttons as well; taking the hat too
         # would step twice.
         if getattr(event, "instance_id", None) in _mapped:
@@ -97,12 +131,19 @@ class Pads:
         try:
             if controller.is_controller(index):
                 pad = controller.Controller(index)
-                instance = pad.as_joystick().get_instance_id()
+                stick = pad.as_joystick()
+                instance = stick.get_instance_id()
                 self._open[instance] = pad
                 _mapped.add(instance)
             else:
                 stick = pygame.joystick.Joystick(index)
-                self._open[stick.get_instance_id()] = stick
+                instance = stick.get_instance_id()
+                self._open[instance] = stick
+            # The name and the GUID, because SDL will rename a clone that
+            # mirrors a pad it recognises and only the GUID still says what the
+            # device was really called. phys is not asked for: SDL does not
+            # answer it, and padmap sets it best-effort anyway.
+            _owners.opened(instance, stick.get_name() or "", stick.get_guid() or "")
         except (pygame.error, AttributeError):
             # A pad can go away between being announced and being opened, and
             # a picker that raised there would die of somebody unplugging one.
@@ -111,6 +152,7 @@ class Pads:
     def remove(self, instance_id: int) -> None:
         self._open.pop(instance_id, None)
         _mapped.discard(instance_id)
+        _owners.closed(instance_id)
 
     def open_all(self) -> None:
         for index in range(pygame.joystick.get_count()):

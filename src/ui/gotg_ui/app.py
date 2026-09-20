@@ -17,7 +17,7 @@ import pygame
 
 from . import around, config, filters, pads, prepare, profiles
 from .art import ArtStore
-from .assign import Session
+from .assign import Session, Watch
 from .browser import SHELF, Browser
 from .catalog import Game, Library
 from .controllers import assets_dir, control_places, draw_assign, draw_strip
@@ -31,6 +31,7 @@ from .installs import Installs
 from .layout import grid, shelf, shelf_at, tile_at
 from .menu import Menu
 from .padmap import DaemonWatch, Padmap, ensure_daemon
+from .padmap import installed as padmap_installed
 from .padstrip import HEIGHT as STRIP_HEIGHT
 from .padstrip import PANEL, status_text, strip_status
 from .prepare import Preparer, is_ready
@@ -758,12 +759,25 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # A failure is a sentence in the strip, not a reason to refuse to draw.
     padmap_trouble = ensure_daemon()
     padmap.connect()
+    # Who may drive the picker: pads padmap published, for as long as padmap is
+    # on the machine to publish any. Read from the machine rather than from the
+    # connection, so a daemon that is restarting does not hand the cursor back
+    # to an unassigned pad for the length of it. Set before the first frame as
+    # well as during it, since a press can arrive before the loop has been
+    # round once.
+    padmap_here = padmap_installed()
+    pads.only_padmap(padmap_here)
     # And asked after again whenever the connection is gone -- see DaemonWatch
     # for why reconnecting alone was not enough.
     padmap_watch = DaemonWatch()
     # The assignment screen. `open` is what decides whether it is on screen,
     # and padmap closes it by accepting rather than this program deciding.
     seating = Session()
+    # And the standing invitation underneath it: padmap listening for a hold
+    # for as long as the grid is up, so picking a controller up and holding a
+    # button is all it takes to become player one. Nothing on screen until
+    # somebody does -- see assign.Watch.
+    watch = Watch()
     controller_art: dict = {}
     # The storage screen, and the path being typed to add to it.
     storage: Storage | None = None
@@ -1234,6 +1248,15 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 padmap.connect()
             for padmap_event in padmap.poll():
                 seating.handle(padmap_event)
+                watch.handle(padmap_event)
+            # Who may move the cursor, and whether padmap is still listening.
+            # Both are read off the connection every frame because both change
+            # underneath the picker: a daemon starts, a pad is claimed, a
+            # session opens and closes again.
+            pads.only_padmap(padmap_here and watch.listening)
+            listen = watch.wanted(padmap.connected, padmap.status_word, len(padmap.players))
+            if listen is not None:
+                padmap.send(listen)
 
             # The full-screen views draw into the band below the strip rather
             # than under it: each starts its heading a sixteenth of the way
@@ -1305,6 +1328,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 strip_status(padmap.status_word, len(padmap.players))
                 if padmap.connected
                 else (padmap_trouble or status_text(padmap.status_word)),
+                progress=seating.view.progress,
             )
             pygame.display.flip()
             # The loader only mirrors streamed text; 30fps halves the redundant
@@ -1317,6 +1341,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
         # terminal, so nothing else will ever stop it.
         if preparer is not None and (chosen is None or preparer.game != chosen[0]):
             preparer.cancel()
+        # And padmap stops listening for holds: the next thing on this screen
+        # is a game, which has its own idea of what a button does.
+        padmap.send(watch.closed())
 
     # Before the caller execs: the emulator must not inherit a window and a
     # grabbed GPU from a process that is about to stop existing.
