@@ -7,7 +7,7 @@ event from the daemon. These pin what a given sequence leaves on screen.
 
 from __future__ import annotations
 
-from gotg_ui.assign import Assignment, Session, Watch, apply
+from gotg_ui.assign import Assignment, Session, Watch, apply, attend
 
 
 def test_nothing_yet_says_how_to_start():
@@ -257,3 +257,72 @@ def test_and_it_closes_again_when_the_session_does():
     session.handle({"event": "state", "state": "assigning", "slots": 4, "players": []})
     session.handle({"event": "state", "state": "ready", "slots": 4, "players": []})
     assert not session.open
+
+
+# --- the whole rule, once a frame -------------------------------------------
+
+
+class FakeDaemon:
+    """padmap as the picker sees it: a queue of events and three readings."""
+
+    def __init__(self, events=(), connected=True, state="idle", players=()):
+        self.events = list(events)
+        self.connected = connected
+        self.status_word = state if connected else "offline"
+        self.players = list(players)
+
+    def poll(self):
+        out, self.events = self.events, []
+        return iter(out)
+
+
+def test_a_pad_padmap_has_not_published_may_not_drive_the_picker():
+    strict, _ = attend(FakeDaemon(), Session(), Watch(), padmap_here=True)
+    assert strict is True
+
+
+def test_a_machine_without_padmap_takes_what_it_is_given():
+    strict, _ = attend(FakeDaemon(connected=False), Session(), Watch(), padmap_here=False)
+    assert strict is False
+
+
+def test_a_daemon_that_is_down_is_still_no_reason_to_let_a_raw_pad_in():
+    strict, _ = attend(FakeDaemon(connected=False), Session(), Watch(), padmap_here=True)
+    assert strict is True
+
+
+def test_padmap_is_told_to_listen_for_a_hold_without_being_asked():
+    # The requirement: controllers pair from wherever the picker is, so the
+    # command goes out on its own rather than waiting for a screen.
+    _, command = attend(FakeDaemon(), Session(), Watch(), padmap_here=True)
+    assert command == {"cmd": "seating", "open": True, "players": 4}
+
+
+def test_the_picker_never_opens_a_session_by_itself():
+    # `begin` grabs every pad and takes the screen. Nothing on the grid should
+    # ever send it -- that is the pairing screen nobody wants to visit.
+    watch, session, daemon = Watch(), Session(), FakeDaemon()
+    for state in ("idle", "ready", "idle"):
+        daemon.status_word = state
+        _, command = attend(daemon, session, watch, padmap_here=True)
+        assert command is None or command["cmd"] == "seating"
+
+
+def test_a_claim_arriving_is_a_seat_on_the_strip():
+    daemon = FakeDaemon(events=[{"event": "claim", "player": 1, "name": "Xbox Wireless Controller"}])
+    session = Session()
+    attend(daemon, session, Watch(), padmap_here=True)
+    assert [s.player for s in session.view.seats] == [1]
+
+
+def test_a_hold_in_flight_reaches_the_ring():
+    daemon = FakeDaemon(events=[{"event": "progress", "frac": 0.5}])
+    session = Session()
+    attend(daemon, session, Watch(), padmap_here=True)
+    assert session.view.progress == 0.5
+
+
+def test_a_daemon_too_old_to_listen_hands_the_pads_back():
+    daemon = FakeDaemon(events=[{"event": "error", "message": 'unknown command "seating"'}])
+    strict, _ = attend(daemon, Session(), Watch(), padmap_here=True)
+    assert strict is False

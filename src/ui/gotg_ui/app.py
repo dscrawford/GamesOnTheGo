@@ -11,13 +11,14 @@ come after this has been sat in front of on a Deck.
 from __future__ import annotations
 
 import math
+import os
 import time
 
 import pygame
 
 from . import around, config, filters, pads, prepare, profiles
 from .art import ArtStore
-from .assign import Session, Watch
+from .assign import Session, Watch, attend
 from .browser import SHELF, Browser
 from .catalog import Game, Library
 from .controllers import assets_dir, control_places, draw_assign, draw_strip
@@ -757,6 +758,14 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # Started rather than waited for: the picker is usually the first thing
     # open on this machine, so if it does not start the daemon nothing will.
     # A failure is a sentence in the strip, not a reason to refuse to draw.
+    # No session, ever, from the grid. padmap opens one by itself the first
+    # time it meets a pad it has no mapping for -- which grabs every
+    # controller, takes the screen, and is exactly the pairing detour this
+    # picker is supposed to have stopped needing. A seat comes from a hold,
+    # and what a button means is asked at launch by gotg-seat, where there is
+    # a game to ask about. Set before the daemon is started, since it is the
+    # daemon that reads it, and left alone when somebody set it themselves.
+    os.environ.setdefault("PADMAP_NO_AUTOSETUP", "1")
     padmap_trouble = ensure_daemon()
     padmap.connect()
     # Who may drive the picker: pads padmap published, for as long as padmap is
@@ -1251,15 +1260,12 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     padmap_watch.mark(time.monotonic())
                     padmap_trouble = ensure_daemon(force=True)
                 padmap.connect()
-            for padmap_event in padmap.poll():
-                seating.handle(padmap_event)
-                watch.handle(padmap_event)
-            # Who may move the cursor, and whether padmap is still listening.
-            # Both are read off the connection every frame because both change
-            # underneath the picker: a daemon starts, a pad is claimed, a
-            # session opens and closes again.
-            pads.only_padmap(padmap_here and watch.listening)
-            listen = watch.wanted(padmap.connected, padmap.status_word, len(padmap.players))
+            # The controller rule, once a frame: fold in what padmap said,
+            # decide whether an unpublished pad may move the cursor, and keep
+            # the daemon listening for a hold. One call because they are one
+            # requirement -- see assign.attend, which is where it is tested.
+            strict, listen = attend(padmap, seating, watch, padmap_here=padmap_here)
+            pads.only_padmap(strict)
             if listen is not None:
                 padmap.send(listen)
 

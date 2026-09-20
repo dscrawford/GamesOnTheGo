@@ -139,6 +139,15 @@ gotg controllers apply [<id>|--all] # write bindings without launching
 
 **In the picker**, padmap listens for a hold for as long as the grid is up: pick a controller up, hold a button, and the ring above the games fills in your colour and seats you. Only pads padmap has published move the cursor — an unseated one is ignored, so a controller nobody has assigned cannot drive the library. `GOTG_ANY_PAD=1` lifts that, for a machine where padmap cannot publish anything.
 
+That is a requirement, and it has a test that runs it against a real daemon and real kernel devices — `tests/e2e`:
+
+```bash
+nix run .#test-controllers                 # or gotg-test-controllers in the dev shell
+GOTG_E2E_REQUIRE=1 nix run .#test-controllers   # a machine that cannot run it fails instead of skipping
+```
+
+It needs `/dev/uinput` writable and nothing else; each test starts a padmap of its own under a temporary directory and never touches the one you are playing with.
+
 **Before a launch**, `gotg-seat` asks for a controller if none is seated, or walks the buttons if the pad is unmapped.
 
 ## Steam
