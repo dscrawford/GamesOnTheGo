@@ -127,6 +127,39 @@
             inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg;
             inherit (padmap.packages.${pkgs.stdenv.hostPlatform.system}) padmap;
           };
+          # The controller requirement, run against a real padmap daemon and
+          # real kernel devices: tests/e2e. Packaged rather than left in the
+          # dev shell so the machine that matters can run it -- `nix run
+          # .#test-controllers` on a Deck, over ssh, with no checkout to set
+          # up first. Its own python because the picker's needs pygame and the
+          # dev venv has none.
+          gotg-test-controllers =
+            let
+              testPython = pkgs.python3.withPackages (ps: [
+                ps.pygame-ce
+                ps.pyyaml
+                ps.pytest
+              ]);
+            in
+            pkgs.writeShellScriptBin "gotg-test-controllers" ''
+              root="''${GOTG_DEV_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+              if [ ! -d "$root/tests/e2e" ]; then
+                echo "gotg-test-controllers: no tests/e2e under $root" >&2
+                echo "      set GOTG_DEV_ROOT to your checkout" >&2
+                exit 1
+              fi
+              export PATH="${pkgs.lib.makeBinPath [
+                padmap.packages.${pkgs.stdenv.hostPlatform.system}.padmap
+              ]}:$PATH"
+              export PYTHONPATH="$root/src/ui''${PYTHONPATH:+:$PYTHONPATH}"
+              export SDL_VIDEODRIVER="''${SDL_VIDEODRIVER:-dummy}"
+              # Each test starts a padmap of its own under its tmp_path. This
+              # is the one variable that could point it at the daemon somebody
+              # is playing with instead.
+              unset PADMAP_SKIP_DAEMON_CHECK
+              exec ${testPython}/bin/python3 -m pytest "$root/tests/e2e" "$@"
+            '';
+
           # The installer, for a machine that has never heard of Nix. Packaged
           # as well as curl-able so that `gotg-install` is on PATH afterwards:
           # a SteamOS update wipes the udev rule, and re-running this is how it
@@ -274,6 +307,11 @@
           type = "app";
           program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-uninstall}/bin/gotg-uninstall";
         };
+        # The controller requirement, on whatever machine is doubting it.
+        test-controllers = {
+          type = "app";
+          program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-test-controllers}/bin/gotg-test-controllers";
+        };
       });
 
       devShells = forAllSystems (
@@ -352,6 +390,8 @@
             exec ${uiPython}/bin/python3 -m ${module} "$@"
           '';
           seatDev = uiDev "gotg-seat" "gotg_ui.seat" "";
+
+          controllerTests = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-test-controllers;
           pickerDev = uiDev "gotg-ui" "gotg_ui" ''
             export GOTG_SEAT="''${GOTG_SEAT:-${seatDev}/bin/gotg-seat}"
           '';
@@ -367,6 +407,7 @@
               # answering it should not mean digging the store path out of a
               # wrapper script.
               padmapPkg
+              controllerTests
             ]
             ++ [
               # The importer's own dependencies, out of its lock rather than a

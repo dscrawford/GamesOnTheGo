@@ -285,3 +285,26 @@ class Watch:
         """Stop listening -- the picker is making way for a game."""
         self.asked = None
         return {"cmd": "seating", "open": False}
+
+
+def attend(padmap, seating: Session, watch: Watch, *, padmap_here: bool) -> tuple[bool, dict | None]:
+    """One frame of keeping up with padmap. The picker's whole controller rule.
+
+    Three things happen here and they are one thing: what the daemon has said
+    is folded in, whether an unpublished pad may move the cursor is decided,
+    and padmap is told to go on listening for a hold if it needs telling.
+
+    They live together because they are a single requirement -- a controller
+    drives this picker once padmap has published it, and picking one up and
+    holding a button is what publishes it. Split across the event loop, any
+    one of them could be dropped in an edit and the other two would go on
+    looking correct.
+
+    Returns whether to take padmap's pads alone, and the command to send, if
+    any. Nothing is sent from here: the caller owns the socket.
+    """
+    for event in padmap.poll():
+        seating.handle(event)
+        watch.handle(event)
+    strict = padmap_here and watch.listening
+    return strict, watch.wanted(padmap.connected, padmap.status_word, len(padmap.players))
