@@ -43,6 +43,17 @@ CHUNK = 65536
 DAEMON_TIMEOUT = int(config.get("theme.timeouts.padmap_daemon", 10))
 
 
+def installed() -> bool:
+    """Whether padmap is on this machine at all.
+
+    Not whether it is answering: a daemon that has died is one the picker
+    restarts, and a pad that may only drive the picker once padmap has
+    published it should go on waiting across that. The two are different
+    questions and only this one is about the machine.
+    """
+    return shutil.which("padmap") is not None
+
+
 def ensure_daemon(force: bool = False) -> str | None:
     """Start padmap's daemon, or restart one running older code.
 

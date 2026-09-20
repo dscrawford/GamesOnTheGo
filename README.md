@@ -106,6 +106,7 @@ gotg steam picker                   # put it in Steam as "Games On The Go"
 | X | `/` or `f` | search |
 | Y | — | next platform |
 | Start | Tab | menu: Platform, Region, Installed, Search, Clear all, View, Controller for… |
+| hold any button | — | take a free seat — the ring above the grid fills, then you are that player |
 | — | `c` | controller diagram for the selected game's platform |
 | — | `i` | installed only |
 | — | `s` | storage |
@@ -135,6 +136,8 @@ gotg controllers apply [<id>|--all] # write bindings without launching
 **Motion:** padmap serves every seated pad's gyro and accelerometer over DSU (`127.0.0.1:26760`, slot = player − 1) and writes each environment's Ryujinx, Cemu and Dolphin config to read it. `PADMAP_DSU_PORT=0` turns it off.
 
 **Stop any game:** hold a shoulder or trigger on each side + Start for 3 s.
+
+**In the picker**, padmap listens for a hold for as long as the grid is up: pick a controller up, hold a button, and the ring above the games fills in your colour and seats you. Only pads padmap has published move the cursor — an unseated one is ignored, so a controller nobody has assigned cannot drive the library. `GOTG_ANY_PAD=1` lifts that, for a machine where padmap cannot publish anything.
 
 **Before a launch**, `gotg-seat` asks for a controller if none is seated, or walks the buttons if the pad is unmapped.
 

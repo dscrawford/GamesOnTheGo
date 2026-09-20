@@ -8,7 +8,7 @@ reading it.
 
 from __future__ import annotations
 
-from gotg_ui.padstrip import PLAYER_COLOURS, colour_for, name_for, seats, status_text
+from gotg_ui.padstrip import PLAYER_COLOURS, colour_for, name_for, next_seat, seats, status_text
 
 
 def player(n: int, name: str = "", **extra) -> dict:
@@ -85,10 +85,13 @@ def test_the_status_is_in_words_somebody_can_act_on():
 
 def test_an_idle_padmap_with_nobody_seated_says_how_to_start():
     # "padmap ready" is true and useless there: the question in front of
-    # somebody is how to make it do anything, not what it is doing.
+    # somebody is how to make it do anything, not what it is doing. And what
+    # it takes is the hold padmap is already listening for, not a key on a
+    # keyboard nobody carried to the sofa.
     from gotg_ui.padstrip import strip_status
 
-    assert strip_status("idle", 0) == "press C to assign controllers"
+    assert strip_status("idle", 0) == "hold a button on a controller"
+    assert strip_status("ready", 0) == "hold a button on a controller"
 
 
 def test_once_somebody_is_seated_it_goes_back_to_saying_what_is_true():
@@ -96,3 +99,18 @@ def test_once_somebody_is_seated_it_goes_back_to_saying_what_is_true():
 
     assert strip_status("idle", 2) == "padmap ready"
     assert strip_status("assigning", 0) == "hold a button on each controller"
+
+
+def test_the_hold_fills_the_first_free_seat():
+    assert next_seat([], 4) == 1
+    assert next_seat([player(1)], 4) == 2
+
+
+def test_a_gap_is_filled_before_the_end():
+    # Player two unplugged and somebody else picked a pad up: they are two,
+    # not five, and the ring belongs where two sits.
+    assert next_seat([player(1), player(3)], 4) == 2
+
+
+def test_no_seat_is_left_to_fill():
+    assert next_seat([player(n) for n in (1, 2, 3, 4)], 4) is None

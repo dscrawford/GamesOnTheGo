@@ -99,10 +99,12 @@ def strip_status(status: str, seated: int) -> str:
 
     "padmap ready" is true and useless when no seat is taken: the question in
     front of somebody then is not what padmap is doing, it is how to make it do
-    anything. So the idle-and-empty case is the only one that names a key.
+    anything. And the answer is the hold padmap is already listening for while
+    the picker is up -- not the key that opens the assignment screen, which is
+    the long way round and is on a keyboard nobody took to the sofa.
     """
-    if status == "idle" and seated == 0:
-        return "press C to assign controllers"
+    if seated == 0 and status in ("idle", "ready"):
+        return "hold a button on a controller"
     return status_text(status)
 
 
@@ -115,3 +117,18 @@ def status_text(status: str) -> str:
         "assigning": "hold a button on each controller",
         "ready": "controllers assigned",
     }.get(status, status)
+
+
+def next_seat(players: list[dict], slots: int = 4) -> int | None:
+    """Which player a hold would claim next, or None when the seats are full.
+
+    The lowest free number rather than the one after the last: a player two
+    who unplugged leaves a gap, and the next person to pick a pad up is two
+    again -- which is what padmap seats them as, and what the ring above the
+    grid has to agree with.
+    """
+    taken = {player for player, _ in seats(players, slots)}
+    for player in range(1, slots + 1):
+        if player not in taken:
+            return player
+    return None
