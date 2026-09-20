@@ -927,14 +927,20 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
 
                 # Same for the controller diagram, which is also where a
                 # controller is assigned -- so it takes A, B and Y from both
-                # the keyboard and a pad, and nothing else.
-                if controllers is not None:
+                # the keyboard and a pad, and nothing else. `seating.open` as
+                # well as the screen, because padmap opens sessions of its own
+                # and the way out of one has to be reachable from wherever the
+                # picker happened to be.
+                if controllers is not None or seating.open:
                     if event.type == pygame.KEYDOWN:
                         if event.key in (pygame.K_ESCAPE, pygame.K_b, pygame.K_c):
+                            # One press, and it keeps what was claimed. Two
+                            # presses was the bug: the first threw the claim
+                            # away, which took the clone with it, which left
+                            # nothing able to press the second.
                             if seating.open:
-                                padmap.send(seating.cancel())
-                            else:
-                                controllers = None
+                                padmap.send(seating.leave())
+                            controllers = None
                         elif event.key in ARROWS and not seating.open:
                             focus = around.nearest(control_anchors, focus, ARROWS[event.key])
                         elif event.key in (pygame.K_RETURN, pygame.K_a):
@@ -959,9 +965,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             padmap.send(seating.accept() if seating.open else seating.begin())
                         elif pressed == pads.B:
                             if seating.open:
-                                padmap.send(seating.cancel())
-                            else:
-                                controllers = None
+                                padmap.send(seating.leave())
+                            controllers = None
                         elif pressed == pads.Y and seating.open:
                             padmap.send(seating.reset())
                     continue
@@ -1282,7 +1287,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 else:
                     draw(below, state, font_at, art, browser.status, None, None, browser.installed, installs.rings())
                 draw_filters(below, font_at, browser, panel, typing)
-            elif controllers is not None:
+            elif controllers is not None or seating.open:
                 if seating.open or seating.view.finished:
                     draw_assign(below, font_at, seating.view)
                 else:

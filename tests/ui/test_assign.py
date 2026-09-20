@@ -202,3 +202,58 @@ def test_a_session_that_opens_and_closes_is_asked_about_again():
     watch.wanted(True, "idle", 0)
     watch.wanted(True, "assigning", 0)
     assert watch.wanted(True, "idle", 0) is not None
+
+
+# --- the way out that does not cost you the controller ----------------------
+
+
+def test_leaving_with_a_seat_claimed_keeps_it():
+    # B used to cancel, and cancelling is padmap discarding every claim --
+    # which, with the picker driven by published pads alone, discards the only
+    # thing that could have pressed B a second time.
+    session = Session()
+    session.begin()
+    session.handle({"event": "claim", "player": 1, "name": "Xbox Wireless Controller"})
+    assert session.leave() == {"cmd": "accept"}
+    assert not session.open
+
+
+def test_leaving_with_nothing_claimed_cancels():
+    session = Session()
+    session.begin()
+    assert session.leave() == {"cmd": "cancel"}
+    assert not session.open
+
+
+def test_leaving_twice_does_not_accept_an_empty_session():
+    session = Session()
+    session.begin()
+    session.handle({"event": "claim", "player": 1, "name": "Pad"})
+    session.leave()
+    assert session.leave() == {"cmd": "cancel"}
+
+
+def test_a_seated_pad_is_told_it_can_hold_to_start():
+    # The one way out of this screen that a pad can reach: padmap takes a
+    # longer hold on an already-claimed pad as "accept", and nothing said so.
+    view = Assignment(state="assigning", pads=1)
+    assert not view.keep_hint
+    view = apply(view, {"event": "claim", "player": 1, "name": "Pad"})
+    assert "hold" in view.keep_hint
+
+
+def test_a_session_the_picker_did_not_start_still_opens_the_screen():
+    # padmap opens one by itself for a pad it has never seen mapped. For the
+    # length of it every pad is grabbed, so the picker answers no button --
+    # and the grid sat there looking broken with nothing saying why.
+    session = Session()
+    assert not session.open
+    session.handle({"event": "state", "state": "assigning", "slots": 4, "players": []})
+    assert session.open
+
+
+def test_and_it_closes_again_when_the_session_does():
+    session = Session()
+    session.handle({"event": "state", "state": "assigning", "slots": 4, "players": []})
+    session.handle({"event": "state", "state": "ready", "slots": 4, "players": []})
+    assert not session.open

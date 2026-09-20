@@ -62,6 +62,22 @@ class Assignment:
         return None
 
     @property
+    def keep_hint(self) -> str:
+        """The way off this screen that a controller can reach, once there is
+        one to reach it with.
+
+        padmap grabs every pad for the length of a session, so nothing on this
+        screen answers a button -- except a longer hold on a pad that already
+        has a seat, which the daemon itself takes as "accept". That was true
+        before this line existed and nothing said so, which left somebody
+        holding a controller looking at a screen that only a keyboard could
+        close.
+        """
+        if self.state != "assigning" or not self.seats:
+            return ""
+        return "or hold a button on a seated controller to start"
+
+    @property
     def prompt(self) -> str:
         """What to tell the person in front of the screen, right now."""
         if self.finished:
@@ -176,8 +192,32 @@ class Session:
         self.view = replace(self.view, seats=(), progress=0.0, finished=False)
         return {"cmd": "reset"}
 
+    def leave(self) -> dict:
+        """Out of this screen, keeping whatever has been claimed.
+
+        B used to cancel, and cancel is padmap throwing every claim away: the
+        clones go with them, and a picker that only answers published pads has
+        just lost the controller that pressed B. So anything claimed is kept --
+        that is what `accept` is -- and cancel is left for the case where there
+        is genuinely nothing to keep.
+        """
+        self.open = False
+        seated = bool(self.view.seats)
+        self.view = Assignment(slots=self.slots)
+        return {"cmd": "accept"} if seated else {"cmd": "cancel"}
+
     def handle(self, event: dict) -> None:
+        """One event from padmap, and what it does to the screen.
+
+        `open` follows the daemon rather than only this program's own `begin`.
+        padmap opens a session by itself for a pad it has no mapping for, and
+        for the length of one it holds every pad -- so a picker that did not
+        notice sat on the grid answering no button, with nothing on screen to
+        say why or how to get out.
+        """
         self.view = apply(self.view, event)
+        if event.get("event") == "state":
+            self.open = event.get("state") == "assigning"
         if self.view.finished:
             self.open = False
 

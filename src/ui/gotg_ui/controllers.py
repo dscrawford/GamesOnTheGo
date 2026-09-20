@@ -496,6 +496,13 @@ def draw_assign(screen, font_at, view) -> None:
     prompt = font_at(30).render(view.prompt, True, TEXT)
     screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.20)))
 
+    # The way out a controller can reach. padmap holds every pad for the length
+    # of a session, so this screen answers no button -- except a longer hold on
+    # a pad that already has a seat, which the daemon takes as "accept" itself.
+    if view.keep_hint:
+        hint = font_at(22).render(view.keep_hint, True, TEXT_DIM)
+        screen.blit(hint, ((width - hint.get_width()) // 2, int(height * 0.25)))
+
     # The hold in flight. padmap reports it as a fraction, and a bar is the
     # only part of this screen that answers "is it registering my button?"
     if view.progress > 0:
@@ -507,6 +514,21 @@ def draw_assign(screen, font_at, view) -> None:
             screen,
             LEADER_LIT,
             pygame.Rect(bar_x, bar_y, int(bar_w * min(1.0, view.progress)), 10),
+            border_radius=5,
+        )
+
+    # And the longer hold on a pad that is already seated, which is padmap
+    # accepting. Drawn in the seat's own colour so the two bars cannot be read
+    # as the same thing happening twice.
+    if view.confirm > 0:
+        bar_w = int(width * 0.4)
+        bar_x = (width - bar_w) // 2
+        bar_y = int(height * 0.30)
+        pygame.draw.rect(screen, LEADER, pygame.Rect(bar_x, bar_y, bar_w, 10), border_radius=5)
+        pygame.draw.rect(
+            screen,
+            colour_for(1),
+            pygame.Rect(bar_x, bar_y, int(bar_w * min(1.0, view.confirm)), 10),
             border_radius=5,
         )
 
@@ -551,7 +573,7 @@ def draw_assign(screen, font_at, view) -> None:
     # Named for both, because both work and only one of them is in the room:
     # somebody holding a pad should not have to find a keyboard to keep what
     # they have just claimed.
-    keys = "A or Enter keep   Y or R start again   B or Esc cancel" \
+    keys = "A or Enter keep   Y or R start again   B or Esc back" \
         if view.state == "assigning" else "A or Enter assign   B or Esc back"
     footer = font_at(20).render(keys, True, TEXT_DIM)
     screen.blit(footer, ((width - footer.get_width()) // 2, int(height * 0.86)))
