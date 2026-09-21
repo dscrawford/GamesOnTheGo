@@ -114,3 +114,48 @@ def test_a_gap_is_filled_before_the_end():
 
 def test_no_seat_is_left_to_fill():
     assert next_seat([player(n) for n in (1, 2, 3, 4)], 4) is None
+
+
+# --- the controller revealed, clockwise from twelve ----------------------------
+
+
+def test_the_reveal_starts_at_twelve_and_goes_clockwise():
+    # Screen coordinates: y grows downward, so twelve is (0, -r) and three
+    # o'clock is (r, 0). A quarter turn sweeps the top-right quadrant.
+    from gotg_ui.padstrip import wedge
+
+    points = wedge((0.0, 0.0), 10.0, 0.25)
+    assert points[0] == (0.0, 0.0)
+    assert points[1] == (0.0, -10.0)
+    last = points[-1]
+    assert abs(last[0] - 10.0) < 1e-6 and abs(last[1]) < 1e-6
+    assert all(x >= -1e-6 and y <= 1e-6 for x, y in points[1:])
+
+
+def test_half_a_turn_reaches_six():
+    from gotg_ui.padstrip import wedge
+
+    x, y = wedge((0.0, 0.0), 10.0, 0.5)[-1]
+    assert abs(x) < 1e-6 and abs(y - 10.0) < 1e-6
+
+
+def test_a_whole_turn_is_the_whole_disc():
+    from gotg_ui.padstrip import wedge
+
+    points = wedge((5.0, 5.0), 10.0, 1.0)
+    x, y = points[-1]
+    assert abs(x - 5.0) < 1e-6 and abs(y + 5.0) < 1e-6
+    assert len(points) > 40
+
+
+def test_nothing_held_is_no_wedge_at_all():
+    from gotg_ui.padstrip import wedge
+
+    assert wedge((0.0, 0.0), 10.0, 0.0) == []
+    assert wedge((0.0, 0.0), 10.0, -1.0) == []
+
+
+def test_more_than_everything_is_everything():
+    from gotg_ui.padstrip import wedge
+
+    assert wedge((0.0, 0.0), 10.0, 1.5) == wedge((0.0, 0.0), 10.0, 1.0)

@@ -37,6 +37,7 @@ from .padstrip import (
     name_for,
     next_seat,
     seats,
+    wedge,
 )
 from .schemes import for_ares, for_platform
 
@@ -416,6 +417,8 @@ def draw_strip(
         icon = icon_surface(None, icon_height, EMPTY_RING)
         if icon is not None:
             screen.blit(icon, (x - PAD_RADIUS, middle - icon.get_height() // 2))
+            # The hold reveals the coloured pad exactly over this red one.
+            joining = x - PAD_RADIUS + icon.get_width() // 2
             x += icon.get_width()
         else:
             reach = PAD_RADIUS - 4
@@ -459,26 +462,53 @@ def draw_strip(
         joining = x
 
     if progress > 0:
-        draw_hold(screen, (joining, middle), next_seat(players, slots), progress)
+        draw_hold(screen, (joining, middle), next_seat(players, slots), progress, icon_height)
 
     word = tiny.render(status, True, LABEL_DIM)
     screen.blit(word, (width - word.get_width() - GAP, middle - word.get_height() // 2))
     return HEIGHT
 
 
-def draw_hold(screen, centre, player: int | None, fraction: float) -> None:
-    """A hold on its way, as a ring filling clockwise from twelve.
+def draw_hold(screen, centre, player: int | None, fraction: float, height: int) -> None:
+    """A hold on its way: the controller, revealed clockwise from twelve.
 
-    In the colour of the seat it is filling, so a second player watching it go
-    round is already being told which one they are about to be. Clockwise from
-    the top because that is how a clock and a person read a ring; pygame's own
-    arcs run anticlockwise from the +x axis.
+    Not a ring beside the seat but the pad itself appearing, the way a clock
+    hand would uncover it -- in the colour of the seat it is filling, so a
+    second player watching it come round is already being told which one
+    they are about to be. Under it, when nobody is seated, sits the red
+    "no controllers" pad, which the coloured one covers as it goes.
+
+    The icon is masked by a pie slice rather than clipped by an arc: pygame
+    has no clip shape but a rectangle, so the slice is drawn opaque on a
+    transparent surface of the icon's size and multiplied into the icon's
+    alpha, which leaves exactly the part inside it.
     """
-    radius = PAD_RADIUS + 5
-    box = pygame.Rect(centre[0] - radius, centre[1] - radius, 2 * radius, 2 * radius)
     colour = colour_for(player) if player else EMPTY_RING
-    top = math.pi / 2
-    pygame.draw.arc(screen, colour, box, top - 2 * math.pi * min(1.0, fraction), top, 3)
+    icon = icon_surface(None, height, colour)
+    # Something to fill in. With nobody seated the red "no controllers" pad
+    # is already there; after the first seat there is nothing at the next
+    # place, and a wedge of colour on its own reads as a smudge rather than
+    # a controller arriving. A silhouette in the empty seat's dark red gives
+    # the sweep a shape to complete.
+    under = icon_surface(None, height, EMPTY)
+    if under is not None and fraction < 1.0:
+        screen.blit(under, under.get_rect(center=centre))
+    if icon is None:
+        # No artwork to reveal: the old ring, rather than nothing at all.
+        radius = PAD_RADIUS + 5
+        box = pygame.Rect(centre[0] - radius, centre[1] - radius, 2 * radius, 2 * radius)
+        top = math.pi / 2
+        pygame.draw.arc(screen, colour, box, top - 2 * math.pi * min(1.0, fraction), top, 3)
+        return
+    width, tall = icon.get_size()
+    slice_ = wedge((width / 2, tall / 2), math.hypot(width, tall) / 2 + 2, fraction)
+    if len(slice_) < 3:
+        return
+    mask = pygame.Surface((width, tall), pygame.SRCALPHA)
+    pygame.draw.polygon(mask, (255, 255, 255, 255), slice_)
+    shown = icon.copy()
+    shown.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    screen.blit(shown, shown.get_rect(center=centre))
 
 
 def draw_assign(screen, font_at, view) -> None:
