@@ -44,9 +44,20 @@
       # session, outside the sandbox, so it enumerates every pad on the
       # machine and "the first one" is not the first one Dolphin will see --
       # it wrote `GBA1 <- SDL/0/Steam Deck`, a name that does not exist
-      # inside. So the pads are named rather than counted: --pad
-      # "sdl:padmap Player N" below, which is what padmap calls its clones,
-      # and the only pads Dolphin has.
+      # inside. So the pads are not counted.
+      #
+      # Nor are they named. They were: --pad "sdl:padmap Player N", which is
+      # what the *kernel* calls padmap's clones and what Dolphin never hears.
+      # A clone mirrors the identity of the pad behind it, so SDL finds
+      # 045e:028e in its own database and hands Dolphin "Xbox 360
+      # Controller"; the name padmap gave it is gone. Four Swords Adventures
+      # had no controls at all, and only for the pads SDL recognises -- the
+      # clone of something it has never heard of keeps its name, which is why
+      # this worked for one pad and not another.
+      #
+      # --pad "padmap:N" below. The wrapper finds player N's clone by its
+      # GUID, which carries a CRC of the real name taken before SDL renames
+      # anything, and keeps the slot that tells two pads of one model apart.
       dolphin = pkgs.writeShellScript "gotg-fsa-dolphin" ''
         exec ${gotgPkgs.padmap-rs}/bin/padmap-rs exec -- \
           ${base.emulator}/bin/${base.bin} "$@"
@@ -99,9 +110,7 @@
           mkdir -p "$state/splitscreen"
           ${split}/bin/splitscreen-fsa \
             --players ${toString players} \
-            ${lib.concatMapStringsSep " " (n: ''--pad "sdl:padmap Player ${toString n}"'') (
-              lib.range 1 players
-            )} \
+            ${lib.concatMapStringsSep " " (n: ''--pad "padmap:${toString n}"'') (lib.range 1 players)} \
             --gc "$target" \
             --gba-bios "$state/bios/gba_bios.bin" \
             --dolphin ${lib.escapeShellArg dolphin} \
