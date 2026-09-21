@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A handheld with its controls built in, drawn for GOTG. CC0: no rights
+     reserved. Flat and unbranded on purpose, like steam.svg beside it: the
+     shape is the recognisable part (a wide slab with a screen in the middle
+     and a grip at each end), and a logo would be a trademark this cannot
+     grant. Read at about 28 pixels, so the screen and the two grips carry it;
+     everything smaller is texture. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <g id="layer1">
+    <!-- body: one slab, grips swelling at both ends and falling away below -->
+    <path id="shell" fill="#2f3136" stroke="#1b1c20" stroke-width="2"
+          d="M 40 84 C 52 74 66 70 78 70 L 178 70 C 190 70 204 74 216 84
+             C 230 95 236 112 236 128 C 236 152 228 172 214 184
+             C 202 194 188 192 182 180 C 176 168 172 158 172 148
+             L 84 148 C 84 158 80 168 74 180 C 68 192 54 194 42 184
+             C 28 172 20 152 20 128 C 20 112 26 95 40 84 Z" />
+    <!-- the screen, which is the whole reason this is not a pad -->
+    <rect id="screen" x="86" y="84" width="84" height="52" rx="6"
+          fill="#1d1f24" stroke="#151619" stroke-width="2" />
+    <rect id="screen-glass" x="92" y="89" width="72" height="42" rx="4" fill="#33465c" />
+    <!-- left: stick above, d-pad below -->
+    <circle id="stick-left" cx="53" cy="99" r="13" fill="#4a4d55" stroke="#22242a" stroke-width="2" />
+    <circle id="stick-left-top" cx="53" cy="99" r="7" fill="#3a3d44" />
+    <path id="dpad" fill="#4a4d55" stroke="#22242a" stroke-width="2"
+          d="M 49 122 L 57 122 L 57 130 L 65 130 L 65 138 L 57 138
+             L 57 146 L 49 146 L 49 138 L 41 138 L 41 130 L 49 130 Z" />
+    <!-- right: face buttons above, stick below, so the two sides mirror -->
+    <circle id="button-y" cx="203" cy="90" r="7" fill="#d8c341" />
+    <circle id="button-x" cx="190" cy="101" r="7" fill="#4a8fd8" />
+    <circle id="button-b" cx="216" cy="101" r="7" fill="#d05050" />
+    <circle id="button-a" cx="203" cy="112" r="7" fill="#5fae5f" />
+    <circle id="stick-right" cx="203" cy="136" r="13" fill="#4a4d55" stroke="#22242a" stroke-width="2" />
+    <circle id="stick-right-top" cx="203" cy="136" r="7" fill="#3a3d44" />
+    <!-- the small buttons either side of the screen -->
+    <rect id="back" x="74" y="84" width="8" height="6" rx="3" fill="#4a4d55" />
+    <rect id="start" x="174" y="84" width="8" height="6" rx="3" fill="#4a4d55" />
+    <!-- shoulders, along the top edge of each grip -->
+    <path id="bumper-left" fill="#3d4047" stroke="#22242a" stroke-width="2"
+          d="M 36 78 C 44 70 56 66 68 66 L 68 74 C 58 74 47 77 40 83 Z" />
+    <path id="bumper-right" fill="#3d4047" stroke="#22242a" stroke-width="2"
+          d="M 220 78 C 212 70 200 66 188 66 L 188 74 C 198 74 209 77 216 83 Z" />
+  </g>
+</svg>

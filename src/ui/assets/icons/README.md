@@ -20,6 +20,7 @@ them.
 
 | File | Source | Licence |
 | --- | --- | --- |
+| `steamdeck.svg` | drawn for GOTG | CC0 |
 | `gamecube.svg` | ES-DE `gamepad_nintendo_gamecube.svg` | MIT |
 | `xbox.svg` | ES-DE `gamepad_xbox.svg` | MIT |
 | `playstation.svg` | ES-DE `gamepad_playstation.svg` | MIT |

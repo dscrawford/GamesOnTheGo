@@ -6,14 +6,18 @@
 #
 # Order is the whole of it. Steam's virtual pad reports as an Xbox pad wearing
 # a different hat, so "steam virtual" has to be tried before "steam"; "nes "
-# has a trailing space so it cannot swallow "genesis".
+# has a trailing space so it cannot swallow "genesis". A Deck's built-in
+# controls report as "Steam Deck" and get the handheld drawing, which is the
+# shape somebody is actually holding; the Puck says "Valve Software Steam
+# Controller Puck" and matches "steam controller" before it ever reaches
+# "valve".
 
 fallback: generic
 
 rules:
   - "steam virtual":      xbox
   - "steam controller":   steam
-  - "steam deck":         steam
+  - "steam deck":         steamdeck
   - "valve":              steam
   - "gamecube":           gamecube
   - "nintendo gamecube":  gamecube
