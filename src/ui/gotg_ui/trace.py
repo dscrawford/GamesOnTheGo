@@ -1,0 +1,36 @@
+"""What the picker decided about controllers, written down as it happens.
+
+`GOTG_UI_TRACE=/path/to/file` and every pad SDL opens, every press it
+delivers and whether it was taken, every padmap event and command, and every
+keyboard node held quiet lands there as one JSON object per line. Off unless
+asked for: the picker is a 60 Hz loop and a file write per frame is not free.
+
+For the conversation where the picker did something on somebody's machine
+that it does not do on the machine the tests run on. A person can press the
+buttons; this is what lets somebody else see what the picker saw.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+
+_path = os.environ.get("GOTG_UI_TRACE") or ""
+_started = time.monotonic()
+
+
+def on() -> bool:
+    return bool(_path)
+
+
+def say(kind: str, **fields) -> None:
+    """One line, or nothing at all when tracing is off."""
+    if not _path:
+        return
+    line = {"t": round(time.monotonic() - _started, 3), "kind": kind, **fields}
+    try:
+        with open(_path, "a") as out:
+            out.write(json.dumps(line, default=str) + "\n")
+    except OSError:
+        pass

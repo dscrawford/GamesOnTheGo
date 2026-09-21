@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
+from . import trace
+
 
 @dataclass(frozen=True)
 class Seat:
@@ -297,6 +299,11 @@ def attend(padmap, seating: Session, watch: Watch) -> dict | None:
     caller owns the socket.
     """
     for event in padmap.poll():
+        if trace.on() and event.get("event") != "progress":
+            trace.say("padmap", **{k: v for k, v in event.items() if k not in ("lines", "build")})
         seating.handle(event)
         watch.handle(event)
-    return watch.wanted(padmap.connected, padmap.status_word, len(padmap.players))
+    command = watch.wanted(padmap.connected, padmap.status_word, len(padmap.players))
+    if command is not None:
+        trace.say("sent", **command)
+    return command

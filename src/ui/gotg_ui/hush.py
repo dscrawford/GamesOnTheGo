@@ -35,6 +35,8 @@ import os
 import sys
 from dataclasses import dataclass, field
 
+from . import trace
+
 DEVICES = "/proc/bus/input/devices"
 
 # Valve. A Steam Controller's lizard keyboard and mouse carry its vendor id
@@ -177,11 +179,13 @@ class Hush:
                 self._refuse(event, f"{node.name}: {exc.strerror}")
                 continue
             self.held[event] = fd
+            trace.say("held", node=event, name=node.name)
         return sorted(self.held)
 
     def _refuse(self, event: str, why: str) -> None:
         if event not in self.refused:
             self.refused.add(event)
+            trace.say("not-held", node=event, why=why)
             print(f"gotg-ui: could not hold {event} ({why}); it may still move the cursor", file=sys.stderr)
 
     def _release(self, event: str) -> None:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pygame
 
+from . import trace
 from .buttons import (
     BACK,
     DOWN,
@@ -27,7 +28,7 @@ from .buttons import (
     name_for,
     step_for,
 )
-from .clones import Owners
+from .clones import Owners, is_clone
 
 __all__ = [
     "A", "B", "BACK", "DOWN", "LB", "LEFT", "RB", "RIGHT", "START", "UP", "X", "Y",
@@ -76,15 +77,27 @@ def _allowed(event) -> bool:
 
 def button(event) -> str | None:
     """The name of the button this event is, or None if it is not one."""
-    if not _allowed(event):
+    if event.type not in (pygame.CONTROLLERBUTTONDOWN, pygame.JOYBUTTONDOWN):
         return None
-    if event.type == pygame.CONTROLLERBUTTONDOWN:
-        return name_for(event.button, standard=True)
-    if event.type == pygame.JOYBUTTONDOWN:
-        if getattr(event, "instance_id", None) in _mapped:
-            return None
-        return name_for(event.button, standard=False)
-    return None
+    allowed = _allowed(event)
+    if allowed and event.type == pygame.CONTROLLERBUTTONDOWN:
+        name = name_for(event.button, standard=True)
+    elif allowed and getattr(event, "instance_id", None) not in _mapped:
+        name = name_for(event.button, standard=False)
+    else:
+        name = None
+    if trace.on():
+        instance = getattr(event, "instance_id", None)
+        trace.say(
+            "press",
+            instance=instance,
+            device=_owners.names.get(instance, "?"),
+            raw=event.type == pygame.JOYBUTTONDOWN,
+            button=event.button,
+            allowed=allowed,
+            taken=name,
+        )
+    return name
 
 
 def direction(event) -> tuple[int, int] | None:
@@ -136,12 +149,21 @@ class Pads:
             # device was really called. phys is not asked for: SDL does not
             # answer it, and padmap sets it best-effort anyway.
             _owners.opened(instance, stick.get_name() or "", stick.get_guid() or "")
+            trace.say(
+                "pad-opened",
+                instance=instance,
+                name=stick.get_name(),
+                guid=stick.get_guid(),
+                clone=is_clone(stick.get_name(), guid=stick.get_guid()),
+                mapped=instance in _mapped,
+            )
         except (pygame.error, AttributeError):
             # A pad can go away between being announced and being opened, and
             # a picker that raised there would die of somebody unplugging one.
             return
 
     def remove(self, instance_id: int) -> None:
+        trace.say("pad-gone", instance=instance_id, name=_owners.names.get(instance_id, "?"))
         self._open.pop(instance_id, None)
         _mapped.discard(instance_id)
         _owners.closed(instance_id)
