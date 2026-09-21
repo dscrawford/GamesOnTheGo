@@ -39,6 +39,11 @@ padmap_ensure() {
   # into -- lives. padmap treats the pair as a session name: a daemon already
   # following this pid, which is the picker's after its execvp, is left
   # alone; one belonging to no session, or another, is replaced.
+  # No session opened by the daemon itself, and no seat but by a hold: a pad
+  # padmap remembers a mapping for was seated the moment it was seen, which
+  # --fresh does not stop. The daemon reads these, so they are set before it
+  # is started, and left alone when somebody set them themselves.
+  export PADMAP_NO_AUTOSETUP="${PADMAP_NO_AUTOSETUP:-1}" PADMAP_NO_AUTOATTACH="${PADMAP_NO_AUTOATTACH:-1}"
   if ! said="$("$(padmap_bin)" ensure-daemon --fresh --follow "$$" 2>&1)"; then
     warn "padmap has no current daemon; controllers will be whatever SDL finds"
     rm -f "$marker"

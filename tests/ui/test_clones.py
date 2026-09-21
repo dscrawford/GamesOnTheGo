@@ -147,3 +147,13 @@ def test_a_renamed_clone_drives_the_picker():
     owners.opened(2, "Xbox 360 Controller", THE_PAD_IT_WAS_MADE_FROM)
     assert owners.may_drive(3)
     assert not owners.may_drive(2)
+
+
+def test_the_picker_turns_sdls_hidapi_off_so_a_steam_controllers_clone_is_seen():
+    # Seen in a trace: HIDAPI on, the raw Steam Controller refused, its seat
+    # taken, and the clone that should have driven the picker never listed.
+    import os
+
+    import gotg_ui  # noqa: F401 - importing is the act
+
+    assert os.environ.get("SDL_JOYSTICK_HIDAPI") == "0"

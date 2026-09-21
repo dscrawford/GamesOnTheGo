@@ -117,6 +117,10 @@ def run(platform: str, title: str) -> int:
     # The same session name the picker used, when there was one: this pid is
     # the picker's after its execvp, and padmap leaves a daemon following it
     # alone. A launch with no picker -- Steam -- starts one of its own, clean.
+    # The same two rules the picker sets for the daemon it starts: no
+    # session opened by the daemon itself, and no seat but by a hold.
+    os.environ.setdefault("PADMAP_NO_AUTOSETUP", "1")
+    os.environ.setdefault("PADMAP_NO_AUTOATTACH", "1")
     trouble = ensure_daemon(fresh=True, follow=os.getpid())
     pads = Padmap()
     if trouble is not None or not pads.connect():

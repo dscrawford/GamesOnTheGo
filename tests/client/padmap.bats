@@ -24,6 +24,7 @@ setup() {
   {
     printf '#!%s\n' "$(command -v bash)"
     printf 'printf "padmap %%s\\n" "$*" >>"$PADMAP_LOG"\n'
+    printf 'printf "env PADMAP_NO_AUTOSETUP=%%s PADMAP_NO_AUTOATTACH=%%s\\n" "${PADMAP_NO_AUTOSETUP-unset}" "${PADMAP_NO_AUTOATTACH-unset}" >>"$PADMAP_LOG"\n'
     printf 'exit "${FAKE_PADMAP_EXIT:-0}"\n'
   } >"$FAKE_BIN/padmap"
   {
@@ -61,6 +62,9 @@ teardown() { stop_saves_service; }
   run padmap_ensure
   [ "$status" -eq 0 ]
   grep -q "padmap ensure-daemon --fresh --follow [0-9]" "$PADMAP_LOG"
+  # And told the two rules before it started: no session of its own, and no
+  # seat but by a hold.
+  grep -q "env PADMAP_NO_AUTOSETUP=1 PADMAP_NO_AUTOATTACH=1" "$PADMAP_LOG"
 }
 
 @test "it is asked for once, not once per launch" {
