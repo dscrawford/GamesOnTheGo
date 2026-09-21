@@ -1,19 +1,22 @@
 """The controller check a game passes through on its way to being launched.
 
-Two questions, asked in order, and skipped entirely when the answer is already
-yes: is there a controller at all, and does it know what the buttons on *this*
-console are called. Both are the sort of thing that is invisible until a game
-is on screen, at which point the person holding the pad has no way to fix it —
-the emulator is fullscreen, the picker is gone, and nothing has focus. So they
-are asked beforehand, while there is still a screen to ask on.
+Every game begins the same way: nobody is seated, and the person about to
+play picks a controller up and holds a button. A seat is something taken in
+front of the screen about to be used, not something the machine remembers
+you having -- so the first thing the gate does with a daemon that remembers
+is tell it to forget. Then the question that was always here: does this pad
+know what the buttons on *this* console are called. That one is invisible
+until a game is on screen, at which point the person holding the pad has no
+way to fix it -- the emulator is fullscreen, the picker is gone, and nothing
+has focus. So it is asked beforehand, while there is still a screen to ask on.
 
-padmap answers both. Seats come from a hold on the pad itself, and a mapping is
-a capture padmap already knows how to run; all this decides is *whether* to ask
-and *what* to send, from the events coming back.
+padmap answers all of it. Seats come from a hold on the pad itself, and a
+mapping is a capture padmap already knows how to run; all this decides is
+*what* to send, and when, from the events coming back.
 
 Model only, and deliberately: what a gate looks like is the runner's business.
-What is tested here is that a machine with a mapped controller is never
-interrupted, and one without is interrupted exactly once.
+What is tested here is the order -- unseat, seat, map, accept -- and that a
+mapped pad is asked for its hold and nothing more.
 """
 
 from __future__ import annotations
@@ -117,6 +120,10 @@ class Gate:
     # is not an answer to `map` -- treating it as one sends a second `map`,
     # which starts a second capture, which sends more steps.
     wizard: bool = False
+    # The daemon has been told to forget its seats, once. Once, because the
+    # seats that come after are this launch's own, taken by a hold in front
+    # of this screen, and forgetting those would be a gate nobody gets past.
+    unseated: bool = False
 
     @property
     def scheme(self) -> schemes.Scheme:
@@ -194,6 +201,12 @@ def decide(gate: Gate) -> tuple[Gate, dict | None]:
     if gate.done or gate.awaiting or gate.wizard:
         return gate, None
 
+    # First, and once: whatever the daemon remembers is not this launch's.
+    # Refused -- an older daemon, or a session somebody else has open -- means
+    # the seats stand and the gate goes on as it always did.
+    if gate.seated and not gate.unseated and not gate.session and "unseat" not in gate.refused:
+        return replace(gate, state=SEATING, awaiting="unseat", unseated=True), {"cmd": "unseat"}
+
     wanted = gate.seated == 0 or gate.unmapped is not None
     if not wanted:
         if gate.session:
@@ -238,17 +251,28 @@ def apply(gate: Gate, event: dict) -> Gate:
         # "assigning" is padmap saying a session is open, which is the answer
         # to `begin` -- there is no other acknowledgement of it.
         session = event.get("state") == "assigning"
+        seats = seats_from(event.get("players"))
+        # `begin` is answered by the state that says "assigning"; `unseat` by
+        # the one with nobody in it. Not by the next state whatever it says:
+        # the daemon greets a connection with one and answers `status` with
+        # another, and the second was still in the socket when the gate sent
+        # unseat -- so it was read as the answer, with everybody still seated,
+        # and the gate went on to map a pad it had meant to forget.
+        answered = (gate.awaiting == "begin" and session) or (gate.awaiting == "unseat" and not seats)
         return replace(
             gate,
-            seats=seats_from(event.get("players")),
+            seats=seats,
             session=session,
-            awaiting="" if gate.awaiting == "begin" and session else gate.awaiting,
+            awaiting="" if answered else gate.awaiting,
         )
 
     if kind == "claim":
         # A seat taken during the gate's own session. Accepting is what turns
         # it into a real assignment, and the runner sends that; here it is
-        # only the news that there is now somebody to play with.
+        # only the news that there is now somebody to play with. A claim
+        # while an unseat is unanswered is somebody holding a button in front
+        # of this screen, which is this launch's own seat: the forgetting is
+        # done, whatever the daemon has said so far.
         player = event.get("player")
         if not isinstance(player, int):
             return gate
@@ -258,6 +282,7 @@ def apply(gate: Gate, event: dict) -> Gate:
             gate,
             seats=tuple(sorted((*others, seat), key=lambda s: s.player)),
             message="",
+            awaiting="" if gate.awaiting == "unseat" else gate.awaiting,
         )
 
     if kind == "mapping":
@@ -305,8 +330,10 @@ def apply(gate: Gate, event: dict) -> Gate:
             refused=refused,
             # A refusal to bind is the end of the asking; a refusal to open a
             # session leaves the screen up, because plugging a controller in
-            # makes padmap open one by itself.
-            state=SKIPPED if gate.awaiting in ("map", "accept") else gate.state,
+            # makes padmap open one by itself. A refusal to unseat is neither:
+            # the seats stand, and the gate looks at them as it always did.
+            state=SKIPPED if gate.awaiting in ("map", "accept") else
+                  CHECKING if gate.awaiting == "unseat" else gate.state,
         )
 
     return gate

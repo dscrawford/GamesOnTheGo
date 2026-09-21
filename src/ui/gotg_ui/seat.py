@@ -103,7 +103,10 @@ def draw(screen, font_at, gate: Gate, title: str, diagram: Diagram | None = None
 
 def run(platform: str, title: str) -> int:
     """Ask what needs asking, then get out of the way. Always returns 0."""
-    trouble = ensure_daemon()
+    # The same session name the picker used, when there was one: this pid is
+    # the picker's after its execvp, and padmap leaves a daemon following it
+    # alone. A launch with no picker -- Steam -- starts one of its own, clean.
+    trouble = ensure_daemon(fresh=True, follow=os.getpid())
     pads = Padmap()
     if trouble is not None or not pads.connect():
         # No daemon, no questions to ask. The game gets whatever SDL finds by

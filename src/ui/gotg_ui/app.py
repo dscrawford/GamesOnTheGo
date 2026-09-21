@@ -766,7 +766,10 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # a game to ask about. Set before the daemon is started, since it is the
     # daemon that reads it, and left alone when somebody set it themselves.
     os.environ.setdefault("PADMAP_NO_AUTOSETUP", "1")
-    padmap_trouble = ensure_daemon()
+    # Unseated, and for as long as this process lives -- which, after a pick
+    # execvp's into a game, is the game. Nobody is seated when the picker
+    # opens; a hold seats them; the daemon goes when the session does.
+    padmap_trouble = ensure_daemon(fresh=True, follow=os.getpid())
     padmap.connect()
     # Who may drive the picker: pads padmap published, for as long as padmap is
     # on the machine to publish any. Read from the machine rather than from the
@@ -1258,7 +1261,10 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             if not padmap.connected:
                 if padmap_watch.due(time.monotonic()):
                     padmap_watch.mark(time.monotonic())
-                    padmap_trouble = ensure_daemon(force=True)
+                    # Not fresh: a daemon that died mid-session restores the
+                    # seats it had, which is what somebody halfway through an
+                    # evening wants back.
+                    padmap_trouble = ensure_daemon(force=True, follow=os.getpid())
                 padmap.connect()
             # The controller rule, once a frame: fold in what padmap said,
             # decide whether an unpublished pad may move the cursor, and keep

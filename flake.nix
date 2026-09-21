@@ -33,7 +33,7 @@
     # Pinned to a revision rather than following the branch, so that a launch
     # that worked yesterday is not changed by somebody else's commit today.
     padmap = {
-      url = "git+ssh://git@github.com/dscrawford/padmap?ref=main&rev=d71ec9d2487d8cd8d07e3861fb8668b681e78b71";
+      url = "git+ssh://git@github.com/dscrawford/padmap?ref=main&rev=f4356e4b7ea7ece1125a39012d0cbe19ffa50b82";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };

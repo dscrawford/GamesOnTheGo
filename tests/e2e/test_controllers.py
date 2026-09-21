@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import time
 
-import pytest
 from fakepad import BTN_SOUTH, BTN_START, FakePad, kernel_names
 
 from gotg_ui import pads
@@ -98,6 +97,22 @@ class Picker:
 
     def seated(self, player: int) -> bool:
         return any(p.get("player") == player for p in self.players)
+
+    def claim(self, pad: FakePad, player: int, tries: int = 3) -> bool:
+        """Hold until this pad is seated as `player`, the way a person does.
+
+        Once is usually enough. It is not when the hold lands while the daemon
+        is republishing the *previous* seat and has not yet reopened the other
+        pads for seating -- the press happens before anything is reading, and
+        a press nobody read cannot be claimed however long it is held. A
+        person just holds again; so does this. Single-pad tests still hold
+        once, so that path stays strict.
+        """
+        for _ in range(tries):
+            pad.hold(BTN_SOUTH, 0.7)
+            if self.until(lambda p: p.seated(player), seconds=4.0):
+                return True
+        return False
 
     def close(self) -> None:
         self.padmap.close()
@@ -192,10 +207,8 @@ def test_a_second_controller_becomes_player_two(daemon, sdl):
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
 
-        first.hold(BTN_SOUTH, 0.7)
-        assert picker.until(lambda p: p.seated(1)), "the first pad took no seat"
-        second.hold(BTN_SOUTH, 0.7)
-        assert picker.until(lambda p: p.seated(2)), "the second pad took no seat"
+        assert picker.claim(first, 1), "the first pad took no seat"
+        assert picker.claim(second, 2), "the second pad took no seat"
 
         numbered = sorted(p["player"] for p in picker.players)
         assert numbered == [1, 2]
@@ -305,17 +318,18 @@ def test_a_controller_can_still_join_after_the_picker_has_left_for_a_game(daemon
 # --- every session starts unseated ------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="padmap has no way to unseat; see docs/requests/session-daemon.md",
-)
-def test_a_new_session_opens_with_nobody_seated_whatever_padmap_remembers(daemon, sdl):
-    """Open the picker, or a game: nobody is seated until somebody holds a button.
+def test_a_new_session_opens_with_nobody_seated_whatever_padmap_remembers(daemon, sdl, monkeypatch):
+    """Open the picker: nobody is seated until somebody holds a button.
 
-    Today the daemon restores yesterday's seats on start and offers no
-    command to drop them, so this fails -- strictly, so the day the request
-    is answered it fails the other way until the marker comes off.
+    The daemon the fixture started remembers a seat. The picker's own
+    `ensure_daemon` -- fresh, following this pid -- replaces it with one that
+    does not, which is what padmap built for docs/requests/session-daemon.md.
     """
+    import os
+    import signal
+
+    from gotg_ui.padmap import ensure_daemon
+
     with FakePad("E2E Xbox Pad") as pad:
         earlier = Picker(_socket(daemon), sdl)
         earlier.run(1.0)
@@ -323,10 +337,93 @@ def test_a_new_session_opens_with_nobody_seated_whatever_padmap_remembers(daemon
         assert earlier.until(lambda p: p.seated(1))
         earlier.close()
 
-        # A new session: the picker again, or a game. Same daemon, same pad.
+        # The picker opening, exactly as app.py does it, against this daemon.
+        for key, value in daemon.env.items():
+            monkeypatch.setenv(key, value)
+        monkeypatch.delenv("PADMAP_SKIP_DAEMON_CHECK", raising=False)
+        assert ensure_daemon(fresh=True, follow=os.getpid()) is None
+        for _ in range(40):
+            if os.path.exists(daemon.path):
+                break
+            time.sleep(0.25)
+
         picker = Picker(_socket(daemon), sdl)
-        picker.run(1.5)
-        assert picker.players == [], (
-            f"the session opened with seats already taken: {picker.players}"
-        )
-        picker.close()
+        try:
+            picker.run(1.5)
+            assert picker.players == [], (
+                f"the session opened with seats already taken: {picker.players}"
+            )
+            assert picker.padmap.state.get("following") == os.getpid(), (
+                "the daemon is not following the picker"
+            )
+            # And the seat is still there for the taking: the same pad, held
+            # again, is player one again.
+            pad.hold(BTN_SOUTH, 0.7)
+            assert picker.until(lambda p: p.seated(1)), "the fresh daemon seated nobody"
+        finally:
+            fresh_pid = picker.padmap.state.get("pid")
+            picker.close()
+            if isinstance(fresh_pid, int):
+                try:
+                    os.kill(fresh_pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+
+
+def test_a_game_launch_begins_with_a_hold_whatever_was_seated(daemon, sdl):
+    """Launch a game: the gate forgets what the daemon remembers, then asks for a hold.
+
+    This is `gotg-seat`'s model -- gate.decide and gate.apply -- driven
+    against the real daemon, after a picker has seated somebody on it.
+    """
+    from gotg_ui.gate import SEATING, Gate, apply, decide
+
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        pad.hold(BTN_SOUTH, 0.7)
+        assert picker.until(lambda p: p.seated(1))
+        picker.close()          # execvp into the game; the gate is next
+
+        client = Padmap(_socket(daemon))
+        assert client.connect()
+        # As seat.py does: the first state before the first decision, or a
+        # gate that has heard nothing asks for a hold with somebody seated.
+        for _ in range(100):
+            for _event in client.poll():
+                pass
+            if client.state:
+                break
+            time.sleep(0.05)
+        assert client.state, "the daemon never answered status"
+        gate = Gate(platform="gamecube")
+        gate = apply(gate, client.state)
+        sent: list[dict] = []
+
+        def step(seconds: float) -> None:
+            nonlocal gate
+            end = time.monotonic() + seconds
+            while time.monotonic() < end:
+                for event in client.poll():
+                    gate = apply(gate, event)
+                gate, command = decide(gate)
+                if command is not None:
+                    sent.append(command)
+                    client.send(command)
+                time.sleep(0.02)
+
+        try:
+            step(2.0)
+            assert sent and sent[0] == {"cmd": "unseat"}, f"the gate's first word was not unseat: {sent}"
+            assert {"cmd": "begin", "players": 4} in sent, f"no hold was asked for: {sent}"
+            assert gate.state == SEATING
+            assert gate.seated == 0, "the gate is asking for a hold with somebody still seated"
+            assert "padmap Player 1" not in kernel_names(), "the old seat's clone is still published"
+
+            pad.hold(BTN_SOUTH, 0.7)
+            step(2.0)
+            assert gate.seated == 1, "the hold in front of the gate seated nobody"
+            assert [s.player for s in gate.seats] == [1]
+        finally:
+            client.send({"cmd": "cancel"})
+            client.close()
