@@ -608,3 +608,20 @@ EOF
   [ "$(paste -sd, "$ORDER_LOG")" = "seat" ]
   [[ "$stderr" != *"published no controllers"* ]]
 }
+
+@test "controllers list --as-game enumerates the way a game is launched" {
+  # Inside the sandbox, hidapi off, Steam's ignore list gone: the view a
+  # port gets, which is not the view `list` gets from the desktop.
+  export GOTG_PADS="$FAKE_BIN/gotg-pads"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'echo "pads hidapi=${SDL_JOYSTICK_HIDAPI-unset} ignore=${SDL_GAMECONTROLLER_IGNORE_DEVICES-unset}" >>"$SEAT_LOG"\n'
+    printf 'echo "[]"\n'
+  } >"$GOTG_PADS"
+  chmod +x "$GOTG_PADS"
+  SDL_GAMECONTROLLER_IGNORE_DEVICES="0x28de/0x1142" gotg controllers list --as-game
+  [ "$status" -eq 0 ]
+  grep -q "padmap-rs exec -- " "$PADMAP_LOG"
+  grep -q "pads hidapi=0 ignore=unset" "$SEAT_LOG"
+  [[ "$stderr" == *"no controllers visible"* ]]
+}
