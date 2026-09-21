@@ -178,6 +178,13 @@ frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).
   pad. Prefer `seating` mode (no grab) for anything on the grid.
 - The picker `execvp`s into the game: its pid survives the hop, which is why
   the daemon follows it and the launcher's `--follow $$` is the same pid.
+- A clone's identity is `mirror` unless an environment's `padIdentity` says
+  otherwise (`src/client/env/lib.nix` -> `pads.json` -> `padmap_identity`).
+  Only the decompiled ports ask for `xbox360`, and `padmap.sh` refuses it for
+  Ryujinx: every clone is one GUID under it and Ryujinx blanks the name CRC
+  to make its device id. Applying it clears `PADMAP_SKIP_DAEMON_CHECK`,
+  because the picker's daemon was started mirrored and padmap only replaces
+  a differently-identified daemon when it is asked.
 - Emulator port bindings must be written *after* the gate, from padmap's
   published clones (`pads_seating` takes them by GUID). Written before it,
   they name raw pads that `padmap-rs exec` then hides -- a seated

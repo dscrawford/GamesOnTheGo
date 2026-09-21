@@ -1,9 +1,14 @@
-# Requests to padmap
+# Requests from GOTG
 
-GOTG is replacing its own controller handling with padmap
-(`github:dscrawford/padmap`, branch `main`). Everything GOTG needs and padmap
-does not yet do is written down here, one file per request, for whoever is
-working on padmap to pick up.
+GOTG (`~/Documents/GOTG`, branch `padmap-integration`) is replacing its own
+controller handling with padmap, and depends on this repository as a flake
+input pinned to a revision. Everything it needs and padmap does not yet do is
+written down here, one file per request.
+
+Written by the agent doing that integration, so every one of them is something
+that blocked a real launch rather than a wish. Where a file names a path like
+`src/client/lib/pads-dolphin.sh`, that is GOTG's tree, and it is named so the
+existing implementation can be read rather than guessed at.
 
 Each file says what GOTG is trying to do, what it does today, why padmap's
 current shape does not reach it, and what would be enough. None of them ask
@@ -17,6 +22,8 @@ needs when the thing calling it keeps each emulator in a directory of its own.
 | [machine-readable-list.md](machine-readable-list.md) | a launcher has to enumerate pads without a daemon and without parsing prose |
 | [always-seating.md](always-seating.md) | a controller that arrives mid-game should be able to join without everybody stopping |
 | [triton-assignment.md](triton-assignment.md) | **bug**: the 2026 Steam Controller pairs in a session and is then never read |
+| [resume-republishing.md](resume-republishing.md) | **bug**: one sleeping wireless pad leaves every controller unpublished |
+| [secondary-bindings.md](secondary-bindings.md) | a control can hold one input, so a second button for the same control has nowhere to live |
 | [session-daemon.md](session-daemon.md) | every session starts unseated and the daemon ends with it — today it outlives everything and restores yesterday's seats |
 | [controllers-that-are-keyboards.md](controllers-that-are-keyboards.md) | a Steam Controller in lizard mode and a Bluetooth Xbox pad are keyboards and mice too; GOTG holds them in the picker, padmap should hold them in the game |
 | [keyboard-as-a-player.md](keyboard-as-a-player.md) | holding space on the grid should seat the keyboard as player N, bound in every emulator like a pad |

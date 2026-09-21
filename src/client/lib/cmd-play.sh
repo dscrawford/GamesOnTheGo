@@ -93,6 +93,11 @@ cmd_play() {
   # missing it. Before the gate, which is SDL and would be blinded the same.
   padmap_clear_steam_env
 
+  # And the identity this environment wants its clones to have, before the
+  # daemon is asked after: a decompiled port reads its own controller
+  # database, and what the clone claims to be decides whether it is in it.
+  padmap_identity_apply "$PLAY_ATTR"
+
   # Before the kill switch rather than after: the gate draws a window, and the
   # watcher is holding the pid that is about to become the game.
   padmap_seat_gate \

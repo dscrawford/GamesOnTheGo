@@ -140,6 +140,8 @@ gotg controllers apply [<id>|--all] # write bindings without launching
 
 **Every session starts with nobody seated** — the picker and each game alike. padmap's daemon is the session's: started unseated, following the process, gone when it is. Pick a controller up, hold a button, and you are player one; the next to hold is player two, which is the numbering every game is bound against.
 
+**What a clone looks like** is `mirror` by default: the physical pad's vendor and product, which is what an emulator told to bind that controller expects. The decompiled ports (DK64 Recompiled, Snowboard Kids 2, Paper Mario ReCut) carry their own controller database and a clone of a Steam Controller is in nobody's, so their environments ask for `xbox360` — every clone a wired `045e:028e`, the one GUID every SDL maps by heart. Refused for Ryujinx whatever an environment says: under it every clone shares a GUID and Ryujinx cannot tell them apart.
+
 **In the picker**, padmap listens for a hold for as long as the grid is up: pick a controller up, hold a button, and the ring above the games fills in your colour and seats you. Only pads padmap has published move the cursor — an unseated one is ignored, so a controller nobody has assigned cannot drive the library. That holds whether or not padmap is running; the keyboard and mouse always work. A controller that is *also* a keyboard — a Steam Controller in lizard mode, a Bluetooth Xbox pad's extra collections — is held quiet at the kernel while the picker runs, so it cannot arrive as arrow keys either. `GOTG_ANY_PAD=1` lifts it by hand, for a television with no keyboard in the room.
 
 That is a requirement, and it has a test that runs it against a real daemon and real kernel devices — `tests/e2e`:
