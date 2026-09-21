@@ -1,17 +1,18 @@
 """The launch-time controller check.
 
 Every launch begins the same way: whatever the daemon remembers is forgotten,
-and the person about to play holds a button. What must *not* appear after
-that is the wizard: a pad that already knows this console's buttons is asked
-for its hold and nothing more, or the check is a toll on every launch rather
-than a fix for the launches that would not have worked.
+padmap is told to listen, and the person about to play holds a button. No
+session: a session fixes its pads when it opens, and a controller switched on
+while the gate was up could not take a seat. What must *not* appear after the
+hold is the wizard: a pad that already knows this console's buttons is asked
+for nothing more, or the check is a toll on every launch rather than a fix
+for the launches that would not have worked.
 """
 
 from gotg_ui.gate import (
     CHECKING,
     MAPPING,
     READY,
-    READYING,
     SEATING,
     SKIPPED,
     Gate,
@@ -21,7 +22,6 @@ from gotg_ui.gate import (
     console_scope,
     decide,
     layout_for,
-    ready_from_the_keyboard,
     seats_from,
 )
 
@@ -86,14 +86,19 @@ def test_a_daemon_that_remembers_seats_is_told_to_forget_them_first():
     assert gate.awaiting == "unseat"
 
 
-def test_the_state_after_unseating_answers_it_and_a_hold_is_asked_for():
+def test_the_state_after_unseating_answers_it_and_padmap_is_told_to_listen():
     gate = Gate(platform="gamecube")
     gate = apply(gate, state_event([seated()]))
     gate, _ = decide(gate)
     gate = apply(gate, state_event([]))
     assert gate.awaiting == ""
     gate, command = decide(gate)
-    assert command == {"cmd": "begin", "players": 4}
+    assert command == {"cmd": "seating", "open": True, "players": 4}
+    assert gate.state == SEATING
+    # Once. padmap does not acknowledge it, and a daemon told every frame is
+    # a daemon told sixty times a second.
+    gate, command = decide(gate)
+    assert command is None
     assert gate.state == SEATING
 
 
@@ -110,7 +115,7 @@ def test_a_stale_state_with_everybody_still_seated_does_not_answer_the_unseat():
     assert command is None
     gate = apply(gate, state_event([]))                   # the real answer
     gate, command = decide(gate)
-    assert command == {"cmd": "begin", "players": 4}
+    assert command == {"cmd": "seating", "open": True, "players": 4}
 
 
 def test_a_claim_while_unseating_is_this_launches_own_seat():
@@ -131,12 +136,11 @@ def test_a_seat_taken_in_front_of_this_screen_is_not_forgotten_too():
     gate = apply(gate, state_event([seated()]))
     gate, _ = decide(gate)                                    # unseat
     gate = apply(gate, state_event([]))
-    gate, _ = decide(gate)                                    # begin
-    gate = apply(gate, state_event([], state="assigning"))
+    gate, _ = decide(gate)                                    # seating
     gate = apply(gate, {"event": "claim", "player": 1, "name": "Xbox Wireless Controller"})
-    gate = apply(gate, state_event([seated(mappings=["console:gamecube"])], state="assigning"))
+    gate = apply(gate, state_event([seated(mappings=["console:gamecube"])]))
     gate, command = decide(gate)
-    assert command is None and gate.state == READYING, "the seat this launch took was forgotten again"
+    assert command is None and gate.state == READY, "the seat this launch took was forgotten again"
 
 
 def test_a_daemon_that_cannot_unseat_leaves_the_seats_standing():
@@ -148,6 +152,8 @@ def test_a_daemon_that_cannot_unseat_leaves_the_seats_standing():
     gate = apply(gate, {"event": "error", "message": 'unknown command "unseat"'})
     assert "unseat" in gate.refused
     gate, command = decide(gate)
+    assert command["cmd"] == "seating"                     # still listens, for a second pad
+    gate, command = decide(gate)
     assert gate.state == READY
     assert command is None
 
@@ -155,37 +161,15 @@ def test_a_daemon_that_cannot_unseat_leaves_the_seats_standing():
 # --- the wizard that should not appear ---------------------------------------
 
 
-def test_a_mapped_controller_is_asked_nothing_but_to_ready_up():
-    # Seated in front of this screen, in a session: no wizard, no accept
-    # either. The game waits for the hold that says "I am ready".
-    gate = Gate(platform="gamecube", unseated=True)
-    gate = apply(gate, state_event([seated(mappings=["console:gamecube"])], state="assigning"))
-    gate, command = decide(gate)
-    assert gate.state == READYING
-    assert command is None
-    assert not gate.done
-    assert "hold a button" in gate.prompt
-
-
-def test_a_seated_and_mapped_pad_outside_any_session_still_goes_straight_in():
-    # No session means no confirm hold for padmap to read -- the older-daemon
-    # path, where unseat was refused and the seats stood.
-    gate = Gate(platform="gamecube", unseated=True)
+def test_a_mapped_controller_is_asked_nothing_more():
+    # Seated in front of this screen: no wizard, nothing sent. The runner's
+    # door waits for the hold that says "go".
+    gate = Gate(platform="gamecube", unseated=True, listening=True)
     gate = apply(gate, state_event([seated(mappings=["console:gamecube"])]))
     gate, command = decide(gate)
     assert gate.state == READY
     assert command is None
     assert gate.done
-
-
-def test_enter_readies_up_from_the_keyboard_only_when_somebody_is_seated():
-    gate = Gate(platform="gamecube", state=READYING, session=True,
-                seats=(Seat(player=1, name="pad", configured=True),))
-    gate, command = ready_from_the_keyboard(gate)
-    assert command == {"cmd": "accept"}
-    assert gate.awaiting == "accept"
-    gate = Gate(platform="gamecube", state=SEATING, session=True)
-    assert ready_from_the_keyboard(gate) == (gate, None)
 
 
 def test_a_pad_mapped_for_another_console_is_not_asked_about_again():
@@ -195,7 +179,7 @@ def test_a_pad_mapped_for_another_console_is_not_asked_about_again():
     own, so a pad mapped on GameCube already works on an N64 game. Asking again
     on each new platform was a wizard in front of a controller that was fine.
     """
-    gate = Gate(platform="n64", unseated=True)
+    gate = Gate(platform="n64", unseated=True, listening=True)
     gate = apply(gate, state_event([seated(mappings=["console:gamecube"])]))
     gate, command = decide(gate)
     assert gate.state == READY
@@ -206,7 +190,7 @@ def test_a_pad_that_bound_itself_is_left_alone():
     # padmap reads the kernel's BTN_ codes, so a standard controller arrives
     # correctly bound and has no capture of its own to show for it. That is a
     # working pad, and the gate must not open a wizard in front of it.
-    gate = Gate(platform="gamecube", unseated=True)
+    gate = Gate(platform="gamecube", unseated=True, listening=True)
     gate = apply(gate, state_event([seated(mappings=[], configured=True)]))
     gate, command = decide(gate)
     assert gate.state == READY
@@ -216,8 +200,8 @@ def test_a_pad_that_bound_itself_is_left_alone():
 def test_a_pad_with_nothing_at_all_is_still_asked_about():
     # The case the gate exists for: seated, and padmap does not know where its
     # buttons are.
-    gate = Gate(platform="gamecube")
-    gate = apply(gate, state_event([seated(mappings=[], configured=False)], state="assigning"))
+    gate = Gate(platform="gamecube", listening=True, unseated=True)
+    gate = apply(gate, state_event([seated(mappings=[], configured=False)]))
     gate, command = decide(gate)
     assert gate.state == MAPPING
     assert command == {"cmd": "map", "player": 1, "layout": "gamecube", "scope": "console:gamecube"}
@@ -228,8 +212,8 @@ def test_the_first_unmapped_pad_is_the_one_asked_about():
         seated(player=1, mappings=["console:snes"]),
         seated(player=2, mappings=[], configured=False),
     ]
-    gate = Gate(platform="snes")
-    gate = apply(gate, state_event(players, state="assigning"))
+    gate = Gate(platform="snes", listening=True, unseated=True)
+    gate = apply(gate, state_event(players))
     gate, command = decide(gate)
     assert command["cmd"] == "map"
     assert command["player"] == 2
@@ -238,12 +222,15 @@ def test_the_first_unmapped_pad_is_the_one_asked_about():
 # --- no controller at all ----------------------------------------------------
 
 
-def test_no_controller_opens_a_session_to_take_a_seat_in():
+def test_no_controller_means_listen_and_wait_not_a_session():
+    # A session fixes its pads when it opens; a controller switched on while
+    # the gate is up could not take a seat. Seating goes on looking.
     gate = Gate(platform="gamecube")
     gate = apply(gate, state_event([]))
     gate, command = decide(gate)
     assert gate.state == SEATING
-    assert command == {"cmd": "begin", "players": 4}
+    assert command == {"cmd": "seating", "open": True, "players": 4}
+    assert command["cmd"] != "begin"
 
 
 def test_asking_happens_once_however_many_state_events_arrive():
@@ -257,43 +244,46 @@ def test_asking_happens_once_however_many_state_events_arrive():
 
 
 def test_the_whole_sequence_for_a_machine_with_nothing_set_up():
-    """begin, hold a button, bind the buttons, accept. In that order.
+    """listen, hold a button, bind the buttons, done. In that order.
 
-    The order is the point: `map` is refused with "mapping needs an open
-    session", and `accept` is what closes the session -- so accepting the seat
-    before binding, which is the obvious order, is the one that cannot work.
+    No session and no accept: padmap seats a held pad in seating mode and
+    publishes it there and then, `map` needs no session, and the second that
+    starts the game is the runner's door.
     """
     gate = Gate(platform="gamecube")
     gate = apply(gate, state_event([]))
     gate, command = decide(gate)
-    assert command == {"cmd": "begin", "players": 4}
+    assert command == {"cmd": "seating", "open": True, "players": 4}
     assert gate.state == SEATING
 
-    gate = apply(gate, state_event([], state="assigning"))
     gate, command = decide(gate)
     assert command is None          # padmap is reading the pads; nothing to send
 
     gate = apply(gate, {"event": "claim", "player": 1, "name": "GOTG test pad"})
-    gate = apply(gate, state_event([seated(name="GOTG test pad")], state="assigning"))
+    gate = apply(gate, state_event([seated(name="GOTG test pad")]))
     gate, command = decide(gate)
     assert gate.state == MAPPING
     assert command["cmd"] == "map"
 
     gate = apply(gate, {"event": "mapping", "control": "a", "label": "A", "index": 0, "total": 16})
     gate = apply(gate, {"event": "mapping", "done": True, "stored": True})
-    gate = apply(gate, state_event(
-        [seated(name="GOTG test pad", mappings=["console:gamecube"])], state="assigning"))
+    gate = apply(gate, state_event([seated(name="GOTG test pad", mappings=["console:gamecube"])]))
     gate, command = decide(gate)
-    assert command is None, "the gate started the game on nobody's say-so"
-    assert gate.state == READYING
-
-    # The ready-up: padmap's confirm, a longer hold on the seated pad, which
-    # the daemon accepts itself when it completes.
-    gate = apply(gate, {"event": "confirm", "frac": 0.5})
-    assert gate.confirm == 0.5
-    gate = apply(gate, {"event": "accepted"})
+    assert command is None, "the gate sent something after the wizard closed"
     assert gate.state == READY
     assert gate.done
+
+
+def test_a_controller_switched_on_during_the_gate_takes_the_next_seat():
+    # The reason there is no session: seating goes on looking, so a claim
+    # can arrive for a pad that did not exist when the gate opened.
+    gate = Gate(platform="gamecube", listening=True, state=SEATING)
+    gate = apply(gate, {"event": "claim", "player": 1, "name": "first"})
+    gate = apply(gate, state_event([seated(name="first", mappings=["console:gamecube"])]))
+    gate, _ = decide(gate)
+    assert gate.state == READY
+    gate = apply(gate, {"event": "claim", "player": 2, "name": "second, just switched on"})
+    assert [s.player for s in gate.seats] == [1, 2]
 
 
 # --- walking the buttons -----------------------------------------------------
@@ -319,16 +309,16 @@ def test_a_button_already_used_says_so_rather_than_looking_dead():
 
 
 def test_a_stored_capture_sends_the_gate_back_to_look_again():
-    gate = Gate(platform="gamecube", state=MAPPING, awaiting="map", session=True)
+    gate = Gate(platform="gamecube", state=MAPPING, awaiting="map", listening=True, unseated=True)
     gate = apply(gate, {"event": "mapping", "done": True, "stored": True})
     assert gate.state == CHECKING
     assert gate.awaiting == ""
-    # With the mapping on the pad there is nothing left to ask -- and nothing
-    # sent: the session closes when somebody holds a button to say go.
-    gate = apply(gate, state_event([seated(mappings=["console:gamecube"])], state="assigning"))
+    # With the mapping on the pad there is nothing left to ask, and nothing
+    # sent: the runner's door takes it from here.
+    gate = apply(gate, state_event([seated(mappings=["console:gamecube"])]))
     gate, command = decide(gate)
     assert command is None
-    assert gate.state == READYING
+    assert gate.state == READY
 
 
 def test_an_abandoned_capture_does_not_ask_again():
@@ -382,18 +372,19 @@ def test_a_refused_bind_is_not_asked_for_again():
     assert command is None
 
 
-def test_a_refused_session_leaves_the_screen_up():
-    # "no joypads found" is answered by plugging one in, and padmap opens a
-    # session by itself when somebody does -- so this one waits.
-    gate = Gate(platform="gamecube", state=SEATING, awaiting="begin")
-    gate = apply(gate, {"event": "error", "message": "no joypads found"})
+def test_a_daemon_that_cannot_listen_is_not_asked_twice_and_the_screen_stays():
+    # An older daemon. The screen stays up -- Esc still plays without -- and
+    # the command is not sent again every frame for ever.
+    gate = Gate(platform="gamecube")
+    gate = apply(gate, state_event([]))
+    gate, command = decide(gate)
+    assert command["cmd"] == "seating"
+    gate = apply(gate, {"event": "error", "message": 'unknown command "seating"'})
+    assert "seating" in gate.refused
     assert gate.state == SEATING
     assert not gate.done
     gate, command = decide(gate)
     assert command is None
-    # And the session padmap opens on its own is picked up.
-    gate = apply(gate, state_event([], state="assigning"))
-    assert gate.session
 
 
 def test_one_command_is_in_flight_at_a_time():
@@ -401,7 +392,7 @@ def test_one_command_is_in_flight_at_a_time():
     gate = apply(gate, state_event([]))
     gate, first = decide(gate)
     gate, second = decide(gate)
-    assert first == {"cmd": "begin", "players": 4}
+    assert first == {"cmd": "seating", "open": True, "players": 4}
     assert second is None
 
 

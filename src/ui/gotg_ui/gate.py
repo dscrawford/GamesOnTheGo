@@ -10,13 +10,17 @@ until a game is on screen, at which point the person holding the pad has no
 way to fix it -- the emulator is fullscreen, the picker is gone, and nothing
 has focus. So it is asked beforehand, while there is still a screen to ask on.
 
-padmap answers all of it. Seats come from a hold on the pad itself, and a
-mapping is a capture padmap already knows how to run; all this decides is
-*what* to send, and when, from the events coming back.
+No session. It used to open one -- `begin`, which grabs every pad -- and a
+session's pad list is fixed the moment it opens: a controller switched on
+while the gate was up could not take a seat, and the second player in the
+room was told to wait for a launch that was already waiting for them.
+padmap's seating mode rescans as it goes, grabs nothing, and seats a held
+pad the same way; `map` no longer needs a session either. So: unseat, listen,
+hold, map, and the door in seat.py for the second that starts the game.
 
 Model only, and deliberately: what a gate looks like is the runner's business.
-What is tested here is the order -- unseat, seat, map, accept -- and that a
-mapped pad is asked for its hold and nothing more.
+What is tested here is the order -- unseat, seat, map -- and that a mapped
+pad is asked for its hold and nothing more.
 """
 
 from __future__ import annotations
@@ -29,8 +33,7 @@ from . import schemes
 CHECKING = "checking"   # connected, nothing decided yet
 SEATING = "seating"     # no controller: hold a button on one
 MAPPING = "mapping"     # a controller with no idea what this console's buttons are
-READYING = "readying"   # seated and mapped: hold a button again to start
-READY = "ready"         # go and play
+READY = "ready"         # seated and mapped; the runner's door decides the rest
 SKIPPED = "skipped"     # asked, declined; go and play anyway
 
 def scheme_for(platform: str) -> schemes.Scheme:
@@ -106,11 +109,12 @@ class Gate:
     total: int = 0
     conflict: str = ""
     message: str = ""
-    # padmap has a session open. Everything about binding buttons happens
-    # inside one: `map` is refused with "mapping needs an open session", and
-    # `accept` is what closes it -- so accepting before mapping, which is the
-    # obvious order, is the one order that cannot work.
+    # padmap has a session open -- somebody else's `begin`. Noted, not used:
+    # this gate opens none, and a claim arrives the same way either way.
     session: bool = False
+    # Seating has been asked for. padmap does not acknowledge it, so it is
+    # sent once and believed; a refusal names the command and is remembered.
+    listening: bool = False
     # The command sent and not yet answered. One at a time, so a state event
     # arriving mid-flow cannot send the same command twice.
     awaiting: str = ""
@@ -129,9 +133,8 @@ class Gate:
     # padmap's `progress`, which is the seating screen's whole answer to "is
     # it registering my button?"
     progress: float = 0.0
-    # The ready-up hold, as far round as it has got. padmap's `confirm`: a
-    # longer hold on a pad that already has a seat, which the daemon takes as
-    # accept when it completes. The game does not start until it does.
+    # padmap's `confirm`, when a session somebody else opened is being
+    # accepted by a hold. Drawn if it comes; nothing here waits for it.
     confirm: float = 0.0
 
     @property
@@ -176,8 +179,6 @@ class Gate:
             if self.conflict:
                 return f"that one is already {self.conflict} — try another"
             return f"press {self.label or self.control}"
-        if self.state == READYING:
-            return "hold a button to start"
         if self.state == READY:
             return "starting the game"
         return "checking controllers"
@@ -215,32 +216,24 @@ def decide(gate: Gate) -> tuple[Gate, dict | None]:
     # First, and once: whatever the daemon remembers is not this launch's.
     # Refused -- an older daemon, or a session somebody else has open -- means
     # the seats stand and the gate goes on as it always did.
-    if gate.seated and not gate.unseated and not gate.session and "unseat" not in gate.refused:
+    if (
+        gate.seated and not gate.unseated and not gate.listening
+        and not gate.session and "unseat" not in gate.refused
+    ):
         return replace(gate, state=SEATING, awaiting="unseat", unseated=True), {"cmd": "unseat"}
 
-    wanted = gate.seated == 0 or gate.unmapped is not None
-    if not wanted:
-        if gate.session:
-            # Nothing left to ask -- and nothing sent. The game does not start
-            # because a pad is seated and mapped; it starts because somebody
-            # holds a button again to say they are ready. That hold is
-            # padmap's confirm, and the daemon accepts when it completes;
-            # `accepted` is what moves this on. Sending accept here started
-            # the game the instant the wizard closed, on nobody's say-so.
-            return replace(gate, state=READYING), None
-        return replace(gate, state=READY), None
-
-    if not gate.session:
-        if "begin" in gate.refused:
-            return gate, None
-        # A session rather than a quiet listen. This is the one moment where
-        # grabbing every pad costs nothing -- no game is running yet, and the
-        # screen in front of the person is this one.
+    # Then listen. Seating rather than a session: it grabs nothing, it seats
+    # a held pad exactly as a session would, and it goes on looking for pads,
+    # so one switched on while this screen is up can take the next seat.
+    # From here every seat is this launch's own, so the forgetting is done.
+    if not gate.listening and "seating" not in gate.refused:
         return replace(
-            gate,
-            state=SEATING if gate.seated == 0 else MAPPING,
-            awaiting="begin",
-        ), {"cmd": "begin", "players": 4}
+            gate, state=SEATING if gate.seated == 0 else gate.state, listening=True, unseated=True
+        ), {
+            "cmd": "seating",
+            "open": True,
+            "players": 4,
+        }
 
     if gate.seated == 0:
         # Waiting on a hold. Nothing to send: padmap is reading the pads.
@@ -248,7 +241,9 @@ def decide(gate: Gate) -> tuple[Gate, dict | None]:
 
     seat = gate.unmapped
     if seat is None or "map" in gate.refused:
-        return gate, None
+        # Seated and mapped. Nothing starts here: the runner's door waits for
+        # a fresh hold of a full second on the clone padmap has published.
+        return replace(gate, state=READY), None
     return replace(gate, state=MAPPING, awaiting="map"), {
         "cmd": "map",
         "player": seat.player,
@@ -262,8 +257,8 @@ def apply(gate: Gate, event: dict) -> Gate:
     kind = event.get("event")
 
     if kind == "state":
-        # "assigning" is padmap saying a session is open, which is the answer
-        # to `begin` -- there is no other acknowledgement of it.
+        # "assigning" is padmap saying a session is open -- not this gate's,
+        # which opens none, but a claim arrives the same way in either.
         session = event.get("state") == "assigning"
         seats = seats_from(event.get("players"))
         # `begin` is answered by the state that says "assigning"; `unseat` by
@@ -272,7 +267,7 @@ def apply(gate: Gate, event: dict) -> Gate:
         # another, and the second was still in the socket when the gate sent
         # unseat -- so it was read as the answer, with everybody still seated,
         # and the gate went on to map a pad it had meant to forget.
-        answered = (gate.awaiting == "begin" and session) or (gate.awaiting == "unseat" and not seats)
+        answered = gate.awaiting == "unseat" and not seats
         return replace(
             gate,
             seats=seats,
@@ -336,9 +331,9 @@ def apply(gate: Gate, event: dict) -> Gate:
         return replace(gate, confirm=float(frac) if isinstance(frac, (int, float)) else 0.0)
 
     if kind == "accepted":
-        # Seats, republished pads and emulator configuration, all written. The
-        # only thing left was the game.
-        return replace(gate, state=READY, session=False, awaiting="", confirm=0.0)
+        # Somebody else's session closed. The seats it made are in the next
+        # state event; nothing here was waiting on it.
+        return replace(gate, session=False, confirm=0.0)
 
     if kind == "error":
         # Whatever was in flight is not coming. Remembered as refused so the
@@ -346,16 +341,19 @@ def apply(gate: Gate, event: dict) -> Gate:
         refused = gate.refused
         if gate.awaiting and gate.awaiting not in refused:
             refused = (*refused, gate.awaiting)
+        # seating is sent without an awaiting, since padmap never answers it
+        # -- except to refuse it by name, which is the one answer it gives.
+        if str(event.get("message") or "") == 'unknown command "seating"' and "seating" not in refused:
+            refused = (*refused, "seating")
         return replace(
             gate,
             message=str(event.get("message") or "padmap said no"),
             awaiting="",
             refused=refused,
-            # A refusal to bind is the end of the asking; a refusal to open a
-            # session leaves the screen up, because plugging a controller in
-            # makes padmap open one by itself. A refusal to unseat is neither:
-            # the seats stand, and the gate looks at them as it always did.
-            state=SKIPPED if gate.awaiting in ("map", "accept") else
+            # A refusal to bind is the end of the asking. A refusal to unseat
+            # is not: the seats stand, and the gate looks at them as it
+            # always did.
+            state=SKIPPED if gate.awaiting == "map" else
                   CHECKING if gate.awaiting == "unseat" else gate.state,
         )
 
@@ -374,17 +372,6 @@ def without_controllers(reason: str, seconds_left: float) -> tuple[str, str]:
         reason or "padmap is not running",
         f"starting without controllers in {left} s — Enter starts now, Esc too",
     )
-
-
-def ready_from_the_keyboard(gate: Gate) -> tuple[Gate, dict | None]:
-    """Enter, on the ready-up screen: the keyboard's way of holding a button.
-
-    Only there. With nobody seated there is nothing to accept, and Enter is
-    the skip it always was; the runner decides that.
-    """
-    if gate.state != READYING or gate.seated == 0:
-        return gate, None
-    return replace(gate, awaiting="accept"), {"cmd": "accept"}
 
 
 # A press this soon after the door opens is the old hold, whatever the pad's
