@@ -30,7 +30,7 @@ picks this up next:
 | Phase | What | Where | Status |
 |---|---|---|---|
 | 0 | Measure the Steam Controller double | padmap | partial, see below |
-| 1 | The daemon is with the picker and the game for their whole lifetime | GOTG | done |
+| 1 | The daemon is with the picker and the game for their whole lifetime — and no longer: `ensure-daemon --fresh --follow <pid>` starts it unseated and ends it with the session | GOTG | done |
 | 2 | One physical controller is one pad | padmap, one line in GOTG | next |
 | 3 | Joining is ambient: hold a button anywhere in the picker | GOTG | after 2 |
 | 4 | A way to finish a rebind from the pad | padmap + GOTG | |

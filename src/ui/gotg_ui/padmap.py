@@ -54,8 +54,16 @@ def installed() -> bool:
     return shutil.which("padmap") is not None
 
 
-def ensure_daemon(force: bool = False) -> str | None:
+def ensure_daemon(force: bool = False, *, fresh: bool = False, follow: int | None = None) -> str | None:
     """Start padmap's daemon, or restart one running older code.
+
+    `fresh` starts it unseated and `follow` ends it when that pid is gone --
+    together they make the daemon the session's: nobody is seated when a
+    picker or a game opens, and nothing is left running when it closes.
+    padmap treats the pair as a session name, so a daemon already following
+    this pid is left alone; that is what carries the seats across the
+    picker's execvp into the game, and what makes a launch with no picker
+    start clean.
 
     Returns None when there is now a current daemon, and a sentence when there
     is not -- because that is a thing to say on screen, not a thing to stop
@@ -75,9 +83,14 @@ def ensure_daemon(force: bool = False) -> str | None:
     padmap = shutil.which("padmap")
     if padmap is None:
         return "padmap is not installed"
+    argv = [padmap, "ensure-daemon"]
+    if fresh:
+        argv.append("--fresh")
+    if follow is not None:
+        argv += ["--follow", str(follow)]
     try:
         done = subprocess.run(
-            [padmap, "ensure-daemon"],
+            argv,
             capture_output=True,
             timeout=DAEMON_TIMEOUT,
             text=True,
@@ -282,6 +295,17 @@ class Padmap:
 
     def forget_pad(self, player: int) -> bool:
         return self.send({"cmd": "forget_pad", "player": player})
+
+    def unseat(self, player: int | None = None) -> bool:
+        """Drop a seat, or every seat, keeping seating open.
+
+        The clone stops, the pad is released, the emulator configs are
+        rewritten for whoever is left. Refused while a session is open.
+        """
+        message: dict = {"cmd": "unseat"}
+        if player is not None:
+            message["player"] = player
+        return self.send(message)
 
     def skip_control(self) -> bool:
         """Move past a control this pad does not have."""

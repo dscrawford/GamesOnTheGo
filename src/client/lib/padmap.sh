@@ -35,7 +35,11 @@ padmap_ensure() {
   # here on is newer than this file, and anything older is a leftover.
   local marker said
   marker="$(mktemp)"
-  if ! said="$("$(padmap_bin)" ensure-daemon 2>&1)"; then
+  # Unseated, and for as long as this shell -- and the emulator it execs
+  # into -- lives. padmap treats the pair as a session name: a daemon already
+  # following this pid, which is the picker's after its execvp, is left
+  # alone; one belonging to no session, or another, is replaced.
+  if ! said="$("$(padmap_bin)" ensure-daemon --fresh --follow "$$" 2>&1)"; then
     warn "padmap has no current daemon; controllers will be whatever SDL finds"
     rm -f "$marker"
     # Not latched: this failure is worth asking about again. The latch used
@@ -101,7 +105,9 @@ padmap_keeper_start() {
       kill -0 "$pid" 2>/dev/null || break
       said="$("$(padmap_bin)" ensure-daemon --check 2>&1)" && continue
       [[ "$said" == *"no daemon running"* ]] || continue
-      if "$(padmap_bin)" ensure-daemon >/dev/null 2>&1; then
+      # Following the game, and not fresh: the seats it had are the ones
+      # the level is being played with.
+      if "$(padmap_bin)" ensure-daemon --follow "$pid" >/dev/null 2>&1; then
         warn "padmap had stopped; started it again"
       else
         warn "padmap stopped and would not start again"

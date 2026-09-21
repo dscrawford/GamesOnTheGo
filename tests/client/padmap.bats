@@ -50,10 +50,12 @@ setup() {
 
 teardown() { stop_saves_service; }
 
-@test "the daemon is asked for before a launch" {
+@test "the daemon is asked for before a launch, unseated and following this shell" {
+  # Nobody is seated when a game opens, and the daemon goes when the game
+  # does. The pid is this shell's, which the emulator inherits by exec.
   run padmap_ensure
   [ "$status" -eq 0 ]
-  grep -q "padmap ensure-daemon" "$PADMAP_LOG"
+  grep -q "padmap ensure-daemon --fresh --follow [0-9]" "$PADMAP_LOG"
 }
 
 @test "it is asked for once, not once per launch" {
@@ -166,7 +168,9 @@ EOF
   GOTG_PADMAP_KEEPER_INTERVAL=0.2 padmap_keeper_start "$game"
   wait "$game"
   sleep 0.6
-  [ "$(grep -cx 'ensure-daemon' "$PADMAP_LOG")" -eq 1 ]
+  # Following the game's pid, and not fresh: the seats it had are the ones
+  # the level is being played with.
+  [ "$(grep -c "^ensure-daemon --follow $game\$" "$PADMAP_LOG")" -eq 1 ]
 }
 
 @test "the keeper leaves a daemon running older code alone" {
@@ -178,7 +182,7 @@ EOF
   GOTG_PADMAP_KEEPER_INTERVAL=0.2 padmap_keeper_start "$game"
   wait "$game"
   sleep 0.6
-  [ "$(grep -cx 'ensure-daemon' "$PADMAP_LOG")" -eq 0 ]
+  [ "$(grep -c '^ensure-daemon --follow' "$PADMAP_LOG")" -eq 0 ]
   [ "$(grep -c 'ensure-daemon --check' "$PADMAP_LOG")" -ge 1 ]
 }
 

@@ -1,9 +1,10 @@
 """The launch-time controller check.
 
-The property that matters most is the one about *not* appearing: a machine
-somebody has already set up must reach the game without being asked anything,
-or the check is a toll on every launch rather than a fix for the launches that
-would not have worked.
+Every launch begins the same way: whatever the daemon remembers is forgotten,
+and the person about to play holds a button. What must *not* appear after
+that is the wizard: a pad that already knows this console's buttons is asked
+for its hold and nothing more, or the check is a toll on every launch rather
+than a fix for the launches that would not have worked.
 """
 
 from gotg_ui.gate import (
@@ -68,11 +69,92 @@ def test_the_scope_is_padmaps_own_spelling():
     assert console_scope("gamecube") == "console:gamecube"
 
 
-# --- the gate that should not appear -----------------------------------------
+# --- every launch begins unseated -------------------------------------------
+
+
+def test_a_daemon_that_remembers_seats_is_told_to_forget_them_first():
+    # A seat is taken in front of the screen about to be used, not remembered
+    # from last night. Whatever padmap restored is not this launch's.
+    gate = Gate(platform="gamecube")
+    gate = apply(gate, state_event([seated(mappings=["console:gamecube"])]))
+    gate, command = decide(gate)
+    assert command == {"cmd": "unseat"}
+    assert gate.state == SEATING
+    assert gate.awaiting == "unseat"
+
+
+def test_the_state_after_unseating_answers_it_and_a_hold_is_asked_for():
+    gate = Gate(platform="gamecube")
+    gate = apply(gate, state_event([seated()]))
+    gate, _ = decide(gate)
+    gate = apply(gate, state_event([]))
+    assert gate.awaiting == ""
+    gate, command = decide(gate)
+    assert command == {"cmd": "begin", "players": 4}
+    assert gate.state == SEATING
+
+
+def test_a_stale_state_with_everybody_still_seated_does_not_answer_the_unseat():
+    # The daemon greets a connection with a state and answers `status` with
+    # another; the second was still in the socket when unseat went out. Read
+    # as the answer, it had the gate mapping a pad it meant to forget.
+    gate = Gate(platform="gamecube")
+    gate = apply(gate, state_event([seated()]))
+    gate, _ = decide(gate)
+    gate = apply(gate, state_event([seated()]))          # the stale one
+    assert gate.awaiting == "unseat"
+    gate, command = decide(gate)
+    assert command is None
+    gate = apply(gate, state_event([]))                   # the real answer
+    gate, command = decide(gate)
+    assert command == {"cmd": "begin", "players": 4}
+
+
+def test_a_claim_while_unseating_is_this_launches_own_seat():
+    # Somebody held a button in the window between the unseat and its answer.
+    # That is the hold the gate was about to ask for.
+    gate = Gate(platform="gamecube")
+    gate = apply(gate, state_event([seated()]))
+    gate, _ = decide(gate)
+    gate = apply(gate, {"event": "claim", "player": 1, "name": "Xbox Wireless Controller"})
+    assert gate.awaiting == ""
+    assert gate.unseated
+
+
+def test_a_seat_taken_in_front_of_this_screen_is_not_forgotten_too():
+    # Once, or the gate is one nobody gets past: the hold seats somebody, the
+    # state says so, and a gate that forgot again would unseat them for ever.
+    gate = Gate(platform="gamecube")
+    gate = apply(gate, state_event([seated()]))
+    gate, _ = decide(gate)                                    # unseat
+    gate = apply(gate, state_event([]))
+    gate, _ = decide(gate)                                    # begin
+    gate = apply(gate, state_event([], state="assigning"))
+    gate = apply(gate, {"event": "claim", "player": 1, "name": "Xbox Wireless Controller"})
+    gate = apply(gate, state_event([seated(mappings=["console:gamecube"])], state="assigning"))
+    gate, command = decide(gate)
+    assert command == {"cmd": "accept"}
+
+
+def test_a_daemon_that_cannot_unseat_leaves_the_seats_standing():
+    # An older daemon, or a session somebody else has open. The seats stand,
+    # and the gate looks at them the way it always did: mapped means go.
+    gate = Gate(platform="gamecube")
+    gate = apply(gate, state_event([seated(mappings=["console:gamecube"])]))
+    gate, _ = decide(gate)
+    gate = apply(gate, {"event": "error", "message": 'unknown command "unseat"'})
+    assert "unseat" in gate.refused
+    gate, command = decide(gate)
+    assert gate.state == READY
+    assert command is None
+
+
+# --- the wizard that should not appear ---------------------------------------
 
 
 def test_a_mapped_controller_goes_straight_to_the_game():
-    gate = Gate(platform="gamecube")
+    # Seated in front of this screen: `unseated` is the gate's word for it.
+    gate = Gate(platform="gamecube", unseated=True)
     gate = apply(gate, state_event([seated(mappings=["console:gamecube"])]))
     gate, command = decide(gate)
     assert gate.state == READY
@@ -87,7 +169,7 @@ def test_a_pad_mapped_for_another_console_is_not_asked_about_again():
     own, so a pad mapped on GameCube already works on an N64 game. Asking again
     on each new platform was a wizard in front of a controller that was fine.
     """
-    gate = Gate(platform="n64")
+    gate = Gate(platform="n64", unseated=True)
     gate = apply(gate, state_event([seated(mappings=["console:gamecube"])]))
     gate, command = decide(gate)
     assert gate.state == READY
@@ -98,7 +180,7 @@ def test_a_pad_that_bound_itself_is_left_alone():
     # padmap reads the kernel's BTN_ codes, so a standard controller arrives
     # correctly bound and has no capture of its own to show for it. That is a
     # working pad, and the gate must not open a wizard in front of it.
-    gate = Gate(platform="gamecube")
+    gate = Gate(platform="gamecube", unseated=True)
     gate = apply(gate, state_event([seated(mappings=[], configured=True)]))
     gate, command = decide(gate)
     assert gate.state == READY

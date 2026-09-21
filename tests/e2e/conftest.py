@@ -79,6 +79,7 @@ def daemon(tmp_path):
         _cannot("padmap started but never bound its socket")
 
     client = Daemon(path)
+    client.env = home
     try:
         yield client
     finally:
@@ -106,6 +107,7 @@ class Daemon:
         self.buffer = b""
         self.seen: list[dict] = []
         self.pid: int | None = None
+        self.env: dict[str, str] = {}
         self.send({"cmd": "status"})
         self.drain(1.0)
 

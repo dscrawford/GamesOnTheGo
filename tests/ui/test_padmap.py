@@ -271,6 +271,40 @@ def test_force_asks_past_the_latch(tmp_path, monkeypatch):
     assert log.read_text().count("asked") == 1
 
 
+def test_the_daemon_is_started_unseated_and_following_the_session(tmp_path, monkeypatch):
+    # Nobody is seated when a picker or a game opens, and the daemon goes
+    # when the session does. Both are padmap's flags; this only has to say
+    # them, and say the pid it means.
+    from gotg_ui.padmap import ensure_daemon
+
+    script = fake_padmap(tmp_path, monkeypatch)
+    log = tmp_path / "calls"
+    script.write_text(f'#!/bin/sh\necho "$@" >>{log}\nexit 0\n')
+    assert ensure_daemon(fresh=True, follow=4321) is None
+    assert log.read_text().strip() == "ensure-daemon --fresh --follow 4321"
+
+
+def test_asking_again_mid_session_follows_but_is_not_fresh(tmp_path, monkeypatch):
+    # A daemon that died halfway through an evening restores the seats it
+    # had, which is what somebody halfway through an evening wants back.
+    from gotg_ui.padmap import ensure_daemon
+
+    script = fake_padmap(tmp_path, monkeypatch)
+    log = tmp_path / "calls"
+    script.write_text(f'#!/bin/sh\necho "$@" >>{log}\nexit 0\n')
+    assert ensure_daemon(force=True, follow=4321) is None
+    assert log.read_text().strip() == "ensure-daemon --follow 4321"
+
+
+def test_unseat_is_the_protocols_word(daemon):
+    client = connected(daemon)
+    client.unseat()
+    client.unseat(2)
+    sent = daemon.read_commands()
+    assert {"cmd": "unseat"} in sent
+    assert {"cmd": "unseat", "player": 2} in sent
+
+
 def test_the_watch_asks_on_an_interval_not_every_frame():
     from gotg_ui.padmap import DaemonWatch
 
