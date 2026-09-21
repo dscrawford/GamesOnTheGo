@@ -155,11 +155,11 @@ def test_a_reconnected_daemon_is_asked_again():
     assert watch.wanted(True, "idle", 0) is not None
 
 
-def test_closing_it_is_one_command_and_forgets_what_was_asked():
-    watch = Watch()
-    watch.wanted(True, "idle", 0)
-    assert watch.closed() == {"cmd": "seating", "open": False}
-    assert watch.wanted(True, "idle", 0) is not None
+def test_there_is_no_way_to_close_it():
+    # A second player usually turns up in the middle of a game, and padmap
+    # keeps listening after the picker is gone. Nothing here may tell it to
+    # stop.
+    assert not hasattr(Watch(), "closed")
 
 
 def test_a_daemon_too_old_to_listen_is_not_asked_twice():
