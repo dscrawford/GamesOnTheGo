@@ -121,6 +121,7 @@ Launches run through [padmap](https://github.com/dscrawford/padmap): pads are re
 
 ```bash
 gotg controllers list               # what SDL sees
+gotg controllers list --as-game     # what a game sees: inside padmap's sandbox, clones only
 gotg controllers order [--json]     # player order
 gotg controllers order --set xbox   # pin player 1; --clear to undo
 gotg controllers apply [<id>|--all] # write bindings without launching
