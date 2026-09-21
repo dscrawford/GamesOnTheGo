@@ -337,3 +337,17 @@ def apply(gate: Gate, event: dict) -> Gate:
         )
 
     return gate
+
+
+def without_controllers(reason: str, seconds_left: float) -> tuple[str, str]:
+    """What the launch window says when padmap cannot be asked: why, and how long.
+
+    Here rather than in seat.py because seat.py imports pygame, and these are
+    words. The reason is padmap's own sentence, so "padmap is not installed"
+    and "padmap would not start: no permission for uinput" arrive as they are.
+    """
+    left = max(0, int(seconds_left + 0.999))
+    return (
+        reason or "padmap is not running",
+        f"starting without controllers in {left} s — Enter starts now, Esc too",
+    )
