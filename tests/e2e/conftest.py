@@ -38,11 +38,32 @@ def _cannot(why: str) -> None:
     pytest.skip(why)
 
 
+def _somebody_is_playing() -> str:
+    """The real daemon's socket, if one is up -- meaning a person is at a
+    picker or a game on this machine right now.
+
+    The fake pads these tests make are real devices, and a real daemon in
+    seating mode claims them: one evening it seated "E2E Xbox Pad" as player
+    two in the user's own game, mid-level, while the test waited for a claim
+    that had gone to the wrong daemon. So the suite does not run beside a
+    real one. GOTG_E2E_BESIDE_A_PLAYER=1 overrides, for whoever means it.
+    """
+    if os.environ.get("GOTG_E2E_BESIDE_A_PLAYER") == "1":
+        return ""
+    real = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "padmap", "padmap.sock")
+    if os.path.exists(real):
+        return f"a padmap daemon is up at {real}: somebody is playing, and the fake pads would join their game"
+    return ""
+
+
 @pytest.fixture
 def daemon(tmp_path):
     """A padmap of this test's own, and a client connected to it."""
     if shutil.which("padmap") is None:
         _cannot("padmap is not on PATH")
+    playing = _somebody_is_playing()
+    if playing:
+        pytest.fail(playing)
     trouble = fakepad.available()
     if trouble:
         _cannot(trouble)

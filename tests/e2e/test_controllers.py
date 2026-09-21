@@ -582,7 +582,8 @@ def _root() -> str:
 
 
 def test_a_launch_from_the_grid_meets_the_gate_first_which_forgets_the_seat(daemon, sdl):
-    """The picker route: the same daemon, and its seat is the first thing to go."""
+    """The picker route: the same daemon, its seat is the first thing to go,
+    and a hold in front of the gate takes it back -- with no session."""
     import signal
 
     with FakePad("E2E Xbox Pad") as pad:
@@ -601,15 +602,17 @@ def test_a_launch_from_the_grid_meets_the_gate_first_which_forgets_the_seat(daem
             while removed is not None and removed.get("reason") != "unseated":
                 removed = daemon.wait_for("controller", seconds=4.0)
             assert removed is not None, "the gate never told the daemon to forget the seat"
-            assigning = None
-            end = time.monotonic() + 8.0
-            while time.monotonic() < end and assigning is None:
-                for event in daemon.drain(0.2):
-                    if event.get("event") == "state" and event.get("state") == "assigning":
-                        assigning = event
-            assert assigning is not None, "the gate never opened a session to take a seat in"
-            assert assigning.get("players") == [], "the gate is asking for a hold with somebody seated"
-            assert seat.poll() is None, "the gate exited before anybody held a button"
+            end = time.monotonic() + 4.0
+            while time.monotonic() < end and daemon.players:
+                daemon.drain(0.2)
+            assert daemon.players == [], "the gate is asking for a hold with somebody seated"
+            assert "assigning" not in daemon.states, "the gate opened a session; a pad switched on now could not join"
+
+            time.sleep(1.0)                 # the gate's seating command lands
+            pad.hold(BTN_SOUTH, 0.7)
+            claimed = daemon.wait_for("claim", seconds=8.0)
+            assert claimed is not None and claimed.get("player") == 1, "a hold in front of the gate seated nobody"
+            assert seat.poll() is None, "the gate exited before anybody was ready"
         finally:
             seat.send_signal(signal.SIGTERM)
             seat.wait(timeout=5)
@@ -664,12 +667,11 @@ def test_a_launch_from_steam_meets_the_gate_first_on_a_daemon_of_its_own(daemon,
                     f"--- gotg-seat stderr ---\n{err}\n--- padmap.log ---\n{tail}"
                 )
             assert state.get("players") == [], "the Steam route started with yesterday's seat"
-            end = time.monotonic() + 6.0
-            while time.monotonic() < end and state.get("state") != "assigning":
-                for event in later.drain(0.2):
-                    if event.get("event") == "state":
-                        state = event
-            assert state.get("state") == "assigning", "the gate never asked for a hold"
+            time.sleep(1.0)                 # the gate's seating command lands
+            pad.hold(BTN_SOUTH, 0.7)
+            claimed = later.wait_for("claim", seconds=8.0)
+            assert claimed is not None and claimed.get("player") == 1, "a hold in front of the gate seated nobody"
+            assert "assigning" not in later.states, "the gate opened a session"
             assert seat.poll() is None
         finally:
             if later is not None:
@@ -757,15 +759,12 @@ WIZARD_BUTTONS = {
 }
 
 
-def test_the_game_waits_until_somebody_holds_a_button_again(daemon, sdl):
-    """Seated and mapped is not "go". The gate sits on "hold a button to start"
-    until padmap's confirm hold completes, and only then does `accepted` arrive.
-
-    The whole gate, against the real daemon: unseat nothing, hold, walk the
-    wizard with the fake pad's own buttons, then prove the game does *not*
-    start on its own, then ready up.
-    """
-    from gotg_ui.gate import READYING, Gate, apply, decide
+def test_the_gate_reaches_ready_with_no_session_and_sends_no_accept(daemon, sdl):
+    """The whole gate, against the real daemon, as its model runs it: listen,
+    hold, walk the wizard with the fake pad's own buttons, ready. Nothing
+    grabbed, no `begin`, no `accept` -- the door in seat.py is what starts
+    the game, and it is tested on its own."""
+    from gotg_ui.gate import READY, Gate, apply, decide
 
     with FakePad("E2E Xbox Pad") as pad:
         client = Padmap(_socket(daemon))
@@ -793,25 +792,19 @@ def test_the_game_waits_until_somebody_holds_a_button_again(daemon, sdl):
                             f"{time.monotonic() - t0:.2f} mapping {event.get('control')} "
                             f"done={event.get('done')} conflict={event.get('conflict')!r}"
                         )
-                    elif kind == "finish":
-                        seen.append(f"{time.monotonic() - t0:.2f} finish {event.get('frac')}")
                     elif kind != "progress":
                         seen.append(f"{time.monotonic() - t0:.2f} {kind}")
                     gate = apply(gate, event)
                     if event.get("event") == "mapping" and not event.get("done"):
                         # A beat between the step and the answer, as a person
                         # leaves one. padmap debounces each pad: a press 170 ms
-                        # after the last release was not a press to it -- the
-                        # release arrived (`finish 0.0`), the capture never did,
-                        # and the run stood still on the second control.
+                        # after the last release was not a press to it.
                         time.sleep(0.4)
                         control = str(event.get("control") or "")
                         button = WIZARD_BUTTONS.get(control)
                         if button is not None:
-                            seen.append(f"{time.monotonic() - t0:.2f} TAP {control}")
                             pad.tap(button, hold=0.12)
                         else:
-                            seen.append(f"{time.monotonic() - t0:.2f} SKIP {control}")
                             client.send({"cmd": "skip_control"})
                 gate, command = decide(gate)
                 if command is not None:
@@ -821,34 +814,16 @@ def test_the_game_waits_until_somebody_holds_a_button_again(daemon, sdl):
 
         try:
             step(1.5)
-            assert {"cmd": "begin", "players": 4} in sent
+            assert {"cmd": "seating", "open": True, "players": 4} in sent
             pad.hold(BTN_SOUTH, 0.7)
             end = time.monotonic() + 30.0
-            while time.monotonic() < end and gate.state != READYING and not gate.done:
+            while time.monotonic() < end and not gate.done:
                 step(0.3)
             story = "\n".join(seen[-30:])
-            assert gate.state == READYING, f"never reached ready-up: state={gate.state} sent={sent}\n{story}"
-
-            # And stays there. Two seconds of nothing: no accept sent, no
-            # accepted received, the game not started.
-            before = len(sent)
-            step(2.0)
-            assert gate.state == READYING and not gate.done, "the game started on nobody's say-so"
-            assert not any(c.get("cmd") == "accept" for c in sent[before:]), "the gate sent accept by itself"
-            assert not any(x.endswith(" accepted") for x in seen), "padmap accepted with nobody holding anything"
-
-            # The ready-up: a longer hold on the seated pad. padmap's confirm
-            # is 0.7 s; the daemon accepts when it completes.
-            pad.hold(BTN_SOUTH, 1.2)
-            end = time.monotonic() + 8.0
-            while time.monotonic() < end and not gate.done:
-                step(0.2)
-            story = "\n".join(seen[-10:])
-            assert gate.done and gate.state == "ready", f"the ready-up hold did not start the game:\n{story}"
-            assert any(x.endswith(" accepted") for x in seen)
+            assert gate.done and gate.state == READY, f"never ready: state={gate.state} sent={sent}\n{story}"
+            assert not any(c.get("cmd") in ("begin", "accept") for c in sent), f"a session was used: {sent}"
+            assert not any(" accepted" in x or " assigning" in x for x in seen)
         finally:
-            if not gate.done:
-                client.send({"cmd": "cancel"})
             client.close()
 
 
@@ -866,19 +841,17 @@ def test_the_gate_holds_the_door_until_a_fresh_one_second_hold(daemon, sdl):
     with FakePad("E2E Xbox Pad") as pad:
         seat = _seat_process(daemon, {"PADMAP_SKIP_DAEMON_CHECK": "1"}, _root())
         try:
-            # The gate opens a session; one long press seats the pad and runs
-            # on into the confirm. Answer the wizard in between.
+            # The gate listens; one press seats the pad. Answer the wizard,
+            # and the moment it closes press again and *do not let go*: the
+            # hold that ends the wizard, still down when the door opens, is
+            # the one that used to start the game.
             assert daemon.wait_for("state", seconds=8.0) is not None
-            end = time.monotonic() + 8.0
-            while time.monotonic() < end and "assigning" not in daemon.states:
-                daemon.drain(0.2)
-            assert "assigning" in daemon.states, "the gate opened no session"
+            time.sleep(1.0)
             pad.hold(BTN_SOUTH, 0.7)
-            accepted = None
+            assert daemon.wait_for("claim", seconds=8.0) is not None, "a hold in front of the gate seated nobody"
             mapped = False
-            confirmed_at = None
             end = time.monotonic() + 40.0
-            while time.monotonic() < end and accepted is None:
+            while time.monotonic() < end and not mapped:
                 for event in daemon.drain(0.2):
                     kind = event.get("event")
                     if kind == "mapping" and not event.get("done"):
@@ -890,20 +863,10 @@ def test_the_gate_holds_the_door_until_a_fresh_one_second_hold(daemon, sdl):
                             daemon.send({"cmd": "skip_control"})
                     elif kind == "mapping" and event.get("done"):
                         mapped = True
-                    elif kind == "accepted":
-                        accepted = event
-                # Seated and mapped: the ready-up is padmap's confirm, a
-                # longer hold on the seated pad, which accepts on its own.
-                # Pressed and *not let go*: the hold that rides through the
-                # confirm and is still down when the clone appears is the one
-                # that used to start the game.
-                if mapped and accepted is None and confirmed_at is None:
-                    time.sleep(0.5)
-                    pad.down(BTN_SOUTH)
-                    confirmed_at = time.monotonic()
-            assert accepted is not None, f"padmap never accepted: mapped={mapped} states={daemon.states[-5:]}"
+            assert mapped, f"the wizard never finished: {daemon.states[-5:]}"
+            pad.down(BTN_SOUTH)
 
-            # The button is still down, well past a second. It must not count.
+            # The button is down, well past a second. It must not count.
             time.sleep(2.5)
             assert seat.poll() is None, "the gate started the game on the hold that was never let go"
             pad.up(BTN_SOUTH)
@@ -969,3 +932,36 @@ def test_the_door_ignores_a_button_that_is_down_when_it_opens(daemon, sdl):
         assert door.done(time.monotonic()), "a fresh second-long hold did not open the door"
         assert 0.9 <= took <= 2.0, f"the door opened after {took:.2f}s, not a second"
         picker.close()
+
+
+def test_a_controller_switched_on_while_the_gate_is_up_takes_a_seat(daemon, sdl):
+    """Note 1: the second player turned their pad on during the gate and could
+    not join, because a session's pads are fixed when it opens. There is no
+    session now; seating keeps looking."""
+    import signal
+
+    with FakePad("E2E Xbox Pad") as first:
+        seat = _seat_process(daemon, {"PADMAP_SKIP_DAEMON_CHECK": "1"}, _root())
+        try:
+            assert daemon.wait_for("state", seconds=8.0) is not None
+            time.sleep(1.0)
+            first.hold(BTN_SOUTH, 0.7)
+            claimed = daemon.wait_for("claim", seconds=8.0)
+            assert claimed is not None and claimed.get("player") == 1
+
+            # Only now does the second controller exist.
+            with FakePad("E2E Other Pad", 0x2AAA, 0x5BBB, 1) as second:
+                time.sleep(1.5)                 # padmap's scan finds it
+                claimed = None
+                for _ in range(3):
+                    second.hold(BTN_SOUTH, 0.7)
+                    claimed = daemon.wait_for("claim", seconds=4.0)
+                    if claimed is not None:
+                        break
+                assert claimed is not None and claimed.get("player") == 2, (
+                    "a controller switched on during the gate could not take a seat"
+                )
+                assert seat.poll() is None
+        finally:
+            seat.send_signal(signal.SIGTERM)
+            seat.wait(timeout=5)

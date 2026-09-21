@@ -61,6 +61,10 @@ nix run .#test-controllers --max-jobs 2 --cores 4 -- -q -k "top_bar"            
   that cannot run it. Set it anywhere the requirement is meant to be enforced.
 - After changing `src/ui/gotg_ui/{pads,clones,assign,gate,padmap}.py`,
   `src/client/lib/padmap.sh`, or the padmap pin: run the e2e.
+- **Never while the user is playing.** The fake pads are real devices, and
+  a real daemon in seating mode seats them: one landed as player two in the
+  user's game. The suite fails fast if the real socket
+  (`$XDG_RUNTIME_DIR/padmap/padmap.sock`) exists; do not override that.
 
 ## Lint & Typecheck
 
