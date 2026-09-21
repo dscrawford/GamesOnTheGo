@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import time
 
+import pytest
 from fakepad import BTN_SOUTH, BTN_START, FakePad, kernel_names
 
 from gotg_ui import pads
@@ -712,3 +713,33 @@ def test_with_no_padmap_the_gate_still_opens_a_window_before_the_game(tmp_path):
     assert done.returncode == 0, done.stderr
     assert took >= 1.5, f"the gate skipped itself in {took:.2f}s -- no window, no countdown"
     assert "padmap" in done.stderr
+
+
+# --- the keyboard as a player -------------------------------------------------
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="padmap has no seat_keyboard yet; see docs/requests/keyboard-as-a-player.md",
+)
+def test_the_keyboard_takes_a_seat_when_asked(daemon, sdl):
+    """Space held on the grid ends in this command; padmap should answer with
+    a seat named Keyboard, icon keyboard, in the next free slot.
+
+    The hold itself is timed by the picker and tested in tests/ui; what is
+    proven here is the daemon's half, strictly, so the day it exists this
+    fails the other way until the marker comes off.
+    """
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        pad.hold(BTN_SOUTH, 0.7)
+        assert picker.until(lambda p: p.seated(1))
+
+        picker.padmap.seat_keyboard()
+        seated = picker.until(
+            lambda p: any(pl.get("player") == 2 and pl.get("icon") == "keyboard" for pl in p.players),
+            seconds=4.0,
+        )
+        assert seated, f"padmap seated no keyboard: {picker.players}"
+        picker.close()

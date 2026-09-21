@@ -296,6 +296,12 @@ def test_asking_again_mid_session_follows_but_is_not_fresh(tmp_path, monkeypatch
     assert log.read_text().strip() == "ensure-daemon --follow 4321"
 
 
+def test_seat_keyboard_is_the_protocols_word(daemon):
+    client = connected(daemon)
+    client.seat_keyboard()
+    assert {"cmd": "seat_keyboard"} in daemon.read_commands()
+
+
 def test_unseat_is_the_protocols_word(daemon):
     client = connected(daemon)
     client.unseat()

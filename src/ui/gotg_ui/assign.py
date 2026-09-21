@@ -307,3 +307,56 @@ def attend(padmap, seating: Session, watch: Watch) -> dict | None:
     if command is not None:
         trace.say("sent", **command)
     return command
+
+
+# How long the space bar is held to take a seat with the keyboard. Longer
+# than padmap's quarter second on a pad: a tap on space opens the game menu,
+# and the two must not be one motion apart.
+KEYBOARD_HOLD = 0.6
+
+
+@dataclass
+class KeyHold:
+    """The space bar, held to seat the keyboard as a player.
+
+    A pad is seated by padmap reading the pad; a keyboard is the compositor's
+    and padmap never sees its keys, so this is the one hold the picker times
+    itself. The clock is passed in, so a test is not a stopwatch.
+
+    Two outcomes from one key. Released early it is the tap it always was --
+    open the menu -- and the caller is told so. Held the whole way it is a
+    seat, said once, and the release after that is nothing.
+    """
+
+    seconds: float = KEYBOARD_HOLD
+    since: float | None = None
+    said: bool = False
+
+    def down(self, now: float) -> None:
+        if self.since is None:
+            self.since = now
+            self.said = False
+
+    def progress(self, now: float) -> float:
+        """How far along the hold is, 0 when nothing is held.
+
+        Whole at a millisecond short of the time: this is compared to 1.0,
+        and 0.6 seconds of floating point is not always 0.6.
+        """
+        if self.since is None:
+            return 0.0
+        elapsed = now - self.since
+        return 1.0 if elapsed >= self.seconds - 1e-3 else max(0.0, elapsed / self.seconds)
+
+    def due(self, now: float) -> dict | None:
+        """The command to send, once, the moment the hold completes."""
+        if self.since is None or self.said or self.progress(now) < 1.0:
+            return None
+        self.said = True
+        return {"cmd": "seat_keyboard"}
+
+    def up(self) -> bool:
+        """The key released. True when it was a tap and the menu should open."""
+        tap = self.since is not None and not self.said
+        self.since = None
+        return tap

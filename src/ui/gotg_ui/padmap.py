@@ -296,6 +296,15 @@ class Padmap:
             message["player"] = player
         return self.send(message)
 
+    def seat_keyboard(self) -> bool:
+        """Seat the keyboard as the next player.
+
+        No clone: the keyboard is the compositor's. What padmap does is write
+        every emulator's configuration so that player N is the keyboard --
+        see docs/requests/keyboard-as-a-player.md for what was asked.
+        """
+        return self.send({"cmd": "seat_keyboard"})
+
     def skip_control(self) -> bool:
         """Move past a control this pad does not have."""
         return self.send({"cmd": "skip_control"})

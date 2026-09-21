@@ -100,13 +100,13 @@ gotg steam picker                   # put it in Steam as "Games On The Go"
 | Pad | Keyboard | Does |
 |---|---|---|
 | D-pad | arrows | move |
-| A | Enter / Space | game menu |
+| A | Enter / tap `Space` | game menu |
 | B | Esc / q | back / quit |
 | LB / RB | PgUp / PgDn | page |
 | X | `/` or `f` | search |
 | Y | — | next platform |
 | Start | Tab | menu: Platform, Region, Installed, Search, Clear all, View, Controller for… |
-| hold any button | — | take a free seat — the ring above the grid fills, then you are that player |
+| hold any button | hold `Space` | take a free seat — the pad (or keyboard) icon above the grid fills in, then you are that player |
 | — | `c` | controller diagram for the selected game's platform |
 | — | `i` | installed only |
 | — | `s` | storage |
