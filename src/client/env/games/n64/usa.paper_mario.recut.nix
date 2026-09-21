@@ -88,6 +88,11 @@ in
 {
   emulator = launcher;
   bin = "gotg-papermario-recut";
+  # A wired Xbox 360 pad, to this port. It reads its own controller database
+  # and a clone mirroring a Steam Controller is in no database at all;
+  # 045e:028e is the one every SDL maps by heart. See
+  # docs/requests/look-like-an-xbox-pad.md.
+  padIdentity = "xbox360";
   configurable = false;
   isolate = true;
   args = [ "{state}" ];

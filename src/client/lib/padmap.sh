@@ -209,6 +209,54 @@ padmap_clear_steam_env() {
   fi
 }
 
+# What padmap's clones should look like for this environment, or nothing.
+#
+# Nothing is padmap's default, "mirror", and that is deliberate: a clone that
+# carries the physical pad's vendor and product is what an emulator told to
+# bind *that* controller expects to find. The environments that ask for
+# something else say so in their pads.json -- see padIdentity in
+# src/client/env/lib.nix.
+#
+# Refused for Ryujinx, whatever the environment says. Under "xbox360" every
+# clone is 045e:028e and every GUID is the same one; Ryujinx builds its
+# device id by blanking the name CRC, so four players would land on one id
+# and one seat. padmap documents that as the consumer the identity does not
+# suit, and this is the line that keeps it out of reach.
+padmap_identity() {
+  local attr="$1" manifest identity emulator
+  manifest="$(env_pads_manifest "$attr")" || return 0
+  [[ -f "$manifest" ]] || return 0
+  identity="$(jq -r '.identity // ""' "$manifest" 2>/dev/null)" || return 0
+  [[ -n "$identity" ]] || return 0
+  emulator="$(jq -r '.emulator // ""' "$manifest" 2>/dev/null)"
+  if [[ "$emulator" == ryujinx ]]; then
+    warn "ignoring the $identity pad identity for $attr: Ryujinx cannot tell two clones apart under it"
+    return 0
+  fi
+  printf '%s' "$identity"
+}
+
+# Hand that identity to the daemon this launch is about to use.
+#
+# Before the daemon is asked after, because the daemon reads the variable
+# when it publishes a clone. And past the latch: the picker started a daemon
+# in the default identity and exported PADMAP_SKIP_DAEMON_CHECK on its way
+# here, so without clearing it nothing would ask, and the game would get the
+# picker's mirrored clones. padmap counts a daemon running a different
+# identity as not current and replaces it -- but only when it is asked.
+#
+# Somebody who set PADMAP_PAD_IDENTITY themselves keeps it: that is a person
+# overriding a per-game default, which is the whole point of the variable.
+padmap_identity_apply() {
+  local attr="$1" identity
+  [[ -z "${PADMAP_PAD_IDENTITY:-}" ]] || return 0
+  identity="$(padmap_identity "$attr")" || return 0
+  [[ -n "$identity" ]] || return 0
+  export PADMAP_PAD_IDENTITY="$identity"
+  unset PADMAP_SKIP_DAEMON_CHECK
+  log "controllers will look like a $identity pad to this game"
+}
+
 # Ask about controllers before the game takes the screen.
 #
 # Only ever asks when there is something to ask -- no controller seated, or one

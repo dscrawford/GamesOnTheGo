@@ -106,6 +106,21 @@
   # name as well, since its one settings file keeps a section per console;
   # dolphin keeps a file per pad and needs nothing beyond knowing it is dolphin.
   padEmulator ? (if padConsole != null then "ares" else null),
+  # What padmap's clones should look like to this environment's program.
+  #
+  # Null is padmap's default, "mirror": the clone carries the physical pad's
+  # vendor and product, which is right nearly everywhere -- an emulator that
+  # was told which controller to bind wants to see that controller.
+  #
+  # "xbox360" makes every clone a wired Microsoft pad, 045e:028e, the one
+  # GUID every SDL build maps out of the box. That is for the decompiled
+  # ports: they carry their own controller database, and a clone of a Steam
+  # Controller is in nobody's. Set it where a port has been seen to need it,
+  # not by default -- under it every clone shares one GUID, which Ryujinx
+  # cannot tell apart (it blanks the name CRC to make its device id), so
+  # padmap.sh refuses it for that emulator rather than seating four players
+  # on top of each other.
+  padIdentity ? null,
   # Whether `gotg configure` can open this emulator's own settings screen.
   #
   # Defaults to whether the environment isolates, because without isolation
@@ -438,19 +453,20 @@ pkgs.runCommand "gotg-env-${name}"
         )
       } $out/share/gotg/configure.json
     ''}
-    ${lib.optionalString (padEmulator != null) ''
+    ${lib.optionalString (padEmulator != null || padIdentity != null) ''
       cp ${
         pkgs.writeText "pads.json" (
           builtins.toJSON (
             {
-              emulator = padEmulator;
               # Which configuration directory the writer should be editing.
               # Cemu's lives under XDG_CONFIG_HOME, which isolation moves — and
               # on a first launch neither location exists yet, so this cannot be
               # settled by looking.
               inherit isolate;
             }
+            // lib.optionalAttrs (padEmulator != null) { emulator = padEmulator; }
             // lib.optionalAttrs (padConsole != null) { console = padConsole; }
+            // lib.optionalAttrs (padIdentity != null) { identity = padIdentity; }
           )
         )
       } $out/share/gotg/pads.json

@@ -625,3 +625,100 @@ EOF
   grep -q "pads hidapi=0 ignore=unset" "$SEAT_LOG"
   [[ "$stderr" == *"no controllers visible"* ]]
 }
+
+# --- which pad identity a game's clones get ---------------------------------
+
+pads_manifest() {
+  local attr="$1"
+  mkdir -p "$GOTG_ROOTS_DIR/$attr/share/gotg"
+  cat >"$GOTG_ROOTS_DIR/$attr/share/gotg/pads.json"
+}
+
+@test "an environment that asks for nothing gets padmap's default" {
+  # Mirror, which is what nearly everything wants: an emulator told to bind
+  # a controller expects to find that controller.
+  fake_env env-plain
+  pads_manifest env-plain <<<'{"emulator":"ares","console":"Nintendo64"}'
+  run padmap_identity env-plain
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a decompiled port's environment asks for the Xbox 360 identity" {
+  fake_env env-dk64
+  pads_manifest env-dk64 <<<'{"emulator":"ares","console":"Nintendo64","identity":"xbox360"}'
+  run padmap_identity env-dk64
+  [ "$status" -eq 0 ]
+  [ "$output" = "xbox360" ]
+}
+
+@test "Ryujinx never gets it, whatever the environment says" {
+  # Every clone is 045e:028e under it and Ryujinx blanks the name CRC to
+  # make its device id, so four players would land on one id and one seat.
+  fake_env env-switch
+  pads_manifest env-switch <<<'{"emulator":"ryujinx","identity":"xbox360"}'
+  run --separate-stderr padmap_identity env-switch
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *"Ryujinx cannot tell two clones apart"* ]]
+}
+
+@test "applying it exports the identity and asks past the daemon latch" {
+  # The picker started its daemon mirrored and latched the check on its way
+  # here; without clearing it nothing would ask, and the game would get the
+  # picker's clones.
+  fake_env env-dk64
+  pads_manifest env-dk64 <<<'{"emulator":"ares","identity":"xbox360"}'
+  export PADMAP_SKIP_DAEMON_CHECK=1
+  padmap_identity_apply env-dk64
+  [ "$PADMAP_PAD_IDENTITY" = "xbox360" ]
+  [ -z "${PADMAP_SKIP_DAEMON_CHECK:-}" ]
+}
+
+@test "applying nothing leaves the latch and the environment alone" {
+  fake_env env-plain
+  pads_manifest env-plain <<<'{"emulator":"ares"}'
+  export PADMAP_SKIP_DAEMON_CHECK=1
+  padmap_identity_apply env-plain
+  [ -z "${PADMAP_PAD_IDENTITY:-}" ]
+  [ "$PADMAP_SKIP_DAEMON_CHECK" = 1 ]
+}
+
+@test "somebody who set the identity themselves keeps it" {
+  fake_env env-dk64
+  pads_manifest env-dk64 <<<'{"emulator":"ares","identity":"xbox360"}'
+  export PADMAP_PAD_IDENTITY=mirror PADMAP_SKIP_DAEMON_CHECK=1
+  padmap_identity_apply env-dk64
+  [ "$PADMAP_PAD_IDENTITY" = mirror ]
+  [ "$PADMAP_SKIP_DAEMON_CHECK" = 1 ]
+}
+
+@test "a launch hands the identity to the daemon before it is asked after" {
+  add_game n64 "usa.dk64.z64" "rom" "DK64"
+  gotg refresh
+  export GOTG_ENV_DIR="$TEST_TMP/env"
+  mkdir -p "$GOTG_ENV_DIR"
+  : >"$GOTG_ENV_DIR/n64.nix"
+  fake_env env-n64
+  pads_manifest env-n64 <<<'{"emulator":"ares","console":"Nintendo64","identity":"xbox360"}'
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'echo "emulator ran"\n'
+  } >"$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
+  chmod +x "$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
+  mkdir -p "$TEST_TMP/data"
+  cp "$(dirname "$GOTG_BIN")/../share/gotg/data/ares-pads.json" "$TEST_TMP/data/"
+  export GOTG_DATA="$TEST_TMP/data"
+  # The launch that a pick from the grid is: the picker's latch already set.
+  export PADMAP_SKIP_DAEMON_CHECK=1
+  cat >"$FAKE_BIN/padmap" <<EOF
+#!$(command -v bash)
+echo "\$* identity=\${PADMAP_PAD_IDENTITY-unset}" >>"$PADMAP_LOG"
+exit 0
+EOF
+  chmod +x "$FAKE_BIN/padmap"
+
+  gotg play usa.dk64
+  [ "$status" -eq 0 ]
+  grep -q "ensure-daemon --fresh --follow [0-9]* identity=xbox360" "$PADMAP_LOG"
+}
