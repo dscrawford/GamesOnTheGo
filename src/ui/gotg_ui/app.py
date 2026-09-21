@@ -16,7 +16,7 @@ import time
 
 import pygame
 
-from . import around, config, filters, pads, prepare, profiles
+from . import around, config, filters, pads, prepare, profiles, trace
 from .art import ArtStore
 from .assign import Session, Watch, attend
 from .browser import SHELF, Browser
@@ -776,6 +776,15 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # execvp's into a game, is the game. Nobody is seated when the picker
     # opens; a hold seats them; the daemon goes when the session does.
     padmap_trouble = ensure_daemon(fresh=True, follow=os.getpid())
+    trace.say(
+        "start",
+        pid=os.getpid(),
+        padmap_on_path=bool(__import__("shutil").which("padmap")),
+        daemon_trouble=padmap_trouble,
+        any_pad=os.environ.get("GOTG_ANY_PAD"),
+        pads_open=len(sticks),
+        held=hush.refresh(),
+    )
     padmap.connect()
     # And asked after again whenever the connection is gone -- see DaemonWatch
     # for why reconnecting alone was not enough.
