@@ -142,3 +142,19 @@ def test_the_fallback_has_an_icon_of_its_own_without_anchors():
 
     assert (icons_dir() / "generic.svg").exists()
     assert "anchor-" not in (icons_dir() / "generic.svg").read_text()
+
+
+def test_a_deck_is_drawn_as_the_handheld_it_is():
+    # Its controls are built into the thing in your hands, so the Steam
+    # Controller's drawing is the wrong shape to recognise at a glance.
+    from gotg_ui.icons import icon_name
+
+    assert icon_name("Steam Deck") == "steamdeck"
+    assert icon_name("Valve Software Steam Deck Controller") == "steamdeck"
+
+
+def test_a_puck_is_still_a_steam_controller():
+    from gotg_ui.icons import icon_name
+
+    assert icon_name("Valve Software Steam Controller Puck") == "steam"
+    assert icon_name("Steam Controller") == "steam"
