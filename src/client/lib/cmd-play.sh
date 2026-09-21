@@ -99,6 +99,14 @@ cmd_play() {
     "$(manifest_field "$PLAY_GAME" platform)" \
     "$(manifest_field "$PLAY_GAME" title)"
 
+  # And the bindings again, now that the gate has seated somebody. The ones
+  # play_prepare wrote were from what SDL saw before anyone held a button --
+  # the raw pads, which `padmap-rs exec` is about to hide from the game -- so
+  # ares' port 1 named a controller the emulator could not see, and the one
+  # it could see was named by nothing. Seen on a real launch: the Steam
+  # Controller seated as player one, published, and dead in the game.
+  pads_configure "$PLAY_ATTR" || warn "could not set controller bindings for $PLAY_ATTR"
+
   # "$$" survives the exec below, so what the watcher holds is the emulator.
   killswitch_start "$$"
   padmap_keeper_start "$$"

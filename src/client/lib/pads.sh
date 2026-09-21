@@ -18,6 +18,22 @@
 
 pads_bin() { printf '%s' "${GOTG_PADS:-gotg-pads}"; }
 
+# What SDL sees, with padmap's mapping in hand. A clone of a pad SDL has no
+# mapping of its own for -- a Steam Controller's -- is otherwise a joystick
+# with no map, and the writer passes it over. The game gets the same string
+# from `padmap-rs exec`; this is the enumerator getting it too.
+pads_enumerate() {
+  local config=""
+  if declare -F padmap_sdl_config >/dev/null; then
+    config="$(padmap_sdl_config 2>/dev/null || true)"
+  fi
+  if [[ -n "$config" ]]; then
+    SDL_GAMECONTROLLERCONFIG="$config" "$(pads_bin)" 2>/dev/null
+  else
+    "$(pads_bin)" 2>/dev/null
+  fi
+}
+
 ares_pads_table() { printf '%s/ares-pads.json' "$GOTG_DATA"; }
 
 # One ares assignment for a standard element, or nothing when this controller
@@ -320,14 +336,33 @@ pads_order_read() {
 
 # The controllers that can be bound, in the order they will be seated.
 #
-# SDL's enumeration order decides it unless something has been pinned, and
-# every caller comes through here — both emulators and `gotg controllers order`
-# — so what is displayed and what is written cannot disagree.
+# padmap's order first. Once it has published anything, the seats are its:
+# player N is the pad it calls "padmap Player N", found by the GUID it wrote
+# -- SDL renames a clone of a pad it recognises, so the name is not enough --
+# and nothing else is seated, because `padmap-rs exec` is about to hide every
+# raw pad from the game. Binding one of those named a controller the emulator
+# could not see, while the clone it could see was named by nothing.
 #
-# A pinned controller that is not attached simply is not there to seat, and the
-# ones behind it move up. Anything unpinned follows in SDL's order.
+# Without padmap, SDL's enumeration order decides it unless something has
+# been pinned. Every caller comes through here — both emulators and `gotg
+# controllers order` — so what is displayed and what is written cannot
+# disagree. A pinned controller that is not attached simply is not there to
+# seat, and the ones behind it move up.
 pads_seating() {
-  local order
+  local order published="${2-}"
+  if [[ -z "$published" ]] && declare -F padmap_published >/dev/null; then
+    published="$(padmap_published 2>/dev/null || true)"
+  fi
+  if [[ -n "$published" && "$published" != "[]" ]]; then
+    jq -c --argjson published "$published" '
+      [ .[] | select(.gamepad and .map != null) ] as $pads
+      | [ $published | sort_by(.player)[] as $seat
+          | ( $pads[] | select(.identity == $seat.guid) )
+            // ( $pads[] | select(.name == $seat.name) )
+            // empty ]
+    ' <<<"$1"
+    return 0
+  fi
   order="$(pads_order_read)"
   jq -c --argjson order "$order" '
     [ .[] | select(.gamepad and .map != null) ]
@@ -449,7 +484,7 @@ pads_ares_configure() {
 
   file="$(env_state_dir "$attr")/data/ares/settings.bml"
 
-  pads="$("$(pads_bin)" 2>/dev/null)" || return 0
+  pads="$(pads_enumerate)" || return 0
 
   # Where this console keeps its pads. A handheld has one built in and no port
   # number; everything else numbers them from 1.

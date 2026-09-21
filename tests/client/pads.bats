@@ -633,3 +633,57 @@ BML
   [ "$(jq -r '.B' <<<"$output")" = "$ID/0/3/0;;" ]
   [ "$(jq -r '.C' <<<"$output")" = "$ID/0/3/1;;" ]
 }
+
+# --- padmap's order is the order ---------------------------------------------
+
+@test "once padmap has published, the seats are its clones by player, found by GUID" {
+  # Real data: gotg-pads (SDL3) on this machine with two raw pads, a fake
+  # pad, a stale clone from an earlier daemon, and the clone padmap had just
+  # published for player 1. SDL renamed the stale clone "Xbox 360 Controller";
+  # the live one kept its name; only the GUID padmap wrote tells them apart.
+  local pads published
+  pads="$(cat "$BATS_TEST_DIRNAME/fixtures/gotg-pads-with-clone.json")"
+  published='[{"player":1,"guid":"0300c9a7aa2a0000bb5b000001000000","name":"padmap Player 1"}]'
+  run pads_seating "$pads" "$published"
+  [ "$status" -eq 0 ]
+  [ "$(jq 'length' <<<"$output")" -eq 1 ]
+  [ "$(jq -r '.[0].identity' <<<"$output")" = "0300c9a7aa2a0000bb5b000001000000" ]
+  [ "$(jq -r '.[0].name' <<<"$output")" = "padmap Player 1" ]
+}
+
+@test "a raw pad is never seated beside padmap's, however early SDL lists it" {
+  # `padmap-rs exec` hides every raw pad from the game. Seating one names a
+  # controller the emulator cannot see.
+  local pads published
+  pads="$(cat "$BATS_TEST_DIRNAME/fixtures/gotg-pads-with-clone.json")"
+  published='[{"player":1,"guid":"0300c9a7aa2a0000bb5b000001000000","name":"padmap Player 1"}]'
+  run pads_seating "$pads" "$published"
+  ! jq -e '.[] | select(.identity == "050018dc5e0400008e02000030110000")' <<<"$output" >/dev/null
+  ! jq -e '.[] | select(.identity == "03002854de2800000413000002006800")' <<<"$output" >/dev/null
+}
+
+@test "players are seated in padmap's order, not SDL's" {
+  local pads published
+  pads="$(cat "$BATS_TEST_DIRNAME/fixtures/gotg-pads-with-clone.json")"
+  # Player 2 is the clone SDL listed *first*; player 1 the one it listed last.
+  published='[{"player":2,"guid":"0300c9a75e0400008e02000001000000","name":"padmap Player 2"},
+              {"player":1,"guid":"0300c9a7aa2a0000bb5b000001000000","name":"padmap Player 1"}]'
+  run pads_seating "$pads" "$published"
+  [ "$(jq -r '.[0].identity' <<<"$output")" = "0300c9a7aa2a0000bb5b000001000000" ]
+  [ "$(jq -r '.[1].identity' <<<"$output")" = "0300c9a75e0400008e02000001000000" ]
+}
+
+@test "a published player SDL does not list is nobody, and no raw pad takes its place" {
+  local pads published
+  pads="$(cat "$BATS_TEST_DIRNAME/fixtures/gotg-pads-with-clone.json")"
+  published='[{"player":1,"guid":"0300ffffffff0000ffff000001000000","name":"padmap Player 9"}]'
+  run pads_seating "$pads" "$published"
+  [ "$output" = "[]" ]
+}
+
+@test "with nothing published the seating is what it always was" {
+  local pads
+  pads="$(cat "$BATS_TEST_DIRNAME/fixtures/gotg-pads-with-clone.json")"
+  run pads_seating "$pads" "[]"
+  [ "$(jq 'length' <<<"$output")" -eq 6 ]
+}
