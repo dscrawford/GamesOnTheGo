@@ -772,6 +772,12 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # a game to ask about. Set before the daemon is started, since it is the
     # daemon that reads it, and left alone when somebody set it themselves.
     os.environ.setdefault("PADMAP_NO_AUTOSETUP", "1")
+    # And no seat but by a hold. padmap seats a pad it has a stored mapping
+    # for the moment it sees it, which --fresh does not stop: the Xbox pad
+    # was player one two seconds after the grid opened, nobody had held
+    # anything, and the strip said "no controllers" because no state ever
+    # followed. Seen in a trace, not reasoned about.
+    os.environ.setdefault("PADMAP_NO_AUTOATTACH", "1")
     # Unseated, and for as long as this process lives -- which, after a pick
     # execvp's into a game, is the game. Nobody is seated when the picker
     # opens; a hold seats them; the daemon goes when the session does.
