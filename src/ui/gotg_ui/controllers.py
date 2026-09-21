@@ -475,35 +475,26 @@ def draw_strip(
     return HEIGHT
 
 
-def draw_hold(
-    screen, centre, player: int | None, fraction: float, height: int, icon_name: str | None = None
-) -> None:
-    """A hold on its way: the controller, revealed clockwise from twelve.
+def draw_reveal(screen, centre, icon_name: str | None, colour, fraction: float, height: int) -> None:
+    """A controller appearing: its drawing, revealed clockwise from twelve.
 
-    Not a ring beside the seat but the pad itself appearing, the way a clock
-    hand would uncover it -- in the colour of the seat it is filling, so a
-    second player watching it come round is already being told which one
-    they are about to be. Under it, when nobody is seated, sits the red
-    "no controllers" pad, which the coloured one covers as it goes.
+    Over a silhouette of the same in the empty seat's dark red, so the sweep
+    has a shape to complete rather than a wedge of colour on its own. The
+    strip, the assignment screen and the launch gate all draw a hold this
+    way, so a hold looks like one thing wherever it happens.
 
     The icon is masked by a pie slice rather than clipped by an arc: pygame
     has no clip shape but a rectangle, so the slice is drawn opaque on a
     transparent surface of the icon's size and multiplied into the icon's
     alpha, which leaves exactly the part inside it.
     """
-    colour = colour_for(player) if player else EMPTY_RING
-    icon = icon_surface(icon_name, height, colour)
-    # Something to fill in. With nobody seated the red "no controllers" pad
-    # is already there; after the first seat there is nothing at the next
-    # place, and a wedge of colour on its own reads as a smudge rather than
-    # a controller arriving. A silhouette in the empty seat's dark red gives
-    # the sweep a shape to complete.
     under = icon_surface(icon_name, height, EMPTY)
     if under is not None and fraction < 1.0:
         screen.blit(under, under.get_rect(center=centre))
+    icon = icon_surface(icon_name, height, colour)
     if icon is None:
-        # No artwork to reveal: the old ring, rather than nothing at all.
-        radius = PAD_RADIUS + 5
+        # No artwork to reveal: a ring, rather than nothing at all.
+        radius = height // 2
         box = pygame.Rect(centre[0] - radius, centre[1] - radius, 2 * radius, 2 * radius)
         top = math.pi / 2
         pygame.draw.arc(screen, colour, box, top - 2 * math.pi * min(1.0, fraction), top, 3)
@@ -517,6 +508,13 @@ def draw_hold(
     shown = icon.copy()
     shown.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
     screen.blit(shown, shown.get_rect(center=centre))
+
+
+def draw_hold(
+    screen, centre, player: int | None, fraction: float, height: int, icon_name: str | None = None
+) -> None:
+    """A hold on its way, on the strip: the joining seat's colour, its icon."""
+    draw_reveal(screen, centre, icon_name, colour_for(player) if player else EMPTY_RING, fraction, height)
 
 
 def draw_assign(screen, font_at, view) -> None:
@@ -541,35 +539,6 @@ def draw_assign(screen, font_at, view) -> None:
         hint = font_at(22).render(view.keep_hint, True, TEXT_DIM)
         screen.blit(hint, ((width - hint.get_width()) // 2, int(height * 0.25)))
 
-    # The hold in flight. padmap reports it as a fraction, and a bar is the
-    # only part of this screen that answers "is it registering my button?"
-    if view.progress > 0:
-        bar_w = int(width * 0.4)
-        bar_x = (width - bar_w) // 2
-        bar_y = int(height * 0.30)
-        pygame.draw.rect(screen, LEADER, pygame.Rect(bar_x, bar_y, bar_w, 10), border_radius=5)
-        pygame.draw.rect(
-            screen,
-            LEADER_LIT,
-            pygame.Rect(bar_x, bar_y, int(bar_w * min(1.0, view.progress)), 10),
-            border_radius=5,
-        )
-
-    # And the longer hold on a pad that is already seated, which is padmap
-    # accepting. Drawn in the seat's own colour so the two bars cannot be read
-    # as the same thing happening twice.
-    if view.confirm > 0:
-        bar_w = int(width * 0.4)
-        bar_x = (width - bar_w) // 2
-        bar_y = int(height * 0.30)
-        pygame.draw.rect(screen, LEADER, pygame.Rect(bar_x, bar_y, bar_w, 10), border_radius=5)
-        pygame.draw.rect(
-            screen,
-            colour_for(1),
-            pygame.Rect(bar_x, bar_y, int(bar_w * min(1.0, view.confirm)), 10),
-            border_radius=5,
-        )
-
     # The seats, across the middle, in the same colours the strip uses.
     slot_w = min(200, width // max(1, view.slots))
     total = slot_w * view.slots
@@ -591,13 +560,22 @@ def draw_assign(screen, font_at, view) -> None:
         # picture the strip uses, so a pad claimed here is recognisable up
         # there. A seat nobody is in gets the generic pad in the empty colour:
         # what is missing is a controller, and that is what it looks like.
-        icon = icon_surface(
-            getattr(seat, "model", None) or (seat.name if seat else None),
-            44,
-            colour_for(player) if seat else EMPTY_RING,
-        )
+        #
+        # A hold fills that pad in, clockwise from twelve, the way the strip
+        # does: padmap's progress on the seat it would claim next, and its
+        # confirm -- the longer hold that accepts -- as the seated pad filling
+        # in again over a dark silhouette, so the two are not one thing twice.
+        below = (centre[0], middle + 62)
+        model = getattr(seat, "model", None) or (seat.name if seat else None)
+        if seat is None and view.progress > 0 and player == view.waiting_for:
+            draw_reveal(screen, below, None, colour_for(player), view.progress, 44)
+            continue
+        if seat is not None and view.confirm > 0:
+            draw_reveal(screen, below, model, colour_for(player), view.confirm, 44)
+            continue
+        icon = icon_surface(model, 44, colour_for(player) if seat else EMPTY_RING)
         if icon is not None:
-            screen.blit(icon, icon.get_rect(center=(centre[0], middle + 62)))
+            screen.blit(icon, icon.get_rect(center=below))
         else:
             label = font_at(20).render(
                 (seat.name if seat else "waiting")[:22], True, TEXT if seat else EMPTY_TEXT

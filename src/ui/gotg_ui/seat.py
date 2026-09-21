@@ -35,7 +35,7 @@ import pygame  # noqa: E402 - the line above only works ahead of the import
 
 from . import pads as sdl_pads
 from .assign import KeyHold
-from .controllers import Diagram, assets_dir
+from .controllers import Diagram, assets_dir, draw_reveal
 from .gate import (
     MAPPING,
     READY,
@@ -83,32 +83,24 @@ def draw(screen, font_at, gate: Gate, title: str, diagram: Diagram | None = None
     screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.22)))
 
     if gate.state == READYING:
-        # The seats, and the ready-up hold filling round the first of them,
-        # clockwise from twelve, the way the picker fills a pad in.
+        # The seated pad, filling in again over a dark silhouette as the
+        # ready-up hold goes round -- padmap's confirm -- the way a hold looks
+        # on the strip and the assignment screen. Whole when nobody is holding.
         centre = (width // 2, int(height * 0.52))
-        pygame.draw.circle(screen, PANEL, centre, 46)
-        pygame.draw.aacircle(screen, colour_for(1), centre, 46, 3)
-        if gate.confirm > 0:
-            import math
-
-            box = pygame.Rect(centre[0] - 58, centre[1] - 58, 116, 116)
-            top = math.pi / 2
-            pygame.draw.arc(screen, colour_for(1), box, top - 2 * math.pi * min(1.0, gate.confirm), top, 6)
-        count = font_at(38).render(str(gate.seated), True, LABEL)
-        screen.blit(count, count.get_rect(center=centre))
+        first = gate.seats[0] if gate.seats else None
+        draw_reveal(screen, centre, first.name if first else None, colour_for(1),
+                    gate.confirm if gate.confirm > 0 else 1.0, int(height * 0.22))
         who = font_at(24).render(
             ", ".join(seat.name or "pad" for seat in gate.seats), True, LABEL_DIM
         )
-        screen.blit(who, ((width - who.get_width()) // 2, int(height * 0.66)))
+        screen.blit(who, ((width - who.get_width()) // 2, int(height * 0.70)))
 
     if gate.state == SEATING:
-        # One ring, because one controller is what this is waiting for. The
-        # colour is player one's, so the seat somebody is about to take looks
-        # like the seat they will have.
+        # The seat somebody is about to take, in the colour they will have:
+        # the generic pad, dark, filling in as they hold. One, because one
+        # controller is what this is waiting for.
         centre = (width // 2, int(height * 0.52))
-        pygame.draw.circle(screen, PANEL, centre, 46)
-        pygame.draw.aacircle(screen, colour_for(1), centre, 46)
-        pygame.draw.aacircle(screen, colour_for(1), centre, 45)
+        draw_reveal(screen, centre, None, colour_for(1), gate.progress, int(height * 0.22))
 
     if gate.state == MAPPING and diagram is not None:
         # The pad, with the button being asked for ringed on it. "press Z" is
@@ -284,7 +276,6 @@ def _wait_for_go(screen, font_at, clock, gate: Gate, title: str) -> None:
 
 
 def _draw_go(screen, font_at, gate: Gate, title: str, fraction: float) -> None:
-    import math
 
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
@@ -293,16 +284,10 @@ def _draw_go(screen, font_at, gate: Gate, title: str, fraction: float) -> None:
     prompt = font_at(56).render("hold a button for a second to start", True, LABEL)
     screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.22)))
     centre = (width // 2, int(height * 0.52))
-    pygame.draw.circle(screen, PANEL, centre, 46)
-    pygame.draw.aacircle(screen, colour_for(1), centre, 46, 3)
-    if fraction > 0:
-        box = pygame.Rect(centre[0] - 58, centre[1] - 58, 116, 116)
-        top = math.pi / 2
-        pygame.draw.arc(screen, colour_for(1), box, top - 2 * math.pi * min(1.0, fraction), top, 6)
-    count = font_at(38).render(str(gate.seated), True, LABEL)
-    screen.blit(count, count.get_rect(center=centre))
+    first = gate.seats[0] if gate.seats else None
+    draw_reveal(screen, centre, first.name if first else None, colour_for(1), fraction, int(height * 0.22))
     who = font_at(24).render(", ".join(seat.name or "pad" for seat in gate.seats), True, LABEL_DIM)
-    screen.blit(who, ((width - who.get_width()) // 2, int(height * 0.66)))
+    screen.blit(who, ((width - who.get_width()) // 2, int(height * 0.70)))
     keys = font_at(22).render("let go, then hold   Enter or Esc start now", True, LABEL_DIM)
     screen.blit(keys, ((width - keys.get_width()) // 2, int(height * 0.92)))
 

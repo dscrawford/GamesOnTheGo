@@ -418,3 +418,11 @@ def test_the_window_without_padmap_says_why_and_how_long():
     said, footer = without_controllers("", 0.0)
     assert said == "padmap is not running"
     assert "0 s" in footer
+
+
+def test_a_hold_in_flight_reaches_the_seating_screen_and_a_claim_ends_it():
+    gate = Gate(platform="gamecube", state=SEATING, session=True)
+    gate = apply(gate, {"event": "progress", "frac": 0.6})
+    assert gate.progress == 0.6
+    gate = apply(gate, {"event": "claim", "player": 1, "name": "pad"})
+    assert gate.progress == 0.0
