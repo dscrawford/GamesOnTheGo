@@ -198,6 +198,24 @@ def run(platform: str, title: str) -> int:
         print(f"gotg-seat: no controller drawing: {error}", file=sys.stderr)
         diagram = None
 
+    def stop_listening() -> None:
+        """Seating closed, for the length of the game.
+
+        It costs a hundred milliseconds of input lag. padmap rescans every
+        input device on every 20 ms tick while seating is open, and one scan
+        -- a udev walk plus a liveness probe of every hidraw node -- takes
+        about 100 ms on this machine, so the daemon's loop never gets back to
+        forwarding in time. Measured through a clone: 0.03 ms for a press
+        with seating closed, 108 ms with it open, against 0.01 ms for the
+        same press read straight off its own device. Melee felt like treacle
+        and it was this.
+
+        docs/requests/seating-costs-the-game-its-input.md asks padmap to
+        throttle that scan. When it does, this goes and a pad can join
+        mid-level again -- the e2e has a strict xfail watching for it.
+        """
+        pads.send({"cmd": "seating", "open": False})
+
     try:
         while True:
             while not gate.done:
@@ -224,6 +242,7 @@ def run(platform: str, title: str) -> int:
                 pygame.display.flip()
                 clock.tick(60)
             if not (gate.state == READY and gate.seated):
+                stop_listening()
                 break
             # The door: the bindings on the pad, a press ringed as it happens, a
             # tap of Y to walk the buttons again, and the second that starts.
@@ -232,6 +251,7 @@ def run(platform: str, title: str) -> int:
                 if command is not None:
                     pads.send(command)
                     continue
+            stop_listening()
             break
     finally:
         pygame.quit()

@@ -120,6 +120,10 @@ class FakePad:
         os.write(self._fd, struct.pack("llHHi", 0, 0, kind, code, value))
         os.write(self._fd, struct.pack("llHHi", 0, 0, EV_SYN, SYN_REPORT, 0))
 
+    def axis(self, code: int, value: int) -> None:
+        """One absolute axis, moved. The stick, for the tests that time it."""
+        self._write(EV_ABS, code, value)
+
     def down(self, button: int = BTN_SOUTH) -> None:
         self._write(EV_KEY, button, 1)
 

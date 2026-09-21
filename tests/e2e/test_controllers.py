@@ -18,10 +18,11 @@ GOTG_E2E_REQUIRE=1 turns "cannot run here" into a failure.
 
 from __future__ import annotations
 
+import struct
 import time
 
 import pytest
-from fakepad import BTN_SOUTH, BTN_START, FakePad, kernel_names
+from fakepad import ABS_X, BTN_SOUTH, BTN_START, FakePad, kernel_names
 
 from gotg_ui import pads
 from gotg_ui.assign import Session, Watch, attend
@@ -690,12 +691,18 @@ def test_with_no_padmap_the_gate_still_opens_a_window_before_the_game(tmp_path):
     """Never silent. The window says why and counts down; the game is not
     started behind somebody's back with nothing to play it with."""
     import os
-    import shutil
     import subprocess
     import sys
 
-    padmap = shutil.which("padmap")
-    without = [d for d in os.environ.get("PATH", "").split(":") if not padmap or os.path.dirname(padmap) != d]
+    # Every directory with a padmap in it, not just the first: the runner puts
+    # the pinned one on PATH and the dev shell has its own, and once the pin
+    # moved those were two store paths. Stripping one left the other, the gate
+    # found padmap after all, and sat waiting for a hold nobody was there to
+    # give -- a test that had been passing for the wrong reason all along.
+    without = [
+        d for d in os.environ.get("PATH", "").split(":")
+        if not os.access(os.path.join(d, "padmap"), os.X_OK)
+    ]
     env = {
         **os.environ,
         "PATH": ":".join(without),
@@ -721,17 +728,14 @@ def test_with_no_padmap_the_gate_still_opens_a_window_before_the_game(tmp_path):
 # --- the keyboard as a player -------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="padmap has no seat_keyboard yet; see docs/requests/keyboard-as-a-player.md",
-)
 def test_the_keyboard_takes_a_seat_when_asked(daemon, sdl):
-    """Space held on the grid ends in this command; padmap should answer with
-    a seat named Keyboard, icon keyboard, in the next free slot.
+    """Space held on the grid ends in this command, and padmap answers with a
+    seat named Keyboard, icon keyboard, in the next free slot.
 
-    The hold itself is timed by the picker and tested in tests/ui; what is
-    proven here is the daemon's half, strictly, so the day it exists this
-    fails the other way until the marker comes off.
+    The hold itself is timed by the picker and tested in tests/ui; this is
+    the daemon's half. It was a strict xfail against
+    docs/requests/keyboard-as-a-player.md until padmap answered it, which is
+    how the marker came off: the suite failed for passing.
     """
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
@@ -1025,3 +1029,179 @@ def test_a_tap_of_y_at_the_door_walks_the_buttons_again(daemon, sdl):
         finally:
             seat.send_signal(signal.SIGTERM)
             seat.wait(timeout=5)
+
+
+# --- how fast a press reaches the game -----------------------------------------
+#
+# Melee felt like treacle: a jagged stick and buttons that answered late. It
+# was not the port and not the pad -- padmap rescans every input device on
+# every 20 ms tick while seating is open, one scan costs about 100 ms here (a
+# udev walk plus a liveness probe of every hidraw node), and the forwarding
+# waited behind it. These are the numbers, taken through a real clone, so it
+# cannot come back quietly.
+
+EVENT = struct.Struct("llHHi")          # struct input_event on 64-bit
+EV_KEY_T, EV_ABS_T = 0x01, 0x03
+
+# A frame at 60 Hz is 16.7 ms and a press should be nowhere near it. Generous
+# against a busy machine; the number seen with seating closed is 0.03 ms.
+A_FRAME_MS = 16.7
+
+
+def _clone_node(player: int = 1) -> str | None:
+    block = None
+    with open("/proc/bus/input/devices") as devices:
+        for line in devices:
+            if line.startswith('N: Name="'):
+                block = line.split('"')[1]
+            elif line.startswith("H: Handlers=") and block == f"padmap Player {player}":
+                for handler in line.split("=", 1)[1].split():
+                    if handler.startswith("event"):
+                        return f"/dev/input/{handler}"
+    return None
+
+
+def _drain(fd: int) -> list[tuple[int, int, int]]:
+    import os
+
+    out = []
+    try:
+        data = os.read(fd, EVENT.size * 256)
+    except BlockingIOError:
+        return out
+    for at in range(0, len(data), EVENT.size):
+        _, _, kind, code, value = EVENT.unpack_from(data, at)
+        out.append((kind, code, value))
+    return out
+
+
+def _percentile(values: list[float], fraction: float) -> float:
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, int(len(ordered) * fraction))]
+
+
+def _tap_latencies(pad: FakePad, fd: int, taps: int = 80) -> list[float]:
+    """Milliseconds from writing a press to reading it on the clone."""
+    import select
+
+    out: list[float] = []
+    _drain(fd)
+    for turn in range(taps):
+        value = 1 if turn % 2 == 0 else 0
+        sent = time.monotonic()
+        pad.down(BTN_SOUTH) if value else pad.up(BTN_SOUTH)
+        end = sent + 0.6
+        while time.monotonic() < end:
+            if select.select([fd], [], [], 0.001)[0]:
+                arrived = time.monotonic()
+                if any(k == EV_KEY_T and c == BTN_SOUTH and v == value for k, c, v in _drain(fd)):
+                    out.append((arrived - sent) * 1000)
+                    break
+        time.sleep(0.008)
+    return out
+
+
+def _seat_and_open_clone(daemon, sdl, pad: FakePad):
+    """Seat the pad by a hold, then open the clone padmap published for it."""
+    import os
+
+    picker = Picker(_socket(daemon), sdl)
+    picker.run(1.0)
+    pad.hold(BTN_SOUTH, 0.7)
+    assert picker.until(lambda p: p.seated(1)), "the pad took no seat"
+    node = None
+    end = time.monotonic() + 8.0
+    while time.monotonic() < end and node is None:
+        node = _clone_node()
+        time.sleep(0.2)
+    assert node, "padmap seated the pad but published no clone"
+    time.sleep(0.5)
+    return picker, os.open(node, os.O_RDONLY | os.O_NONBLOCK)
+
+
+def test_a_press_reaches_the_game_inside_a_frame(daemon, sdl):
+    """With seating closed, as it is for the length of a game."""
+    import os
+
+    with FakePad("PERF Pad") as pad:
+        picker, fd = _seat_and_open_clone(daemon, sdl, pad)
+        try:
+            # What gotg-seat sends as it hands over to the game.
+            picker.padmap.send({"cmd": "seating", "open": False})
+            time.sleep(1.0)
+            latencies = _tap_latencies(pad, fd)
+            assert len(latencies) > 60, f"only {len(latencies)} presses arrived at all"
+            p95 = _percentile(latencies, 0.95)
+            assert p95 < A_FRAME_MS, (
+                f"a press took {p95:.1f} ms to reach the game (p50 "
+                f"{_percentile(latencies, 0.5):.1f}, max {max(latencies):.1f}); "
+                "a frame is 16.7 ms"
+            )
+        finally:
+            os.close(fd)
+            picker.close()
+
+
+def test_the_stick_loses_nothing_on_the_way_through(daemon, sdl):
+    """Every value the pad sends is a value the game sees, in order.
+
+    A stick that arrives quantised is a stick that feels jagged, and a
+    decompiled port reads the axis straight.
+    """
+    import os
+    import select
+
+    with FakePad("PERF Pad") as pad:
+        picker, fd = _seat_and_open_clone(daemon, sdl, pad)
+        try:
+            picker.padmap.send({"cmd": "seating", "open": False})
+            time.sleep(1.0)
+            _drain(fd)
+            sent = [-30000 + step * 61 for step in range(600)]
+            seen: list[int] = []
+            for value in sent:
+                pad.axis(ABS_X, value)
+                time.sleep(0.004)                      # 250 Hz, a fast pad's rate
+                if select.select([fd], [], [], 0)[0]:
+                    seen += [v for k, c, v in _drain(fd) if k == EV_ABS_T and c == ABS_X]
+            time.sleep(0.3)
+            seen += [v for k, c, v in _drain(fd) if k == EV_ABS_T and c == ABS_X]
+
+            lost = [value for value in sent if value not in set(seen)]
+            assert not lost, f"{len(lost)} of {len(sent)} stick positions never arrived: {lost[:6]}"
+            assert seen == sent, "the stick arrived out of order or doubled"
+        finally:
+            os.close(fd)
+            picker.close()
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="padmap rescans every tick while seating is open; "
+           "see docs/requests/seating-costs-the-game-its-input.md",
+)
+def test_a_pad_can_join_mid_game_without_costing_the_game_its_input(daemon, sdl):
+    """The one GOTG gave up to get the latency back.
+
+    Seating open is what lets a second player join in the middle of a level.
+    It also costs about 100 ms a press, so the gate closes it before the game
+    starts. When padmap's scan is cheap this passes, and the close in
+    seat.py -- and this marker -- can go.
+    """
+    import os
+
+    with FakePad("PERF Pad") as pad:
+        picker, fd = _seat_and_open_clone(daemon, sdl, pad)
+        try:
+            picker.padmap.send({"cmd": "seating", "open": True, "players": 4})
+            time.sleep(1.0)
+            latencies = _tap_latencies(pad, fd)
+            assert len(latencies) > 60, f"only {len(latencies)} presses arrived at all"
+            p95 = _percentile(latencies, 0.95)
+            assert p95 < A_FRAME_MS, (
+                f"with seating open a press took {p95:.1f} ms (p50 "
+                f"{_percentile(latencies, 0.5):.1f}); a frame is 16.7 ms"
+            )
+        finally:
+            os.close(fd)
+            picker.close()
