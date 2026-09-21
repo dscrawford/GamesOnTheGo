@@ -385,3 +385,50 @@ def ready_from_the_keyboard(gate: Gate) -> tuple[Gate, dict | None]:
     if gate.state != READYING or gate.seated == 0:
         return gate, None
     return replace(gate, awaiting="accept"), {"cmd": "accept"}
+
+
+# A press this soon after the door opens is the old hold, whatever the pad's
+# state said: SDL reports a button already down within a frame of opening.
+ARM_QUIET = 0.25
+
+
+@dataclass
+class GoHold:
+    """The second that starts the game, counted only from a fresh press.
+
+    One hold ran through everything: it finished the wizard, it was padmap's
+    confirm, and it was still down when the clone appeared -- padmap
+    forwards a Steam Controller's button *state*, so the clone showed A
+    pressed from its first frame, and the door counted it. The door now
+    asks the pads what is down when it opens; if anything is, it is armed
+    by nothing but a release. If nothing is, a press after a quarter
+    second's quiet is a fresh one. The clock is passed in.
+    """
+
+    seconds: float = 1.0
+    opened: float = 0.0
+    held_at_open: bool = False
+    armed: bool = False
+    since: float | None = None
+
+    def pressed(self, now: float) -> None:
+        if not self.armed:
+            if not self.held_at_open and now - self.opened >= ARM_QUIET:
+                self.armed = True
+            else:
+                return
+        if self.since is None:
+            self.since = now
+
+    def released(self, now: float) -> None:
+        self.armed = True
+        self.since = None
+
+    def progress(self, now: float) -> float:
+        if self.since is None:
+            return 0.0
+        elapsed = now - self.since
+        return 1.0 if elapsed >= self.seconds - 1e-3 else max(0.0, elapsed / self.seconds)
+
+    def done(self, now: float) -> bool:
+        return self.progress(now) >= 1.0

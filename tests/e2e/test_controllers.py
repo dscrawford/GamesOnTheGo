@@ -894,15 +894,21 @@ def test_the_gate_holds_the_door_until_a_fresh_one_second_hold(daemon, sdl):
                         accepted = event
                 # Seated and mapped: the ready-up is padmap's confirm, a
                 # longer hold on the seated pad, which accepts on its own.
+                # Pressed and *not let go*: the hold that rides through the
+                # confirm and is still down when the clone appears is the one
+                # that used to start the game.
                 if mapped and accepted is None and confirmed_at is None:
                     time.sleep(0.5)
-                    pad.hold(BTN_SOUTH, 1.0)
+                    pad.down(BTN_SOUTH)
                     confirmed_at = time.monotonic()
             assert accepted is not None, f"padmap never accepted: mapped={mapped} states={daemon.states[-5:]}"
 
-            # The moment this launch used to start the game. It must not.
+            # The button is still down, well past a second. It must not count.
             time.sleep(2.5)
-            assert seat.poll() is None, "the gate started the game right after accept"
+            assert seat.poll() is None, "the gate started the game on the hold that was never let go"
+            pad.up(BTN_SOUTH)
+            time.sleep(0.5)
+            assert seat.poll() is None
 
             # A fresh press, held for a second, is the go.
             pad.hold(BTN_SOUTH, 1.3)
@@ -914,3 +920,52 @@ def test_the_gate_holds_the_door_until_a_fresh_one_second_hold(daemon, sdl):
             if seat.poll() is None:
                 seat.send_signal(signal.SIGTERM)
                 seat.wait(timeout=5)
+
+
+def test_the_door_ignores_a_button_that_is_down_when_it_opens(daemon, sdl):
+    """A real clone that already shows A pressed when the door opens -- as a
+    Steam Controller's does, since padmap forwards its state -- must count
+    for nothing until it comes up. Driven in-process, event by event."""
+    from gotg_ui.seat import Door
+
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        pad.hold(BTN_SOUTH, 0.7)
+        assert picker.until(lambda p: p.seated(1))
+        picker.run(1.0)                      # the clone is open in `sticks`
+        sticks = picker.sticks
+
+        # A press that began before the door existed, still down.
+        pad.down(BTN_SOUTH)
+        time.sleep(0.3)
+        for _ in range(5):
+            for event in sdl.event.get():
+                if event.type == sdl.JOYDEVICEADDED:
+                    sticks.add(event.device_index)
+            time.sleep(0.05)
+        assert sticks.any_button_down(), "the clone does not show the button down; nothing to prove"
+
+        door = Door(sticks, time.monotonic(), seconds=1.0)
+        end = time.monotonic() + 2.5
+        while time.monotonic() < end:
+            now = time.monotonic()
+            for event in sdl.event.get():
+                door.handle(event, now)
+            assert not door.done(now), "the door opened on a hold that was never let go"
+            time.sleep(0.02)
+
+        pad.up(BTN_SOUTH)
+        time.sleep(0.3)
+        pad.down(BTN_SOUTH)
+        opened = time.monotonic()
+        while time.monotonic() < opened + 3.0 and not door.done(time.monotonic()):
+            now = time.monotonic()
+            for event in sdl.event.get():
+                door.handle(event, now)
+            time.sleep(0.02)
+        pad.up(BTN_SOUTH)
+        took = time.monotonic() - opened
+        assert door.done(time.monotonic()), "a fresh second-long hold did not open the door"
+        assert 0.9 <= took <= 2.0, f"the door opened after {took:.2f}s, not a second"
+        picker.close()
