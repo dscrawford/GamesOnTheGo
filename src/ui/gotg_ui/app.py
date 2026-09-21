@@ -18,7 +18,7 @@ import pygame
 
 from . import around, config, filters, pads, prepare, profiles, trace
 from .art import ArtStore
-from .assign import Session, Watch, attend
+from .assign import KeyHold, Session, Watch, attend
 from .browser import SHELF, Browser
 from .catalog import Game, Library
 from .controllers import assets_dir, control_places, draw_assign, draw_strip
@@ -797,6 +797,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # button is all it takes to become player one. Nothing on screen until
     # somebody does -- see assign.Watch.
     watch = Watch()
+    # The space bar, held, seats the keyboard. Tapped it opens the menu as it
+    # always did -- decided on release, so one key can mean either.
+    space = KeyHold()
     controller_art: dict = {}
     # The storage screen, and the path being typed to add to it.
     storage: Storage | None = None
@@ -1160,7 +1163,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         state.turn(1)
                     elif event.key == pygame.K_PAGEUP:
                         state.turn(-1)
-                    elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                    elif event.key == pygame.K_SPACE:
+                        space.down(time.monotonic())
+                    elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                         if state.game is not None:
                             menu = Menu(
                                 state.game,
@@ -1202,6 +1207,20 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     # No button 4/5 here: SDL2 reports a wheel as MOUSEWHEEL *and*
                     # as those two for compatibility, so handling both turns the
                     # page twice for one scroll.
+                elif event.type == pygame.KEYUP and event.key == pygame.K_SPACE:
+                    # A tap is the menu, as space always was; a hold that
+                    # finished has already seated the keyboard and this is
+                    # just the key coming back up.
+                    if space.up() and state.game is not None:
+                        menu = Menu(
+                            state.game,
+                            state.selected,
+                            browser.is_installed(state.game),
+                            variants_for(state.game),
+                            version_names(versions_for(state.game)),
+                            columns=browser.columns,
+                            installing=installs.running(state.game.key),
+                        )
                 elif event.type == pygame.MOUSEWHEEL:
                     browser.grid.turn(-1 if event.y > 0 else 1)
                 elif pads.direction(event) is not None:
@@ -1282,6 +1301,10 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             listen = attend(padmap, seating, watch)
             if listen is not None:
                 padmap.send(listen)
+            keyboard = space.due(time.monotonic())
+            if keyboard is not None:
+                trace.say("sent", **keyboard)
+                padmap.send(keyboard)
 
             # The full-screen views draw into the band below the strip rather
             # than under it: each starts its heading a sixteenth of the way
@@ -1353,7 +1376,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 strip_status(padmap.status_word, len(padmap.players))
                 if padmap.connected
                 else (padmap_trouble or status_text(padmap.status_word)),
-                progress=seating.view.progress,
+                progress=seating.view.progress or space.progress(time.monotonic()),
+                joining="keyboard" if space.since is not None else None,
             )
             pygame.display.flip()
             # The loader only mirrors streamed text; 30fps halves the redundant

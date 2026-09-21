@@ -379,18 +379,21 @@ def icon_surface(pad_name: str | None, height: int, colour: tuple[int, int, int]
 
 
 def draw_strip(
-    screen, font_at, players: list[dict], slots: int, status: str, progress: float = 0.0
+    screen, font_at, players: list[dict], slots: int, status: str,
+    progress: float = 0.0, joining: str | None = None,
 ) -> int:
     """Draw the strip along the top. Returns the height it used.
 
     The caller offsets everything below by that, so the strip decides its own
     height and the screens under it do not carry a copy of the number.
 
-    `progress` is a hold padmap is reading right now, as a fraction. It is
-    drawn here rather than only on the assignment screen because that is where
-    the hold happens: somebody picks a controller up in front of the library
-    and holds a button, and the ring filling above the games is the only thing
-    that says the machine noticed.
+    `progress` is a hold in flight, as a fraction, and `joining` is which
+    drawing is being revealed by it -- None for the generic pad, "keyboard"
+    for the space bar. It is drawn here rather than only on the assignment
+    screen because that is where the hold happens: somebody picks a
+    controller up in front of the library and holds a button, and the pad
+    filling in above the games is the only thing that says the machine
+    noticed.
     """
     width = screen.get_width()
     pygame.draw.rect(screen, PANEL, pygame.Rect(0, 0, width, HEIGHT))
@@ -407,7 +410,7 @@ def draw_strip(
     # Where the next badge would go, which is where a hold in flight is drawn.
     # With nobody seated that is over the generic pad on the left; with two
     # seated it is after the second, which is where the third will appear.
-    joining = x
+    joining_at = x
 
     if not occupied:
         # Nothing is connected: the generic pad, in the colour that means
@@ -416,9 +419,12 @@ def draw_strip(
         # a controller is read from a sofa and "no controllers" is not.
         icon = icon_surface(None, icon_height, EMPTY_RING)
         if icon is not None:
-            screen.blit(icon, (x - PAD_RADIUS, middle - icon.get_height() // 2))
+            # Not while a keyboard is filling in over the same spot: a pad's
+            # ears around a keyboard's edges read as two things arriving.
+            if not (progress > 0 and joining):
+                screen.blit(icon, (x - PAD_RADIUS, middle - icon.get_height() // 2))
             # The hold reveals the coloured pad exactly over this red one.
-            joining = x - PAD_RADIUS + icon.get_width() // 2
+            joining_at = x - PAD_RADIUS + icon.get_width() // 2
             x += icon.get_width()
         else:
             reach = PAD_RADIUS - 4
@@ -459,17 +465,19 @@ def draw_strip(
                 screen.blit(label, (x + PAD_RADIUS + 6, middle - label.get_height() // 2))
                 width_used = 6 + label.get_width()
         x += PAD_RADIUS * 2 + width_used + GAP * 2
-        joining = x
+        joining_at = x
 
     if progress > 0:
-        draw_hold(screen, (joining, middle), next_seat(players, slots), progress, icon_height)
+        draw_hold(screen, (joining_at, middle), next_seat(players, slots), progress, icon_height, joining)
 
     word = tiny.render(status, True, LABEL_DIM)
     screen.blit(word, (width - word.get_width() - GAP, middle - word.get_height() // 2))
     return HEIGHT
 
 
-def draw_hold(screen, centre, player: int | None, fraction: float, height: int) -> None:
+def draw_hold(
+    screen, centre, player: int | None, fraction: float, height: int, icon_name: str | None = None
+) -> None:
     """A hold on its way: the controller, revealed clockwise from twelve.
 
     Not a ring beside the seat but the pad itself appearing, the way a clock
@@ -484,13 +492,13 @@ def draw_hold(screen, centre, player: int | None, fraction: float, height: int) 
     alpha, which leaves exactly the part inside it.
     """
     colour = colour_for(player) if player else EMPTY_RING
-    icon = icon_surface(None, height, colour)
+    icon = icon_surface(icon_name, height, colour)
     # Something to fill in. With nobody seated the red "no controllers" pad
     # is already there; after the first seat there is nothing at the next
     # place, and a wedge of colour on its own reads as a smudge rather than
     # a controller arriving. A silhouette in the empty seat's dark red gives
     # the sweep a shape to complete.
-    under = icon_surface(None, height, EMPTY)
+    under = icon_surface(icon_name, height, EMPTY)
     if under is not None and fraction < 1.0:
         screen.blit(under, under.get_rect(center=centre))
     if icon is None:
