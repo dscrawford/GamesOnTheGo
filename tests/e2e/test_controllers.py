@@ -850,3 +850,67 @@ def test_the_game_waits_until_somebody_holds_a_button_again(daemon, sdl):
             if not gate.done:
                 client.send({"cmd": "cancel"})
             client.close()
+
+
+# --- a full second, on a fresh press ------------------------------------------
+
+
+def test_the_gate_holds_the_door_until_a_fresh_one_second_hold(daemon, sdl):
+    """The gate as the launcher runs it, against the daemon: the seat hold that
+    runs straight into padmap's confirm must not also start the game. After
+    `accepted` the process stays; it goes only when the pad lets go and holds
+    again for a second.
+    """
+    import signal
+
+    with FakePad("E2E Xbox Pad") as pad:
+        seat = _seat_process(daemon, {"PADMAP_SKIP_DAEMON_CHECK": "1"}, _root())
+        try:
+            # The gate opens a session; one long press seats the pad and runs
+            # on into the confirm. Answer the wizard in between.
+            assert daemon.wait_for("state", seconds=8.0) is not None
+            end = time.monotonic() + 8.0
+            while time.monotonic() < end and "assigning" not in daemon.states:
+                daemon.drain(0.2)
+            assert "assigning" in daemon.states, "the gate opened no session"
+            pad.hold(BTN_SOUTH, 0.7)
+            accepted = None
+            mapped = False
+            confirmed_at = None
+            end = time.monotonic() + 40.0
+            while time.monotonic() < end and accepted is None:
+                for event in daemon.drain(0.2):
+                    kind = event.get("event")
+                    if kind == "mapping" and not event.get("done"):
+                        time.sleep(0.4)
+                        button = WIZARD_BUTTONS.get(str(event.get("control") or ""))
+                        if button is not None:
+                            pad.tap(button, hold=0.12)
+                        else:
+                            daemon.send({"cmd": "skip_control"})
+                    elif kind == "mapping" and event.get("done"):
+                        mapped = True
+                    elif kind == "accepted":
+                        accepted = event
+                # Seated and mapped: the ready-up is padmap's confirm, a
+                # longer hold on the seated pad, which accepts on its own.
+                if mapped and accepted is None and confirmed_at is None:
+                    time.sleep(0.5)
+                    pad.hold(BTN_SOUTH, 1.0)
+                    confirmed_at = time.monotonic()
+            assert accepted is not None, f"padmap never accepted: mapped={mapped} states={daemon.states[-5:]}"
+
+            # The moment this launch used to start the game. It must not.
+            time.sleep(2.5)
+            assert seat.poll() is None, "the gate started the game right after accept"
+
+            # A fresh press, held for a second, is the go.
+            pad.hold(BTN_SOUTH, 1.3)
+            end = time.monotonic() + 4.0
+            while time.monotonic() < end and seat.poll() is None:
+                time.sleep(0.1)
+            assert seat.poll() == 0, "a full second's hold did not start the game"
+        finally:
+            if seat.poll() is None:
+                seat.send_signal(signal.SIGTERM)
+                seat.wait(timeout=5)

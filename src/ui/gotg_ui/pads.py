@@ -32,7 +32,7 @@ from .clones import Owners, is_clone
 
 __all__ = [
     "A", "B", "BACK", "DOWN", "LB", "LEFT", "RB", "RIGHT", "START", "UP", "X", "Y",
-    "Pads", "button", "direction", "init",
+    "Pads", "button", "direction", "init", "released",
 ]
 
 # SDL's own constants, checked against the numbers buttons.py writes out. If a
@@ -98,6 +98,21 @@ def button(event) -> str | None:
             taken=name,
         )
     return name
+
+
+def released(event) -> bool:
+    """Whether this is a button coming back up on a pad padmap published.
+
+    The one thing the launch gate reads besides a press: its ready-up hold
+    must start from a press that began on that screen, so a button already
+    down when the screen appeared -- the hold that took the seat, still going
+    -- does not count until it has come up once.
+    """
+    if event.type not in (pygame.CONTROLLERBUTTONUP, pygame.JOYBUTTONUP):
+        return False
+    if event.type == pygame.JOYBUTTONUP and getattr(event, "instance_id", None) in _mapped:
+        return False
+    return _allowed(event)
 
 
 def direction(event) -> tuple[int, int] | None:

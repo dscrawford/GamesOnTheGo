@@ -33,8 +33,21 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 import pygame  # noqa: E402 - the line above only works ahead of the import
 
+from . import pads as sdl_pads
+from .assign import KeyHold
 from .controllers import Diagram, assets_dir
-from .gate import MAPPING, READYING, SEATING, SKIPPED, Gate, apply, decide, ready_from_the_keyboard, without_controllers
+from .gate import (
+    MAPPING,
+    READY,
+    READYING,
+    SEATING,
+    SKIPPED,
+    Gate,
+    apply,
+    decide,
+    ready_from_the_keyboard,
+    without_controllers,
+)
 from .padmap import Padmap, ensure_daemon
 from .padstrip import EMPTY_RING, LABEL, LABEL_DIM, PANEL, colour_for
 
@@ -50,6 +63,13 @@ FIRST_STATE_TIMEOUT = float(config.get("theme.timeouts.first_state", 3.0))
 # starts anyway. Long enough to read; short enough that a television with no
 # keyboard in the room is not stuck on it. The environment wins, for tests.
 COUNTDOWN = float(os.environ.get("GOTG_SEAT_COUNTDOWN") or config.get("theme.timeouts.seat_countdown", 8.0))
+
+# The hold that starts the game, once padmap has accepted the seats. A full
+# second, on a press that began on this screen: the hold that took the seat
+# ran straight into padmap's confirm, and one press seated somebody and
+# started the game before they had let go. The daemon's accept is padmap's
+# business; this second is ours, read from the clone it just published.
+GO_HOLD = float(os.environ.get("GOTG_SEAT_GO_HOLD") or config.get("theme.timeouts.seat_go_hold", 1.0))
 
 
 def draw(screen, font_at, gate: Gate, title: str, diagram: Diagram | None = None) -> None:
@@ -220,10 +240,71 @@ def run(platform: str, title: str) -> int:
             draw(screen, font_at, gate, title, diagram)
             pygame.display.flip()
             clock.tick(60)
+        if gate.state == READY and gate.seated:
+            _wait_for_go(screen, font_at, clock, gate, title)
     finally:
         pygame.quit()
         pads.close()
     return 0
+
+
+def _wait_for_go(screen, font_at, clock, gate: Gate, title: str) -> None:
+    """padmap has accepted; the game starts when somebody holds for a second.
+
+    Read from the clones padmap just published, through the same rule as the
+    picker -- a pad padmap has not published moves nothing here either. A
+    press already down when this screen appears is the seat hold still
+    going, and does not count: SDL sends no press for it, only the release,
+    and the second starts from the next press.
+    """
+    sticks = sdl_pads.init()
+    hold = KeyHold(seconds=GO_HOLD)
+    while True:
+        now = time.monotonic()
+        for event in pygame.event.get():
+            if event.type == pygame.JOYDEVICEADDED:
+                sticks.add(event.device_index)
+            elif event.type == pygame.JOYDEVICEREMOVED:
+                sticks.remove(event.instance_id)
+            elif event.type == pygame.QUIT:
+                return
+            elif event.type == pygame.KEYDOWN and event.key in (
+                pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE, pygame.K_b
+            ):
+                return
+            elif sdl_pads.button(event) is not None:
+                hold.down(now)
+            elif sdl_pads.released(event):
+                hold.up()
+        if hold.due(now) is not None:
+            return
+        _draw_go(screen, font_at, gate, title, hold.progress(now))
+        pygame.display.flip()
+        clock.tick(60)
+
+
+def _draw_go(screen, font_at, gate: Gate, title: str, fraction: float) -> None:
+    import math
+
+    width, height = screen.get_size()
+    screen.fill(BACKGROUND)
+    heading = font_at(34).render(title, True, LABEL_DIM)
+    screen.blit(heading, ((width - heading.get_width()) // 2, int(height * 0.10)))
+    prompt = font_at(56).render("hold a button for a second to start", True, LABEL)
+    screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.22)))
+    centre = (width // 2, int(height * 0.52))
+    pygame.draw.circle(screen, PANEL, centre, 46)
+    pygame.draw.aacircle(screen, colour_for(1), centre, 46, 3)
+    if fraction > 0:
+        box = pygame.Rect(centre[0] - 58, centre[1] - 58, 116, 116)
+        top = math.pi / 2
+        pygame.draw.arc(screen, colour_for(1), box, top - 2 * math.pi * min(1.0, fraction), top, 6)
+    count = font_at(38).render(str(gate.seated), True, LABEL)
+    screen.blit(count, count.get_rect(center=centre))
+    who = font_at(24).render(", ".join(seat.name or "pad" for seat in gate.seats), True, LABEL_DIM)
+    screen.blit(who, ((width - who.get_width()) // 2, int(height * 0.66)))
+    keys = font_at(22).render("let go, then hold   Enter or Esc start now", True, LABEL_DIM)
+    screen.blit(keys, ((width - keys.get_width()) // 2, int(height * 0.92)))
 
 
 def _hold_the_door(title: str, reason: str) -> int:

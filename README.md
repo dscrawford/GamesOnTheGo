@@ -150,7 +150,7 @@ GOTG_E2E_REQUIRE=1 nix run .#test-controllers   # a machine that cannot run it f
 
 It needs `/dev/uinput` writable and nothing else; each test starts a padmap of its own under a temporary directory and never touches the one you are playing with.
 
-**Before a launch**, `gotg-seat` forgets whatever the daemon remembers, asks for a hold, walks the buttons only if that pad is unmapped for this console, and then waits: the game starts when somebody holds a button again to say they are ready (Enter does it from the keyboard). Then the emulator is bound to what that seated: port N is `padmap Player N`, found by the GUID padmap published, and never a raw pad — `padmap-rs exec` hides those from the game.
+**Before a launch**, `gotg-seat` forgets whatever the daemon remembers, asks for a hold, walks the buttons only if that pad is unmapped for this console, and then waits: the game starts when somebody lets go and holds a button again for a full second (Enter does it from the keyboard). Then the emulator is bound to what that seated: port N is `padmap Player N`, found by the GUID padmap published, and never a raw pad — `padmap-rs exec` hides those from the game.
 
 ## Steam
 
