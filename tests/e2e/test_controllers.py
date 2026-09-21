@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import time
 
+import pytest
 from fakepad import BTN_SOUTH, BTN_START, FakePad, kernel_names
 
 from gotg_ui import pads
@@ -240,3 +241,92 @@ def _socket(daemon):
     from pathlib import Path
 
     return Path(daemon.path)
+
+
+# --- pairing is on the menu, and the menu's top bar says so -----------------
+
+
+def test_pairing_happens_on_the_menu_and_shows_in_the_top_bar(daemon, sdl):
+    """Not the controller screen. The grid, the strip along the top, a hold.
+
+    Three things are asserted against the picker's own models: no assignment
+    screen ever opened, the strip went from "no controllers" to one seat, and
+    the words at its right-hand end changed from an instruction to a fact.
+    """
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+
+        assert not picker.seating.open, "the controller screen opened on its own"
+        assert seats(picker.players) == []
+        assert strip_status(picker.padmap.status_word, 0) == "hold a button on a controller"
+
+        pad.hold(BTN_SOUTH, 0.7)
+        assert picker.until(lambda p: p.seated(1)), "holding a button seated nobody"
+        picker.run(0.3)
+
+        assert not picker.seating.open, "the hold dragged the picker onto the controller screen"
+        assert [player for player, _ in seats(picker.players)] == [1], "the top bar shows no seat"
+        assert strip_status(picker.padmap.status_word, 1) == "controllers assigned"
+        assert next_seat(picker.players) == 2, "the top bar should be ready for player two"
+        picker.close()
+
+
+def test_a_controller_can_still_join_after_the_picker_has_left_for_a_game(daemon, sdl):
+    """Any time: the grid, a game, anything. The picker is gone and a hold still seats you.
+
+    The picker is the client that asked padmap to listen; a game has no
+    client at all. So the picker disconnects, the observer disconnects, and a
+    pad is held with nobody on the socket.
+    """
+    from conftest import Daemon
+
+    with FakePad("E2E Xbox Pad") as first, FakePad("E2E Other Pad", 0x2AAA, 0x5BBB, 1) as second:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        first.hold(BTN_SOUTH, 0.7)
+        assert picker.until(lambda p: p.seated(1))
+        picker.close()          # the picker execs into the game
+        daemon.close()          # and nothing else is listening
+        time.sleep(0.5)
+
+        second.hold(BTN_SOUTH, 0.7)
+        time.sleep(2.0)
+
+        later = Daemon(daemon.path)
+        try:
+            numbered = sorted(p["player"] for p in later.players)
+        finally:
+            later.close()
+        assert numbered == [1, 2], f"a pad held mid-game took no seat: {numbered}"
+        assert "padmap Player 2" in kernel_names()
+
+
+# --- every session starts unseated ------------------------------------------
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="padmap has no way to unseat; see docs/requests/session-daemon.md",
+)
+def test_a_new_session_opens_with_nobody_seated_whatever_padmap_remembers(daemon, sdl):
+    """Open the picker, or a game: nobody is seated until somebody holds a button.
+
+    Today the daemon restores yesterday's seats on start and offers no
+    command to drop them, so this fails -- strictly, so the day the request
+    is answered it fails the other way until the marker comes off.
+    """
+    with FakePad("E2E Xbox Pad") as pad:
+        earlier = Picker(_socket(daemon), sdl)
+        earlier.run(1.0)
+        pad.hold(BTN_SOUTH, 0.7)
+        assert earlier.until(lambda p: p.seated(1))
+        earlier.close()
+
+        # A new session: the picker again, or a game. Same daemon, same pad.
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.5)
+        assert picker.players == [], (
+            f"the session opened with seats already taken: {picker.players}"
+        )
+        picker.close()

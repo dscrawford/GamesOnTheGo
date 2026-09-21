@@ -236,6 +236,11 @@ class Watch:
     it is sent again on each connection and after each change of state, which
     the daemon takes idempotently. Not every frame, which would be a syscall
     sixty times a second to tell a daemon what it already knows.
+
+    Never closed. The daemon keeps seating open after this client is gone, so
+    a pad picked up in the middle of a game takes the next free seat exactly
+    as one picked up in front of the grid does -- and the game is where the
+    second player usually turns up.
     """
 
     slots: int = 4
@@ -281,10 +286,6 @@ class Watch:
         self.asked = here
         return {"cmd": "seating", "open": True, "players": self.slots}
 
-    def closed(self) -> dict:
-        """Stop listening -- the picker is making way for a game."""
-        self.asked = None
-        return {"cmd": "seating", "open": False}
 
 
 def attend(padmap, seating: Session, watch: Watch, *, padmap_here: bool) -> tuple[bool, dict | None]:

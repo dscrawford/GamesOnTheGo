@@ -1352,9 +1352,12 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
         # terminal, so nothing else will ever stop it.
         if preparer is not None and (chosen is None or preparer.game != chosen[0]):
             preparer.cancel()
-        # And padmap stops listening for holds: the next thing on this screen
-        # is a game, which has its own idea of what a button does.
-        padmap.send(watch.closed())
+        # padmap goes on listening for a hold. It used to be told to stop
+        # here, on the theory that a game has its own idea of what a button
+        # does -- but the daemon seats only pads that hold no seat, so a
+        # button in a game reseats nobody, and a second player arriving
+        # mid-level is exactly who this is for. Seating outlives this client
+        # in the daemon, which is what lets it.
 
     # Before the caller execs: the emulator must not inherit a window and a
     # grabbed GPU from a process that is about to stop existing.
