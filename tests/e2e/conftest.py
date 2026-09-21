@@ -89,6 +89,34 @@ def daemon(tmp_path):
                 os.kill(client.pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
+        # And any daemon a test started under this runtime dir since -- the
+        # Steam route replaces the fixture's with one following a gate that
+        # the test then kills, and the follower needs a moment to notice. A
+        # daemon left behind holds the machine's real pads; three of them,
+        # from one evening's experiments, were grabbing the user's
+        # controllers during his own launch. By runtime dir, never by name:
+        # matching argv has killed a user's real daemon from a test before.
+        _reap(home["XDG_RUNTIME_DIR"])
+
+
+def _reap(runtime_dir: str) -> None:
+    """SIGTERM every padmap-rs whose XDG_RUNTIME_DIR is this test's."""
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            with open(f"/proc/{pid}/comm") as comm:
+                if "padmap-rs" not in comm.read():
+                    continue
+            with open(f"/proc/{pid}/environ", "rb") as environ:
+                env = environ.read().split(b"\0")
+        except OSError:
+            continue
+        if f"XDG_RUNTIME_DIR={runtime_dir}".encode() in env:
+            try:
+                os.kill(int(pid), signal.SIGTERM)
+            except ProcessLookupError:
+                pass
 
 
 class Daemon:

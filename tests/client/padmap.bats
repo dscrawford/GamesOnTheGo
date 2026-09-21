@@ -545,15 +545,26 @@ ryujinx_env() {
     printf 'echo game >>"$ORDER_LOG"\n'
   } >"$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
   chmod +x "$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
-  # An environment with pads to bind, and an enumerator that says so.
+  # An environment with pads to bind, and an enumerator that says so -- and
+  # records how it was asked, since how it is asked decides what it can see.
   echo '{"emulator":"ares","console":"Nintendo64"}' >"$GOTG_ROOTS_DIR/env-n64/share/gotg/pads.json"
   export GOTG_PADS="$FAKE_BIN/gotg-pads"
   {
     printf '#!%s\n' "$(command -v bash)"
     printf 'echo pads >>"$ORDER_LOG"\n'
+    printf 'echo "pads hidapi=${SDL_JOYSTICK_HIDAPI-unset} steam=${SDL_JOYSTICK_HIDAPI_STEAM-unset} config=${SDL_GAMECONTROLLERCONFIG:+set}" >>"$SEAT_LOG"\n'
     printf 'echo "[]"\n'
   } >"$GOTG_PADS"
   chmod +x "$GOTG_PADS"
+  # The gate seats somebody: padmap publishes, as a claim would make it.
+  export GOTG_PADMAP_RUNTIME="$TEST_TMP/padmap-rt"
+  mkdir -p "$GOTG_PADMAP_RUNTIME"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'echo seat >>"$ORDER_LOG"\n'
+    printf "cat '%s' >\"\$GOTG_PADMAP_RUNTIME/env.sh\"\n" "$BATS_TEST_DIRNAME/fixtures/padmap-env-one-player.sh"
+  } >"$FAKE_BIN/gotg-seat"
+  chmod +x "$FAKE_BIN/gotg-seat"
   mkdir -p "$TEST_TMP/data"
   cp "$(dirname "$GOTG_BIN")/../share/gotg/data/ares-pads.json" "$TEST_TMP/data/"
   export GOTG_DATA="$TEST_TMP/data"
@@ -562,6 +573,12 @@ ryujinx_env() {
   [ "$status" -eq 0 ]
   # Before the gate, the gate, again after it, then the game.
   [ "$(paste -sd, "$ORDER_LOG")" = "pads,seat,pads,game" ]
+  # Before the gate nothing was published, so the enumerator ran as it
+  # always has. After it, padmap's mapping in hand and hidapi off, or the
+  # clone of a Steam Controller is not in the list at all.
+  [ "$(grep -c '^pads ' "$SEAT_LOG")" -eq 2 ]
+  [ "$(sed -n '1{/^pads /p}' <(grep '^pads ' "$SEAT_LOG"))" = "pads hidapi=unset steam=unset config=" ]
+  [ "$(grep '^pads ' "$SEAT_LOG" | sed -n 2p)" = "pads hidapi=0 steam=0 config=set" ]
 }
 
 @test "the publish is waited for after the gate, not before it" {

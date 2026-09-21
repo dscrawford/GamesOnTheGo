@@ -743,3 +743,110 @@ def test_the_keyboard_takes_a_seat_when_asked(daemon, sdl):
         )
         assert seated, f"padmap seated no keyboard: {picker.players}"
         picker.close()
+
+
+# --- the game waits to be told ---------------------------------------------------
+
+
+# What the fake pad can press for each control padmap's wizard may ask for,
+# by the control names the gamecube layout uses. Anything absent is skipped,
+# which is what a person does with a control their pad does not have.
+WIZARD_BUTTONS = {
+    "a": BTN_SOUTH, "b": 0x131, "x": 0x134, "y": 0x133,
+    "leftshoulder": 0x136, "rightshoulder": 0x137, "start": BTN_START,
+}
+
+
+def test_the_game_waits_until_somebody_holds_a_button_again(daemon, sdl):
+    """Seated and mapped is not "go". The gate sits on "hold a button to start"
+    until padmap's confirm hold completes, and only then does `accepted` arrive.
+
+    The whole gate, against the real daemon: unseat nothing, hold, walk the
+    wizard with the fake pad's own buttons, then prove the game does *not*
+    start on its own, then ready up.
+    """
+    from gotg_ui.gate import READYING, Gate, apply, decide
+
+    with FakePad("E2E Xbox Pad") as pad:
+        client = Padmap(_socket(daemon))
+        assert client.connect()
+        for _ in range(100):
+            for _event in client.poll():
+                pass
+            if client.state:
+                break
+            time.sleep(0.05)
+        gate = Gate(platform="gamecube")
+        gate = apply(gate, client.state)
+        sent: list[dict] = []
+        seen: list[str] = []
+        t0 = time.monotonic()
+
+        def step(seconds: float) -> None:
+            nonlocal gate
+            end = time.monotonic() + seconds
+            while time.monotonic() < end:
+                for event in client.poll():
+                    kind = event.get("event", "?")
+                    if kind == "mapping":
+                        seen.append(
+                            f"{time.monotonic() - t0:.2f} mapping {event.get('control')} "
+                            f"done={event.get('done')} conflict={event.get('conflict')!r}"
+                        )
+                    elif kind == "finish":
+                        seen.append(f"{time.monotonic() - t0:.2f} finish {event.get('frac')}")
+                    elif kind != "progress":
+                        seen.append(f"{time.monotonic() - t0:.2f} {kind}")
+                    gate = apply(gate, event)
+                    if event.get("event") == "mapping" and not event.get("done"):
+                        # A beat between the step and the answer, as a person
+                        # leaves one. padmap debounces each pad: a press 170 ms
+                        # after the last release was not a press to it -- the
+                        # release arrived (`finish 0.0`), the capture never did,
+                        # and the run stood still on the second control.
+                        time.sleep(0.4)
+                        control = str(event.get("control") or "")
+                        button = WIZARD_BUTTONS.get(control)
+                        if button is not None:
+                            seen.append(f"{time.monotonic() - t0:.2f} TAP {control}")
+                            pad.tap(button, hold=0.12)
+                        else:
+                            seen.append(f"{time.monotonic() - t0:.2f} SKIP {control}")
+                            client.send({"cmd": "skip_control"})
+                gate, command = decide(gate)
+                if command is not None:
+                    sent.append(command)
+                    client.send(command)
+                time.sleep(0.02)
+
+        try:
+            step(1.5)
+            assert {"cmd": "begin", "players": 4} in sent
+            pad.hold(BTN_SOUTH, 0.7)
+            end = time.monotonic() + 30.0
+            while time.monotonic() < end and gate.state != READYING and not gate.done:
+                step(0.3)
+            story = "\n".join(seen[-30:])
+            assert gate.state == READYING, f"never reached ready-up: state={gate.state} sent={sent}\n{story}"
+
+            # And stays there. Two seconds of nothing: no accept sent, no
+            # accepted received, the game not started.
+            before = len(sent)
+            step(2.0)
+            assert gate.state == READYING and not gate.done, "the game started on nobody's say-so"
+            assert not any(c.get("cmd") == "accept" for c in sent[before:]), "the gate sent accept by itself"
+            assert not any(x.endswith(" accepted") for x in seen), "padmap accepted with nobody holding anything"
+
+            # The ready-up: a longer hold on the seated pad. padmap's confirm
+            # is 0.7 s; the daemon accepts when it completes.
+            pad.hold(BTN_SOUTH, 1.2)
+            end = time.monotonic() + 8.0
+            while time.monotonic() < end and not gate.done:
+                step(0.2)
+            story = "\n".join(seen[-10:])
+            assert gate.done and gate.state == "ready", f"the ready-up hold did not start the game:\n{story}"
+            assert any(x.endswith(" accepted") for x in seen)
+        finally:
+            if not gate.done:
+                client.send({"cmd": "cancel"})
+            client.close()
