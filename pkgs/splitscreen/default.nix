@@ -32,13 +32,13 @@ let
 in
 stdenvNoCC.mkDerivation {
   pname = "splitscreen";
-  version = "0-unstable-2026-09-17";
+  version = "0-unstable-2026-09-21";
 
   src = fetchFromGitHub {
     owner = "dscrawford";
     repo = "SplitScreenWrapper";
-    rev = "cac7be483b7abc404b5fc90d23cb388c803f314c";
-    hash = "sha256-LSnTgvlh5B4x2Eb81UG1SgO2exy7sKu5/r8EUCJ1/28=";
+    rev = "f1edf1462948739cab023fac3414e81f10fa3c66";
+    hash = "sha256-uSpy9FrVhKi/JB3QA3E+qHtYSw2LDlyg27SvIAhvSQM=";
   };
 
   nativeBuildInputs = [ makeWrapper ];
