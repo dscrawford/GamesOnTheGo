@@ -77,6 +77,11 @@ class Seat:
 
     player: int
     name: str = ""
+    # The device node padmap seated, as it named it (`/dev/input/event9`).
+    # Carried so a drawing can be chosen by what the device *is* -- a Deck and
+    # a Steam Controller share a name and differ only by product id. See
+    # devices.py.
+    node: str = ""
     mappings: tuple[str, ...] = ()
     # padmap's own word for it: mapped, not merely known. True for a pad it
     # bound from the kernel's BTN_ codes as well as one somebody captured by
@@ -200,6 +205,7 @@ def seats_from(players: list | None) -> tuple[Seat, ...]:
         Seat(
             player=p["player"],
             name=str(p.get("name") or ""),
+            node=str(p.get("node") or ""),
             mappings=tuple(str(m) for m in (p.get("mappings") or [])),
             configured=bool(p.get("configured", False)),
         )
@@ -310,6 +316,7 @@ def apply(gate: Gate, event: dict) -> Gate:
         seat = Seat(
             player=player,
             name=str(event.get("name") or ""),
+            node=str(event.get("node") or ""),
             configured=bool(event.get("configured", False)),
         )
         return replace(

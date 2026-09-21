@@ -207,5 +207,20 @@ frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).
   line: pads opened and whether they are clones, every press and its
   verdict, padmap events and commands, keyboard nodes held). Two real bugs
   were found that way in one evening; neither reproduced with fake pads.
-- The Deck (`steamdeck`, 100.80.53.67) does not accept this machine's ssh
-  key; on-device checks need the user.
+- The Deck answers `ssh deck@192.168.0.80` from here with no password (it
+  also has a tailnet name, `steamdeck`/100.80.53.67). Nothing of GOTG's is
+  installed on it -- no `gotg`, no `padmap` -- so an on-device check means
+  copying the modules over and running them against its real `/proc` and
+  `/sys`, which is how `tests/ui/fixtures/input-devices-steam-deck.txt` and
+  the `hidraw-steam-deck/` tree were captured.
+- **A Deck calls itself a Steam Controller.** Its built-in controls report
+  `Vendor=28de Product=1205` under the name `Valve Software Steam
+  Controller`, character for character what a Puck reports, so no name rule
+  can draw it as a handheld. `config/icons.yaml` has an `ids:` table, tried
+  before the names, and `gotg_ui/devices.py` resolves a seat's `node` to
+  `vendor:product` -- through `/proc/bus/input/devices` for an evdev node and
+  `/sys/class/hidraw/*/device/uevent` for the hidraw-only pads (a Deck and a
+  Steam Controller have no joystick evdev node at all). With Steam Input
+  running, the Deck's controls arrive instead as an anonymous
+  `Microsoft X-Box 360 pad 0` (28de:11ff) with no phys or uniq -- there is
+  nothing there to tell it from a real Xbox pad, and it draws as one.

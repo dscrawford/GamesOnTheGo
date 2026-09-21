@@ -6,18 +6,29 @@
 #
 # Order is the whole of it. Steam's virtual pad reports as an Xbox pad wearing
 # a different hat, so "steam virtual" has to be tried before "steam"; "nes "
-# has a trailing space so it cannot swallow "genesis". A Deck's built-in
-# controls report as "Steam Deck" and get the handheld drawing, which is the
-# shape somebody is actually holding; the Puck says "Valve Software Steam
-# Controller Puck" and matches "steam controller" before it ever reaches
-# "valve".
+# has a trailing space so it cannot swallow "genesis"; the Puck says "Valve
+# Software Steam Controller Puck" and matches "steam controller" before it
+# ever reaches "valve".
+#
+# Some pads no name can tell apart. `ids` is tried first, by exact
+# vendor:product in lowercase hex, read from /proc/bus/input/devices for the
+# node padmap seated (`gotg_ui/devices.py`).
 
 fallback: generic
+
+# Checked before the names. A Steam Deck reports N: Name="Valve Software Steam
+# Controller", character for character what a Steam Controller reports, so
+# nothing but the product id can give it the handheld drawing -- which is the
+# shape the person is actually holding. 1102 and 1142 are the wired and
+# wireless Steam Controllers, 1304 the Puck; those already reach "steam" by
+# name and are left to.
+ids:
+  - "28de:1205":          steamdeck
 
 rules:
   - "steam virtual":      xbox
   - "steam controller":   steam
-  - "steam deck":         steamdeck
+  - "steam deck":         steamdeck   # Steam Input names a Deck this; the hardware does not
   - "valve":              steam
   - "gamecube":           gamecube
   - "nintendo gamecube":  gamecube

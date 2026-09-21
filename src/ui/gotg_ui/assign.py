@@ -29,6 +29,9 @@ class Seat:
 
     player: int
     name: str = ""
+    # The device node padmap seated. A drawing is chosen from it where the
+    # name cannot say which pad this is -- see devices.py.
+    node: str = ""
     icon: str = ""
     configured: bool = True
 
@@ -110,6 +113,7 @@ def apply(assignment: Assignment, event: dict) -> Assignment:
             Seat(
                 player=p["player"],
                 name=str(p.get("name") or ""),
+                node=str(p.get("node") or ""),
                 icon=str(p.get("icon") or ""),
             )
             for p in (event.get("players") or [])
@@ -140,6 +144,7 @@ def apply(assignment: Assignment, event: dict) -> Assignment:
         seat = Seat(
             player=player,
             name=str(event.get("name") or ""),
+            node=str(event.get("node") or ""),
             icon=str(event.get("icon") or ""),
             configured=bool(event.get("configured", True)),
         )

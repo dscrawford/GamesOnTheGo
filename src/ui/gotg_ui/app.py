@@ -16,7 +16,7 @@ import time
 
 import pygame
 
-from . import around, config, filters, pads, prepare, profiles, trace
+from . import around, config, devices, filters, pads, prepare, profiles, trace
 from .art import ArtStore
 from .assign import KeyHold, Session, Watch, attend
 from .browser import SHELF, Browser
@@ -891,10 +891,14 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 if event.type == pygame.JOYDEVICEADDED:
                     sticks.add(event.device_index)
                     hush.refresh()
+                    # Event node numbers are reused, so what /proc said about
+                    # eventN a moment ago can be another device now.
+                    devices.forget()
                     continue
                 if event.type == pygame.JOYDEVICEREMOVED:
                     sticks.remove(event.instance_id)
                     hush.refresh()
+                    devices.forget()
                     continue
 
                 # On the loader, the only input is the way out. Everything else

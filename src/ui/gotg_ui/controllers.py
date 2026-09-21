@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 import pygame
 
-from . import config, icons
+from . import config, devices, icons
 from .bindings import bindings_for, console_for, players_for
 from .leaders import Anchor, place
 from .padstrip import (
@@ -350,7 +350,7 @@ def _note(screen, font_at, headline: str, detail: str) -> None:
 _icons: dict[tuple[str, int, tuple[int, int, int]], object] = {}
 
 
-def icon_surface(pad_name: str | None, height: int, colour: tuple[int, int, int]):
+def icon_surface(pad_name: str | None, height: int, colour: tuple[int, int, int], ids: str | None = None):
     """The drawing of this controller, `height` tall, in one colour.
 
     The artwork is a black silhouette, which on a dark strip is a black
@@ -363,7 +363,7 @@ def icon_surface(pad_name: str | None, height: int, colour: tuple[int, int, int]
     the number says which player and the colour is what makes it answerable
     from a sofa without reading anything.
     """
-    path = icons.icon_image(pad_name)
+    path = icons.icon_image(pad_name, ids)
     if path is None:
         return None
     key = (str(path), height, colour)
@@ -458,7 +458,11 @@ def draw_strip(
         # shape of the pad in a player's hands is the thing they can check
         # against what they are holding. An unrecognised pad is the generic
         # drawing, which still says a pad is there.
-        icon = icon_surface(seat.get("model") or seat.get("name"), icon_height, colour)
+        # By the node's vendor:product where that answers, because a Deck and a
+        # Steam Controller report one name between them -- see devices.py.
+        icon = icon_surface(
+            seat.get("model") or seat.get("name"), icon_height, colour, devices.ids_for(seat.get("node"))
+        )
         width_used = 0
         if icon is not None:
             screen.blit(icon, (x + PAD_RADIUS + 6, middle - icon.get_height() // 2))
@@ -480,7 +484,9 @@ def draw_strip(
     return HEIGHT
 
 
-def draw_reveal(screen, centre, icon_name: str | None, colour, fraction: float, height: int) -> None:
+def draw_reveal(
+    screen, centre, icon_name: str | None, colour, fraction: float, height: int, ids: str | None = None
+) -> None:
     """A controller appearing: its drawing, revealed clockwise from twelve.
 
     Over a silhouette of the same in the empty seat's dark red, so the sweep
@@ -493,10 +499,10 @@ def draw_reveal(screen, centre, icon_name: str | None, colour, fraction: float, 
     transparent surface of the icon's size and multiplied into the icon's
     alpha, which leaves exactly the part inside it.
     """
-    under = icon_surface(icon_name, height, EMPTY)
+    under = icon_surface(icon_name, height, EMPTY, ids)
     if under is not None and fraction < 1.0:
         screen.blit(under, under.get_rect(center=centre))
-    icon = icon_surface(icon_name, height, colour)
+    icon = icon_surface(icon_name, height, colour, ids)
     if icon is None:
         # No artwork to reveal: a ring, rather than nothing at all.
         radius = height // 2
@@ -516,10 +522,16 @@ def draw_reveal(screen, centre, icon_name: str | None, colour, fraction: float, 
 
 
 def draw_hold(
-    screen, centre, player: int | None, fraction: float, height: int, icon_name: str | None = None
+    screen,
+    centre,
+    player: int | None,
+    fraction: float,
+    height: int,
+    icon_name: str | None = None,
+    ids: str | None = None,
 ) -> None:
     """A hold on its way, on the strip: the joining seat's colour, its icon."""
-    draw_reveal(screen, centre, icon_name, colour_for(player) if player else EMPTY_RING, fraction, height)
+    draw_reveal(screen, centre, icon_name, colour_for(player) if player else EMPTY_RING, fraction, height, ids)
 
 
 def draw_assign(screen, font_at, view) -> None:
@@ -572,13 +584,14 @@ def draw_assign(screen, font_at, view) -> None:
         # in again over a dark silhouette, so the two are not one thing twice.
         below = (centre[0], middle + 62)
         model = getattr(seat, "model", None) or (seat.name if seat else None)
+        ids = devices.ids_for(getattr(seat, "node", "")) if seat else None
         if seat is None and view.progress > 0 and player == view.waiting_for:
             draw_reveal(screen, below, None, colour_for(player), view.progress, 44)
             continue
         if seat is not None and view.confirm > 0:
-            draw_reveal(screen, below, model, colour_for(player), view.confirm, 44)
+            draw_reveal(screen, below, model, colour_for(player), view.confirm, 44, ids)
             continue
-        icon = icon_surface(model, 44, colour_for(player) if seat else EMPTY_RING)
+        icon = icon_surface(model, 44, colour_for(player) if seat else EMPTY_RING, ids)
         if icon is not None:
             screen.blit(icon, icon.get_rect(center=below))
         else:
