@@ -25,7 +25,7 @@ pad is asked for its hold and nothing more.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from . import schemes
 
@@ -121,6 +121,10 @@ class Gate:
     # Commands padmap has refused. Not retried, because the same command would
     # be refused the same way for ever.
     refused: tuple[str, ...] = ()
+    # What the wizard has bound so far, control -> binding, from its last
+    # step. The screen says what the previous press became, which is the
+    # only way to see a binding while making it.
+    captured: dict = field(default_factory=dict)
     # A capture is running. Every step of one is a `mapping` event, and a step
     # is not an answer to `map` -- treating it as one sends a second `map`,
     # which starts a second capture, which sends more steps.
@@ -310,6 +314,7 @@ def apply(gate: Gate, event: dict) -> Gate:
                 label="",
                 conflict="",
             )
+        captured = event.get("captured")
         return replace(
             gate,
             state=MAPPING,
@@ -320,6 +325,7 @@ def apply(gate: Gate, event: dict) -> Gate:
             index=int(event.get("index") or 0),
             total=int(event.get("total") or 0),
             conflict=str(event.get("conflict") or ""),
+            captured=dict(captured) if isinstance(captured, dict) else gate.captured,
         )
 
     if kind == "progress":
@@ -360,6 +366,23 @@ def apply(gate: Gate, event: dict) -> Gate:
     return gate
 
 
+def rebind(gate: Gate) -> tuple[Gate, dict | None]:
+    """Walk the buttons again, on purpose, for the first seated pad.
+
+    Asked for from the door: somebody looked at what their buttons do and
+    wants them otherwise. Back through the wizard, then the door again.
+    """
+    if not gate.seats or gate.wizard or gate.awaiting:
+        return gate, None
+    seat = gate.seats[0]
+    return replace(gate, state=MAPPING, awaiting="map"), {
+        "cmd": "map",
+        "player": seat.player,
+        "layout": gate.layout,
+        "scope": gate.scope,
+    }
+
+
 def without_controllers(reason: str, seconds_left: float) -> tuple[str, str]:
     """What the launch window says when padmap cannot be asked: why, and how long.
 
@@ -375,8 +398,13 @@ def without_controllers(reason: str, seconds_left: float) -> tuple[str, str]:
 
 
 # A press this soon after the door opens is the old hold, whatever the pad's
-# state said: SDL reports a button already down within a frame of opening.
-ARM_QUIET = 0.25
+# state said. Two ways it arrives late: SDL reports a button already down
+# within a frame of opening, and padmap forwards the state it held back
+# during the wizard when the wizard ends -- measured at 120 ms after the
+# capture closed, which is after the door has opened. A full second covers
+# both with room; a person who presses within a second of the screen
+# appearing lets go and holds again, which is what the footer says to do.
+ARM_QUIET = 1.0
 
 
 @dataclass

@@ -230,18 +230,23 @@ def draw(
     cache: dict,
     highlight: str | None = None,
     bound: dict[str, str] | None = None,
+    heading: str | None = None,
+    keys: str | None = None,
+    footer: str | None = None,
 ) -> None:
     """The whole screen: pad, labels, leaders, and whatever is missing.
 
     `bound` is what each control is actually bound to on the controller in
     hand, read off padmap's profile. Without it the screen can say a console
-    has a Z button; with it, it can say which button Z is.
+    has a Z button; with it, it can say which button Z is. `heading`, `keys`
+    and `footer` are the launch gate's, which shows this same drawing with
+    its own words around it; None is the picker's.
     """
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
 
     bound_map = bound or {}
-    title = font_at(46).render(f"Controller — {platform}", True, TEXT)
+    title = font_at(46).render(heading if heading is not None else f"Controller — {platform}", True, TEXT)
     screen.blit(title, ((width - title.get_width()) // 2, int(height * 0.045)))
 
     shown = resolve(platform)
@@ -301,7 +306,7 @@ def draw(
         x = item.x + 8 if item.align == "left" else item.x - text.get_width() - 8
         screen.blit(text, (int(x), int(item.y)))
 
-    line = (
+    line = footer if footer is not None else (
         f"{console}  ·  {len(anchors)} of {len(bindings)} inputs  ·  "
         f"{seats} player{'s' if seats != 1 else ''}   —   applied to every game on this platform"
     )
@@ -313,8 +318,8 @@ def draw(
     # Said, because a cursor that moves is not obviously a cursor that can be
     # moved. Nothing about adding a second input: padmap holds one binding per
     # control, so offering it would be offering something with nowhere to go.
-    keys = font_at(20).render("d-pad or arrows to move around the pad", True, TEXT_DIM)
-    screen.blit(keys, ((width - keys.get_width()) // 2, int(height * 0.055)))
+    hint = font_at(20).render(keys if keys is not None else "d-pad or arrows to move around the pad", True, TEXT_DIM)
+    screen.blit(hint, ((width - hint.get_width()) // 2, int(height * 0.055)))
 
     # Said out loud rather than left to be noticed: a diagram that quietly drew
     # twenty-one of twenty-two would read as a complete answer.

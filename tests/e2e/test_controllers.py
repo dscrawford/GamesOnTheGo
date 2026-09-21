@@ -449,7 +449,8 @@ def test_a_game_launch_begins_with_a_hold_whatever_was_seated(daemon, sdl):
         try:
             step(2.0)
             assert sent and sent[0] == {"cmd": "unseat"}, f"the gate's first word was not unseat: {sent}"
-            assert {"cmd": "begin", "players": 4} in sent, f"no hold was asked for: {sent}"
+            assert {"cmd": "seating", "open": True, "players": 4} in sent, f"no hold was listened for: {sent}"
+            assert not any(c.get("cmd") == "begin" for c in sent), "the gate opened a session"
             assert gate.state == SEATING
             assert gate.seated == 0, "the gate is asking for a hold with somebody still seated"
             # The clone goes when the kernel gets round to it, and the name
@@ -857,19 +858,26 @@ def test_the_gate_holds_the_door_until_a_fresh_one_second_hold(daemon, sdl):
                     if kind == "mapping" and not event.get("done"):
                         time.sleep(0.4)
                         button = WIZARD_BUTTONS.get(str(event.get("control") or ""))
+                        last = int(event.get("index") or 0) + 1 >= int(event.get("total") or 0)
                         if button is not None:
                             pad.tap(button, hold=0.12)
                         else:
                             daemon.send({"cmd": "skip_control"})
+                        if last:
+                            # Press *before* the wizard closes, and keep it
+                            # down: this is the hold that used to ride
+                            # through to the door and start the game.
+                            time.sleep(0.2)
+                            pad.down(0x136)
                     elif kind == "mapping" and event.get("done"):
                         mapped = True
             assert mapped, f"the wizard never finished: {daemon.states[-5:]}"
-            pad.down(BTN_SOUTH)
 
-            # The button is down, well past a second. It must not count.
+            # The button was down before the door opened and still is, well
+            # past a second. It must not count.
             time.sleep(2.5)
             assert seat.poll() is None, "the gate started the game on the hold that was never let go"
-            pad.up(BTN_SOUTH)
+            pad.up(0x136)
             time.sleep(0.5)
             assert seat.poll() is None
 
@@ -962,6 +970,58 @@ def test_a_controller_switched_on_while_the_gate_is_up_takes_a_seat(daemon, sdl)
                     "a controller switched on during the gate could not take a seat"
                 )
                 assert seat.poll() is None
+        finally:
+            seat.send_signal(signal.SIGTERM)
+            seat.wait(timeout=5)
+
+
+# --- change the bindings from the door ------------------------------------------
+
+
+def test_a_tap_of_y_at_the_door_walks_the_buttons_again(daemon, sdl):
+    """Note 2: from the door, somebody can ask for the wizard again. Y, tapped
+    on the seated pad, and the daemon starts a fresh capture."""
+    import signal
+
+    with FakePad("E2E Xbox Pad") as pad:
+        seat = _seat_process(daemon, {"PADMAP_SKIP_DAEMON_CHECK": "1"}, _root())
+        try:
+            assert daemon.wait_for("state", seconds=8.0) is not None
+            time.sleep(1.0)
+            pad.hold(BTN_SOUTH, 0.7)
+            assert daemon.wait_for("claim", seconds=8.0) is not None
+            steps = 0
+            mapped = False
+            end = time.monotonic() + 40.0
+            while time.monotonic() < end and not mapped:
+                for event in daemon.drain(0.2):
+                    if event.get("event") == "mapping" and not event.get("done"):
+                        steps += 1
+                        time.sleep(0.4)
+                        button = WIZARD_BUTTONS.get(str(event.get("control") or ""))
+                        if button is not None:
+                            pad.tap(button, hold=0.12)
+                        else:
+                            daemon.send({"cmd": "skip_control"})
+                    elif event.get("event") == "mapping" and event.get("done"):
+                        mapped = True
+            assert mapped and steps >= 10, f"the first wizard did not run: {steps} steps"
+
+            # The door is up. Tapped -- down, up, well short of a second --
+            # Y asks for the walk again. Which raw button SDL calls Y depends
+            # on whether padmap's mapping file existed when the gate started
+            # (raw 2, the walk above) or SDL fell back to its Xbox layout
+            # (raw 3); a person would press the one labelled Y. Try both.
+            time.sleep(1.5)
+            assert seat.poll() is None
+            again = None
+            for raw in (0x134, 0x133):
+                pad.tap(raw, hold=0.15)
+                again = daemon.wait_for("mapping", seconds=4.0)
+                if again is not None:
+                    break
+            assert again is not None and not again.get("done"), "Y at the door started no second walk"
+            assert seat.poll() is None, "the gate exited on a tap"
         finally:
             seat.send_signal(signal.SIGTERM)
             seat.wait(timeout=5)
