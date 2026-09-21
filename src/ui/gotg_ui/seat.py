@@ -33,8 +33,8 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 import pygame  # noqa: E402 - the line above only works ahead of the import
 
+from . import devices, profiles, trace
 from . import pads as sdl_pads
-from . import profiles, trace
 from .controllers import Diagram, assets_dir, draw_reveal
 from .controllers import draw as draw_diagram
 from .gate import (
@@ -424,6 +424,7 @@ def _draw_go(
     draw_reveal(
         screen, (int(width * 0.92), int(height * 0.10)),
         first.name if first else None, colour_for(1), fraction, int(height * 0.09),
+        devices.ids_for(first.node) if first else None,
     )
 
 
@@ -439,7 +440,7 @@ def _draw_seats(screen, font_at, gate: Gate, middle: int) -> None:
         pygame.draw.aacircle(screen, colour, centre, radius)
         number = font_at(28).render(str(seat.player), True, (20, 20, 24))
         screen.blit(number, number.get_rect(center=centre))
-        draw_reveal(screen, (centre[0] + radius + 30, middle), seat.name, colour, 1.0, 40)
+        draw_reveal(screen, (centre[0] + radius + 30, middle), seat.name, colour, 1.0, 40, devices.ids_for(seat.node))
 
 
 def _hold_the_door(title: str, reason: str) -> int:

@@ -33,6 +33,19 @@ def _rules() -> list[tuple[str, str]]:
     return out
 
 
+def _id_rules() -> list[tuple[str, str]]:
+    """The `vendor:product` table, for the pads a name cannot identify.
+
+    Exact matches, not substrings: an id is an identifier, which is the whole
+    reason these exist beside the name rules rather than among them.
+    """
+    out: list[tuple[str, str]] = []
+    for entry in config.get("icons.ids", []) or []:
+        if isinstance(entry, dict):
+            out.extend((str(k).lower().strip(), str(v)) for k, v in entry.items())
+    return out
+
+
 def _fallback() -> str:
     """The generic pad. An unknown controller is still a controller, and the
     generic drawing says "a pad is here" -- which is the question asked."""
@@ -42,13 +55,24 @@ def _fallback() -> str:
 FALLBACK = "generic"
 
 
-def icon_name(pad_name: str | None) -> str:
-    """The icon a controller's name asks for, or the generic pad.
+def icon_name(pad_name: str | None, ids: str | None = None) -> str:
+    """The icon a controller asks for, by its ids first and its name after.
 
-    A name nobody has a rule for is not a failure: an unknown controller is
-    still a controller, and the generic drawing says "a pad is here" — which is
-    the question the strip answers.
+    `ids` is `vendor:product` in lowercase hex (`devices.ids_for`), and it wins
+    where it is known because a name is what a maker wrote and an id is what a
+    device is: a Deck calls itself "Valve Software Steam Controller", exactly
+    as a Puck does, and only 28de:1205 says which of the two somebody is
+    holding.
+
+    A pad nobody has a rule for either way is not a failure: an unknown
+    controller is still a controller, and the generic drawing says "a pad is
+    here" — which is the question the strip answers.
     """
+    if ids:
+        wanted = str(ids).lower().strip()
+        for needle, icon in _id_rules():
+            if needle == wanted:
+                return icon
     lowered = (pad_name or "").lower()
     for needle, icon in _rules():
         if needle in lowered:
@@ -70,14 +94,14 @@ def controllers_dir() -> pathlib.Path:
     return pathlib.Path(__file__).resolve().parent.parent / "assets" / "controllers"
 
 
-def icon_path(pad_name: str | None) -> pathlib.Path | None:
+def icon_path(pad_name: str | None, ids: str | None = None) -> pathlib.Path | None:
     """Where that icon's file is, or None if there is no artwork at all.
 
     Icons first, then the console diagrams: a console drawn once for the
     binding screen is the same picture the strip wants, and vendoring it twice
     would be two copies to de-brand and two to keep in step.
     """
-    name = icon_name(pad_name)
+    name = icon_name(pad_name, ids)
     for directory in (icons_dir(), controllers_dir()):
         candidate = directory / f"{name}.svg"
         if candidate.exists():
@@ -99,7 +123,7 @@ def built_dir() -> pathlib.Path:
     return base / "icons"
 
 
-def icon_image(pad_name: str | None) -> pathlib.Path | None:
+def icon_image(pad_name: str | None, ids: str | None = None) -> pathlib.Path | None:
     """The PNG to draw for this controller, or None when none was built.
 
     The generic pad stands in for anything unrecognised *and* for anything
@@ -114,7 +138,7 @@ def icon_image(pad_name: str | None) -> pathlib.Path | None:
     except (OSError, ValueError):
         return None
     files = manifest.get("icons", {})
-    for name in (icon_name(pad_name), _fallback(), FALLBACK):
+    for name in (icon_name(pad_name, ids), _fallback(), FALLBACK):
         filename = files.get(name)
         if filename:
             candidate = directory / str(filename)
