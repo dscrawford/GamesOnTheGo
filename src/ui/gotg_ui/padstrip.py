@@ -132,3 +132,38 @@ def next_seat(players: list[dict], slots: int = 4) -> int | None:
         if player not in taken:
             return player
     return None
+
+
+def wedge(centre: tuple[float, float], radius: float, fraction: float, step: float = 5.0) -> list[tuple[float, float]]:
+    """A pie slice from twelve o'clock, clockwise, `fraction` of the way round.
+
+    The polygon that reveals a controller while its button is held: what is
+    drawn is the icon inside this shape, so the pad appears the way a clock
+    hand would uncover it. Twelve rather than three because that is where a
+    person starts reading a circle, and clockwise because that is the way
+    time goes; pygame's own arcs run the other way from the other place,
+    which is why this is a polygon and not one of those.
+
+    Screen coordinates, y down. Empty when there is nothing to show, and the
+    whole disc for anything past one -- a fraction is a fraction.
+    """
+    if fraction <= 0:
+        return []
+    fraction = min(1.0, fraction)
+    cx, cy = centre
+    points = [(cx, cy)]
+    sweep = 360.0 * fraction
+    angle = 0.0
+    while angle < sweep:
+        points.append(_on_circle(cx, cy, radius, angle))
+        angle += step
+    points.append(_on_circle(cx, cy, radius, sweep))
+    return points
+
+
+def _on_circle(cx: float, cy: float, radius: float, degrees: float) -> tuple[float, float]:
+    """Clockwise from twelve, in a coordinate system where y grows downward."""
+    import math
+
+    theta = math.radians(degrees)
+    return (cx + radius * math.sin(theta), cy - radius * math.cos(theta))
