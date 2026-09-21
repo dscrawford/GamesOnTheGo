@@ -125,6 +125,10 @@ class Gate:
     # seats that come after are this launch's own, taken by a hold in front
     # of this screen, and forgetting those would be a gate nobody gets past.
     unseated: bool = False
+    # A hold on a pad that has no seat yet, as far round as it has got:
+    # padmap's `progress`, which is the seating screen's whole answer to "is
+    # it registering my button?"
+    progress: float = 0.0
     # The ready-up hold, as far round as it has got. padmap's `confirm`: a
     # longer hold on a pad that already has a seat, which the daemon takes as
     # accept when it completes. The game does not start until it does.
@@ -292,6 +296,7 @@ def apply(gate: Gate, event: dict) -> Gate:
             gate,
             seats=tuple(sorted((*others, seat), key=lambda s: s.player)),
             message="",
+            progress=0.0,
             awaiting="" if gate.awaiting == "unseat" else gate.awaiting,
         )
 
@@ -321,6 +326,10 @@ def apply(gate: Gate, event: dict) -> Gate:
             total=int(event.get("total") or 0),
             conflict=str(event.get("conflict") or ""),
         )
+
+    if kind == "progress":
+        frac = event.get("frac")
+        return replace(gate, progress=float(frac) if isinstance(frac, (int, float)) else 0.0)
 
     if kind == "confirm":
         frac = event.get("frac")
