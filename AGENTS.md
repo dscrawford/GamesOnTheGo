@@ -178,6 +178,13 @@ frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).
   pad. Prefer `seating` mode (no grab) for anything on the grid.
 - The picker `execvp`s into the game: its pid survives the hop, which is why
   the daemon follows it and the launcher's `--follow $$` is the same pid.
+- **Latency is a thing the tests measure.** `tests/e2e` times a press from
+  the source's `write()` to the clone's `read()`: under a frame (16.7 ms),
+  against 0.03 ms seen in practice. Seating open costs ~108 ms, because
+  padmap rescans every device on every 20 ms tick and one scan takes ~100 ms
+  here, so `gotg-seat` closes seating before the game starts. The strict
+  xfail `test_a_pad_can_join_mid_game_without_costing_the_game_its_input`
+  fails the day padmap makes that scan cheap -- take the close out then.
 - A clone's identity is `mirror` unless an environment's `padIdentity` says
   otherwise (`src/client/env/lib.nix` -> `pads.json` -> `padmap_identity`).
   Only the decompiled ports ask for `xbox360`, and `padmap.sh` refuses it for

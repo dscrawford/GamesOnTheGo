@@ -153,6 +153,8 @@ GOTG_E2E_REQUIRE=1 nix run .#test-controllers   # a machine that cannot run it f
 
 It needs `/dev/uinput` writable and nothing else; each test starts a padmap of its own under a temporary directory and never touches the one you are playing with.
 
+**During a game** padmap stops listening for new holds: with seating open it rescans every input device 50 times a second, and a press then takes ~108 ms to reach the game instead of ~0.03 ms. A pad cannot join mid-level until [that is fixed](docs/requests/seating-costs-the-game-its-input.md); the latency is measured by `tests/e2e`.
+
 **Before a launch**, `gotg-seat` forgets whatever the daemon remembers, asks for a hold, walks the buttons only if that pad is unmapped for this console, and then waits: the game starts when somebody lets go and holds a button again for a full second (Enter does it from the keyboard). Then the emulator is bound to what that seated: port N is `padmap Player N`, found by the GUID padmap published, and never a raw pad — `padmap-rs exec` hides those from the game.
 
 ## Steam
