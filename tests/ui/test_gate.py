@@ -15,6 +15,7 @@ from gotg_ui.gate import (
     SEATING,
     SKIPPED,
     Gate,
+    GoHold,
     Seat,
     apply,
     console_scope,
@@ -426,3 +427,52 @@ def test_a_hold_in_flight_reaches_the_seating_screen_and_a_claim_ends_it():
     assert gate.progress == 0.6
     gate = apply(gate, {"event": "claim", "player": 1, "name": "pad"})
     assert gate.progress == 0.0
+
+
+# --- the second that starts the game ------------------------------------------
+
+
+def test_a_button_already_down_when_the_door_opens_does_not_count():
+    # SDL reports it pressed the instant the clone is opened. That is the
+    # hold that finished the wizard, still going.
+    hold = GoHold(seconds=1.0, opened=100.0)
+    hold.pressed(100.02)
+    assert hold.progress(101.5) == 0.0
+    assert not hold.done(101.5)
+
+
+def test_a_button_the_pad_says_is_down_at_open_counts_for_nothing_until_it_comes_up():
+    # padmap forwards a Steam Controller's state, so its clone shows A down
+    # from its first frame, and SDL may report that press late or never.
+    # The pad was asked; the answer outranks the quiet.
+    hold = GoHold(seconds=1.0, opened=100.0, held_at_open=True)
+    hold.pressed(101.0)
+    assert not hold.done(103.0)
+    hold.released(103.1)
+    hold.pressed(103.2)
+    assert hold.done(104.2)
+
+
+def test_letting_go_arms_the_door_and_the_next_press_is_the_one():
+    hold = GoHold(seconds=1.0, opened=100.0)
+    hold.pressed(100.02)
+    hold.released(100.8)
+    hold.pressed(101.0)
+    assert abs(hold.progress(101.5) - 0.5) < 1e-9
+    assert hold.done(102.0)
+
+
+def test_nothing_held_at_open_means_the_first_press_counts():
+    hold = GoHold(seconds=1.0, opened=100.0)
+    hold.pressed(100.6)
+    assert hold.done(101.6)
+
+
+def test_a_press_let_go_early_starts_over():
+    hold = GoHold(seconds=1.0, opened=100.0)
+    hold.pressed(100.6)
+    hold.released(101.0)
+    assert hold.progress(101.5) == 0.0
+    hold.pressed(101.2)
+    assert not hold.done(102.1)
+    assert hold.done(102.2)

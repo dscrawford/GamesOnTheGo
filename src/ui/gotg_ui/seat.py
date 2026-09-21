@@ -34,7 +34,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame  # noqa: E402 - the line above only works ahead of the import
 
 from . import pads as sdl_pads
-from .assign import KeyHold
+from . import trace
 from .controllers import Diagram, assets_dir, draw_reveal
 from .gate import (
     MAPPING,
@@ -43,6 +43,7 @@ from .gate import (
     SEATING,
     SKIPPED,
     Gate,
+    GoHold,
     apply,
     decide,
     ready_from_the_keyboard,
@@ -240,37 +241,63 @@ def run(platform: str, title: str) -> int:
     return 0
 
 
-def _wait_for_go(screen, font_at, clock, gate: Gate, title: str) -> None:
-    """padmap has accepted; the game starts when somebody holds for a second.
+class Door:
+    """The go screen's decision, one event at a time, so a test can drive it.
 
-    Read from the clones padmap just published, through the same rule as the
-    picker -- a pad padmap has not published moves nothing here either. A
-    press already down when this screen appears is the seat hold still
-    going, and does not count: SDL sends no press for it, only the release,
-    and the second starts from the next press.
+    Opened over the pads SDL has now -- the clones padmap just published --
+    and asks them what is down. A button already held is the hold that
+    finished the wizard and rode through padmap's confirm; it does not
+    count, and nothing does until it has come up.
     """
-    sticks = sdl_pads.init()
-    hold = KeyHold(seconds=GO_HOLD)
+
+    def __init__(self, sticks, now: float, seconds: float = GO_HOLD):
+        self.sticks = sticks
+        self.hold = GoHold(seconds=seconds, opened=now, held_at_open=sticks.any_button_down())
+        trace.say("door-open", pads=len(sticks), held_at_open=self.hold.held_at_open)
+
+    def handle(self, event, now: float) -> bool:
+        """One pygame event. True when the door should close without waiting."""
+        if event.type == pygame.JOYDEVICEADDED:
+            self.sticks.add(event.device_index)
+            # A pad arriving with a button down is the same old hold.
+            if self.sticks.any_button_down():
+                self.hold.held_at_open = True
+                self.hold.armed = False
+                trace.say("door-pad-arrived-held")
+        elif event.type == pygame.JOYDEVICEREMOVED:
+            self.sticks.remove(event.instance_id)
+        elif event.type == pygame.QUIT:
+            return True
+        elif event.type == pygame.KEYDOWN and event.key in (
+            pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE, pygame.K_b
+        ):
+            return True
+        elif sdl_pads.button(event) is not None:
+            self.hold.pressed(now)
+            trace.say("door-press", armed=self.hold.armed, counted=self.hold.since is not None)
+        elif sdl_pads.released(event):
+            self.hold.released(now)
+            trace.say("door-release")
+        return False
+
+    def done(self, now: float) -> bool:
+        return self.hold.done(now)
+
+    def progress(self, now: float) -> float:
+        return self.hold.progress(now)
+
+
+def _wait_for_go(screen, font_at, clock, gate: Gate, title: str) -> None:
+    """padmap has accepted; the game starts when somebody holds for a second."""
+    door = Door(sdl_pads.init(), time.monotonic())
     while True:
         now = time.monotonic()
         for event in pygame.event.get():
-            if event.type == pygame.JOYDEVICEADDED:
-                sticks.add(event.device_index)
-            elif event.type == pygame.JOYDEVICEREMOVED:
-                sticks.remove(event.instance_id)
-            elif event.type == pygame.QUIT:
+            if door.handle(event, now):
                 return
-            elif event.type == pygame.KEYDOWN and event.key in (
-                pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE, pygame.K_b
-            ):
-                return
-            elif sdl_pads.button(event) is not None:
-                hold.down(now)
-            elif sdl_pads.released(event):
-                hold.up()
-        if hold.due(now) is not None:
+        if door.done(now):
             return
-        _draw_go(screen, font_at, gate, title, hold.progress(now))
+        _draw_go(screen, font_at, gate, title, door.progress(now))
         pygame.display.flip()
         clock.tick(60)
 

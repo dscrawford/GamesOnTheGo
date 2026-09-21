@@ -183,6 +183,25 @@ class Pads:
         _mapped.discard(instance_id)
         _owners.closed(instance_id)
 
+    def any_button_down(self) -> bool:
+        """Whether a button is held on any pad padmap published, right now.
+
+        Asked, not waited for. A pad whose clone appeared with a button
+        already down carries that state from the first frame -- padmap
+        forwards a Steam Controller's state, not its events -- and SDL may
+        or may not report a press for it. The state is what is true.
+        """
+        for instance, pad in list(self._open.items()):
+            if not _owners.may_drive(instance):
+                continue
+            stick = pad.as_joystick() if hasattr(pad, "as_joystick") else pad
+            try:
+                if any(stick.get_button(i) for i in range(stick.get_numbuttons())):
+                    return True
+            except pygame.error:
+                continue
+        return False
+
     def open_all(self) -> None:
         for index in range(pygame.joystick.get_count()):
             self.add(index)
