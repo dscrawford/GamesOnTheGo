@@ -528,3 +528,66 @@ ryujinx_env() {
   grep -q -- "--platform n64" "$SEAT_LOG"
   grep -q "env SDL_GAMECONTROLLER_IGNORE_DEVICES=unset LD_PRELOAD=unset" "$SEAT_LOG"
 }
+
+@test "the bindings are written again after the gate, from what it seated" {
+  # The ones play_prepare wrote were from before anyone held a button. On a
+  # real launch the Steam Controller was seated, published, and dead in the
+  # game, because ares' port 1 named the raw Xbox pad the sandbox then hid.
+  add_game n64 "usa.zelda.z64" "rom" "Zelda"
+  gotg refresh
+  export GOTG_ENV_DIR="$TEST_TMP/env"
+  mkdir -p "$GOTG_ENV_DIR"
+  : >"$GOTG_ENV_DIR/n64.nix"
+  fake_env env-n64
+  export ORDER_LOG="$TEST_TMP/order"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'echo game >>"$ORDER_LOG"\n'
+  } >"$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
+  chmod +x "$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
+  # An environment with pads to bind, and an enumerator that says so.
+  echo '{"emulator":"ares","console":"Nintendo64"}' >"$GOTG_ROOTS_DIR/env-n64/share/gotg/pads.json"
+  export GOTG_PADS="$FAKE_BIN/gotg-pads"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'echo pads >>"$ORDER_LOG"\n'
+    printf 'echo "[]"\n'
+  } >"$GOTG_PADS"
+  chmod +x "$GOTG_PADS"
+  mkdir -p "$TEST_TMP/data"
+  cp "$(dirname "$GOTG_BIN")/../share/gotg/data/ares-pads.json" "$TEST_TMP/data/"
+  export GOTG_DATA="$TEST_TMP/data"
+
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  # Before the gate, the gate, again after it, then the game.
+  [ "$(paste -sd, "$ORDER_LOG")" = "pads,seat,pads,game" ]
+}
+
+@test "the publish is waited for after the gate, not before it" {
+  # Waiting before the gate waited three seconds for a publish nobody could
+  # have caused yet, and warned that nothing was published over a launch
+  # about to seat somebody.
+  export GOTG_PADMAP_RUNTIME="$TEST_TMP/padmap-rt"
+  mkdir -p "$GOTG_PADMAP_RUNTIME"
+  export ORDER_LOG="$TEST_TMP/order"
+  cat >"$FAKE_BIN/padmap" <<EOF
+#!$(command -v bash)
+echo "\$*" >>"$PADMAP_LOG"
+if [ "\$1" = ensure-daemon ]; then
+  echo "no daemon running; starting one"; echo "daemon up, build test"
+fi
+exit 0
+EOF
+  # The gate is what publishes: this one writes env.sh, as a claim would.
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'echo seat >>"$ORDER_LOG"\n'
+    printf 'echo "export SDL_GAMECONTROLLERCONFIG=x" >"$GOTG_PADMAP_RUNTIME/env.sh"\n'
+  } >"$FAKE_BIN/gotg-seat"
+  chmod +x "$FAKE_BIN/padmap" "$FAKE_BIN/gotg-seat"
+  GOTG_PADMAP_PUBLISH_WAIT=20 run --separate-stderr padmap_seat_gate n64 "Zelda"
+  [ "$status" -eq 0 ]
+  [ "$(paste -sd, "$ORDER_LOG")" = "seat" ]
+  [[ "$stderr" != *"published no controllers"* ]]
+}

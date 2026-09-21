@@ -174,6 +174,11 @@ frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).
   pad. Prefer `seating` mode (no grab) for anything on the grid.
 - The picker `execvp`s into the game: its pid survives the hop, which is why
   the daemon follows it and the launcher's `--follow $$` is the same pid.
+- Emulator port bindings must be written *after* the gate, from padmap's
+  published clones (`pads_seating` takes them by GUID). Written before it,
+  they name raw pads that `padmap-rs exec` then hides -- a seated
+  controller, dead in the game. `gotg-pads` (SDL3) reports a clone's GUID
+  exactly as padmap's `env.sh` does, even when SDL renames the clone.
 - With Steam running, a pad that appeared in the last ~second is grabbed by
   Steam and a hold on it reaches nobody; tests hold again, people do too.
 - The picker Steam launches is a built copy — `gotg steam picker` refreshes

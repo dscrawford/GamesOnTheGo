@@ -28,7 +28,15 @@
 padmap_bin() { printf '%s' "${GOTG_PADMAP:-padmap}"; }
 padmap_rs_bin() { printf '%s' "${GOTG_PADMAP_RS:-padmap-rs}"; }
 
+# `--no-wait` leaves the publish wait to the caller: the seat gate, which is
+# what makes a fresh daemon publish anything at all, and which cannot run
+# before the daemon it talks to. PADMAP_MARKER is the moment the daemon was
+# asked after, for that caller to wait against; empty when there was
+# nothing started here and so nothing to wait for.
+PADMAP_MARKER=""
 padmap_ensure() {
+  local wait=1
+  [[ "${1:-}" != "--no-wait" ]] || wait=0
   [[ "${PADMAP_SKIP_DAEMON_CHECK:-0}" != "1" ]] || return 0
   command -v "$(padmap_bin)" >/dev/null 2>&1 || return 0
   # A moment before the daemon is asked after: anything it publishes from
@@ -56,10 +64,16 @@ padmap_ensure() {
   # that was already current published long ago, or has nothing to publish
   # yet because nobody is seated, and waiting on it would be waiting on a
   # button press.
-  if [[ "$said" == *"daemon up"* ]]; then
-    padmap_wait_published "$marker"
+  if [[ "$said" == *"daemon up"* || "$said" == *"restarted"* ]]; then
+    if ((wait)); then
+      padmap_wait_published "$marker"
+      rm -f "$marker"
+    else
+      PADMAP_MARKER="$marker"
+    fi
+  else
+    rm -f "$marker"
   fi
-  rm -f "$marker"
   export PADMAP_SKIP_DAEMON_CHECK=1
 }
 
@@ -219,8 +233,18 @@ padmap_seat_gate() {
     warn "no gotg-seat here; starting without checking for a controller"
     return 0
   fi
-  padmap_ensure
+  # The daemon first, unseated; then the gate, which is where somebody holds
+  # a button; then the wait for what that published. The wait used to sit in
+  # padmap_ensure, before the gate -- three seconds of waiting for a publish
+  # nobody could have caused yet, and a warning that nothing was published
+  # printed over a launch that was about to seat somebody.
+  padmap_ensure --no-wait
   "$seat" --platform "$platform" --title "$title" || true
+  if [[ -n "$PADMAP_MARKER" ]]; then
+    padmap_wait_published "$PADMAP_MARKER"
+    rm -f "$PADMAP_MARKER"
+    PADMAP_MARKER=""
+  fi
 }
 
 # Launch, with padmap's mappings in the environment.
@@ -296,6 +320,18 @@ padmap_published() {
     | ($f[1] // "" | capture("^padmap Player (?<n>[0-9]+)$")? // empty) as $m
     | {player: ($m.n | tonumber), guid: $f[0], name: $f[1], sdl_line: .}
   ' <<<"$value" | jq -cs 'select(length > 0)'
+}
+
+# The SDL mapping padmap published, for a program that enumerates pads outside
+# `padmap-rs exec` -- gotg-pads, deciding what to bind. Without it a clone of
+# a pad SDL has no mapping for (a Steam Controller's, say) is a joystick with
+# no map, and the writer would pass it over. Empty when nothing is published.
+padmap_sdl_config() {
+  local file
+  file="$(padmap_runtime_dir)/env.sh"
+  [[ -f "$file" ]] || return 0
+  # shellcheck disable=SC1090
+  (set +u; . "$file" 2>/dev/null; printf '%s' "${SDL_GAMECONTROLLERCONFIG:-}")
 }
 
 # Have padmap write this environment's emulator configuration. Returns 0 when
