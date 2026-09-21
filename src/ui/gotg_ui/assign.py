@@ -247,21 +247,18 @@ class Watch:
     # The (state, seated) it was last asked under. None is "not asked", which
     # is where a lost connection puts it: a restarted daemon remembers nothing.
     asked: tuple[str, int] | None = None
-    # A daemon too old to know the command. It is never asked again, and the
-    # picker stops holding raw pads at arm's length -- with nothing listening
-    # for a hold, ignoring them would leave a machine no controller can drive.
+    # A daemon too old to know the command. It is never asked again -- and
+    # that is all: the pads are not handed back to whoever holds them. A
+    # machine whose padmap cannot seat anybody is a machine the keyboard
+    # drives, until padmap is fixed.
     refused: bool = False
-
-    @property
-    def listening(self) -> bool:
-        """Whether padmap can be expected to seat a pad somebody holds."""
-        return not self.refused
 
     def handle(self, event: dict) -> None:
         """padmap's answer, when it has one. Only a refusal says anything: the
         daemon acknowledges `seating` with silence, and names the command it
-        did not understand -- `unknown command "seating"`."""
-        if event.get("event") == "error" and "seating" in str(event.get("message") or ""):
+        did not understand. Matched whole, because other errors mention
+        seating too and none of them mean this."""
+        if event.get("event") == "error" and str(event.get("message") or "") == 'unknown command "seating"':
             self.refused = True
 
     def wanted(self, connected: bool, state: str, seated: int) -> dict | None:
@@ -288,24 +285,18 @@ class Watch:
 
 
 
-def attend(padmap, seating: Session, watch: Watch, *, padmap_here: bool) -> tuple[bool, dict | None]:
-    """One frame of keeping up with padmap. The picker's whole controller rule.
+def attend(padmap, seating: Session, watch: Watch) -> dict | None:
+    """One frame of keeping up with padmap.
 
-    Three things happen here and they are one thing: what the daemon has said
-    is folded in, whether an unpublished pad may move the cursor is decided,
-    and padmap is told to go on listening for a hold if it needs telling.
+    What the daemon has said is folded in, and padmap is told to go on
+    listening for a hold if it needs telling. Who may move the cursor is not
+    decided here or anywhere: a pad padmap published, and nothing else, and
+    `pads.py` asks `clones.py` on every event.
 
-    They live together because they are a single requirement -- a controller
-    drives this picker once padmap has published it, and picking one up and
-    holding a button is what publishes it. Split across the event loop, any
-    one of them could be dropped in an edit and the other two would go on
-    looking correct.
-
-    Returns whether to take padmap's pads alone, and the command to send, if
-    any. Nothing is sent from here: the caller owns the socket.
+    Returns the command to send, if any. Nothing is sent from here: the
+    caller owns the socket.
     """
     for event in padmap.poll():
         seating.handle(event)
         watch.handle(event)
-    strict = padmap_here and watch.listening
-    return strict, watch.wanted(padmap.connected, padmap.status_word, len(padmap.players))
+    return watch.wanted(padmap.connected, padmap.status_word, len(padmap.players))

@@ -32,7 +32,6 @@ from .installs import Installs
 from .layout import grid, shelf, shelf_at, tile_at
 from .menu import Menu
 from .padmap import DaemonWatch, Padmap, ensure_daemon
-from .padmap import installed as padmap_installed
 from .padstrip import HEIGHT as STRIP_HEIGHT
 from .padstrip import PANEL, status_text, strip_status
 from .prepare import Preparer, is_ready
@@ -771,14 +770,6 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # opens; a hold seats them; the daemon goes when the session does.
     padmap_trouble = ensure_daemon(fresh=True, follow=os.getpid())
     padmap.connect()
-    # Who may drive the picker: pads padmap published, for as long as padmap is
-    # on the machine to publish any. Read from the machine rather than from the
-    # connection, so a daemon that is restarting does not hand the cursor back
-    # to an unassigned pad for the length of it. Set before the first frame as
-    # well as during it, since a press can arrive before the loop has been
-    # round once.
-    padmap_here = padmap_installed()
-    pads.only_padmap(padmap_here)
     # And asked after again whenever the connection is gone -- see DaemonWatch
     # for why reconnecting alone was not enough.
     padmap_watch = DaemonWatch()
@@ -1266,12 +1257,11 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     # evening wants back.
                     padmap_trouble = ensure_daemon(force=True, follow=os.getpid())
                 padmap.connect()
-            # The controller rule, once a frame: fold in what padmap said,
-            # decide whether an unpublished pad may move the cursor, and keep
-            # the daemon listening for a hold. One call because they are one
-            # requirement -- see assign.attend, which is where it is tested.
-            strict, listen = attend(padmap, seating, watch, padmap_here=padmap_here)
-            pads.only_padmap(strict)
+            # Keeping up with padmap, once a frame: fold in what it said and
+            # keep it listening for a hold. Who may move the cursor is not a
+            # question here -- pads.py refuses anything padmap did not
+            # publish, on every event, with no switch to turn that off.
+            listen = attend(padmap, seating, watch)
             if listen is not None:
                 padmap.send(listen)
 

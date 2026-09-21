@@ -189,7 +189,6 @@ def sdl():
     pads._owners.names.clear()
     pads._owners.guids.clear()
     pads._mapped.clear()
-    pads.only_padmap(False)
     try:
         yield pygame
     finally:

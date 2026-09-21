@@ -53,10 +53,7 @@ class Picker:
         self.progress_seen = 0.0
 
     def frame(self) -> None:
-        strict, listen = attend(
-            self.padmap, self.seating, self.watch, padmap_here=True
-        )
-        pads.only_padmap(strict)
+        listen = attend(self.padmap, self.seating, self.watch)
         if listen is not None:
             self.sent.append(listen)
             self.padmap.send(listen)
@@ -237,13 +234,46 @@ def test_the_picker_never_opens_a_session_of_its_own(daemon, sdl):
         picker.close()
 
 
+def test_with_no_padmap_at_all_a_pad_still_cannot_move_the_picker(sdl):
+    """The bug as it was seen: the picker opened, no daemon anywhere, and an
+    Xbox pad that padmap had never heard of moved the cursor.
+
+    No `daemon` fixture on purpose. Nothing is running, nothing is on the
+    socket, and the pad is refused anyway -- because the rule is about the
+    pad, not about padmap's state.
+    """
+    with FakePad("E2E Xbox Pad") as pad:
+        sticks = pads.init()
+        # SDL announces the pad a moment after it exists, and the picker opens
+        # it on that announcement; a test that cleared the queue here threw
+        # the announcement away and then proved nothing.
+        end = time.monotonic() + 1.0
+        while time.monotonic() < end:
+            for event in sdl.event.get():
+                if event.type == sdl.JOYDEVICEADDED:
+                    sticks.add(event.device_index)
+            time.sleep(0.02)
+        saw = False
+        for _ in range(4):
+            pad.tap(BTN_SOUTH)
+            time.sleep(0.1)
+            for event in sdl.event.get():
+                if event.type == sdl.JOYDEVICEADDED:
+                    sticks.add(event.device_index)
+                elif event.type in (sdl.CONTROLLERBUTTONDOWN, sdl.JOYBUTTONDOWN):
+                    saw = True
+                    assert pads.button(event) is None, "a pad padmap never published drove the picker"
+                elif event.type == sdl.JOYHATMOTION:
+                    assert pads.direction(event) is None
+        assert saw, "SDL never delivered the press, so nothing was proven"
+
+
 def test_the_keyboard_is_never_filtered(sdl):
     """Two things drive the picker, and the other one is the keyboard.
 
     The filter is only ever asked about pads: a key is not a pad event and
     cannot be swallowed by it, whatever padmap is doing.
     """
-    pads.only_padmap(True)
     key = sdl.event.Event(sdl.KEYDOWN, {"key": sdl.K_a, "unicode": "a", "mod": 0})
     assert pads.button(key) is None
     assert pads.direction(key) is None

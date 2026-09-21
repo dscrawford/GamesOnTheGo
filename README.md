@@ -139,7 +139,7 @@ gotg controllers apply [<id>|--all] # write bindings without launching
 
 **Every session starts with nobody seated** — the picker and each game alike. padmap's daemon is the session's: started unseated, following the process, gone when it is. Pick a controller up, hold a button, and you are player one; the next to hold is player two, which is the numbering every game is bound against.
 
-**In the picker**, padmap listens for a hold for as long as the grid is up: pick a controller up, hold a button, and the ring above the games fills in your colour and seats you. Only pads padmap has published move the cursor — an unseated one is ignored, so a controller nobody has assigned cannot drive the library. `GOTG_ANY_PAD=1` lifts that, for a machine where padmap cannot publish anything.
+**In the picker**, padmap listens for a hold for as long as the grid is up: pick a controller up, hold a button, and the ring above the games fills in your colour and seats you. Only pads padmap has published move the cursor — an unseated one is ignored, so a controller nobody has assigned cannot drive the library. That holds whether or not padmap is running; the keyboard and mouse always work. `GOTG_ANY_PAD=1` lifts it by hand, for a television with no keyboard in the room.
 
 That is a requirement, and it has a test that runs it against a real daemon and real kernel devices — `tests/e2e`:
 

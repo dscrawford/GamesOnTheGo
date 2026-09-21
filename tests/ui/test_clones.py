@@ -33,31 +33,35 @@ def test_a_pad_with_no_name_at_all_is_not_a_clone():
     assert not clones.is_clone(None, None)
 
 
-def test_only_a_clone_drives_the_picker_on_a_machine_with_padmap():
-    assert clones.drives("padmap Player 1", padmap_here=True)
-    assert not clones.drives("Microsoft X-Box 360 pad", padmap_here=True)
+def test_only_a_clone_drives_the_picker():
+    assert clones.drives("padmap Player 1")
+    assert not clones.drives("Microsoft X-Box 360 pad")
 
 
-def test_everything_drives_it_on_a_machine_without_padmap():
-    # No padmap on the machine is no clone coming, ever. There the picker is
-    # on its own and takes what it is given; a grid that answered only the
-    # keyboard would be a machine that looks broken.
-    assert clones.drives("Microsoft X-Box 360 pad", padmap_here=False)
-    assert clones.drives("padmap Player 1", padmap_here=False)
+def test_there_is_no_machine_on_which_a_raw_pad_drives_it(monkeypatch):
+    # The rule has no "unless": not when padmap is missing, not when it is
+    # down, not when it is too old. A shell that had not reloaded since
+    # padmap joined its PATH looked like "no padmap here", and an unassigned
+    # Xbox pad drove the library -- the one thing this exists to stop.
+    monkeypatch.delenv("GOTG_ANY_PAD", raising=False)
+    assert not clones.drives("Microsoft X-Box 360 pad")
+    assert not clones.drives("Steam Controller")
+    assert not clones.drives("")
+    assert not clones.drives(None)
 
 
-def test_a_way_back_in_without_a_keyboard(monkeypatch):
-    # The failure this rule can cause is a television showing a library that
-    # no controller in the room will move.
+def test_the_way_back_in_is_off_unless_somebody_typed_it(monkeypatch):
+    monkeypatch.setenv("GOTG_ANY_PAD", "0")
+    assert not clones.drives("Microsoft X-Box 360 pad")
     monkeypatch.setenv("GOTG_ANY_PAD", "1")
-    assert clones.drives("Microsoft X-Box 360 pad", padmap_here=True)
+    assert clones.drives("Microsoft X-Box 360 pad")
 
 
 # --- the pads that are open, and which of them may move anything ------------
 
 
-def opened(padmap_here=True, **pads):
-    owners = clones.Owners(padmap_here=padmap_here)
+def opened(**pads):
+    owners = clones.Owners()
     for instance, name in pads.items():
         owners.opened(int(instance.lstrip("p")), name)
     return owners
@@ -85,15 +89,9 @@ def test_an_unplugged_pad_is_forgotten_rather_than_left_behind():
     assert not owners.may_drive(4)
 
 
-def test_with_no_daemon_every_open_pad_drives():
-    owners = opened(padmap_here=False, p3="Microsoft X-Box 360 pad")
-    assert owners.may_drive(3)
-
-
-def test_a_daemon_that_dies_does_not_hand_the_cursor_back():
-    # The rule is the machine, not the connection: a daemon the picker is
-    # restarting must not be a window in which an unassigned Steam Controller
-    # drives the library.
+def test_a_pad_opened_before_padmap_was_anywhere_still_does_not_drive():
+    # Nothing about the daemon's state reaches this: the pad is either one
+    # padmap published, or it is not.
     owners = opened(p3="Microsoft X-Box 360 pad", p7="padmap Player 1")
     assert not owners.may_drive(3)
     assert owners.may_drive(7)
@@ -144,7 +142,7 @@ def test_a_guid_that_is_not_one_decides_nothing():
 def test_a_renamed_clone_drives_the_picker():
     # The failure this would otherwise be: a player seats themselves, padmap
     # publishes their pad, and the picker ignores them for ever.
-    owners = clones.Owners(padmap_here=True)
+    owners = clones.Owners()
     owners.opened(3, "Xbox 360 Controller", CLONE_OF_AN_XBOX_PAD)
     owners.opened(2, "Xbox 360 Controller", THE_PAD_IT_WAS_MADE_FROM)
     assert owners.may_drive(3)
