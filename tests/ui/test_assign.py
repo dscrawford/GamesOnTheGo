@@ -169,19 +169,13 @@ def test_a_daemon_too_old_to_listen_is_not_asked_twice():
     assert watch.wanted(True, "ready", 1) is None
 
 
-def test_and_the_picker_stops_holding_raw_pads_at_arms_length():
-    # Nothing is listening for a hold, so a pad that is ignored until it is
-    # claimed is a pad that is ignored for ever.
-    watch = Watch()
-    assert watch.listening
-    watch.handle({"event": "error", "message": 'unknown command "seating"'})
-    assert not watch.listening
-
-
 def test_somebody_elses_error_is_not_this_one():
+    # Other errors mention seating too -- "seating is suspended while a
+    # session is open" -- and none of them mean the daemon cannot do it.
     watch = Watch()
     watch.handle({"event": "error", "message": "no joypads found"})
-    assert watch.listening
+    watch.handle({"event": "error", "message": "seating is suspended while a session is open"})
+    assert not watch.refused
 
 
 def test_a_seat_freed_after_the_last_one_filled_is_asked_about_again():
@@ -276,25 +270,10 @@ class FakeDaemon:
         return iter(out)
 
 
-def test_a_pad_padmap_has_not_published_may_not_drive_the_picker():
-    strict, _ = attend(FakeDaemon(), Session(), Watch(), padmap_here=True)
-    assert strict is True
-
-
-def test_a_machine_without_padmap_takes_what_it_is_given():
-    strict, _ = attend(FakeDaemon(connected=False), Session(), Watch(), padmap_here=False)
-    assert strict is False
-
-
-def test_a_daemon_that_is_down_is_still_no_reason_to_let_a_raw_pad_in():
-    strict, _ = attend(FakeDaemon(connected=False), Session(), Watch(), padmap_here=True)
-    assert strict is True
-
-
 def test_padmap_is_told_to_listen_for_a_hold_without_being_asked():
     # The requirement: controllers pair from wherever the picker is, so the
     # command goes out on its own rather than waiting for a screen.
-    _, command = attend(FakeDaemon(), Session(), Watch(), padmap_here=True)
+    command = attend(FakeDaemon(), Session(), Watch())
     assert command == {"cmd": "seating", "open": True, "players": 4}
 
 
@@ -304,25 +283,29 @@ def test_the_picker_never_opens_a_session_by_itself():
     watch, session, daemon = Watch(), Session(), FakeDaemon()
     for state in ("idle", "ready", "idle"):
         daemon.status_word = state
-        _, command = attend(daemon, session, watch, padmap_here=True)
+        command = attend(daemon, session, watch)
         assert command is None or command["cmd"] == "seating"
 
 
 def test_a_claim_arriving_is_a_seat_on_the_strip():
     daemon = FakeDaemon(events=[{"event": "claim", "player": 1, "name": "Xbox Wireless Controller"}])
     session = Session()
-    attend(daemon, session, Watch(), padmap_here=True)
+    attend(daemon, session, Watch())
     assert [s.player for s in session.view.seats] == [1]
 
 
 def test_a_hold_in_flight_reaches_the_ring():
     daemon = FakeDaemon(events=[{"event": "progress", "frac": 0.5}])
     session = Session()
-    attend(daemon, session, Watch(), padmap_here=True)
+    attend(daemon, session, Watch())
     assert session.view.progress == 0.5
 
 
-def test_a_daemon_too_old_to_listen_hands_the_pads_back():
+def test_a_daemon_too_old_to_listen_is_not_asked_again_and_hands_nothing_back():
+    # It used to hand the raw pads back. It does not: a padmap that cannot
+    # seat anybody is a picker the keyboard drives until padmap is fixed.
     daemon = FakeDaemon(events=[{"event": "error", "message": 'unknown command "seating"'}])
-    strict, _ = attend(daemon, Session(), Watch(), padmap_here=True)
-    assert strict is False
+    watch = Watch()
+    assert attend(daemon, Session(), watch) is None
+    assert watch.refused
+    assert attend(FakeDaemon(state="ready", players=[{"player": 1}]), Session(), watch) is None

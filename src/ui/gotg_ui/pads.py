@@ -31,7 +31,7 @@ from .clones import Owners
 
 __all__ = [
     "A", "B", "BACK", "DOWN", "LB", "LEFT", "RB", "RIGHT", "START", "UP", "X", "Y",
-    "Pads", "button", "direction", "init", "only_padmap",
+    "Pads", "button", "direction", "init",
 ]
 
 # SDL's own constants, checked against the numbers buttons.py writes out. If a
@@ -52,29 +52,21 @@ assert STANDARD[pygame.CONTROLLER_BUTTON_A] == A
 # all there is.
 _mapped: set[int] = set()
 
-# What each open pad is called, and whether padmap is running to have named it.
-# A raw pad reaches this program whenever padmap is not holding it -- a failed
-# grab, a Steam Controller it cannot grab, or its own seating mode, which grabs
-# nothing on purpose -- and acting on those presses is the picker taking orders
-# from a controller nobody has assigned. See `clones.py`; the rule is relaxed
-# with no daemon at all, since then no clone is coming and the keyboard would be
-# the only way in.
+# What each open pad is called, and its GUID, by SDL instance id. A raw pad
+# reaches this program whenever padmap is not holding it -- a failed grab, a
+# Steam Controller it cannot grab, or its own seating mode, which grabs
+# nothing on purpose -- and acting on those presses is the picker taking
+# orders from a controller nobody has assigned. See `clones.py`: the rule
+# has no off switch but GOTG_ANY_PAD.
 _owners = Owners()
 
 
-def only_padmap(on: bool) -> None:
-    """Whether padmap is there to publish a pad, which is what decides whether
-    an unpublished one may drive anything. The picker calls it per frame from
-    the connection it already has; the rule itself is `clones.py`."""
-    _owners.padmap_here = on
-
-
 def _allowed(event) -> bool:
-    """Whether this event came from a pad that may drive the picker.
+    """Whether this event came from a pad padmap published.
 
     `instance_id` on everything SDL2 sends, and `joy` for the older spelling,
     so a pygame that answers only the second is not a picker that answers
-    nothing.
+    nothing. An id this has never opened is nobody's, and is refused.
     """
     instance = getattr(event, "instance_id", None)
     if instance is None:

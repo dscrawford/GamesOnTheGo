@@ -81,24 +81,21 @@ def is_clone(name: str | None, phys: str | None = "", guid: str | None = "") -> 
     return name_crc(guid) in CLONE_CRCS
 
 
-def drives(name: str | None, phys: str | None = "", *, padmap_here: bool, guid: str | None = "") -> bool:
-    """Whether this pad may move the picker's cursor.
+def drives(name: str | None, phys: str | None = "", guid: str | None = "") -> bool:
+    """Whether this pad may move the picker's cursor: only if padmap published it.
 
-    A daemon that is merely not connected is not a reason to let a raw pad in.
-    It was, once -- the thought being that a picker nothing could drive was
-    worse than one anything could -- but the two failures are not the same
-    size. An unassigned Steam Controller moving the cursor is the bug this
-    exists to stop, and a daemon that is down is a daemon the picker starts,
-    says so in the strip, and keeps asking after.
+    No other case. There used to be two -- no daemon on the machine, and a
+    daemon too old to seat anybody -- on the theory that a picker nothing
+    could drive was worse than one anything could. It was not: a shell that
+    had not reloaded since padmap joined its PATH looked exactly like "no
+    padmap here", and an unassigned Xbox pad drove the library, which is the
+    one thing this exists to stop. The keyboard always works; that is the
+    fallback.
 
-    `padmap_here` is therefore whether padmap is on the machine at all. A
-    machine without it has no clone coming ever, and there the picker is on its
-    own and takes what it is given.
-
-    GOTG_ANY_PAD=1 lifts the rule by hand, because the failure it can cause is
-    a television showing a library that nothing in the room will move.
+    GOTG_ANY_PAD=1 lifts the rule by hand, for a television with no keyboard
+    in the room. Off unless somebody typed it.
     """
-    if not padmap_here or os.environ.get("GOTG_ANY_PAD") == "1":
+    if os.environ.get("GOTG_ANY_PAD") == "1":
         return True
     return is_clone(name, phys, guid)
 
@@ -118,9 +115,6 @@ class Owners:
     like.
     """
 
-    # Whether padmap is on this machine -- not whether it is answering. See
-    # `drives`: a pad waits for its clone through a daemon restart.
-    padmap_here: bool = False
     names: dict[int, str] = field(default_factory=dict)
     guids: dict[int, str] = field(default_factory=dict)
 
@@ -137,8 +131,4 @@ class Owners:
 
     def may_drive(self, instance: int | None) -> bool:
         """Whether an event from this pad may move the picker."""
-        return drives(
-            self.names.get(instance, ""),
-            padmap_here=self.padmap_here,
-            guid=self.guids.get(instance, ""),
-        )
+        return drives(self.names.get(instance, ""), guid=self.guids.get(instance, ""))
