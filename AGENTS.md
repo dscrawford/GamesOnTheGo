@@ -178,5 +178,11 @@ frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).
   Steam and a hold on it reaches nobody; tests hold again, people do too.
 - The picker Steam launches is a built copy — `gotg steam picker` refreshes
   it. `.envrc` auto-rebuilds only on `src/client` changes, never `src/ui`.
+- When the picker does something on a real machine the tests do not show:
+  `GOTG_UI_TRACE=/tmp/gotg-trace.log gotg-ui`, ask the person to press the
+  buttons in a numbered order, then read the file (one JSON object per
+  line: pads opened and whether they are clones, every press and its
+  verdict, padmap events and commands, keyboard nodes held). Two real bugs
+  were found that way in one evening; neither reproduced with fake pads.
 - The Deck (`steamdeck`, 100.80.53.67) does not accept this machine's ssh
   key; on-device checks need the user.
