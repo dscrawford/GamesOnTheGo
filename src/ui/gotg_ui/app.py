@@ -27,6 +27,7 @@ from .fetch import Loader
 from .filters import Filters
 from .gate import layout_for
 from .grid import Grid
+from .hush import Hush
 from .installed import installed_games
 from .installs import Installs
 from .layout import grid, shelf, shelf_at, tile_at
@@ -697,6 +698,12 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # the controller API, which is what makes "the right bumper" mean the same
     # button on every pad rather than index 5 on an Xbox one.
     sticks = pads.init()
+    # And every keyboard and mouse that is really a controller -- a Steam
+    # Controller's lizard mode, a Bluetooth Xbox pad's extra collections --
+    # held so the compositor never sees them. The joystick rule cannot reach
+    # those: to SDL a lizard-mode d-pad *is* the arrow keys. See hush.py.
+    hush = Hush()
+    hush.refresh()
 
     fonts: dict[int, pygame.font.Font] = {}
 
@@ -865,9 +872,11 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 # moment, because it looks like padmap broke the machine.
                 if event.type == pygame.JOYDEVICEADDED:
                     sticks.add(event.device_index)
+                    hush.refresh()
                     continue
                 if event.type == pygame.JOYDEVICEREMOVED:
                     sticks.remove(event.instance_id)
+                    hush.refresh()
                     continue
 
                 # On the loader, the only input is the way out. Everything else
@@ -1356,6 +1365,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
         # in the daemon, which is what lets it.
 
     # Before the caller execs: the emulator must not inherit a window and a
-    # grabbed GPU from a process that is about to stop existing.
+    # grabbed GPU from a process that is about to stop existing -- nor the
+    # controllers' keyboards, which are padmap's to hold from here on.
+    hush.release()
     pygame.quit()
     return chosen

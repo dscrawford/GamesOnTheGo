@@ -43,7 +43,12 @@ UI_DEV_SETUP = _iow(3, 92)      # struct uinput_setup
 UI_ABS_SETUP = _iow(4, 28)      # struct uinput_abs_setup
 UI_SET_EVBIT = _iow(100, 4)
 UI_SET_KEYBIT = _iow(101, 4)
+UI_SET_RELBIT = _iow(102, 4)
 UI_SET_ABSBIT = _iow(103, 4)
+UI_SET_PHYS = _iow(108, 8)   # _IOW('U', 108, char*): sized as the pointer, which is the argument
+
+KEY_ENTER, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT = 28, 103, 108, 105, 106
+REL_X, REL_Y = 0x00, 0x01
 
 # What padmap and SDL both look for before calling something a joypad: buttons
 # in the gamepad range, and a pair of absolute axes.
@@ -62,27 +67,50 @@ def available() -> str:
 class FakePad:
     """One controller, until it is closed."""
 
-    def __init__(self, name: str, vendor: int = 0x045E, product: int = 0x028E, version: int = 0x0110):
+    def __init__(
+        self,
+        name: str,
+        vendor: int = 0x045E,
+        product: int = 0x028E,
+        version: int = 0x0110,
+        phys: str = "",
+        keyboard: bool = False,
+    ):
+        """A joypad, or with `keyboard` a keyboard-and-mouse that says it is
+        one -- the shape a Steam Controller's lizard mode and a Bluetooth
+        Xbox pad's extra collections take. `phys` is what ties the two
+        together in /proc/bus/input/devices, as the radio address does for
+        the real thing."""
         self.name = name
         self._fd: int = os.open(UINPUT, os.O_WRONLY | os.O_NONBLOCK)
-        for bit in (EV_KEY, EV_ABS):
-            fcntl.ioctl(self._fd, UI_SET_EVBIT, bit)
-        for button in BUTTONS:
-            fcntl.ioctl(self._fd, UI_SET_KEYBIT, button)
-        for axis in (ABS_X, ABS_Y):
-            fcntl.ioctl(self._fd, UI_SET_ABSBIT, axis)
-            # struct uinput_abs_setup: __u16 code, then input_absinfo's six ints
-            fcntl.ioctl(
-                self._fd,
-                UI_ABS_SETUP,
-                struct.pack("HHiiiiii", axis, 0, 0, -32768, 32767, 0, 0, 0),
-            )
+        if keyboard:
+            for bit in (EV_KEY, 0x02):          # EV_REL
+                fcntl.ioctl(self._fd, UI_SET_EVBIT, bit)
+            for key in (KEY_ENTER, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, 0x110):  # + BTN_LEFT
+                fcntl.ioctl(self._fd, UI_SET_KEYBIT, key)
+            for axis in (REL_X, REL_Y):
+                fcntl.ioctl(self._fd, UI_SET_RELBIT, axis)
+        else:
+            for bit in (EV_KEY, EV_ABS):
+                fcntl.ioctl(self._fd, UI_SET_EVBIT, bit)
+            for button in BUTTONS:
+                fcntl.ioctl(self._fd, UI_SET_KEYBIT, button)
+            for axis in (ABS_X, ABS_Y):
+                fcntl.ioctl(self._fd, UI_SET_ABSBIT, axis)
+                # struct uinput_abs_setup: __u16 code, then input_absinfo's six ints
+                fcntl.ioctl(
+                    self._fd,
+                    UI_ABS_SETUP,
+                    struct.pack("HHiiiiii", axis, 0, 0, -32768, 32767, 0, 0, 0),
+                )
         # struct uinput_setup: input_id (bus, vendor, product, version), name, ff
         fcntl.ioctl(
             self._fd,
             UI_DEV_SETUP,
             struct.pack("HHHH80sI", 3, vendor, product, version, name.encode(), 0),
         )
+        if phys:
+            fcntl.ioctl(self._fd, UI_SET_PHYS, phys.encode() + b"\0")
         fcntl.ioctl(self._fd, UI_DEV_CREATE)
         # udev has to see it, padmap has to scan for it, and SDL has to be told
         # about it. A tenth of a second is not enough on a loaded machine.
@@ -122,6 +150,21 @@ class FakePad:
 
     def __exit__(self, *_exc) -> None:
         self.close()
+
+
+def event_node(name: str) -> str | None:
+    """The /dev/input/eventN behind a device name, or None."""
+    block_name, handlers = None, ""
+    with open("/proc/bus/input/devices") as devices:
+        for line in devices:
+            if line.startswith('N: Name="'):
+                block_name = line.split('"')[1]
+            elif line.startswith("H: Handlers=") and block_name == name:
+                handlers = line.split("=", 1)[1]
+                for handler in handlers.split():
+                    if handler.startswith("event"):
+                        return f"/dev/input/{handler}"
+    return None
 
 
 def kernel_names() -> list[str]:

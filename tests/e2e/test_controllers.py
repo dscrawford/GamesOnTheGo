@@ -457,3 +457,75 @@ def test_a_game_launch_begins_with_a_hold_whatever_was_seated(daemon, sdl):
         finally:
             client.send({"cmd": "cancel"})
             client.close()
+
+
+# --- a controller that is also a keyboard ------------------------------------
+
+
+def _reader(path: str):
+    """The compositor, as far as a grab is concerned: another fd on the node."""
+    import os
+
+    return os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+
+
+def _arrived(fd: int, seconds: float = 0.6) -> bool:
+    """Whether any event reaches this fd in this long."""
+    import os
+
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        try:
+            if os.read(fd, 4096):
+                return True
+        except BlockingIOError:
+            pass
+        time.sleep(0.02)
+    return False
+
+
+def test_a_controllers_keyboard_and_mouse_never_reach_the_compositor(sdl):
+    """The bug as it was seen the second time: the joystick rule held, and a
+    Steam Controller in lizard mode moved the cursor anyway -- as arrow keys.
+
+    Pygame under the dummy driver has no keyboard path, so this is proven
+    where it happens: a second reader on the node, standing in for the
+    compositor, receives nothing while the picker holds the grab, and
+    everything once it lets go. A real keyboard next to it is never held.
+    """
+    import os
+
+    from fakepad import KEY_RIGHT, event_node
+
+    from gotg_ui.hush import Hush
+
+    with (
+        FakePad("E2E Xbox Pad", phys="usb-e2e/input0") as pad,
+        FakePad("E2E Xbox Pad Keyboard", phys="usb-e2e/input0", keyboard=True) as lizard,
+        FakePad("E2E Real Keyboard", 0x1D6B, 0x0001, 1, phys="usb-desk/input0", keyboard=True) as real,
+    ):
+        del pad  # it is there to make the keyboard a controller's; nothing presses it
+        time.sleep(0.5)
+        lizard_node = event_node("E2E Xbox Pad Keyboard")
+        real_node = event_node("E2E Real Keyboard")
+        assert lizard_node and real_node, "the kernel never listed the keyboards"
+
+        compositor = _reader(lizard_node)
+        desk = _reader(real_node)
+        try:
+            hush = Hush()
+            held = hush.refresh()
+            assert os.path.basename(lizard_node) in held, f"the controller's keyboard was not held: {held}"
+            assert os.path.basename(real_node) not in held, "a real keyboard was grabbed"
+
+            lizard.tap(KEY_RIGHT)
+            assert not _arrived(compositor), "a key from the controller's keyboard reached the compositor"
+            real.tap(KEY_RIGHT)
+            assert _arrived(desk), "the real keyboard was silenced"
+
+            hush.release()
+            lizard.tap(KEY_RIGHT)
+            assert _arrived(compositor), "the grab outlived the picker"
+        finally:
+            os.close(compositor)
+            os.close(desk)

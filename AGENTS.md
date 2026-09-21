@@ -119,7 +119,11 @@ finds it by name.
 
 Two things drive the picker: the keyboard (and mouse), and a controller padmap
 has published. Nothing else -- not when padmap is missing, down, or too old.
-`GOTG_ANY_PAD=1` is the only override, and it is never set by anything. A controller is published by being held, from
+`GOTG_ANY_PAD=1` is the only override, and it is never set by anything.
+A controller that is also a keyboard or mouse (a Steam Controller's lizard
+mode, a Bluetooth Xbox pad's extra HID collections) is held with `EVIOCGRAB`
+while the picker runs -- `hush.py` -- because SDL delivers a key, not the
+device it came from. A controller is published by being held, from
 wherever the picker or game is — never from a screen somebody had to find.
 Every session — picker or game — starts with nobody seated; padmap's daemon
 is started `--fresh --follow <pid>` and ends with the session. Enforced by
@@ -157,6 +161,12 @@ frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).
 - SDL renames a padmap clone that mirrors a pad it knows (`Xbox 360
   Controller`), so device *names* cannot identify padmap's pads. The GUID's
   bytes 2–3 carry a CRC-16 of the real name; that is what `clones.py` reads.
+- Controllers are keyboards too. The Steam Controller Puck is four keyboards
+  and four mice in hardware until something sends lizard-off over hidraw; a
+  Bluetooth Xbox pad has `Keyboard`/`Mouse`/`Consumer Control` nodes on the
+  same `Uniq` as its joystick. Over Bluetooth every device's `Phys` is the
+  *adapter's* address (the phone's media keys share it with the pad), so
+  siblings are matched by `Uniq`, never by `Phys`.
 - padmap grabs every pad for the length of a `begin` session, so the
   assignment screen answers no button but a long hold on an already-seated
   pad. Prefer `seating` mode (no grab) for anything on the grid.

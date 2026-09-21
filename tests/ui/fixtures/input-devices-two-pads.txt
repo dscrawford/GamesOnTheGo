@@ -1,0 +1,402 @@
+I: Bus=0003 Vendor=046d Product=c547 Version=0111
+N: Name="Logitech USB Receiver"
+P: Phys=usb-0000:0d:00.3-2.2/input0
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/0000:0d:00.3/usb5/5-2/5-2.2/5-2.2:1.0/0003:046D:C547.0008/input/input13
+U: Uniq=
+H: Handlers=mouse4 event8 
+B: PROP=0
+B: EV=17
+B: KEY=ffff0000 0 0 0 0
+B: REL=1943
+B: MSC=10
+
+I: Bus=0003 Vendor=046d Product=c547 Version=0111
+N: Name="Logitech USB Receiver Keyboard"
+P: Phys=usb-0000:0d:00.3-2.2/input1
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/0000:0d:00.3/usb5/5-2/5-2.2/5-2.2:1.1/0003:046D:C547.0009/input/input14
+U: Uniq=
+H: Handlers=sysrq kbd leds event9 
+B: PROP=0
+B: EV=12001f
+B: KEY=3f0003bfff 0 0 483ffff17aff32d bfd4444600000000 1 130ff38b17d007 ffe77bfad941dfed fdbeffdf77cfffff fffffffffffffffe
+B: REL=1040
+B: ABS=100000000
+B: MSC=10
+B: LED=1f
+
+I: Bus=0003 Vendor=258a Product=00c1 Version=0111
+N: Name="SINO WEALTH Bluetooth Keyboard"
+P: Phys=usb-0000:0d:00.3-2.3.2/input0
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/0000:0d:00.3/usb5/5-2/5-2.3/5-2.3.2/5-2.3.2:1.0/0003:258A:00C1.000B/input/input15
+U: Uniq=
+H: Handlers=sysrq kbd leds event10 
+B: PROP=0
+B: EV=120013
+B: KEY=1000000000007 ff9f207ac14057ff febeffdfffefffff fffffffffffffffe
+B: MSC=10
+B: LED=1f
+
+I: Bus=0003 Vendor=258a Product=00c1 Version=0111
+N: Name="SINO WEALTH Bluetooth Keyboard System Control"
+P: Phys=usb-0000:0d:00.3-2.3.2/input1
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/0000:0d:00.3/usb5/5-2/5-2.3/5-2.3.2/5-2.3.2:1.1/0003:258A:00C1.000C/input/input16
+U: Uniq=
+H: Handlers=kbd event11 
+B: PROP=0
+B: EV=13
+B: KEY=c000 10000000000000 0
+B: MSC=10
+
+I: Bus=0003 Vendor=258a Product=00c1 Version=0111
+N: Name="SINO WEALTH Bluetooth Keyboard Consumer Control"
+P: Phys=usb-0000:0d:00.3-2.3.2/input1
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/0000:0d:00.3/usb5/5-2/5-2.3/5-2.3.2/5-2.3.2:1.1/0003:258A:00C1.000C/input/input17
+U: Uniq=
+H: Handlers=kbd event12 
+B: PROP=0
+B: EV=1f
+B: KEY=33eff 0 0 483ffff17aff32d bfd4444600000000 1 130c730b17c000 267bfad9415fed 9e168000004400 10000002
+B: REL=1040
+B: ABS=100000000
+B: MSC=10
+
+I: Bus=0003 Vendor=258a Product=00c1 Version=0111
+N: Name="SINO WEALTH Bluetooth Keyboard"
+P: Phys=usb-0000:0d:00.3-2.3.2/input1
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/0000:0d:00.3/usb5/5-2/5-2.3/5-2.3.2/5-2.3.2:1.1/0003:258A:00C1.000C/input/input18
+U: Uniq=
+H: Handlers=kbd event13 
+B: PROP=0
+B: EV=100013
+B: KEY=ff80000000000000 80b0ffcd01cfffff febffbffdffffffe
+B: MSC=10
+
+I: Bus=0003 Vendor=0c45 Product=636d Version=0100
+N: Name="NexiGo HD Webcam: NexiGo HD Web"
+P: Phys=usb-0000:08:00.1-6/button
+S: Sysfs=/devices/pci0000:00/0000:00:01.2/0000:02:00.0/0000:03:08.0/0000:08:00.1/usb1/1-6/1-6:1.0/input/input19
+U: Uniq=
+H: Handlers=kbd event14 
+B: PROP=0
+B: EV=3
+B: KEY=100000 0 0 0
+
+I: Bus=0019 Vendor=0000 Product=0001 Version=0000
+N: Name="Power Button"
+P: Phys=PNP0C0C/button/input0
+S: Sysfs=/devices/LNXSYSTM:00/LNXSYBUS:00/PNP0C0C:00/input/input20
+U: Uniq=
+H: Handlers=kbd event15 
+B: PROP=0
+B: EV=3
+B: KEY=8000 10000000000000 0
+
+I: Bus=0019 Vendor=0000 Product=0001 Version=0000
+N: Name="Power Button"
+P: Phys=LNXPWRBN/button/input0
+S: Sysfs=/devices/LNXSYSTM:00/LNXPWRBN:00/input/input21
+U: Uniq=
+H: Handlers=kbd event16 
+B: PROP=0
+B: EV=3
+B: KEY=8000 10000000000000 0
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="HDA NVidia HDMI/DP,pcm=3"
+P: Phys=ALSA
+S: Sysfs=/devices/pci0000:00/0000:00:03.1/0000:0b:00.1/sound/card2/input22
+U: Uniq=
+H: Handlers=event17 
+B: PROP=0
+B: EV=21
+B: SW=140
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="HDA NVidia HDMI/DP,pcm=7"
+P: Phys=ALSA
+S: Sysfs=/devices/pci0000:00/0000:00:03.1/0000:0b:00.1/sound/card2/input23
+U: Uniq=
+H: Handlers=event18 
+B: PROP=0
+B: EV=21
+B: SW=140
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="HDA NVidia HDMI/DP,pcm=8"
+P: Phys=ALSA
+S: Sysfs=/devices/pci0000:00/0000:00:03.1/0000:0b:00.1/sound/card2/input24
+U: Uniq=
+H: Handlers=event19 
+B: PROP=0
+B: EV=21
+B: SW=140
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="HDA NVidia HDMI/DP,pcm=9"
+P: Phys=ALSA
+S: Sysfs=/devices/pci0000:00/0000:00:03.1/0000:0b:00.1/sound/card2/input25
+U: Uniq=
+H: Handlers=event20 
+B: PROP=0
+B: EV=21
+B: SW=140
+
+I: Bus=0001 Vendor=10ec Product=0b00 Version=0001
+N: Name="HDA Digital PCBeep"
+P: Phys=card3/codec#0/beep0
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/0000:0d:00.4/sound/card3/input26
+U: Uniq=
+H: Handlers=kbd event21 
+B: PROP=0
+B: EV=40001
+B: SND=6
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="HD-Audio Generic Rear Mic"
+P: Phys=ALSA
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/0000:0d:00.4/sound/card3/input27
+U: Uniq=
+H: Handlers=event22 
+B: PROP=0
+B: EV=21
+B: SW=10
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="HD-Audio Generic Front Mic"
+P: Phys=ALSA
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/0000:0d:00.4/sound/card3/input28
+U: Uniq=
+H: Handlers=event23 
+B: PROP=0
+B: EV=21
+B: SW=10
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="HD-Audio Generic Line"
+P: Phys=ALSA
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/0000:0d:00.4/sound/card3/input29
+U: Uniq=
+H: Handlers=event24 
+B: PROP=0
+B: EV=21
+B: SW=2000
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="HD-Audio Generic Line Out Front"
+P: Phys=ALSA
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/0000:0d:00.4/sound/card3/input30
+U: Uniq=
+H: Handlers=event25 
+B: PROP=0
+B: EV=21
+B: SW=40
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="HD-Audio Generic Line Out Surround"
+P: Phys=ALSA
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/0000:0d:00.4/sound/card3/input31
+U: Uniq=
+H: Handlers=event26 
+B: PROP=0
+B: EV=21
+B: SW=40
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="HD-Audio Generic Line Out CLFE"
+P: Phys=ALSA
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/0000:0d:00.4/sound/card3/input32
+U: Uniq=
+H: Handlers=event27 
+B: PROP=0
+B: EV=21
+B: SW=40
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="HD-Audio Generic Front Headphone"
+P: Phys=ALSA
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/0000:0d:00.4/sound/card3/input33
+U: Uniq=
+H: Handlers=event28 
+B: PROP=0
+B: EV=21
+B: SW=4
+
+I: Bus=0019 Vendor=0000 Product=0000 Version=0000
+N: Name="Eee PC WMI hotkeys"
+P: Phys=eeepc-wmi/input0
+S: Sysfs=/devices/platform/eeepc-wmi/input/input34
+U: Uniq=
+H: Handlers=kbd event29 rfkill 
+B: PROP=0
+B: EV=100013
+B: KEY=7e40000 0 800000000000 0 0 1400b00100000 300180001100800 e000000000000 2
+B: MSC=10
+
+I: Bus=0005 Vendor=0000 Product=0000 Version=0000
+N: Name="BlueZ 5.87 (MCS)"
+P: Phys=a4:6b:b6:76:b4:01
+S: Sysfs=/devices/virtual/input/input35
+U: Uniq=
+H: Handlers=kbd event30 
+B: PROP=0
+B: EV=3
+B: KEY=300 6800000000 0 0
+
+I: Bus=0005 Vendor=0000 Product=0000 Version=0000
+N: Name="nixos #1 (MCS)"
+P: Phys=50:2e:91:08:d7:d1
+S: Sysfs=/devices/virtual/input/input36
+U: Uniq=
+H: Handlers=kbd event31 
+B: PROP=0
+B: EV=3
+B: KEY=300 6800000000 0 0
+
+I: Bus=0003 Vendor=28de Product=1304 Version=0111
+N: Name="Valve Software Steam Controller Puck Mouse"
+P: Phys=usb-0000:08:00.1-4/input2
+S: Sysfs=/devices/pci0000:00/0000:00:01.2/0000:02:00.0/0000:03:08.0/0000:08:00.1/usb1/1-4/1-4:1.2/0003:28DE:1304.000D/input/input37
+U: Uniq=FXB996050187C
+H: Handlers=mouse0 event0 
+B: PROP=0
+B: EV=17
+B: KEY=30000 0 0 0 0
+B: REL=1943
+B: MSC=10
+
+I: Bus=0003 Vendor=28de Product=1304 Version=0111
+N: Name="Valve Software Steam Controller Puck Keyboard"
+P: Phys=usb-0000:08:00.1-4/input2
+S: Sysfs=/devices/pci0000:00/0000:00:01.2/0000:02:00.0/0000:03:08.0/0000:08:00.1/usb1/1-4/1-4:1.2/0003:28DE:1304.000D/input/input38
+U: Uniq=FXB996050187C
+H: Handlers=sysrq kbd event1 
+B: PROP=0
+B: EV=100013
+B: KEY=e080ffdf01cfffff fffffffffffffffe
+B: MSC=10
+
+I: Bus=0003 Vendor=28de Product=1304 Version=0111
+N: Name="Valve Software Steam Controller Puck Mouse"
+P: Phys=usb-0000:08:00.1-4/input3
+S: Sysfs=/devices/pci0000:00/0000:00:01.2/0000:02:00.0/0000:03:08.0/0000:08:00.1/usb1/1-4/1-4:1.3/0003:28DE:1304.000E/input/input40
+U: Uniq=FXB996050187C
+H: Handlers=mouse1 event2 
+B: PROP=0
+B: EV=17
+B: KEY=30000 0 0 0 0
+B: REL=1943
+B: MSC=10
+
+I: Bus=0003 Vendor=28de Product=1304 Version=0111
+N: Name="Valve Software Steam Controller Puck Keyboard"
+P: Phys=usb-0000:08:00.1-4/input3
+S: Sysfs=/devices/pci0000:00/0000:00:01.2/0000:02:00.0/0000:03:08.0/0000:08:00.1/usb1/1-4/1-4:1.3/0003:28DE:1304.000E/input/input41
+U: Uniq=FXB996050187C
+H: Handlers=sysrq kbd event3 
+B: PROP=0
+B: EV=100013
+B: KEY=e080ffdf01cfffff fffffffffffffffe
+B: MSC=10
+
+I: Bus=0003 Vendor=28de Product=1304 Version=0111
+N: Name="Valve Software Steam Controller Puck Mouse"
+P: Phys=usb-0000:08:00.1-4/input4
+S: Sysfs=/devices/pci0000:00/0000:00:01.2/0000:02:00.0/0000:03:08.0/0000:08:00.1/usb1/1-4/1-4:1.4/0003:28DE:1304.000F/input/input43
+U: Uniq=FXB996050187C
+H: Handlers=mouse2 event4 
+B: PROP=0
+B: EV=17
+B: KEY=30000 0 0 0 0
+B: REL=1943
+B: MSC=10
+
+I: Bus=0003 Vendor=28de Product=1304 Version=0111
+N: Name="Valve Software Steam Controller Puck Keyboard"
+P: Phys=usb-0000:08:00.1-4/input4
+S: Sysfs=/devices/pci0000:00/0000:00:01.2/0000:02:00.0/0000:03:08.0/0000:08:00.1/usb1/1-4/1-4:1.4/0003:28DE:1304.000F/input/input44
+U: Uniq=FXB996050187C
+H: Handlers=sysrq kbd event5 
+B: PROP=0
+B: EV=100013
+B: KEY=e080ffdf01cfffff fffffffffffffffe
+B: MSC=10
+
+I: Bus=0003 Vendor=28de Product=1304 Version=0111
+N: Name="Valve Software Steam Controller Puck Mouse"
+P: Phys=usb-0000:08:00.1-4/input5
+S: Sysfs=/devices/pci0000:00/0000:00:01.2/0000:02:00.0/0000:03:08.0/0000:08:00.1/usb1/1-4/1-4:1.5/0003:28DE:1304.0010/input/input46
+U: Uniq=FXB996050187C
+H: Handlers=mouse3 event6 
+B: PROP=0
+B: EV=17
+B: KEY=30000 0 0 0 0
+B: REL=1943
+B: MSC=10
+
+I: Bus=0003 Vendor=28de Product=1304 Version=0111
+N: Name="Valve Software Steam Controller Puck Keyboard"
+P: Phys=usb-0000:08:00.1-4/input5
+S: Sysfs=/devices/pci0000:00/0000:00:01.2/0000:02:00.0/0000:03:08.0/0000:08:00.1/usb1/1-4/1-4:1.5/0003:28DE:1304.0010/input/input47
+U: Uniq=FXB996050187C
+H: Handlers=sysrq kbd event7 
+B: PROP=0
+B: EV=100013
+B: KEY=e080ffdf01cfffff fffffffffffffffe
+B: MSC=10
+
+I: Bus=0003 Vendor=28de Product=11ff Version=0001
+N: Name="Microsoft X-Box 360 pad 1"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input699
+U: Uniq=
+H: Handlers=event257 js1 
+B: PROP=0
+B: EV=20000b
+B: KEY=7cdb000000000000 0 0 0 0
+B: ABS=3003f
+B: FF=10000 0
+
+I: Bus=0005 Vendor=045e Product=028e Version=1130
+N: Name="Xbox Wireless Controller"
+P: Phys=50:2e:91:08:d7:d1
+S: Sysfs=/devices/virtual/misc/uhid/0005:045E:0B13.0016/input/input792
+U: Uniq=0c:35:26:75:f6:2b
+H: Handlers=event256 js0 
+B: PROP=0
+B: EV=20001b
+B: KEY=7cdb000000000000 0 0 0 0
+B: ABS=20003003f
+B: MSC=10
+B: FF=107030000 0
+
+I: Bus=0005 Vendor=045e Product=028e Version=1130
+N: Name="Xbox Wireless Controller Consumer Control"
+P: Phys=50:2e:91:08:d7:d1
+S: Sysfs=/devices/virtual/misc/uhid/0005:045E:0B13.0016/input/input793
+U: Uniq=0c:35:26:75:f6:2b
+H: Handlers=event258 
+B: PROP=0
+B: EV=3
+B: KEY=100000000000000 0 0 0 0 0 0 0 0 0
+
+I: Bus=0005 Vendor=045e Product=028e Version=1130
+N: Name="Xbox Wireless Controller Keyboard"
+P: Phys=50:2e:91:08:d7:d1
+S: Sysfs=/devices/virtual/misc/uhid/0005:045E:0B13.0016/input/input794
+U: Uniq=0c:35:26:75:f6:2b
+H: Handlers=kbd event259 
+B: PROP=0
+B: EV=3
+B: KEY=168001000000 10000002
+
+I: Bus=0005 Vendor=045e Product=028e Version=1130
+N: Name="Xbox Wireless Controller Mouse"
+P: Phys=50:2e:91:08:d7:d1
+S: Sysfs=/devices/virtual/misc/uhid/0005:045E:0B13.0016/input/input795
+U: Uniq=0c:35:26:75:f6:2b
+H: Handlers=mouse5 event260 
+B: PROP=0
+B: EV=7
+B: KEY=ff0000 0 0 0 0
+B: REL=143
+

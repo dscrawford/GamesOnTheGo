@@ -18,3 +18,4 @@ needs when the thing calling it keeps each emulator in a directory of its own.
 | [always-seating.md](always-seating.md) | a controller that arrives mid-game should be able to join without everybody stopping |
 | [triton-assignment.md](triton-assignment.md) | **bug**: the 2026 Steam Controller pairs in a session and is then never read |
 | [session-daemon.md](session-daemon.md) | every session starts unseated and the daemon ends with it — today it outlives everything and restores yesterday's seats |
+| [controllers-that-are-keyboards.md](controllers-that-are-keyboards.md) | a Steam Controller in lizard mode and a Bluetooth Xbox pad are keyboards and mice too; GOTG holds them in the picker, padmap should hold them in the game |
