@@ -32,7 +32,7 @@ from .clones import Owners, is_clone
 
 __all__ = [
     "A", "B", "BACK", "DOWN", "LB", "LEFT", "RB", "RIGHT", "START", "UP", "X", "Y",
-    "Pads", "button", "direction", "init", "released",
+    "Pads", "button", "direction", "init", "raw_input", "released",
 ]
 
 # SDL's own constants, checked against the numbers buttons.py writes out. If a
@@ -113,6 +113,27 @@ def released(event) -> bool:
     if event.type == pygame.JOYBUTTONUP and getattr(event, "instance_id", None) in _mapped:
         return False
     return _allowed(event)
+
+
+def raw_input(event) -> tuple[str, int, object] | None:
+    """A raw joystick input from a pad padmap published: (kind, index, value).
+
+    The joystick API's own numbering -- button 3, hat 0, axis 2 -- which is
+    how padmap's profile names things, so a screen can say which control is
+    being pressed. Unlike `button`, the raw event of a mapped pad is *not*
+    dropped here: this is not acting on a press, only showing it.
+    """
+    if not _allowed(event):
+        return None
+    if event.type == pygame.JOYBUTTONDOWN:
+        return ("button", event.button, 1)
+    if event.type == pygame.JOYHATMOTION:
+        dx, dy = event.value
+        mask = (1 if dy > 0 else 0) | (2 if dx > 0 else 0) | (4 if dy < 0 else 0) | (8 if dx < 0 else 0)
+        return ("hat", event.hat, mask)
+    if event.type == pygame.JOYAXISMOTION:
+        return ("axis", event.axis, event.value)
+    return None
 
 
 def direction(event) -> tuple[int, int] | None:

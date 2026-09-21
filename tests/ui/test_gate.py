@@ -453,17 +453,57 @@ def test_letting_go_arms_the_door_and_the_next_press_is_the_one():
     assert hold.done(102.0)
 
 
-def test_nothing_held_at_open_means_the_first_press_counts():
+def test_nothing_held_at_open_means_a_press_after_the_quiet_counts():
     hold = GoHold(seconds=1.0, opened=100.0)
-    hold.pressed(100.6)
-    assert hold.done(101.6)
+    hold.pressed(101.2)
+    assert hold.done(102.2)
+
+
+def test_a_press_in_the_first_second_is_the_old_hold_arriving_late():
+    # padmap forwards the state it held back during the wizard when the
+    # wizard ends, about a tenth of a second after the door has opened.
+    hold = GoHold(seconds=1.0, opened=100.0)
+    hold.pressed(100.3)
+    assert not hold.done(102.0)
+    hold.released(102.1)
+    hold.pressed(102.3)
+    assert hold.done(103.3)
 
 
 def test_a_press_let_go_early_starts_over():
     hold = GoHold(seconds=1.0, opened=100.0)
-    hold.pressed(100.6)
-    hold.released(101.0)
-    assert hold.progress(101.5) == 0.0
-    hold.pressed(101.2)
-    assert not hold.done(102.1)
-    assert hold.done(102.2)
+    hold.pressed(101.6)
+    hold.released(102.0)
+    assert hold.progress(102.5) == 0.0
+    hold.pressed(102.2)
+    assert not hold.done(103.1)
+    assert hold.done(103.2)
+
+
+# --- asking for the wizard again ---------------------------------------------
+
+
+def test_rebind_walks_the_first_seated_pad_through_the_wizard_again():
+    from gotg_ui.gate import rebind
+
+    gate = Gate(platform="gamecube", state=READY, listening=True, unseated=True,
+                seats=(Seat(player=1, name="pad", configured=True),))
+    gate, command = rebind(gate)
+    assert command == {"cmd": "map", "player": 1, "layout": "gamecube", "scope": "console:gamecube"}
+    assert gate.state == MAPPING and gate.awaiting == "map"
+    assert not gate.done
+
+
+def test_rebind_with_nobody_seated_or_a_wizard_running_does_nothing():
+    from gotg_ui.gate import rebind
+
+    assert rebind(Gate(platform="gamecube")) == (Gate(platform="gamecube"), None)
+    busy = Gate(platform="gamecube", wizard=True, seats=(Seat(player=1),))
+    assert rebind(busy) == (busy, None)
+
+
+def test_the_wizard_step_carries_what_has_been_bound_so_far():
+    gate = Gate(platform="gamecube", state=MAPPING, awaiting="map", listening=True, unseated=True)
+    gate = apply(gate, {"event": "mapping", "control": "b", "label": "B", "index": 1, "total": 16,
+                        "captured": {"a": {"kind": "button", "index": 0, "value": 0}}})
+    assert gate.captured == {"a": {"kind": "button", "index": 0, "value": 0}}

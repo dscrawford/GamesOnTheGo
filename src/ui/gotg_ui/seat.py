@@ -34,8 +34,9 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame  # noqa: E402 - the line above only works ahead of the import
 
 from . import pads as sdl_pads
-from . import trace
+from . import profiles, trace
 from .controllers import Diagram, assets_dir, draw_reveal
+from .controllers import draw as draw_diagram
 from .gate import (
     MAPPING,
     READY,
@@ -45,10 +46,12 @@ from .gate import (
     GoHold,
     apply,
     decide,
+    rebind,
     without_controllers,
 )
 from .padmap import Padmap, ensure_daemon
 from .padstrip import EMPTY_RING, LABEL, LABEL_DIM, PANEL, colour_for
+from .pressing import controls_for
 
 WINDOW = tuple(config.get("theme.window", [1280, 800]))
 BACKGROUND = config.colour("theme.colours.background", (18, 18, 20))
@@ -109,6 +112,12 @@ def draw(screen, font_at, gate: Gate, title: str, diagram: Diagram | None = None
             at = (pad_x + int(uv[0] * pad.get_width()), pad_y + int(uv[1] * pad.get_height()))
             pygame.draw.aacircle(screen, colour_for(1), at, 17, 3)
             break
+
+    if gate.state == MAPPING and gate.captured:
+        # What the previous press became, so a binding is seen as it is made.
+        control, binding = list(gate.captured.items())[-1]
+        said = font_at(24).render(f"{control} is now {profiles.describe(binding)}", True, LABEL_DIM)
+        screen.blit(said, ((width - said.get_width()) // 2, int(height * 0.29)))
 
     if gate.state == MAPPING and gate.total:
         bar_w, bar_h = int(width * 0.5), 10
@@ -190,31 +199,40 @@ def run(platform: str, title: str) -> int:
         diagram = None
 
     try:
-        while not gate.done:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    gate = _leave(pads, gate)
-                elif event.type == pygame.KEYDOWN:
-                    if event.key in (pygame.K_ESCAPE, pygame.K_b):
+        while True:
+            while not gate.done:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
                         gate = _leave(pads, gate)
-                    elif event.key == pygame.K_s and gate.state == MAPPING:
-                        # A control this pad does not have. Every layout here
-                        # is a superset of somebody's controller.
-                        pads.send({"cmd": "skip_control"})
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key in (pygame.K_ESCAPE, pygame.K_b):
+                            gate = _leave(pads, gate)
+                        elif event.key == pygame.K_s and gate.state == MAPPING:
+                            # A control this pad does not have. Every layout here
+                            # is a superset of somebody's controller.
+                            pads.send({"cmd": "skip_control"})
 
-            for message in pads.poll():
-                gate = apply(gate, message)
-            if not pads.connected:
+                for message in pads.poll():
+                    gate = apply(gate, message)
+                if not pads.connected:
+                    break
+                gate, command = decide(gate)
+                if command is not None:
+                    pads.send(command)
+
+                draw(screen, font_at, gate, title, diagram)
+                pygame.display.flip()
+                clock.tick(60)
+            if not (gate.state == READY and gate.seated):
                 break
-            gate, command = decide(gate)
-            if command is not None:
-                pads.send(command)
-
-            draw(screen, font_at, gate, title, diagram)
-            pygame.display.flip()
-            clock.tick(60)
-        if gate.state == READY and gate.seated:
-            _wait_for_go(screen, font_at, clock, gate, title)
+            # The door: the bindings on the pad, a press ringed as it happens, a
+            # tap of Y to walk the buttons again, and the second that starts.
+            if _wait_for_go(screen, font_at, clock, gate, title) == "rebind":
+                gate, command = rebind(gate)
+                if command is not None:
+                    pads.send(command)
+                    continue
+            break
     finally:
         pygame.quit()
         pads.close()
@@ -230,9 +248,16 @@ class Door:
     count, and nothing does until it has come up.
     """
 
-    def __init__(self, sticks, now: float, seconds: float = GO_HOLD):
+    def __init__(self, sticks, now: float, seconds: float = GO_HOLD, buttons: dict | None = None):
         self.sticks = sticks
         self.hold = GoHold(seconds=seconds, opened=now, held_at_open=sticks.any_button_down())
+        # padmap's profile for the seated pad, so a raw input can be named:
+        # which control the button under the thumb is. Ringed on the drawing
+        # while it is down.
+        self.buttons = buttons or {}
+        self.lit: str | None = None
+        self.y_down = False
+        self.rebind = False
         trace.say("door-open", pads=len(sticks), held_at_open=self.hold.held_at_open)
 
     def handle(self, event, now: float) -> bool:
@@ -254,10 +279,27 @@ class Door:
             return True
         elif sdl_pads.button(event) is not None:
             self.hold.pressed(now)
+            # Y, tapped, is "walk the buttons again". Tapped: let go before
+            # the second is up, or it was the hold that starts the game.
+            if sdl_pads.button(event) == sdl_pads.Y:
+                self.y_down = True
             trace.say("door-press", armed=self.hold.armed, counted=self.hold.since is not None)
         elif sdl_pads.released(event):
+            if self.y_down and self.hold.armed and not self.hold.done(now):
+                self.rebind = True
+            self.y_down = False
             self.hold.released(now)
+            self.lit = None
             trace.say("door-release")
+        raw = sdl_pads.raw_input(event)
+        if raw is not None:
+            named = controls_for(self.buttons, *raw)
+            if named:
+                self.lit = named[0]
+            elif raw[0] != "button":
+                # An axis or hat back at rest clears it; a button's rest is
+                # its release, handled above.
+                self.lit = None
         return False
 
     def done(self, now: float) -> bool:
@@ -267,36 +309,64 @@ class Door:
         return self.hold.progress(now)
 
 
-def _wait_for_go(screen, font_at, clock, gate: Gate, title: str) -> None:
-    """padmap has accepted; the game starts when somebody holds for a second."""
-    door = Door(sdl_pads.init(), time.monotonic())
+def _wait_for_go(screen, font_at, clock, gate: Gate, title: str) -> str:
+    """Seated and mapped; the game starts when somebody holds for a second.
+
+    Returns "go", or "rebind" when Y was tapped instead.
+    """
+    first = gate.seats[0] if gate.seats else None
+    profile = profiles.for_pad(first.name) if first else None
+    bound = profiles.described(profile, gate.scope)
+    door = Door(sdl_pads.init(), time.monotonic(), buttons=(profile or {}).get("buttons") or {})
+    cache: dict = {}
     while True:
         now = time.monotonic()
         for event in pygame.event.get():
             if door.handle(event, now):
-                return
+                return "go"
+            if door.rebind:
+                return "rebind"
         if door.done(now):
-            return
-        _draw_go(screen, font_at, gate, title, door.progress(now))
+            return "go"
+        _draw_go(screen, font_at, gate, title, door.progress(now), bound, door.lit, cache)
         pygame.display.flip()
         clock.tick(60)
 
 
-def _draw_go(screen, font_at, gate: Gate, title: str, fraction: float) -> None:
-
+def _draw_go(
+    screen, font_at, gate: Gate, title: str, fraction: float, bound: dict, lit: str | None, cache: dict
+) -> None:
+    """The door: what every button does on this pad, the one being pressed
+    ringed, and the second filling in beside the title."""
     width, height = screen.get_size()
-    screen.fill(BACKGROUND)
-    heading = font_at(34).render(title, True, LABEL_DIM)
-    screen.blit(heading, ((width - heading.get_width()) // 2, int(height * 0.10)))
-    prompt = font_at(56).render("hold a button for a second to start", True, LABEL)
-    screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.22)))
-    centre = (width // 2, int(height * 0.52))
+    try:
+        names = ", ".join(seat.name or "pad" for seat in gate.seats)
+        draw_diagram(
+            screen, assets_dir(), gate.platform, font_at, cache,
+            highlight=lit, bound=bound,
+            heading=f"{title}  —  {names}",
+            keys="",
+            footer=(
+                "let go, then hold a button for a second to start   ·   "
+                "tap Y to change these   ·   Enter or Esc start now"
+            ),
+        )
+    except Exception as error:  # noqa: BLE001 - a drawing must not start a game
+        # The drawing is a courtesy; the door is not. A missing table or
+        # artwork falls back to the words, and the second still has to be
+        # held -- a traceback here once exited the gate and started the game.
+        screen.fill(BACKGROUND)
+        heading = font_at(34).render(title, True, LABEL_DIM)
+        screen.blit(heading, ((width - heading.get_width()) // 2, int(height * 0.10)))
+        prompt = font_at(48).render("hold a button for a second to start", True, LABEL)
+        screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.40)))
+        note = font_at(20).render(f"(no drawing: {error})", True, LABEL_DIM)
+        screen.blit(note, ((width - note.get_width()) // 2, int(height * 0.92)))
     first = gate.seats[0] if gate.seats else None
-    draw_reveal(screen, centre, first.name if first else None, colour_for(1), fraction, int(height * 0.22))
-    who = font_at(24).render(", ".join(seat.name or "pad" for seat in gate.seats), True, LABEL_DIM)
-    screen.blit(who, ((width - who.get_width()) // 2, int(height * 0.70)))
-    keys = font_at(22).render("let go, then hold   Enter or Esc start now", True, LABEL_DIM)
-    screen.blit(keys, ((width - keys.get_width()) // 2, int(height * 0.92)))
+    draw_reveal(
+        screen, (int(width * 0.92), int(height * 0.10)),
+        first.name if first else None, colour_for(1), fraction, int(height * 0.09),
+    )
 
 
 def _hold_the_door(title: str, reason: str) -> int:
