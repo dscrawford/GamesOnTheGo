@@ -80,6 +80,24 @@ padmap has that seat pointed somewhere else. `padmap-rs exec` starts a game
 with only padmap's clones visible, hidraw included; see
 [docs/controllers.md](controllers.md).
 
+## The first window is the controller check
+
+`gotg play` and a Steam shortcut both go through `gotg-seat` before the
+emulator: whatever the daemon remembers is forgotten, the person about to
+play holds a button, and the buttons are walked only if that pad has never
+been mapped for this console. Never silently skipped — with no padmap to ask
+it still opens, says why, and counts down eight seconds so a television with
+no keyboard is not stuck on it.
+
+Steam is its own environment for this: no picker ran first, so the gate
+starts a daemon of its own (`ensure-daemon --fresh --follow <pid>`) that ends
+with the game, and Steam's `SDL_GAMECONTROLLER_IGNORE_DEVICES` and overlay
+preload are cleared before the gate — which is SDL, and would be blinded the
+same as a game. `tests/client/padmap.bats` runs the launcher `gotg steam add`
+writes under those variables and reads what reached the gate;
+`tests/e2e/test_controllers.py` runs `gotg-seat` as a process on both routes
+against a real daemon.
+
 ## Testing without the hardware
 
 `gotg qa <id> --machine deck` reproduces the conditions above on a desktop —

@@ -370,7 +370,10 @@ def test_a_new_session_opens_with_nobody_seated_whatever_padmap_remembers(daemon
         # The picker opening, exactly as app.py does it, against this daemon.
         for key, value in daemon.env.items():
             monkeypatch.setenv(key, value)
-        monkeypatch.delenv("PADMAP_SKIP_DAEMON_CHECK", raising=False)
+        # Set rather than deleted, so monkeypatch has something to restore:
+        # ensure_daemon writes "1" here on success, and a delenv of an absent
+        # key would leave that for every test after this one.
+        monkeypatch.setenv("PADMAP_SKIP_DAEMON_CHECK", "0")
         assert ensure_daemon(fresh=True, follow=os.getpid()) is None
         for _ in range(40):
             if os.path.exists(daemon.path):
@@ -448,6 +451,12 @@ def test_a_game_launch_begins_with_a_hold_whatever_was_seated(daemon, sdl):
             assert {"cmd": "begin", "players": 4} in sent, f"no hold was asked for: {sent}"
             assert gate.state == SEATING
             assert gate.seated == 0, "the gate is asking for a hold with somebody still seated"
+            # The clone goes when the kernel gets round to it, and the name
+            # is global: a daemon the previous test is still tearing down
+            # may hold one too for a moment.
+            end = time.monotonic() + 4.0
+            while time.monotonic() < end and "padmap Player 1" in kernel_names():
+                step(0.2)
             assert "padmap Player 1" not in kernel_names(), "the old seat's clone is still published"
 
             pad.hold(BTN_SOUTH, 0.7)
@@ -529,3 +538,177 @@ def test_a_controllers_keyboard_and_mouse_never_reach_the_compositor(sdl):
         finally:
             os.close(compositor)
             os.close(desk)
+
+
+# --- the first window of a launch ---------------------------------------------
+#
+# `gotg-seat` as the launcher runs it: a process of its own, against the
+# daemon. Two routes reach it. From the grid the picker execvps into the
+# launcher, so the pid is the picker's and the daemon is kept, seats and all,
+# for the gate to forget. From Steam there is no picker: the gate starts a
+# daemon of its own, fresh, following itself.
+
+
+def _seat_process(daemon, extra: dict, root: str):
+    import os
+    import subprocess
+    import sys
+
+    env = {**os.environ, **daemon.env}
+    # The latch padmap's own client sets after a successful ensure-daemon.
+    # An earlier test in this process may have left it in os.environ -- a
+    # monkeypatched delenv of a key that was absent records nothing to
+    # restore -- and a gate that inherits it never starts its own daemon.
+    env.pop("PADMAP_SKIP_DAEMON_CHECK", None)
+    env.update(extra)
+    env.setdefault("SDL_VIDEODRIVER", "dummy")
+    env.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+    env.setdefault("GOTG_CONFIG", os.path.join(root, "config"))
+    env.setdefault("PADMAP_NO_AUTOSETUP", "1")
+    return subprocess.Popen(
+        [sys.executable, "-m", "gotg_ui.seat", "--platform", "gamecube", "--title", "E2E launch"],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
+def _root() -> str:
+    import os
+
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def test_a_launch_from_the_grid_meets_the_gate_first_which_forgets_the_seat(daemon, sdl):
+    """The picker route: the same daemon, and its seat is the first thing to go."""
+    import signal
+
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        pad.hold(BTN_SOUTH, 0.7)
+        assert picker.until(lambda p: p.seated(1))
+        picker.close()
+        daemon.drain(0.5)
+
+        # PADMAP_SKIP_DAEMON_CHECK is what the picker exports before it execvps,
+        # so the launcher does not ask for a daemon it already has.
+        seat = _seat_process(daemon, {"PADMAP_SKIP_DAEMON_CHECK": "1"}, _root())
+        try:
+            removed = daemon.wait_for("controller", seconds=8.0)
+            while removed is not None and removed.get("reason") != "unseated":
+                removed = daemon.wait_for("controller", seconds=4.0)
+            assert removed is not None, "the gate never told the daemon to forget the seat"
+            assigning = None
+            end = time.monotonic() + 8.0
+            while time.monotonic() < end and assigning is None:
+                for event in daemon.drain(0.2):
+                    if event.get("event") == "state" and event.get("state") == "assigning":
+                        assigning = event
+            assert assigning is not None, "the gate never opened a session to take a seat in"
+            assert assigning.get("players") == [], "the gate is asking for a hold with somebody seated"
+            assert seat.poll() is None, "the gate exited before anybody held a button"
+        finally:
+            seat.send_signal(signal.SIGTERM)
+            seat.wait(timeout=5)
+
+
+def test_a_launch_from_steam_meets_the_gate_first_on_a_daemon_of_its_own(daemon, sdl):
+    """The Steam route: no picker, so the gate starts a fresh daemon following itself,
+    and that daemon ends with it."""
+    import os
+    import signal
+
+    from conftest import Daemon
+
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        pad.hold(BTN_SOUTH, 0.7)
+        assert picker.until(lambda p: p.seated(1))
+        picker.close()
+        daemon.close()          # nothing of the picker's survives a Steam launch
+
+        seat = _seat_process(daemon, {}, _root())
+        later = None
+        try:
+            # ensure-daemon replaces the fixture's daemon: the socket goes and
+            # comes back belonging to a daemon that follows the gate.
+            state = None
+            end = time.monotonic() + 15.0
+            while time.monotonic() < end and state is None:
+                time.sleep(0.25)
+                if not os.path.exists(daemon.path):
+                    continue
+                try:
+                    later = Daemon(daemon.path)
+                except OSError:
+                    continue
+                # Daemon() has already read the greeting and the answer to
+                # `status` into `seen`; the state is there, not in a later drain.
+                for event in later.seen + later.drain(0.5):
+                    if event.get("event") == "state" and event.get("following") == seat.pid:
+                        state = event
+                if state is None:
+                    later.close()
+                    later = None
+            if state is None:
+                log = os.path.join(daemon.env["XDG_RUNTIME_DIR"], "padmap", "padmap.log")
+                tail = open(log).read()[-1500:] if os.path.exists(log) else "(no daemon log)"
+                seat.send_signal(signal.SIGTERM)
+                _, err = seat.communicate(timeout=5)
+                raise AssertionError(
+                    f"no daemon following the gate (pid {seat.pid}) ever appeared\n"
+                    f"--- gotg-seat stderr ---\n{err}\n--- padmap.log ---\n{tail}"
+                )
+            assert state.get("players") == [], "the Steam route started with yesterday's seat"
+            end = time.monotonic() + 6.0
+            while time.monotonic() < end and state.get("state") != "assigning":
+                for event in later.drain(0.2):
+                    if event.get("event") == "state":
+                        state = event
+            assert state.get("state") == "assigning", "the gate never asked for a hold"
+            assert seat.poll() is None
+        finally:
+            if later is not None:
+                later.close()
+            seat.send_signal(signal.SIGTERM)
+            seat.wait(timeout=5)
+        # And the daemon it started goes with it.
+        end = time.monotonic() + 4.0
+        while time.monotonic() < end and os.path.exists(daemon.path):
+            time.sleep(0.25)
+        assert not os.path.exists(daemon.path), "the gate's daemon outlived the gate"
+
+
+def test_with_no_padmap_the_gate_still_opens_a_window_before_the_game(tmp_path):
+    """Never silent. The window says why and counts down; the game is not
+    started behind somebody's back with nothing to play it with."""
+    import os
+    import shutil
+    import subprocess
+    import sys
+
+    padmap = shutil.which("padmap")
+    without = [d for d in os.environ.get("PATH", "").split(":") if not padmap or os.path.dirname(padmap) != d]
+    env = {
+        **os.environ,
+        "PATH": ":".join(without),
+        "XDG_RUNTIME_DIR": str(tmp_path / "run"),
+        "SDL_VIDEODRIVER": "dummy",
+        "PYGAME_HIDE_SUPPORT_PROMPT": "1",
+        "GOTG_CONFIG": os.path.join(_root(), "config"),
+        "GOTG_SEAT_COUNTDOWN": "2",
+    }
+    env.pop("PADMAP_SKIP_DAEMON_CHECK", None)
+    (tmp_path / "run").mkdir()
+    started = time.monotonic()
+    done = subprocess.run(
+        [sys.executable, "-m", "gotg_ui.seat", "--platform", "gamecube", "--title", "E2E launch"],
+        env=env, capture_output=True, text=True, timeout=30,
+    )
+    took = time.monotonic() - started
+    assert done.returncode == 0, done.stderr
+    assert took >= 1.5, f"the gate skipped itself in {took:.2f}s -- no window, no countdown"
+    assert "padmap" in done.stderr

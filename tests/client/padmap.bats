@@ -36,6 +36,11 @@ setup() {
   {
     printf '#!%s\n' "$(command -v bash)"
     printf 'printf "gotg-seat %%s\\n" "$*" >>"$SEAT_LOG"\n'
+    # What Steam's environment looked like by the time the gate ran: the
+    # gate is SDL, and Steam's ignore list would blind it exactly as it
+    # blinds a game.
+    printf 'printf "env SDL_GAMECONTROLLER_IGNORE_DEVICES=%%s LD_PRELOAD=%%s\\n" "${SDL_GAMECONTROLLER_IGNORE_DEVICES-unset}" "${LD_PRELOAD-unset}" >>"$SEAT_LOG"\n'
+    printf '[ -z "${ORDER_LOG:-}" ] || echo seat >>"$ORDER_LOG"\n'
     printf 'exit "${FAKE_SEAT_EXIT:-0}"\n'
   } >"$FAKE_BIN/gotg-seat"
   chmod +x "$FAKE_BIN/padmap" "$FAKE_BIN/padmap-rs" "$FAKE_BIN/gotg-seat"
@@ -473,4 +478,49 @@ ryujinx_env() {
   run padmap_emit env-n64
   [ "$status" -ne 0 ]
   [ ! -e "$EMIT_ARGS" ]
+}
+
+@test "a Steam launch meets the controller check first, with Steam's blindfold off" {
+  # Steam is its own environment: a sparse PATH, SDL told to ignore the very
+  # pads padmap publishes, and its overlay preloaded into everything. The
+  # launcher it runs is the one `gotg steam add` writes, and this runs that
+  # launcher under those conditions and reads what reached the gate.
+  add_game n64 "usa.zelda.z64" "rom" "Zelda"
+  gotg refresh
+  export GOTG_ENV_DIR="$TEST_TMP/env"
+  mkdir -p "$GOTG_ENV_DIR"
+  : >"$GOTG_ENV_DIR/n64.nix"
+  fake_env env-n64
+  export ORDER_LOG="$TEST_TMP/order"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'echo game >>"$ORDER_LOG"\n'
+    printf 'echo "emulator ran"\n'
+  } >"$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
+  chmod +x "$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
+
+  export GOTG_STEAM_SHORTCUTS="$TEST_TMP/shortcuts.vdf"
+  gotg steam add usa.zelda
+  [ "$status" -eq 0 ]
+  local launcher="$GOTG_GAMES_DIR/n64/play-usa.zelda.sh"
+  [ -x "$launcher" ]
+
+  # Where the launcher looks for gotg: a stable path under the state dir,
+  # never PATH -- and under Steam, never the store.
+  local xdg="$TEST_TMP/steam-xdg"
+  mkdir -p "$xdg/gotg/app/bin"
+  ln -s "$GOTG_BIN" "$xdg/gotg/app/bin/gotg"
+
+  run env XDG_STATE_HOME="$xdg" \
+      SDL_GAMECONTROLLER_IGNORE_DEVICES="0x28de/0x1142,0x045e/0x028e" \
+      SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT="0x0000/0x0000" \
+      LD_PRELOAD="/opt/steam/ubuntu12_64/gameoverlayrenderer.so" \
+      bash "$launcher"
+  [ "$status" -eq 0 ]
+  # Steam swallows stdout; the launcher keeps its own log.
+  grep -q "emulator ran" "$xdg/gotg/logs/usa.zelda.log"
+  # The gate first, the game second.
+  [ "$(paste -sd, "$ORDER_LOG")" = "seat,game" ]
+  grep -q -- "--platform n64" "$SEAT_LOG"
+  grep -q "env SDL_GAMECONTROLLER_IGNORE_DEVICES=unset LD_PRELOAD=unset" "$SEAT_LOG"
 }

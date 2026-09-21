@@ -126,7 +126,9 @@ while the picker runs -- `hush.py` -- because SDL delivers a key, not the
 device it came from. A controller is published by being held, from
 wherever the picker or game is — never from a screen somebody had to find.
 Every session — picker or game — starts with nobody seated; padmap's daemon
-is started `--fresh --follow <pid>` and ends with the session. Enforced by
+is started `--fresh --follow <pid>` and ends with the session. Every launch,
+`gotg play` or Steam, meets `gotg-seat` first and it is never silently
+skipped: with no padmap it opens anyway, says why, and counts down. Enforced by
 `tests/e2e/test_controllers.py`; the rule itself is `clones.py` (match the
 GUID's name-CRC, because SDL renames clones), `assign.attend` (one call per
 frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).

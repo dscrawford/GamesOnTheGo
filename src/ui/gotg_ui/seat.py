@@ -1,13 +1,19 @@
 """`gotg-seat` — the screen between pressing play and the game starting.
 
-Runs only when it has something to ask. A machine with a controller that is
-already mapped for this console never sees it: the check is a socket round trip
-and an exit, fast enough to sit in front of every launch.
+The first window of every launch, from a terminal, from the grid, or from
+Steam: whatever the daemon remembers is forgotten, and the person about to
+play holds a button to be player one. Then, and only if this pad has never
+been mapped for this console, the buttons are walked.
 
-Exits 0 whatever happens, including when padmap is not running at all. This is
-in the way of a game somebody asked for, and a controller problem is not a
-reason to refuse to start one -- the worst case is the launch that would have
-happened anyway, which is what it was before this existed.
+Never silent. It used to be: with no daemon to ask it printed a line to
+stderr and returned, which under Steam is a line in a log nobody reads, and
+the game came up with nothing to play it with and no word why. Now the
+window opens either way. With padmap gone it says so and counts down,
+because a screen no controller can dismiss must not be a trap -- the
+keyboard skips it at once, and eight seconds skip it for everybody else.
+
+Exits 0 whatever happens. This is in the way of a game somebody asked for,
+and a controller problem is not a reason to refuse to start one.
 """
 
 from __future__ import annotations
@@ -28,7 +34,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame  # noqa: E402 - the line above only works ahead of the import
 
 from .controllers import Diagram, assets_dir
-from .gate import MAPPING, SEATING, SKIPPED, Gate, apply, decide
+from .gate import MAPPING, SEATING, SKIPPED, Gate, apply, decide, without_controllers
 from .padmap import Padmap, ensure_daemon
 from .padstrip import EMPTY_RING, LABEL, LABEL_DIM, PANEL, colour_for
 
@@ -39,6 +45,11 @@ BACKGROUND = config.colour("theme.colours.background", (18, 18, 20))
 # launching. A socket that is there answers in milliseconds; this is the bound
 # on a socket that is there and silent.
 FIRST_STATE_TIMEOUT = float(config.get("theme.timeouts.first_state", 3.0))
+
+# How long the window stays when there is no padmap to ask, before the game
+# starts anyway. Long enough to read; short enough that a television with no
+# keyboard in the room is not stuck on it. The environment wins, for tests.
+COUNTDOWN = float(os.environ.get("GOTG_SEAT_COUNTDOWN") or config.get("theme.timeouts.seat_countdown", 8.0))
 
 
 def draw(screen, font_at, gate: Gate, title: str, diagram: Diagram | None = None) -> None:
@@ -109,10 +120,10 @@ def run(platform: str, title: str) -> int:
     trouble = ensure_daemon(fresh=True, follow=os.getpid())
     pads = Padmap()
     if trouble is not None or not pads.connect():
-        # No daemon, no questions to ask. The game gets whatever SDL finds by
-        # itself, exactly as it did before padmap.
+        # No daemon, no questions to ask -- but a window all the same, or a
+        # game starts with nothing to play it with and no word why.
         print(f"gotg-seat: {trouble or pads.error}; starting anyway", file=sys.stderr)
-        return 0
+        return _hold_the_door(title, trouble or pads.error or "")
 
     gate = Gate(platform=platform)
 
@@ -129,7 +140,8 @@ def run(platform: str, title: str) -> int:
         time.sleep(0.02)
     if not pads.state:
         print("gotg-seat: padmap said nothing; starting anyway", file=sys.stderr)
-        return 0
+        pads.close()
+        return _hold_the_door(title, "padmap said nothing")
 
     gate, command = decide(gate)
     if gate.done:
@@ -183,6 +195,41 @@ def run(platform: str, title: str) -> int:
     finally:
         pygame.quit()
         pads.close()
+    return 0
+
+
+def _hold_the_door(title: str, reason: str) -> int:
+    """The window when there is no padmap to ask. Counts down, then starts."""
+    pygame.init()
+    pygame.display.set_caption("GamesOnTheGo")
+    screen = pygame.display.set_mode(WINDOW)
+    clock = pygame.time.Clock()
+    fonts: dict[int, pygame.font.Font] = {}
+
+    def font_at(size: int) -> pygame.font.Font:
+        if size not in fonts:
+            fonts[size] = pygame.font.Font(None, size)
+        return fonts[size]
+
+    deadline = time.monotonic() + COUNTDOWN
+    try:
+        while time.monotonic() < deadline:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT or event.type == pygame.KEYDOWN:
+                    return 0
+            width, height = screen.get_size()
+            screen.fill(BACKGROUND)
+            heading = font_at(34).render(title, True, LABEL_DIM)
+            screen.blit(heading, ((width - heading.get_width()) // 2, int(height * 0.10)))
+            said, footer = without_controllers(reason, deadline - time.monotonic())
+            prompt = font_at(48).render(said, True, EMPTY_RING)
+            screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.40)))
+            keys = font_at(22).render(footer, True, LABEL_DIM)
+            screen.blit(keys, ((width - keys.get_width()) // 2, int(height * 0.92)))
+            pygame.display.flip()
+            clock.tick(30)
+    finally:
+        pygame.quit()
     return 0
 
 

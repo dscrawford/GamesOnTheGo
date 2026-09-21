@@ -371,3 +371,19 @@ def test_one_command_is_in_flight_at_a_time():
     gate, second = decide(gate)
     assert first == {"cmd": "begin", "players": 4}
     assert second is None
+
+
+# --- the window when there is nothing to ask ---------------------------------
+
+
+def test_the_window_without_padmap_says_why_and_how_long():
+    # Under Steam a line on stderr is a line in a log nobody reads. The
+    # window is what somebody sees, and it counts down so nobody is stuck.
+    from gotg_ui.gate import without_controllers
+
+    said, footer = without_controllers("padmap is not installed", 7.2)
+    assert said == "padmap is not installed"
+    assert "8 s" in footer and "Enter" in footer
+    said, footer = without_controllers("", 0.0)
+    assert said == "padmap is not running"
+    assert "0 s" in footer
