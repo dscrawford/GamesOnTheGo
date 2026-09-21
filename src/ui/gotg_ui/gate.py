@@ -140,6 +140,12 @@ class Gate:
     # padmap's `confirm`, when a session somebody else opened is being
     # accepted by a hold. Drawn if it comes; nothing here waits for it.
     confirm: float = 0.0
+    # A claim has landed and the state that follows it has not. A claim says
+    # who sat down, not what they know: it carries no mappings, so a gate
+    # that decided on one asked every pad it seated to walk its buttons
+    # again, on every launch, however much was stored. That is what "the
+    # bindings are not remembered" was. The state that follows carries them.
+    awaiting_state: bool = False
 
     @property
     def scheme(self) -> schemes.Scheme:
@@ -217,6 +223,11 @@ def decide(gate: Gate) -> tuple[Gate, dict | None]:
     if gate.done or gate.awaiting or gate.wizard:
         return gate, None
 
+    # A claim whose state has not arrived: what this pad knows is not in
+    # hand, and deciding here is deciding on nothing.
+    if gate.awaiting_state:
+        return gate, None
+
     # First, and once: whatever the daemon remembers is not this launch's.
     # Refused -- an older daemon, or a session somebody else has open -- means
     # the seats stand and the gate goes on as it always did.
@@ -277,6 +288,9 @@ def apply(gate: Gate, event: dict) -> Gate:
             seats=seats,
             session=session,
             awaiting="" if answered else gate.awaiting,
+            # The state is the authority on what each pad knows, so whatever
+            # a claim left half-said is settled here.
+            awaiting_state=False,
         )
 
     if kind == "claim":
@@ -290,12 +304,20 @@ def apply(gate: Gate, event: dict) -> Gate:
         if not isinstance(player, int):
             return gate
         others = tuple(s for s in gate.seats if s.player != player)
-        seat = Seat(player=player, name=str(event.get("name") or ""))
+        # `configured` is padmap's own word for "this pad is bound" and the
+        # claim carries it; the mappings do not travel with a claim, so the
+        # state that follows is waited for before anything is asked.
+        seat = Seat(
+            player=player,
+            name=str(event.get("name") or ""),
+            configured=bool(event.get("configured", False)),
+        )
         return replace(
             gate,
             seats=tuple(sorted((*others, seat), key=lambda s: s.player)),
             message="",
             progress=0.0,
+            awaiting_state=True,
             awaiting="" if gate.awaiting == "unseat" else gate.awaiting,
         )
 

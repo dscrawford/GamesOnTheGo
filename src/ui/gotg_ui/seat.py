@@ -38,6 +38,7 @@ from . import profiles, trace
 from .controllers import Diagram, assets_dir, draw_reveal
 from .controllers import draw as draw_diagram
 from .gate import (
+    CHECKING,
     MAPPING,
     READY,
     SEATING,
@@ -246,11 +247,18 @@ def run(platform: str, title: str) -> int:
                 break
             # The door: the bindings on the pad, a press ringed as it happens, a
             # tap of Y to walk the buttons again, and the second that starts.
-            if _wait_for_go(screen, font_at, clock, gate, title) == "rebind":
+            verdict, gate = _wait_for_go(screen, font_at, clock, pads, gate, title)
+            if verdict == "rebind":
                 gate, command = rebind(gate)
                 if command is not None:
                     pads.send(command)
                     continue
+            if verdict == "map":
+                # Somebody joined at the door. Back through the loop, which
+                # asks padmap to walk that pad's buttons and then comes here
+                # again with both of them seated.
+                gate = replace(gate, state=CHECKING)
+                continue
             stop_listening()
             break
     finally:
@@ -267,6 +275,12 @@ class Door:
     finished the wizard and rode through padmap's confirm; it does not
     count, and nothing does until it has come up.
     """
+
+    # What starts the game, held. Not "any button": the door also takes a tap
+    # of Y for "walk the buttons again", and with any button arming the hold
+    # a thumb that brushed Y on the way to starting went back to the wizard
+    # instead -- which reads exactly like bindings not being remembered.
+    GO = (sdl_pads.A, sdl_pads.START)
 
     def __init__(self, sticks, now: float, seconds: float = GO_HOLD, buttons: dict | None = None):
         self.sticks = sticks
@@ -298,14 +312,19 @@ class Door:
         ):
             return True
         elif sdl_pads.button(event) is not None:
-            self.hold.pressed(now)
-            # Y, tapped, is "walk the buttons again". Tapped: let go before
-            # the second is up, or it was the hold that starts the game.
-            if sdl_pads.button(event) == sdl_pads.Y:
+            pressed = sdl_pads.button(event)
+            if pressed in self.GO:
+                self.hold.pressed(now)
+            # Y, tapped, is "walk the buttons again", and it cannot also be
+            # the hold that starts the game.
+            if pressed == sdl_pads.Y:
                 self.y_down = True
-            trace.say("door-press", armed=self.hold.armed, counted=self.hold.since is not None)
+            trace.say(
+                "door-press", button=pressed, armed=self.hold.armed,
+                counted=self.hold.since is not None,
+            )
         elif sdl_pads.released(event):
-            if self.y_down and self.hold.armed and not self.hold.done(now):
+            if self.y_down and not self.hold.done(now):
                 self.rebind = True
             self.y_down = False
             self.hold.released(now)
@@ -329,10 +348,17 @@ class Door:
         return self.hold.progress(now)
 
 
-def _wait_for_go(screen, font_at, clock, gate: Gate, title: str) -> str:
-    """Seated and mapped; the game starts when somebody holds for a second.
+def _wait_for_go(screen, font_at, clock, pads: Padmap, gate: Gate, title: str) -> tuple[str, Gate]:
+    """Seated and mapped; the game starts when somebody holds A for a second.
 
-    Returns "go", or "rebind" when Y was tapped instead.
+    padmap is polled here, which it was not: a second player holding a button
+    was claimed by the daemon and nothing on this screen knew, so the seat
+    that had just been taken was invisible and the pad that took it did
+    nothing. Now the seats are redrawn as they arrive, and a pad that arrives
+    with no idea what this console's buttons are sends the gate back to ask.
+
+    Returns "go", "rebind" when Y was tapped, or "map" for a seat that needs
+    walking -- with the gate as the daemon has left it.
     """
     first = gate.seats[0] if gate.seats else None
     profile = profiles.for_pad(first.name) if first else None
@@ -341,13 +367,21 @@ def _wait_for_go(screen, font_at, clock, gate: Gate, title: str) -> str:
     cache: dict = {}
     while True:
         now = time.monotonic()
+        for message in pads.poll():
+            gate = apply(gate, message)
+        if not pads.connected:
+            return "go", gate
+        # A pad seated at this screen that has never been mapped for this
+        # console: back to the wizard, and back here after it.
+        if gate.unmapped is not None:
+            return "map", gate
         for event in pygame.event.get():
             if door.handle(event, now):
-                return "go"
+                return "go", gate
             if door.rebind:
-                return "rebind"
+                return "rebind", gate
         if door.done(now):
-            return "go"
+            return "go", gate
         _draw_go(screen, font_at, gate, title, door.progress(now), bound, door.lit, cache)
         pygame.display.flip()
         clock.tick(60)
@@ -357,7 +391,7 @@ def _draw_go(
     screen, font_at, gate: Gate, title: str, fraction: float, bound: dict, lit: str | None, cache: dict
 ) -> None:
     """The door: what every button does on this pad, the one being pressed
-    ringed, and the second filling in beside the title."""
+    ringed, the seats along the bottom, and the second filling in."""
     width, height = screen.get_size()
     try:
         names = ", ".join(seat.name or "pad" for seat in gate.seats)
@@ -367,8 +401,8 @@ def _draw_go(
             heading=f"{title}  —  {names}",
             keys="",
             footer=(
-                "let go, then hold a button for a second to start   ·   "
-                "tap Y to change these   ·   Enter or Esc start now"
+                "hold A for a second to start   ·   tap Y to change these   ·   "
+                "another player: hold a button   ·   Enter or Esc start now"
             ),
         )
     except Exception as error:  # noqa: BLE001 - a drawing must not start a game
@@ -378,15 +412,34 @@ def _draw_go(
         screen.fill(BACKGROUND)
         heading = font_at(34).render(title, True, LABEL_DIM)
         screen.blit(heading, ((width - heading.get_width()) // 2, int(height * 0.10)))
-        prompt = font_at(48).render("hold a button for a second to start", True, LABEL)
+        prompt = font_at(48).render("hold A for a second to start", True, LABEL)
         screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.40)))
         note = font_at(20).render(f"(no drawing: {error})", True, LABEL_DIM)
         screen.blit(note, ((width - note.get_width()) // 2, int(height * 0.92)))
+
+    # Who has control, in the colours the strip and the grid use, so a second
+    # player holding a button sees themselves appear rather than wondering.
+    _draw_seats(screen, font_at, gate, int(height * 0.80))
     first = gate.seats[0] if gate.seats else None
     draw_reveal(
         screen, (int(width * 0.92), int(height * 0.10)),
         first.name if first else None, colour_for(1), fraction, int(height * 0.09),
     )
+
+
+def _draw_seats(screen, font_at, gate: Gate, middle: int) -> None:
+    """A badge and a controller per seat, left to right, player colours."""
+    width = screen.get_width()
+    radius = 22
+    step = radius * 2 + 78
+    left = (width - step * max(1, gate.seated)) // 2 + step // 2
+    for index, seat in enumerate(gate.seats):
+        centre = (left + index * step, middle)
+        colour = colour_for(seat.player)
+        pygame.draw.aacircle(screen, colour, centre, radius)
+        number = font_at(28).render(str(seat.player), True, (20, 20, 24))
+        screen.blit(number, number.get_rect(center=centre))
+        draw_reveal(screen, (centre[0] + radius + 30, middle), seat.name, colour, 1.0, 40)
 
 
 def _hold_the_door(title: str, reason: str) -> int:

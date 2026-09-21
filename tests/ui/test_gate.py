@@ -507,3 +507,41 @@ def test_the_wizard_step_carries_what_has_been_bound_so_far():
     gate = apply(gate, {"event": "mapping", "control": "b", "label": "B", "index": 1, "total": 16,
                         "captured": {"a": {"kind": "button", "index": 0, "value": 0}}})
     assert gate.captured == {"a": {"kind": "button", "index": 0, "value": 0}}
+
+
+# --- a claim says who sat down, not what they know ----------------------------
+
+
+def test_a_claim_alone_never_sends_anybody_to_the_wizard():
+    # Reported as "the bindings are not remembered": a claim carries no
+    # mappings, so a gate that decided on one asked every pad to walk its
+    # buttons again, on every launch, whatever was stored.
+    gate = Gate(platform="gamecube", listening=True, unseated=True, state=SEATING)
+    gate = apply(gate, {"event": "claim", "player": 1, "name": "Xbox Wireless Controller"})
+    gate, command = decide(gate)
+    assert command is None, "asked to bind a pad before hearing what it knows"
+    assert gate.awaiting_state
+
+
+def test_the_state_after_a_claim_settles_it_and_a_mapped_pad_goes_through():
+    gate = Gate(platform="gamecube", listening=True, unseated=True, state=SEATING)
+    gate = apply(gate, {"event": "claim", "player": 1, "name": "pad"})
+    gate = apply(gate, state_event([seated(mappings=["console:gamecube"])]))
+    assert not gate.awaiting_state
+    gate, command = decide(gate)
+    assert command is None
+    assert gate.state == READY
+
+
+def test_and_a_pad_that_really_is_unmapped_is_still_asked():
+    gate = Gate(platform="gamecube", listening=True, unseated=True, state=SEATING)
+    gate = apply(gate, {"event": "claim", "player": 1, "name": "pad", "configured": False})
+    gate = apply(gate, state_event([seated(mappings=[], configured=False)]))
+    gate, command = decide(gate)
+    assert command["cmd"] == "map"
+    assert gate.state == MAPPING
+
+
+def test_a_claim_carries_padmaps_own_word_for_bound():
+    gate = apply(Gate(platform="gamecube"), {"event": "claim", "player": 1, "name": "pad", "configured": True})
+    assert gate.seats[0].configured
