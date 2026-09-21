@@ -18,17 +18,28 @@
 
 pads_bin() { printf '%s' "${GOTG_PADS:-gotg-pads}"; }
 
-# What SDL sees, with padmap's mapping in hand. A clone of a pad SDL has no
-# mapping of its own for -- a Steam Controller's -- is otherwise a joystick
-# with no map, and the writer passes it over. The game gets the same string
-# from `padmap-rs exec`; this is the enumerator getting it too.
+# What SDL sees, with padmap's mapping in hand and its hidapi off.
+#
+# Once padmap has published, the pads to bind are its clones, and they are
+# evdev. gotg-pads turns SDL's hidapi on for the Steam Controller so a raw
+# one is visible to bind when there is no padmap; with padmap there is, that
+# same hidapi claims Valve's ids and SDL then hides the *clone* of a Steam
+# Controller -- one pad listed, the published one absent, nothing seated,
+# nothing rewritten, and ares kept the raw pad the sandbox was about to hide.
+# Measured with gotg-pads against a clone wearing 28de:1304. The environment
+# outranks the hint the binary sets, which is what makes this reachable.
+#
+# The mapping string is the same one the game gets from `padmap-rs exec`: a
+# clone of a pad SDL has no mapping of its own for is otherwise a joystick
+# with no map, and the writer passes it over.
 pads_enumerate() {
   local config=""
   if declare -F padmap_sdl_config >/dev/null; then
     config="$(padmap_sdl_config 2>/dev/null || true)"
   fi
   if [[ -n "$config" ]]; then
-    SDL_GAMECONTROLLERCONFIG="$config" "$(pads_bin)" 2>/dev/null
+    SDL_GAMECONTROLLERCONFIG="$config" SDL_JOYSTICK_HIDAPI=0 SDL_JOYSTICK_HIDAPI_STEAM=0 \
+      "$(pads_bin)" 2>/dev/null
   else
     "$(pads_bin)" 2>/dev/null
   fi

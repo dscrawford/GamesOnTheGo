@@ -11,6 +11,7 @@ from gotg_ui.gate import (
     CHECKING,
     MAPPING,
     READY,
+    READYING,
     SEATING,
     SKIPPED,
     Gate,
@@ -19,6 +20,7 @@ from gotg_ui.gate import (
     console_scope,
     decide,
     layout_for,
+    ready_from_the_keyboard,
     seats_from,
 )
 
@@ -133,7 +135,7 @@ def test_a_seat_taken_in_front_of_this_screen_is_not_forgotten_too():
     gate = apply(gate, {"event": "claim", "player": 1, "name": "Xbox Wireless Controller"})
     gate = apply(gate, state_event([seated(mappings=["console:gamecube"])], state="assigning"))
     gate, command = decide(gate)
-    assert command == {"cmd": "accept"}
+    assert command is None and gate.state == READYING, "the seat this launch took was forgotten again"
 
 
 def test_a_daemon_that_cannot_unseat_leaves_the_seats_standing():
@@ -152,14 +154,37 @@ def test_a_daemon_that_cannot_unseat_leaves_the_seats_standing():
 # --- the wizard that should not appear ---------------------------------------
 
 
-def test_a_mapped_controller_goes_straight_to_the_game():
-    # Seated in front of this screen: `unseated` is the gate's word for it.
+def test_a_mapped_controller_is_asked_nothing_but_to_ready_up():
+    # Seated in front of this screen, in a session: no wizard, no accept
+    # either. The game waits for the hold that says "I am ready".
+    gate = Gate(platform="gamecube", unseated=True)
+    gate = apply(gate, state_event([seated(mappings=["console:gamecube"])], state="assigning"))
+    gate, command = decide(gate)
+    assert gate.state == READYING
+    assert command is None
+    assert not gate.done
+    assert "hold a button" in gate.prompt
+
+
+def test_a_seated_and_mapped_pad_outside_any_session_still_goes_straight_in():
+    # No session means no confirm hold for padmap to read -- the older-daemon
+    # path, where unseat was refused and the seats stood.
     gate = Gate(platform="gamecube", unseated=True)
     gate = apply(gate, state_event([seated(mappings=["console:gamecube"])]))
     gate, command = decide(gate)
     assert gate.state == READY
     assert command is None
     assert gate.done
+
+
+def test_enter_readies_up_from_the_keyboard_only_when_somebody_is_seated():
+    gate = Gate(platform="gamecube", state=READYING, session=True,
+                seats=(Seat(player=1, name="pad", configured=True),))
+    gate, command = ready_from_the_keyboard(gate)
+    assert command == {"cmd": "accept"}
+    assert gate.awaiting == "accept"
+    gate = Gate(platform="gamecube", state=SEATING, session=True)
+    assert ready_from_the_keyboard(gate) == (gate, None)
 
 
 def test_a_pad_mapped_for_another_console_is_not_asked_about_again():
@@ -258,8 +283,13 @@ def test_the_whole_sequence_for_a_machine_with_nothing_set_up():
     gate = apply(gate, state_event(
         [seated(name="GOTG test pad", mappings=["console:gamecube"])], state="assigning"))
     gate, command = decide(gate)
-    assert command == {"cmd": "accept"}
+    assert command is None, "the gate started the game on nobody's say-so"
+    assert gate.state == READYING
 
+    # The ready-up: padmap's confirm, a longer hold on the seated pad, which
+    # the daemon accepts itself when it completes.
+    gate = apply(gate, {"event": "confirm", "frac": 0.5})
+    assert gate.confirm == 0.5
     gate = apply(gate, {"event": "accepted"})
     assert gate.state == READY
     assert gate.done
@@ -292,11 +322,12 @@ def test_a_stored_capture_sends_the_gate_back_to_look_again():
     gate = apply(gate, {"event": "mapping", "done": True, "stored": True})
     assert gate.state == CHECKING
     assert gate.awaiting == ""
-    # With the mapping on the pad there is nothing left to ask, so the session
-    # it was bound in is closed.
+    # With the mapping on the pad there is nothing left to ask -- and nothing
+    # sent: the session closes when somebody holds a button to say go.
     gate = apply(gate, state_event([seated(mappings=["console:gamecube"])], state="assigning"))
     gate, command = decide(gate)
-    assert command == {"cmd": "accept"}
+    assert command is None
+    assert gate.state == READYING
 
 
 def test_an_abandoned_capture_does_not_ask_again():

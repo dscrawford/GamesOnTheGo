@@ -34,7 +34,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame  # noqa: E402 - the line above only works ahead of the import
 
 from .controllers import Diagram, assets_dir
-from .gate import MAPPING, SEATING, SKIPPED, Gate, apply, decide, without_controllers
+from .gate import MAPPING, READYING, SEATING, SKIPPED, Gate, apply, decide, ready_from_the_keyboard, without_controllers
 from .padmap import Padmap, ensure_daemon
 from .padstrip import EMPTY_RING, LABEL, LABEL_DIM, PANEL, colour_for
 
@@ -61,6 +61,25 @@ def draw(screen, font_at, gate: Gate, title: str, diagram: Diagram | None = None
 
     prompt = font_at(56).render(gate.prompt, True, LABEL)
     screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.22)))
+
+    if gate.state == READYING:
+        # The seats, and the ready-up hold filling round the first of them,
+        # clockwise from twelve, the way the picker fills a pad in.
+        centre = (width // 2, int(height * 0.52))
+        pygame.draw.circle(screen, PANEL, centre, 46)
+        pygame.draw.aacircle(screen, colour_for(1), centre, 46, 3)
+        if gate.confirm > 0:
+            import math
+
+            box = pygame.Rect(centre[0] - 58, centre[1] - 58, 116, 116)
+            top = math.pi / 2
+            pygame.draw.arc(screen, colour_for(1), box, top - 2 * math.pi * min(1.0, gate.confirm), top, 6)
+        count = font_at(38).render(str(gate.seated), True, LABEL)
+        screen.blit(count, count.get_rect(center=centre))
+        who = font_at(24).render(
+            ", ".join(seat.name or "pad" for seat in gate.seats), True, LABEL_DIM
+        )
+        screen.blit(who, ((width - who.get_width()) // 2, int(height * 0.66)))
 
     if gate.state == SEATING:
         # One ring, because one controller is what this is waiting for. The
@@ -106,7 +125,8 @@ def draw(screen, font_at, gate: Gate, title: str, diagram: Diagram | None = None
         said = font_at(24).render(gate.message, True, EMPTY_RING)
         screen.blit(said, ((width - said.get_width()) // 2, int(height * 0.76)))
 
-    keys = "S skip this button   Esc play without it" if gate.state == MAPPING \
+    keys = "hold a button on your controller to start   Enter or Esc start now" if gate.state == READYING \
+        else "S skip this button   Esc play without it" if gate.state == MAPPING \
         else "Esc play without a controller"
     footer = font_at(22).render(keys, True, LABEL_DIM)
     screen.blit(footer, ((width - footer.get_width()) // 2, int(height * 0.92)))
@@ -180,6 +200,10 @@ def run(platform: str, title: str) -> int:
                 elif event.type == pygame.KEYDOWN:
                     if event.key in (pygame.K_ESCAPE, pygame.K_b):
                         gate = _leave(pads, gate)
+                    elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                        gate, command = ready_from_the_keyboard(gate)
+                        if command is not None:
+                            pads.send(command)
                     elif event.key == pygame.K_s and gate.state == MAPPING:
                         # A control this pad does not have. Every layout here
                         # is a superset of somebody's controller.
@@ -239,6 +263,14 @@ def _hold_the_door(title: str, reason: str) -> int:
 
 def _leave(pads: Padmap, gate: Gate) -> Gate:
     """Back out of whatever is open, and let the game start."""
+    if gate.state == READYING:
+        # Somebody seated and mapped a controller and now wants the game.
+        # Backing out here keeps that, rather than throwing it away for
+        # being impatient: the same accept the hold would have sent.
+        gate, command = ready_from_the_keyboard(gate)
+        if command is not None:
+            pads.send(command)
+            return gate
     if gate.state == SEATING:
         pads.send({"cmd": "cancel"})
     elif gate.state == MAPPING:

@@ -29,6 +29,7 @@ from . import schemes
 CHECKING = "checking"   # connected, nothing decided yet
 SEATING = "seating"     # no controller: hold a button on one
 MAPPING = "mapping"     # a controller with no idea what this console's buttons are
+READYING = "readying"   # seated and mapped: hold a button again to start
 READY = "ready"         # go and play
 SKIPPED = "skipped"     # asked, declined; go and play anyway
 
@@ -124,6 +125,10 @@ class Gate:
     # seats that come after are this launch's own, taken by a hold in front
     # of this screen, and forgetting those would be a gate nobody gets past.
     unseated: bool = False
+    # The ready-up hold, as far round as it has got. padmap's `confirm`: a
+    # longer hold on a pad that already has a seat, which the daemon takes as
+    # accept when it completes. The game does not start until it does.
+    confirm: float = 0.0
 
     @property
     def scheme(self) -> schemes.Scheme:
@@ -167,6 +172,8 @@ class Gate:
             if self.conflict:
                 return f"that one is already {self.conflict} — try another"
             return f"press {self.label or self.control}"
+        if self.state == READYING:
+            return "hold a button to start"
         if self.state == READY:
             return "starting the game"
         return "checking controllers"
@@ -210,10 +217,13 @@ def decide(gate: Gate) -> tuple[Gate, dict | None]:
     wanted = gate.seated == 0 or gate.unmapped is not None
     if not wanted:
         if gate.session:
-            # Nothing left to ask. Accepting is what turns the claims into
-            # assignments, republishes the pads and writes the emulator's
-            # configuration -- so the game starts with them.
-            return replace(gate, awaiting="accept"), {"cmd": "accept"}
+            # Nothing left to ask -- and nothing sent. The game does not start
+            # because a pad is seated and mapped; it starts because somebody
+            # holds a button again to say they are ready. That hold is
+            # padmap's confirm, and the daemon accepts when it completes;
+            # `accepted` is what moves this on. Sending accept here started
+            # the game the instant the wizard closed, on nobody's say-so.
+            return replace(gate, state=READYING), None
         return replace(gate, state=READY), None
 
     if not gate.session:
@@ -312,10 +322,14 @@ def apply(gate: Gate, event: dict) -> Gate:
             conflict=str(event.get("conflict") or ""),
         )
 
+    if kind == "confirm":
+        frac = event.get("frac")
+        return replace(gate, confirm=float(frac) if isinstance(frac, (int, float)) else 0.0)
+
     if kind == "accepted":
         # Seats, republished pads and emulator configuration, all written. The
         # only thing left was the game.
-        return replace(gate, state=READY, session=False, awaiting="")
+        return replace(gate, state=READY, session=False, awaiting="", confirm=0.0)
 
     if kind == "error":
         # Whatever was in flight is not coming. Remembered as refused so the
@@ -351,3 +365,14 @@ def without_controllers(reason: str, seconds_left: float) -> tuple[str, str]:
         reason or "padmap is not running",
         f"starting without controllers in {left} s — Enter starts now, Esc too",
     )
+
+
+def ready_from_the_keyboard(gate: Gate) -> tuple[Gate, dict | None]:
+    """Enter, on the ready-up screen: the keyboard's way of holding a button.
+
+    Only there. With nobody seated there is nothing to accept, and Enter is
+    the skip it always was; the runner decides that.
+    """
+    if gate.state != READYING or gate.seated == 0:
+        return gate, None
+    return replace(gate, awaiting="accept"), {"cmd": "accept"}
