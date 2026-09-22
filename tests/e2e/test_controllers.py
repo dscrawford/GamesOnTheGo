@@ -2073,3 +2073,51 @@ def test_the_keyboard_drives_nothing_until_padmap_seats_it(daemon, sdl):
         door.keys_drive = True
         assert door.handle(enter, time.monotonic()), "a seated keyboard could not start the game"
         picker.close()
+
+
+def test_a_smooth_shape_is_made_once_and_kept(sdl):
+    """The rings and checks are supersampled -- painted at four times the
+    size on a transparent surface and scaled down, because pygame's thick
+    lines and polygons have hard pixel edges and a green ring made of
+    staircases is the first thing anybody notices on a still screen.
+
+    That is only affordable because every one of them is the same shape again
+    next frame: a ring at the same fraction, a check at the same size. Here
+    with pygame, because the dev venv has none.
+    """
+    from gotg_ui import controllers
+
+    controllers._shapes.clear()
+    painted = []
+
+    def paint(surface, scale):
+        painted.append(scale)
+
+    first = controllers.crisp(("e2e", 1), (10, 10), paint)
+    again = controllers.crisp(("e2e", 1), (10, 10), paint)
+    assert first is again, "the same shape was made twice"
+    assert painted == [controllers.CRISP], "painted once, at the supersampled size"
+
+    controllers.crisp(("e2e", 2), (10, 10), paint)
+    assert len(painted) == 2, "a different key is a different shape"
+
+    # And it cannot grow without end: a fraction off a clock is a new key
+    # about ninety times a hold.
+    for step in range(controllers._SHAPES_KEPT + 5):
+        controllers.crisp(("e2e-fill", step), (4, 4), lambda surface, scale: None)
+    assert len(controllers._shapes) <= controllers._SHAPES_KEPT
+    controllers._shapes.clear()
+
+
+def test_a_ring_at_the_same_fraction_is_not_redrawn_every_frame(sdl):
+    """A fraction is a float off a clock, so two frames a thousandth apart
+    would be two shapes. Quantising is what makes the cache work at all."""
+    from gotg_ui import controllers
+
+    controllers._shapes.clear()
+    screen = sdl.display.set_mode((200, 200))
+    for step in range(30):
+        # A hold ticking along at sixty frames a second, a millisecond apart.
+        controllers.draw_arc(screen, (100, 100), 30, (100, 200, 100), 0.5 + step * 0.0001, 4)
+    assert len(controllers._shapes) == 1, f"one ring became {len(controllers._shapes)} surfaces"
+    controllers._shapes.clear()
