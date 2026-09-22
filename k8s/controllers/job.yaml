@@ -1,0 +1,71 @@
+# The controller requirement, run on the cluster instead of somebody's desk.
+#
+# The suite makes real pads through /dev/uinput and runs a real padmap daemon
+# against them. On a desktop that is a fake pad joining the game the person at
+# the keyboard is playing -- it happened -- so this is where it belongs.
+#
+#   sed 's/@TAG@/0.1.0/' k8s/controllers/job.yaml | kubectl apply -f -
+#   kubectl -n default logs -f job/gotg-controllers
+#
+# The pod's exit status is the verdict. GOTG_E2E_REQUIRE=1 is set in the
+# image, so a pod that cannot reach /dev/uinput fails rather than skipping.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gotg-controllers
+  namespace: default
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: gotg-controllers
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: tests
+          # localhost, as the QA job does: it is a NodePort on every node,
+          # and that is the name the nodes' containerd trusts without a
+          # certificate. A push from a desktop goes to a node's address.
+          image: localhost:30500/gotg-controllers:@TAG@
+          # Overridable: `args: ["-q", "-k", "top_bar"]` runs one test.
+          args: ["-q"]
+          securityContext:
+            # /dev/uinput is how a pad is made, and containerd's device cgroup
+            # denies it to an unprivileged container whatever the node's file
+            # permissions say. The same trade the QA job takes, for the same
+            # reason, on the same private cluster.
+            privileged: true
+          env:
+            - name: XDG_RUNTIME_DIR
+              value: /tmp/xdg
+          volumeMounts:
+            - name: uinput
+              mountPath: /dev/uinput
+            - name: input
+              mountPath: /dev/input
+              # The pads are created through /dev/uinput; this is only how SDL
+              # and padmap enumerate them. Not read-only, unlike QA's: padmap
+              # opens a pad to grab it, and the suite reads a clone's node
+              # directly to time a press.
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: uinput
+          hostPath:
+            path: /dev/uinput
+            type: CharDevice
+        - name: input
+          hostPath:
+            path: /dev/input
+            type: Directory
+        - name: tmp
+          emptyDir: {}
