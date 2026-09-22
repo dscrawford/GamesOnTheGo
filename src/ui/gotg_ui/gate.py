@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
-from . import schemes
+from . import config, schemes
 
 # Where the gate is, which is also what the runner draws.
 CHECKING = "checking"   # connected, nothing decided yet
@@ -207,6 +207,13 @@ class Gate:
 # enough that letting go looks like letting go.
 PROGRESS_STALE = 0.05
 
+# How long a hold has to be to claim a seat, asked for on every `seating`.
+# padmap's own default is 0.25 s, which claimed a seat for anybody picking a
+# controller up or resting a thumb on it while reading the screen. Sent rather
+# than assumed: an older daemon ignores the field and keeps its quarter
+# second, which is the behaviour this had before.
+PAIR_HOLD = float(config.get("theme.timeouts.pair_hold", 1.5))
+
 
 @dataclass
 class Fade:
@@ -292,6 +299,7 @@ def decide(gate: Gate) -> tuple[Gate, dict | None]:
             "cmd": "seating",
             "open": True,
             "players": 4,
+            "hold": PAIR_HOLD,
         }
 
     if gate.seated == 0:

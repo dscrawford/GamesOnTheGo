@@ -52,6 +52,11 @@ padmap_ensure() {
   # --fresh does not stop. The daemon reads these, so they are set before it
   # is started, and left alone when somebody set them themselves.
   export PADMAP_NO_AUTOSETUP="${PADMAP_NO_AUTOSETUP:-1}" PADMAP_NO_AUTOATTACH="${PADMAP_NO_AUTOATTACH:-1}"
+  # And how long a hold takes to claim a seat. The picker and the gate ask for
+  # this on every `seating`, but an assignment session -- padmap's own wizard
+  # -- takes the daemon's, so it is set here as well. padmap keeps its quarter
+  # second for anything outside 0.05..10, and an older daemon ignores it.
+  export PADMAP_HOLD_SECONDS="${PADMAP_HOLD_SECONDS:-1.5}"
   if ! said="$("$(padmap_bin)" ensure-daemon --fresh --follow "$$" 2>&1)"; then
     warn "padmap has no current daemon; controllers will be whatever SDL finds"
     rm -f "$marker"

@@ -13,6 +13,7 @@ from gotg_ui import gate as gate_mod
 from gotg_ui.gate import (
     CHECKING,
     MAPPING,
+    PAIR_HOLD,
     READY,
     SEATING,
     SKIPPED,
@@ -94,7 +95,7 @@ def test_the_state_after_unseating_answers_it_and_padmap_is_told_to_listen():
     gate = apply(gate, state_event([]))
     assert gate.awaiting == ""
     gate, command = decide(gate)
-    assert command == {"cmd": "seating", "open": True, "players": 4}
+    assert command == {"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD}
     assert gate.state == SEATING
     # Once. padmap does not acknowledge it, and a daemon told every frame is
     # a daemon told sixty times a second.
@@ -116,7 +117,7 @@ def test_a_stale_state_with_everybody_still_seated_does_not_answer_the_unseat():
     assert command is None
     gate = apply(gate, state_event([]))                   # the real answer
     gate, command = decide(gate)
-    assert command == {"cmd": "seating", "open": True, "players": 4}
+    assert command == {"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD}
 
 
 def test_a_claim_while_unseating_is_this_launches_own_seat():
@@ -230,7 +231,7 @@ def test_no_controller_means_listen_and_wait_not_a_session():
     gate = apply(gate, state_event([]))
     gate, command = decide(gate)
     assert gate.state == SEATING
-    assert command == {"cmd": "seating", "open": True, "players": 4}
+    assert command == {"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD}
     assert command["cmd"] != "begin"
 
 
@@ -254,7 +255,7 @@ def test_the_whole_sequence_for_a_machine_with_nothing_set_up():
     gate = Gate(platform="gamecube")
     gate = apply(gate, state_event([]))
     gate, command = decide(gate)
-    assert command == {"cmd": "seating", "open": True, "players": 4}
+    assert command == {"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD}
     assert gate.state == SEATING
 
     gate, command = decide(gate)
@@ -393,7 +394,7 @@ def test_one_command_is_in_flight_at_a_time():
     gate = apply(gate, state_event([]))
     gate, first = decide(gate)
     gate, second = decide(gate)
-    assert first == {"cmd": "seating", "open": True, "players": 4}
+    assert first == {"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD}
     assert second is None
 
 
@@ -585,3 +586,22 @@ def test_a_claim_takes_the_reveal_off_the_screen():
     fade.saw(0.9, 10.0)
     fade.saw(0.0, 10.02)
     assert fade.now(10.02) == 0.0
+
+
+def test_seating_asks_for_a_hold_long_enough_to_be_deliberate():
+    """padmap's own default claims a seat in a quarter second.
+
+    Short enough that picking a controller up, or resting a thumb on one while
+    reading the screen, took a seat nobody meant to take. The length is on the
+    command, so an older daemon ignores the field and behaves as it always
+    did: `docs/requests/how-long-a-seat-takes-to-claim.md`, landed in padmap
+    as 98fd757.
+    """
+    gate, command = decide(Gate(platform="n64"))
+    assert command is not None and command["cmd"] == "seating"
+    assert command["hold"] == PAIR_HOLD
+    # padmap refuses nothing here, but it clamps to 0.05..10 and falls back to
+    # its own quarter second outside that -- so a number outside the range
+    # would quietly be the thing this exists to avoid.
+    assert 0.05 <= PAIR_HOLD <= 10.0, f"padmap would ignore a hold of {PAIR_HOLD}s"
+    assert PAIR_HOLD > 0.25, "the point is that it is longer than padmap's default"

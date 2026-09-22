@@ -90,3 +90,19 @@ GOTG's own pause between pairing and readying up — every pad quiet for a
 second before a press can start the game — stays either way. It exists
 because the *pairing* press used to roll straight into the go hold, and that
 is a front-end problem, not this one.
+
+---
+
+## Answered
+
+padmap `98fd757`. `hold` on the `seating` command, 0.05 to 10 seconds, 0.25
+for anybody who does not ask, and omitted it leaves the length as it was;
+`PADMAP_HOLD_SECONDS` sets what a daemon starts with. A hold in flight when
+the length changes is dropped rather than re-measured, and nothing is refused
+-- a length outside the range is the default. `docs/EVENTS.md`, "How long the
+hold is".
+
+GOTG asks for **1.5 s**: `theme.timeouts.pair_hold`, sent on every `seating`
+by `gate.decide` and the picker's `assign.Watch`, and exported as
+`PADMAP_HOLD_SECONDS` by `padmap.sh` and `gotg_ui.padmap.ensure_daemon` so a
+session -- padmap's own wizard -- takes the same length.

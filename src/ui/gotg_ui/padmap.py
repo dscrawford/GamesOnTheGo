@@ -69,6 +69,10 @@ def ensure_daemon(force: bool = False, *, fresh: bool = False, follow: int | Non
     """
     if not force and os.environ.get("PADMAP_SKIP_DAEMON_CHECK") == "1":
         return None
+    # What a daemon starts with. `seating` carries the same length on every
+    # open -- see gate.PAIR_HOLD -- but an assignment session takes whatever
+    # the daemon was started with, and that is the wizard.
+    os.environ.setdefault("PADMAP_HOLD_SECONDS", str(config.get("theme.timeouts.pair_hold", 1.5)))
     padmap = shutil.which("padmap")
     if padmap is None:
         return "padmap is not installed"

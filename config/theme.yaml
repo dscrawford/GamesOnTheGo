@@ -88,6 +88,11 @@ timeouts:
   # longer than that to come off, so the press that paired a controller used
   # to run straight into the hold that starts the game.
   seat_pause: 1.0
+  # How long a button is held to claim a seat. padmap's own default is a
+  # quarter second, which is short enough that picking a controller up claims
+  # one; this is what `seating` asks for instead. 0.05 to 10 seconds -- padmap
+  # ignores anything else and keeps its default.
+  pair_hold: 1.5
   seat_rebind_hold: 3.0
   keyboard_hold: 3.0
   service: 10

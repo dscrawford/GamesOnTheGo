@@ -24,7 +24,7 @@ setup() {
   {
     printf '#!%s\n' "$(command -v bash)"
     printf 'printf "padmap %%s\\n" "$*" >>"$PADMAP_LOG"\n'
-    printf 'printf "env PADMAP_NO_AUTOSETUP=%%s PADMAP_NO_AUTOATTACH=%%s\\n" "${PADMAP_NO_AUTOSETUP-unset}" "${PADMAP_NO_AUTOATTACH-unset}" >>"$PADMAP_LOG"\n'
+    printf 'printf "env PADMAP_NO_AUTOSETUP=%%s PADMAP_NO_AUTOATTACH=%%s PADMAP_HOLD_SECONDS=%%s\\n" "${PADMAP_NO_AUTOSETUP-unset}" "${PADMAP_NO_AUTOATTACH-unset}" "${PADMAP_HOLD_SECONDS-unset}" >>"$PADMAP_LOG"\n'
     printf 'exit "${FAKE_PADMAP_EXIT:-0}"\n'
   } >"$FAKE_BIN/padmap"
   {
@@ -64,7 +64,22 @@ teardown() { stop_saves_service; }
   grep -q "padmap ensure-daemon --fresh --follow [0-9]" "$PADMAP_LOG"
   # And told the two rules before it started: no session of its own, and no
   # seat but by a hold.
-  grep -q "env PADMAP_NO_AUTOSETUP=1 PADMAP_NO_AUTOATTACH=1" "$PADMAP_LOG"
+  grep -q "env PADMAP_NO_AUTOSETUP=1 PADMAP_NO_AUTOATTACH=1 PADMAP_HOLD_SECONDS=1.5" "$PADMAP_LOG"
+}
+
+@test "a seat takes a hold long enough to be deliberate, not a quarter second" {
+  # padmap's own default claims a seat in 0.25s, which is short enough that
+  # picking a controller up takes one. The picker and the gate ask for the
+  # length on every `seating`; a session -- padmap's wizard -- takes what the
+  # daemon was started with, so it is set here too.
+  run padmap_ensure
+  [ "$status" -eq 0 ]
+  grep -q "PADMAP_HOLD_SECONDS=1.5" "$PADMAP_LOG"
+}
+
+@test "a hold length somebody set by hand is left alone" {
+  PADMAP_HOLD_SECONDS=0.4 padmap_ensure
+  grep -q "PADMAP_HOLD_SECONDS=0.4" "$PADMAP_LOG"
 }
 
 @test "it is asked for once, not once per launch" {

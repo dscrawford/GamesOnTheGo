@@ -275,23 +275,18 @@ def run(platform: str, title: str) -> int:
     # The diagram, once, shared with the door: it is the same screen.
     cache: dict = {}
 
-    def stop_listening() -> None:
-        """Seating closed, for the length of the game.
-
-        It costs a hundred milliseconds of input lag. padmap rescans every
-        input device on every 20 ms tick while seating is open, and one scan
-        -- a udev walk plus a liveness probe of every hidraw node -- takes
-        about 100 ms on this machine, so the daemon's loop never gets back to
-        forwarding in time. Measured through a clone: 0.03 ms for a press
-        with seating closed, 108 ms with it open, against 0.01 ms for the
-        same press read straight off its own device. Melee felt like treacle
-        and it was this.
-
-        docs/requests/seating-costs-the-game-its-input.md asks padmap to
-        throttle that scan. When it does, this goes and a pad can join
-        mid-level again -- the e2e has a strict xfail watching for it.
-        """
-        pads.send({"cmd": "seating", "open": False})
+    # Seating stays open into the game, which is what it was for.
+    #
+    # It used to be closed here, because it cost about a hundred milliseconds
+    # a press: padmap rescanned every input device on every 20 ms tick while
+    # seating was open, one scan took ~100 ms, and the forwarding waited
+    # behind it. Melee felt like treacle and it was that. The gate closed
+    # seating and gave up mid-game joining for it --
+    # docs/requests/seating-costs-the-game-its-input.md asked for the scan to
+    # be throttled, and padmap has done it. The e2e's strict xfail turned into
+    # an XPASS, which is the day this note said to take the close out: a pad
+    # switched on in the middle of a level can take a seat again, and the
+    # latency tests hold the other half to under a frame.
 
     try:
         while True:
@@ -347,7 +342,6 @@ def run(platform: str, title: str) -> int:
                 clock.tick(60)
             if not (gate.state == READY and gate.seated):
                 _said(f"no door: {gate.state}, {gate.seated} seated")
-                stop_listening()
                 break
             # The door: the bindings on the pad, a press ringed as it happens, a
             # tap of Y to walk the buttons again, and the second that starts.
@@ -363,7 +357,6 @@ def run(platform: str, title: str) -> int:
                 # again with both of them seated.
                 gate = replace(gate, state=CHECKING)
                 continue
-            stop_listening()
             break
     finally:
         hush.release()
