@@ -21,6 +21,7 @@ from __future__ import annotations
 import struct
 import time
 
+import pytest
 from fakepad import ABS_X, BTN_SOUTH, BTN_START, FakePad, event_node, kernel_names
 
 from gotg_ui import pads
@@ -2121,3 +2122,118 @@ def test_a_ring_at_the_same_fraction_is_not_redrawn_every_frame(sdl):
         controllers.draw_arc(screen, (100, 100), 30, (100, 200, 100), 0.5 + step * 0.0001, 4)
     assert len(controllers._shapes) == 1, f"one ring became {len(controllers._shapes)} surfaces"
     controllers._shapes.clear()
+
+
+# --- two people pairing at once -----------------------------------------------
+#
+# One person pairing is a fraction. Two is a queue: both fills have to be on
+# screen, and the seats have to go out in the order the buttons went down --
+# not in the order the pads were plugged in, which is what the daemon used to
+# do and what nobody on a sofa can see. padmap names the pad on every
+# `progress` now (`frac`, `name`, `node`, `player`) and says `frac: 0` when
+# one lets go; these are that, end to end, with two real pads.
+
+
+def _progress_by_node(daemon, seconds: float) -> dict[str, list[float]]:
+    """Every `progress` reading of the last `seconds`, by the pad it names."""
+    found: dict[str, list[float]] = {}
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        for event in daemon.drain(0.1):
+            if event.get("event") != "progress":
+                continue
+            found.setdefault(str(event.get("node") or ""), []).append(float(event.get("frac", 0)))
+    return found
+
+
+def test_two_pads_holding_at_once_are_two_fills(daemon, sdl):
+    """Both people see themselves, and the readings say which is which.
+
+    Anonymous readings -- one `frac` per pad per tick with no pad on it --
+    arrive as a single fill jumping between two values, which is what this
+    looked like before padmap named them.
+    """
+    with FakePad("E2E Xbox Pad") as first, FakePad("E2E Other Pad", 0x2AAA, 0x5BBB, 1) as second:
+        daemon.send({"cmd": "seating", "open": True, "players": 4, "hold": 1.5})
+        daemon.drain(0.5)
+
+        first.down(BTN_SOUTH)
+        time.sleep(0.2)
+        second.down(BTN_SOUTH)
+        readings = _progress_by_node(daemon, 1.0)
+        first.up(BTN_SOUTH)
+        second.up(BTN_SOUTH)
+
+        named = {node: fracs for node, fracs in readings.items() if node}
+        assert len(named) == 2, f"two pads holding gave {len(named)} fills: {readings}"
+        for node, fracs in named.items():
+            assert max(fracs) > 0, f"{node} filled nothing"
+            assert fracs == sorted(fracs), f"{node}'s fill went backwards: {fracs}"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="a claim clears every other hold in flight at this pin; "
+           "see docs/requests/two-people-pairing-at-once.md",
+)
+def test_the_seat_goes_to_whoever_pressed_first(daemon, sdl):
+    """Not to whichever pad was plugged in first, which is what the daemon
+    used to do when two holds finished in the same tick.
+
+    Press order is right at this pin; the second claim never arrives, because
+    the first claim's `seating.reset()` clears the other pad's hold and a
+    button that is already down sends no new edge to restart it.
+    """
+    with FakePad("E2E Xbox Pad") as first, FakePad("E2E Other Pad", 0x2AAA, 0x5BBB, 1) as second:
+        daemon.send({"cmd": "seating", "open": True, "players": 4, "hold": 1.0})
+        daemon.drain(0.5)
+        daemon.seen.clear()
+
+        # The second pad first, by a clear margin, so "press order" and "pad
+        # order" disagree and the answer says which one won.
+        second.down(BTN_SOUTH)
+        time.sleep(0.35)
+        first.down(BTN_SOUTH)
+        claims = []
+        end = time.monotonic() + 6.0
+        while time.monotonic() < end and len(claims) < 2:
+            for event in daemon.drain(0.2):
+                if event.get("event") == "claim":
+                    claims.append(event)
+        second.up(BTN_SOUTH)
+        first.up(BTN_SOUTH)
+
+        assert len(claims) == 2, f"two holds, {len(claims)} claims: {claims}"
+        assert claims[0]["name"] == "E2E Other Pad", f"the earlier press did not go first: {claims}"
+        assert claims[0]["player"] == 1 and claims[1]["player"] == 2
+
+
+def test_letting_go_loses_the_place_and_says_so(daemon, sdl):
+    """A release is a reading of its own -- `frac: 0` for that pad -- because
+    silence cannot say *which* of two pads stopped. And the seat that hold was
+    filling towards goes to whoever does finish."""
+    with FakePad("E2E Xbox Pad") as first, FakePad("E2E Other Pad", 0x2AAA, 0x5BBB, 1) as second:
+        daemon.send({"cmd": "seating", "open": True, "players": 4, "hold": 1.5})
+        daemon.drain(0.5)
+        daemon.seen.clear()
+
+        first.down(BTN_SOUTH)
+        time.sleep(0.2)
+        second.down(BTN_SOUTH)
+        time.sleep(0.5)
+        first.up(BTN_SOUTH)          # gives up its place
+
+        released = None
+        end = time.monotonic() + 2.0
+        while time.monotonic() < end and released is None:
+            for event in daemon.drain(0.2):
+                if event.get("event") == "progress" and float(event.get("frac", 1)) == 0.0:
+                    released = event
+        assert released is not None, "letting go said nothing at all"
+        assert "E2E Xbox Pad" in str(released.get("name")), f"the wrong pad was said: {released}"
+
+        claimed = daemon.wait_for("claim", seconds=6.0)
+        second.up(BTN_SOUTH)
+        assert claimed is not None, "the pad that kept holding never took a seat"
+        assert claimed["name"] == "E2E Other Pad"
+        assert claimed["player"] == 1, "the seat the other pad gave up was not the one taken"
