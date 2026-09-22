@@ -159,13 +159,13 @@ def wedge(centre: tuple[float, float], radius: float, fraction: float, step: flo
     sweep = 360.0 * fraction
     angle = 0.0
     while angle < sweep:
-        points.append(_on_circle(cx, cy, radius, angle))
+        points.append(on_circle(cx, cy, radius, angle))
         angle += step
-    points.append(_on_circle(cx, cy, radius, sweep))
+    points.append(on_circle(cx, cy, radius, sweep))
     return points
 
 
-def _on_circle(cx: float, cy: float, radius: float, degrees: float) -> tuple[float, float]:
+def on_circle(cx: float, cy: float, radius: float, degrees: float) -> tuple[float, float]:
     """Clockwise from twelve, in a coordinate system where y grows downward."""
     import math
 

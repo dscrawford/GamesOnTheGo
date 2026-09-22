@@ -36,6 +36,7 @@ from .padstrip import (
     colour_for,
     name_for,
     next_seat,
+    on_circle,
     seats,
     wedge,
 )
@@ -660,6 +661,31 @@ def draw_stick(
         reach = radius - max(3, radius // 5)
         spot = (int(centre[0] + x * reach), int(centre[1] + y * reach))
         pygame.draw.aacircle(screen, colour_for(player), spot, max(3, radius // 4))
+
+
+def draw_arc(screen, centre, radius: float, colour, fraction: float, width: int = 4) -> None:
+    """An open arc, clockwise from twelve, `fraction` of the way round.
+
+    Hollow on purpose and drawn as a polyline rather than punched out of a
+    filled wedge: this goes *over* a controller drawing, and punching would
+    take a bite out of it.
+    """
+    if fraction <= 0:
+        return
+    sweep = 360.0 * min(1.0, fraction)
+    step = 4.0
+    angles = [0.0]
+    while angles[-1] + step < sweep:
+        angles.append(angles[-1] + step)
+    angles.append(sweep)
+    points = [(int(x), int(y)) for x, y in (on_circle(centre[0], centre[1], radius, a) for a in angles)]
+    if len(points) < 2:
+        return
+    # Thickness from `lines`, edge from `aalines`: pygame's anti-aliased
+    # lines are one pixel whatever width is asked for, and a one-pixel ring
+    # around a controller at arm's length is not there at all.
+    pygame.draw.lines(screen, colour, False, points, max(1, width))
+    pygame.draw.aalines(screen, colour, False, points)
 
 
 def draw_ring(screen, centre, radius: int, colour, fraction: float, width: int = 5, behind=BACKGROUND) -> None:
