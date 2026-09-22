@@ -199,6 +199,44 @@ class Gate:
         return "checking controllers"
 
 
+# How long a `progress` reading is believed after it arrives. padmap sends
+# them about every 20 ms while a button is held and says *nothing at all* when
+# it is let go -- so a hold abandoned four-fifths of the way through left
+# four-fifths of a controller painted on the screen until something else
+# happened. Three frames at sixty: long enough to ride out a late event, short
+# enough that letting go looks like letting go.
+PROGRESS_STALE = 0.05
+
+
+@dataclass
+class Fade:
+    """The reveal's fraction, which has to fall back to nothing by itself.
+
+    Deliberately not part of `Gate`: a gate is rebuilt from events and has no
+    clock, and this is the one thing here that is about time passing rather
+    than about what the daemon said.
+    """
+
+    value: float = 0.0
+    at: float = 0.0
+
+    def saw(self, value: float, now: float) -> None:
+        """A reading from the daemon. Only a fresh one restarts the clock."""
+        if value != self.value:
+            self.value = value
+            self.at = now
+        elif value > 0:
+            # The same fraction again is still the daemon talking: padmap
+            # repeats the reading while a button stays where it is.
+            self.at = now
+
+    def now(self, now: float) -> float:
+        """What to draw: nothing, once the readings stop coming."""
+        if self.value <= 0 or now - self.at > PROGRESS_STALE:
+            return 0.0
+        return self.value
+
+
 def seats_from(players: list | None) -> tuple[Seat, ...]:
     """The seated pads a state event reports, in player order."""
     found = [

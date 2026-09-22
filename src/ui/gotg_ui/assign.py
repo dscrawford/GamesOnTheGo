@@ -18,9 +18,11 @@ sequence of events leaves on screen.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field, replace
 
 from . import config, trace
+from .gate import Fade
 
 
 @dataclass(frozen=True)
@@ -181,6 +183,11 @@ class Session:
     slots: int = 4
     view: Assignment = field(default_factory=Assignment)
     open: bool = False
+    # The reveal's own clock. padmap sends `progress` while a button is held
+    # and nothing at all when it is let go, so the last reading would sit on
+    # the strip for ever: `gate.Fade` is what empties it. Fed from `handle`,
+    # which is where a reading actually arrives.
+    fade: Fade = field(default_factory=Fade)
 
     def begin(self) -> dict:
         self.open = True
@@ -213,6 +220,10 @@ class Session:
         self.view = Assignment(slots=self.slots)
         return {"cmd": "accept"} if seated else {"cmd": "cancel"}
 
+    def filling(self, now: float) -> float:
+        """What the strip should draw: nothing, once the readings stop."""
+        return self.fade.now(now)
+
     def handle(self, event: dict) -> None:
         """One event from padmap, and what it does to the screen.
 
@@ -223,6 +234,10 @@ class Session:
         say why or how to get out.
         """
         self.view = apply(self.view, event)
+        # The fraction, dated. Only a message can refresh it, which is what
+        # makes the strip empty again when a hold is let go -- padmap does not
+        # say so, it simply stops talking.
+        self.fade.saw(self.view.progress, time.monotonic())
         if event.get("event") == "state":
             self.open = event.get("state") == "assigning"
         if self.view.finished:
@@ -259,6 +274,10 @@ class Watch:
     # machine whose padmap cannot seat anybody is a machine the keyboard
     # drives, until padmap is fixed.
     refused: bool = False
+
+    def filling(self, now: float) -> float:
+        """What the strip should draw: nothing, once the readings stop."""
+        return self.fade.now(now)
 
     def handle(self, event: dict) -> None:
         """padmap's answer, when it has one. Only a refusal says anything: the
