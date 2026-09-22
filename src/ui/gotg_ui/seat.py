@@ -486,11 +486,13 @@ class Door:
             trace.say("door-release")
         seat = sdl_pads.player(event)
 
-        # A pad SDL maps says which control it is itself, in the standard
-        # layout the binding tables are written against. Read in preference to
-        # padmap's capture, which holds only the controls one console asked
-        # for: the Steam Controller's N64 capture has no `x` and its universal
-        # one has no `lefttrigger`, so half this screen lit nothing.
+        # One vocabulary per pad, chosen by whether SDL maps it -- not by
+        # what kind of event this is. A pad SDL maps says which control it is
+        # itself, in the standard layout the binding tables are written
+        # against; a pad it does not map can only be named by padmap's
+        # capture. Choosing per event ran both for an axis, and one trigger
+        # lit two labels: a GameCube pad's right trigger read as R *and* Z.
+        known = sdl_pads.mapped(event)
         standard = element_for_button(sdl_pads.button(event))
         if standard and seat is not None:
             self.pressing[seat] = now
@@ -499,7 +501,7 @@ class Door:
         if gone and seat is not None:
             self._let_go(seat, [self._one(gone)])
 
-        moved = sdl_pads.axis_move(event)
+        moved = sdl_pads.axis_move(event) if known else None
         if moved is not None and seat is not None:
             index, value = moved
             self.pressing[seat] = now
@@ -512,14 +514,14 @@ class Door:
                 self._let_go(seat, ends)
 
         released = sdl_pads.raw_release(event)
-        if released is not None and seat is not None and not standard:
+        if released is not None and seat is not None and not known:
             # A pad SDL does not map: padmap's capture is the only thing that
             # can name its buttons, and the release has to be named the same
             # way `lit_by` holds them.
             self._let_go(seat, self._named(controls_on(self._table(seat), "button", released)))
 
         raw = sdl_pads.raw_input(event)
-        if raw is not None and not standard:
+        if raw is not None and not known:
             # Who it was, so the screen can light that seat. An axis coming
             # back to rest is still that seat being heard from: a stick a
             # player waggles to check it works is exactly what this answers.
@@ -641,13 +643,17 @@ def _wait_for_go(
     # One profile per seat, by the name padmap gave it: whose press it is
     # decides which table names the control.
     by_seat = {
-        seat.player: (profiles.for_pad(seat.name) or {}).get("buttons") or {}
+        # This console's capture, falling back to the universal one, which is
+        # what padmap itself falls back to: the top-level table is the
+        # universal capture alone, and a pad bound for N64 has controls there
+        # that it does not have here.
+        seat.player: profiles.bindings(profiles.for_pad(seat.name), gate.scope)
         for seat in gate.seats
         if seat.name
     }
     door = Door(
         sdl_pads.init(), time.monotonic(),
-        buttons=(profile or {}).get("buttons") or {},
+        buttons=profiles.bindings(profile, gate.scope),
         buttons_by=by_seat,
         names=pad_controls(console_for(gate.platform)),
     )

@@ -150,6 +150,20 @@ def raw_input(event) -> tuple[str, int, object] | None:
     return None
 
 
+def mapped(event) -> bool:
+    """Whether SDL has a standard layout for the pad this event came from.
+
+    Which vocabulary names a press: SDL's own for a pad it maps, padmap's
+    capture for one it does not. Deciding that per *event* instead -- a button
+    said one thing, an axis the other -- lit two labels for one trigger, which
+    is what a GameCube pad on an N64 drawing looked like: R and Z at once.
+    """
+    instance = getattr(event, "instance_id", None)
+    if instance is None:
+        instance = getattr(event, "joy", None)
+    return instance in _mapped
+
+
 def button_up(event) -> str | None:
     """The name of the button this release is, on a pad padmap published.
 
