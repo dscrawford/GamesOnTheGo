@@ -607,23 +607,34 @@ def draw_reveal(
         pygame.draw.arc(screen, colour, box, top - 2 * math.pi * min(1.0, fraction), top, 3)
         return
     width, tall = icon.get_size()
-    slice_ = wedge((width / 2, tall / 2), math.hypot(width, tall) / 2 + 2, fraction)
-    if len(slice_) < 3:
+    if fraction <= 0:
         return
-    mask = pygame.Surface((width, tall), pygame.SRCALPHA)
-    pygame.draw.polygon(mask, (255, 255, 255, 255), slice_)
+
+    def paint(surface, scale):
+        slice_ = wedge(
+            (scale * width / 2, scale * tall / 2),
+            scale * (math.hypot(width, tall) / 2 + 2),
+            round(min(1.0, fraction), 2),
+        )
+        if len(slice_) >= 3:
+            pygame.draw.polygon(surface, (255, 255, 255, 255), slice_)
+
+    # The mask's edge is one long diagonal -- the hand of the clock -- and a
+    # hard one made the reveal look like a torn page. Painted big and scaled
+    # down it is a soft edge, which is what a sweep looks like.
+    mask = crisp(("wedge", width, tall, round(min(1.0, fraction), 2)), (width, tall), paint)
     shown = icon.copy()
     shown.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
     screen.blit(shown, shown.get_rect(center=centre))
 
 
-def gate_points(centre, radius: float, sides: int = 8) -> list[tuple[int, int]]:
+def gate_points(centre, radius: float, sides: int = 8) -> list[tuple[float, float]]:
     """An octagon around this centre, flat side up, as a real gate sits."""
     turn = math.pi / sides
     return [
         (
-            int(centre[0] + radius * math.sin(2 * math.pi * corner / sides + turn)),
-            int(centre[1] - radius * math.cos(2 * math.pi * corner / sides + turn)),
+            centre[0] + radius * math.sin(2 * math.pi * corner / sides + turn),
+            centre[1] - radius * math.cos(2 * math.pi * corner / sides + turn),
         )
         for corner in range(sides)
     ]
@@ -647,9 +658,18 @@ def draw_stick(
     them was a picture of a different controller.
     """
     if gate == "octagon":
-        # aalines, closed: a polygon outline at this size is all diagonals,
-        # which is the shape aliasing shows up on worst.
-        pygame.draw.aalines(screen, LEADER, True, gate_points(centre, radius), 2)
+        box = int(2 * radius + 8)
+        middle = box / 2
+
+        def paint(surface, scale):
+            points = [
+                (int(x * scale), int(y * scale))
+                for x, y in gate_points((middle, middle), radius)
+            ]
+            pygame.draw.lines(surface, LEADER, True, points, 2 * scale)
+
+        shape = crisp(("octagon", radius, tuple(LEADER)), (box, box), paint)
+        screen.blit(shape, shape.get_rect(center=(int(centre[0]), int(centre[1]))))
     else:
         pygame.draw.aacircle(screen, LEADER, centre, radius, 2)
     if not at:
@@ -663,6 +683,46 @@ def draw_stick(
         pygame.draw.aacircle(screen, colour_for(player), spot, max(3, radius // 4))
 
 
+# Shapes drawn big and scaled down, by whatever names them. pygame draws a
+# thick line, a polygon and a pie slice with hard pixel edges -- `aalines` is
+# one pixel wide whatever width is asked for -- and a green ring or a check
+# mark made of staircases is the first thing anybody notices on a screen that
+# is otherwise still. So they are painted at four times the size on a
+# transparent surface and smoothscaled down, which is anti-aliasing by
+# averaging and costs nothing after the first frame: every one of these is
+# the same shape again next frame.
+_shapes: dict[tuple, object] = {}
+_SHAPES_KEPT = 600
+
+# How much bigger to paint. Four is where the stairs stop being visible at
+# these sizes; eight costs four times the memory for a difference nobody saw.
+CRISP = 4
+
+
+def crisp(key: tuple, size: tuple[int, int], paint) -> object:
+    """A transparent surface with `paint` drawn on it, smooth and kept.
+
+    `paint(surface, scale)` draws at `scale` times the size it was asked for,
+    and gets scaled back down. `key` is what makes two calls the same shape:
+    everything the drawing depends on has to be in it.
+    """
+    found = _shapes.get(key)
+    if found is not None:
+        return found
+    width, height = max(1, size[0]), max(1, size[1])
+    big = pygame.Surface((width * CRISP, height * CRISP), pygame.SRCALPHA)
+    paint(big, CRISP)
+    small = pygame.transform.smoothscale(big, (width, height))
+    if len(_shapes) >= _SHAPES_KEPT:
+        # A hold visits about ninety fractions and a screen has a handful of
+        # seats; this only fills up if something is drawing shapes nobody
+        # will ask for twice, and then forgetting them all is the right size
+        # of mistake.
+        _shapes.clear()
+    _shapes[key] = small
+    return small
+
+
 def draw_arc(screen, centre, radius: float, colour, fraction: float, width: int = 4) -> None:
     """An open arc, clockwise from twelve, `fraction` of the way round.
 
@@ -672,20 +732,28 @@ def draw_arc(screen, centre, radius: float, colour, fraction: float, width: int 
     """
     if fraction <= 0:
         return
-    sweep = 360.0 * min(1.0, fraction)
-    step = 4.0
-    angles = [0.0]
-    while angles[-1] + step < sweep:
-        angles.append(angles[-1] + step)
-    angles.append(sweep)
-    points = [(int(x), int(y)) for x, y in (on_circle(centre[0], centre[1], radius, a) for a in angles)]
-    if len(points) < 2:
-        return
-    # Thickness from `lines`, edge from `aalines`: pygame's anti-aliased
-    # lines are one pixel whatever width is asked for, and a one-pixel ring
-    # around a controller at arm's length is not there at all.
-    pygame.draw.lines(screen, colour, False, points, max(1, width))
-    pygame.draw.aalines(screen, colour, False, points)
+    # Quantised, because a fraction is a float off a clock and two frames a
+    # thousandth apart are the same picture: this is what makes the cache hit.
+    step = round(min(1.0, fraction), 2)
+    radius = float(radius)
+    box = int(2 * (radius + width) + 4)
+    middle = box / 2
+
+    def paint(surface, scale):
+        sweep = 360.0 * step
+        angles, turn = [0.0], 3.0
+        while angles[-1] + turn < sweep:
+            angles.append(angles[-1] + turn)
+        angles.append(sweep)
+        points = [
+            (int(x * scale), int(y * scale))
+            for x, y in (on_circle(middle, middle, radius, angle) for angle in angles)
+        ]
+        if len(points) > 1:
+            pygame.draw.lines(surface, colour, False, points, max(1, width * scale))
+
+    shape = crisp(("arc", radius, width, tuple(colour), step), (box, box), paint)
+    screen.blit(shape, shape.get_rect(center=(int(centre[0]), int(centre[1]))))
 
 
 def draw_ring(screen, centre, radius: int, colour, fraction: float, width: int = 5, behind=BACKGROUND) -> None:
@@ -715,16 +783,22 @@ def draw_tick(screen, centre, size: int, colour, behind=(14, 20, 16)) -> None:
     drawn over a player's badge, and green on the blue of player one at
     twenty pixels was a smudge. The dark pass is what makes it a shape.
     """
-    x, y = centre
+    box = int(size * 2)
+    middle = box / 2
     unit = size / 2
-    points = [
-        (int(x - unit), int(y)),
-        (int(x - unit * 0.25), int(y + unit * 0.7)),
-        (int(x + unit), int(y - unit * 0.75)),
-    ]
     width = max(3, size // 5)
-    pygame.draw.lines(screen, behind, False, points, width + 3)
-    pygame.draw.lines(screen, colour, False, points, width)
+
+    def paint(surface, scale):
+        points = [
+            (int(scale * (middle - unit)), int(scale * middle)),
+            (int(scale * (middle - unit * 0.25)), int(scale * (middle + unit * 0.7))),
+            (int(scale * (middle + unit)), int(scale * (middle - unit * 0.75))),
+        ]
+        pygame.draw.lines(surface, behind, False, points, (width + 3) * scale)
+        pygame.draw.lines(surface, colour, False, points, width * scale)
+
+    shape = crisp(("tick", size, tuple(colour), tuple(behind)), (box, box), paint)
+    screen.blit(shape, shape.get_rect(center=(int(centre[0]), int(centre[1]))))
 
 
 def draw_hold(
