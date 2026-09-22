@@ -37,7 +37,7 @@ from . import devices, keys, meter, profiles, trace
 from . import pads as sdl_pads
 from .assign import KeyHold
 from .bindings import console_for, pad_controls
-from .controllers import Diagram, assets_dir, draw_reveal, draw_tick, icon_surface
+from .controllers import Diagram, assets_dir, draw_arc, draw_reveal, draw_tick, icon_surface
 from .controllers import draw as draw_diagram
 from .gate import (
     CHECKING,
@@ -89,6 +89,11 @@ GO_HOLD = float(os.environ.get("GOTG_SEAT_GO_HOLD") or config.get("theme.timeout
 # across a room, short enough that four people pressing at once still reads as
 # four separate answers rather than four lights left on.
 PRESS_SHOWN = 0.45
+
+# How long the check stays up after a hold finishes, before the game starts.
+# Without it the ring closed and the screen was gone in the same frame, which
+# reads as "something happened" rather than "you are ready".
+READY_SHOWN = 0.3
 
 # The pause between pairing and being able to start. The hold that claims a
 # seat is padmap's quarter second, and a thumb does not come off a button that
@@ -746,6 +751,7 @@ def _wait_for_go(
     fade = Fade()
     space = KeyHold()
     fps = meter.Meter()
+    finished: float | None = None
     cache = cache if cache is not None else {}
     while True:
         now = time.monotonic()
@@ -786,7 +792,12 @@ def _wait_for_go(
             trace.say("door-rebind")
             return "rebind", gate
         if door.done(now):
-            return "go", gate
+            # The ring has closed. One more moment with the check through it,
+            # so the last thing seen is "ready" rather than a screen vanishing.
+            if finished is None:
+                finished = now
+            elif now - finished >= READY_SHOWN:
+                return "go", gate
         painting = time.perf_counter()
         _draw_go(
             screen, font_at, gate, title, cache,
@@ -923,25 +934,37 @@ def _draw_seats(
         colour = colour_for(seat.player)
         ids = devices.ids_for(seat.node)
 
-        if holder == seat.player and fraction > 0:
-            draw_reveal(screen, centre, seat.name, colour, fraction, height, ids)
+        icon = icon_surface(seat.name, height, colour, ids)
+        if icon is None:
+            # No artwork for this pad: a disc in its colour still says a seat
+            # is taken, which is the question.
+            pygame.draw.aacircle(screen, colour, centre, 13)
         else:
-            icon = icon_surface(seat.name, height, colour, ids)
-            if icon is None:
-                # No artwork for this pad: a disc in its colour still says a
-                # seat is taken, which is the question.
-                pygame.draw.aacircle(screen, colour, centre, 13)
-            else:
-                # Dim while idle, full colour while pressed. Nothing else on
-                # this screen moves, so a drawing brightening under a thumb
-                # is unmistakably an answer to it.
-                icon.set_alpha(255 if seat.player in heard else SETTLED)
-                screen.blit(icon, icon.get_rect(center=centre))
-                icon.set_alpha(255)
+            # Dim while idle, full colour while pressed. Nothing else on this
+            # screen moves, so a drawing brightening under a thumb is
+            # unmistakably an answer to it.
+            icon.set_alpha(255 if seat.player in heard else SETTLED)
+            screen.blit(icon, icon.get_rect(center=centre))
+            icon.set_alpha(255)
 
-        corner = (centre[0] + height // 2 - 2, centre[1] + height // 3)
-        pygame.draw.aacircle(screen, (16, 22, 18), corner, 9)
-        draw_tick(screen, corner, 11, SETTLED_GREEN)
+        # Readying up is not pairing, so it does not look like it. Pairing is
+        # the controller filling in -- padmap's own hold, drawn as a reveal
+        # wherever it happens. This is a green ring closing around the pad
+        # already in somebody's hands, and a check through it when it is
+        # done: a different thing, said differently.
+        if holder == seat.player and fraction > 0:
+            draw_arc(screen, centre, height * 0.72, SETTLED_GREEN, fraction, 4)
+            if fraction >= 1.0:
+                # Through the middle, and small enough that the pad is still
+                # recognisable underneath: this says ready, not "gone".
+                draw_tick(screen, centre, int(height * 0.55), SETTLED_GREEN)
+
+        # The shoulder tick says "this seat is paired". While the ready check
+        # is up it is the same word twice, so it stands down.
+        if not (holder == seat.player and fraction >= 1.0):
+            corner = (centre[0] + height // 2 - 2, centre[1] + height // 3)
+            pygame.draw.aacircle(screen, (16, 22, 18), corner, 9)
+            draw_tick(screen, corner, 11, SETTLED_GREEN)
 
     if joining > 0:
         # The seat being claimed right now, in the colour it is about to be:
