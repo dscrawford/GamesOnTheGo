@@ -97,6 +97,14 @@ PRESS_SHOWN = 0.45
 # ready -- and nothing counts as a go until every pad has been quiet this long.
 PAUSE = float(os.environ.get("GOTG_SEAT_PAUSE") or config.get("theme.timeouts.seat_pause", 1.0))
 
+# SDL's standard axis order, as which stick and which of its two numbers.
+# The triggers (4 and 5) are not a stick and keep their labels.
+STICK_AXES = {0: ("left", 0), 1: ("left", 1), 2: ("right", 0), 3: ("right", 1)}
+
+# Below this a stick is at rest. A pad reads a percent or two off centre for
+# ever, and a dot that never sits still looks like a broken controller.
+STICK_DEAD = 0.12
+
 # The hold on Y that walks the buttons again. A tap was what it was, and a
 # thumb that brushed Y reaching for A landed in the wizard -- so it is a hold,
 # and the same length as the one that starts the game.
@@ -409,6 +417,10 @@ class Door:
         # control per player, and an axis coming back to the middle then took
         # the dot off a button that was still held.
         self.lit_by: dict[int, set[str]] = {}
+        # Where each player's sticks are: player -> {"left"|"right": (x, y)},
+        # y down. Drawn as a dot inside the ring that replaced that stick's
+        # four labels, because a stick is a position and four words are not.
+        self.sticks_by: dict[int, dict[str, tuple[float, float]]] = {}
         # When Y went down, for the hold that rebinds.
         self.y_since: float | None = None
         # Said once, when the hold finishes: a trace with sixty lines a second
@@ -498,6 +510,14 @@ class Door:
         if moved is not None and seat is not None:
             index, value = moved
             self.pressing[seat] = now
+            stick, axis = STICK_AXES.get(index, (None, None))
+            if stick is not None:
+                # Under a deadzone it is the middle: a stick at rest reads a
+                # percent or two off centre and a dot that never sits still
+                # looks like a fault rather than a reading.
+                where = list(self.sticks_by.setdefault(seat, {}).get(stick, (0.0, 0.0)))
+                where[axis] = 0.0 if abs(value) < STICK_DEAD else max(-1.0, min(1.0, value))
+                self.sticks_by[seat][stick] = (where[0], where[1])
             pushed = element_on_axis(index, value)
             ends = [self._one(name) for name in elements_on_axis(index)]
             if pushed:
@@ -680,6 +700,7 @@ def _wait_for_go(
             screen, font_at, gate, title, cache,
             fraction=door.progress(now),
             pressing=door.lit_by,
+            sticks=door.sticks_by,
             holder=door.holder,
             heard=door.heard(now),
             joining=fade.now(now),
@@ -713,6 +734,7 @@ def _draw_go(
     cache: dict,
     fraction: float = 0.0,
     pressing: dict[int, set[str]] | None = None,
+    sticks: dict[int, dict[str, tuple[float, float]]] | None = None,
     holder: int | None = None,
     heard: set[int] | None = None,
     joining: float = 0.0,
@@ -737,6 +759,7 @@ def _draw_go(
         draw_diagram(
             screen, assets_dir(), gate.platform, font_at, cache,
             pressing=pressing or {},
+            sticks=sticks or {},
             heading=f"{title}  —  {names}" if names else title,
             keys="",
             footer=_footer(gate, settled),

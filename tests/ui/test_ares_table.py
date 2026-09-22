@@ -14,6 +14,8 @@ import pathlib
 import pytest
 
 from gotg_ui.bindings import describe_all, pad_controls
+from gotg_ui.bindings import stick_groups as pad_sticks
+from gotg_ui.bindings import stick_groups_for_ids as sticks_by_id
 
 TABLE = json.loads((pathlib.Path(__file__).parents[2] / "src" / "client" / "data" / "ares-pads.json").read_text())
 N64 = TABLE["Nintendo64"]["buttons"]
@@ -79,3 +81,40 @@ def test_a_console_the_table_has_never_heard_of_translates_nothing(monkeypatch):
     monkeypatch.setenv("GOTG_DATA", str(pathlib.Path(__file__).parents[2] / "src" / "client" / "data"))
     assert pad_controls("GameCube") == {}
     assert pad_controls(None) == {}
+
+
+def test_a_stick_is_one_thing_not_four_labels(monkeypatch):
+    """X-Axis/Lo, X-Axis/Hi, Y-Axis/Lo, Y-Axis/Hi is what a stick is made of.
+
+    None of those four says where the stick *is*, which is the only thing
+    worth knowing while checking a controller. They are grouped into one ring
+    with a dot in it; the D-pad is not, because it is four switches and reads
+    that way in the hand.
+    """
+    monkeypatch.setenv("GOTG_DATA", str(pathlib.Path(__file__).parents[2] / "src" / "client" / "data"))
+    groups = pad_sticks("Nintendo64")
+    assert set(groups) == {"left", "right"}
+    assert groups["left"] == {
+        "X-Axis/Lo": (-1, 0),
+        "X-Axis/Hi": (1, 0),
+        "Y-Axis/Lo": (0, -1),
+        "Y-Axis/Hi": (0, 1),
+    }
+    # The C buttons are four switches on an N64 and the right stick on
+    # everything that plays it, so they group by what they are bound to.
+    assert groups["right"] == {
+        "C-Up": (0, -1),
+        "C-Down": (0, 1),
+        "C-Left": (-1, 0),
+        "C-Right": (1, 0),
+    }
+    # The D-pad, the triggers and the face buttons stay labels.
+    for stick in groups.values():
+        assert not {"Up", "Down", "Left", "Right", "Z", "L", "R", "A", "B", "Start"} & set(stick)
+
+
+def test_a_drawing_labelled_with_padmaps_own_ids_groups_those(monkeypatch):
+    # Dolphin's two publish no console, so the drawing carries padmap's ids.
+    monkeypatch.setenv("GOTG_DATA", str(pathlib.Path(__file__).parents[2] / "src" / "client" / "data"))
+    groups = sticks_by_id(["rightstick_up", "rightstick_left", "dpup", "a", "lefttrigger"])
+    assert groups == {"right": {"rightstick_up": (0, -1), "rightstick_left": (-1, 0)}}

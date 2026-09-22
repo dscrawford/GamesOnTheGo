@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import pygame
 
 from . import config, devices, icons
-from .bindings import bindings_for, console_for, players_for
+from .bindings import bindings_for, console_for, players_for, stick_groups, stick_groups_for_ids
 from .leaders import Anchor, place
 from .padstrip import (
     EMPTY,
@@ -231,6 +231,7 @@ def draw(
     cache: dict,
     highlight: str | None = None,
     pressing: dict[int, set[str]] | None = None,
+    sticks: dict[int, dict[str, tuple[float, float]]] | None = None,
     heading: str | None = None,
     keys: str | None = None,
     footer: str | None = None,
@@ -240,6 +241,8 @@ def draw(
     `pressing` is player -> the controls under that player's thumbs right
     now: each puts a dot in its player's colour beside that label, so two
     people can check their own pads at once and see which is which.
+    `sticks` is player -> {"left"/"right": (x, y)}, drawn as a dot inside the
+    ring that replaces that stick's four labels.
     `heading`, `keys` and `footer` are the launch gate's, which shows this
     same drawing with its own words around it; None is the picker's.
     """
@@ -289,7 +292,31 @@ def draw(
     art = diagram.surface(pad_width)
     screen.blit(art, (int(rect[0]), int(rect[1])))
 
-    anchors = anchors_for(diagram, bindings, rect, with_binding=named, alias=alias)
+    every = anchors_for(diagram, bindings, rect, with_binding=named, alias=alias)
+    placed = {anchor.input: anchor for anchor in every}
+    # A stick is one thing on the drawing, not four rails of text: its
+    # directions are taken out of the labels and drawn as a ring with a dot
+    # in it, where their own anchors are. The D-pad keeps its four, because it
+    # is four switches and reads that way in the hand.
+    groups = stick_groups(console) if named else stick_groups_for_ids(bindings)
+    rings: list[tuple[str, tuple[int, int], int]] = []
+    sticky: set[str] = set()
+    for stick, ways in groups.items():
+        known = [(placed[name], way) for name, way in ways.items() if name in placed]
+        if len(known) < 2:
+            # One direction alone says nothing about where the middle is;
+            # leave it as a label.
+            continue
+        middle = (
+            sum(anchor.x for anchor, _ in known) / len(known),
+            sum(anchor.y for anchor, _ in known) / len(known),
+        )
+        reach = max(
+            math.hypot(anchor.x - middle[0], anchor.y - middle[1]) for anchor, _ in known
+        )
+        rings.append((stick, (int(middle[0]), int(middle[1])), int(max(14, reach + 6))))
+        sticky.update(name for name, _ in ways.items() if name in placed)
+    anchors = [anchor for anchor in every if anchor.input not in sticky]
     label_height = label_font.get_linesize()
     for item in place(anchors, rect, label_height, PINNED):
         # Whose thumbs are on this control, in seat order, and the label is
@@ -325,6 +352,13 @@ def draw(
                 at = (int(x - 6 - dot_r - index * step), middle_y)
             pygame.draw.aacircle(screen, colour_for(player), at, dot_r)
 
+    for stick, middle, radius in rings:
+        draw_stick(screen, middle, radius, {
+            player: where
+            for player, held in (sticks or {}).items()
+            if (where := held.get(stick)) is not None
+        })
+
     line = footer if footer is not None else (
         f"{console}  ·  {len(anchors)} of {len(bindings)} inputs  ·  "
         f"{seats} player{'s' if seats != 1 else ''}   —   applied to every game on this platform"
@@ -347,7 +381,10 @@ def draw(
     # so the N64's Z sits under the grip and has nowhere to point at — it is
     # bound, it works, and this line is the only place that says so. A console
     # still on the generic pad has a larger number and that one *is* a to-do.
-    missing = len(bindings) - len(anchors)
+    # The sticks count as drawn: their four directions are the ring, not a
+    # gap. Without this the line called eight controls missing the moment
+    # they started being drawn properly.
+    missing = len(bindings) - len(anchors) - len(sticky)
     if missing:
         note = f"{missing} more bound, with nowhere on this drawing to point at"
         screen.blit(
@@ -538,6 +575,29 @@ def draw_reveal(
     shown = icon.copy()
     shown.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
     screen.blit(shown, shown.get_rect(center=centre))
+
+
+def draw_stick(screen, centre, radius: int, at: dict[int, tuple[float, float]]) -> None:
+    """A stick, as a circle with a dot in it.
+
+    Four labels reading X-Axis/Lo, X-Axis/Hi, Y-Axis/Lo, Y-Axis/Hi down the
+    side of a drawing say what a stick is made of; none of them says where it
+    is. The ring is the stick's travel and the dot is where a thumb has it,
+    in that player's colour -- two players on one console get two dots, which
+    is also how you see whose stick is drifting.
+
+    `at` is player -> (x, y), each -1..1, y down as a screen counts.
+    """
+    pygame.draw.aacircle(screen, LEADER, centre, radius, 2)
+    if not at:
+        # Nobody's thumb: the rest position, so the ring is not an empty hoop
+        # whose meaning has to be guessed.
+        pygame.draw.aacircle(screen, DOT, centre, max(3, radius // 5))
+        return
+    for player, (x, y) in sorted(at.items()):
+        reach = radius - max(3, radius // 5)
+        spot = (int(centre[0] + x * reach), int(centre[1] + y * reach))
+        pygame.draw.aacircle(screen, colour_for(player), spot, max(3, radius // 4))
 
 
 def draw_ring(screen, centre, radius: int, colour, fraction: float, width: int = 5, behind=BACKGROUND) -> None:
