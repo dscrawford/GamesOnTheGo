@@ -60,6 +60,12 @@ def crc16(data: bytes) -> int:
 # once: the alternative is sixteen CRCs per pad event.
 CLONE_CRCS = frozenset(crc16(f"{VIRTUAL_PREFIX}{player}".encode()) for player in range(1, SEATS + 1))
 
+# And which player each of those CRCs is. The seat number is in the clone's
+# real name, so a press can be attributed to the person who made it -- which
+# is what lets a screen show *who* is holding a button rather than only that
+# somebody is.
+CLONE_PLAYERS = {crc16(f"{VIRTUAL_PREFIX}{player}".encode()): player for player in range(1, SEATS + 1)}
+
 
 def name_crc(guid: str | None) -> int | None:
     """The CRC of the name SDL first saw, out of a GUID, or None if that is
@@ -79,6 +85,26 @@ def is_clone(name: str | None, phys: str | None = "", guid: str | None = "") -> 
     if str(phys or "").startswith(VIRTUAL_PHYS_PREFIX) or str(name or "").startswith(VIRTUAL_PREFIX):
         return True
     return name_crc(guid) in CLONE_CRCS
+
+
+def player_of(name: str | None, phys: str | None = "", guid: str | None = "") -> int | None:
+    """Which seat this pad is, or None if it is not one of padmap's.
+
+    Three ways of asking the same question, in the order they survive: the
+    kernel name padmap gave the clone, the phys it set beside it, and the CRC
+    SDL took of that name before renaming the device out from under it.
+    """
+    text = str(name or "")
+    if text.startswith(VIRTUAL_PREFIX):
+        tail = text[len(VIRTUAL_PREFIX):].strip()
+        if tail.isdigit():
+            return int(tail)
+    port = str(phys or "")
+    if port.startswith(VIRTUAL_PHYS_PREFIX):
+        tail = port[len(VIRTUAL_PHYS_PREFIX):].lstrip("pP")
+        if tail.isdigit():
+            return int(tail)
+    return CLONE_PLAYERS.get(name_crc(guid))
 
 
 def drives(name: str | None, phys: str | None = "", guid: str | None = "") -> bool:
@@ -132,3 +158,9 @@ class Owners:
     def may_drive(self, instance: int | None) -> bool:
         """Whether an event from this pad may move the picker."""
         return drives(self.names.get(instance, ""), guid=self.guids.get(instance, ""))
+
+    def player(self, instance: int | None) -> int | None:
+        """Which player's pad this is, for a screen that shows who pressed."""
+        if instance not in self.names:
+            return None
+        return player_of(self.names.get(instance, ""), guid=self.guids.get(instance, ""))

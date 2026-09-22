@@ -37,6 +37,7 @@ EMPTY_TEXT = config.colour("theme.colours.empty_text", (208, 78, 78))
 LABEL = config.colour("theme.colours.text", (232, 232, 236))
 LABEL_DIM = config.colour("theme.colours.text_dim", (150, 150, 158))
 PANEL = config.colour("theme.colours.panel", (26, 26, 30))
+READY = config.colour("theme.colours.ready", (108, 196, 116))
 
 # The strip's own height. The caller offsets everything below by it, so the
 # screens underneath carry no copy of the number.

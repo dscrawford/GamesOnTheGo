@@ -157,3 +157,24 @@ def test_the_picker_turns_sdls_hidapi_off_so_a_steam_controllers_clone_is_seen()
     import gotg_ui  # noqa: F401 - importing is the act
 
     assert os.environ.get("SDL_JOYSTICK_HIDAPI") == "0"
+
+
+def test_a_clone_says_which_seat_it_is():
+    """Who pressed, not only whether somebody did.
+
+    Three spellings of the same fact, because each survives a different thing:
+    the kernel name is renamed by SDL, the phys is best-effort (UI_SET_PHYS
+    can fail), and the GUID's CRC is what is left when both are gone.
+    """
+    assert clones.player_of("padmap Player 3") == 3
+    assert clones.player_of("Xbox 360 Controller", "padmap/p2") == 2
+    assert clones.player_of("Xbox 360 Controller", guid=CLONE_OF_AN_XBOX_PAD) == 3
+    assert clones.player_of("Xbox 360 Controller", guid=THE_PAD_IT_WAS_MADE_FROM) is None
+    assert clones.player_of("") is None
+
+
+def test_a_seat_is_only_claimed_for_a_pad_this_has_opened():
+    owners = clones.Owners()
+    owners.opened(7, "Xbox 360 Controller", CLONE_OF_AN_XBOX_PAD)
+    assert owners.player(7) == 3
+    assert owners.player(9) is None, "an instance nobody opened belongs to nobody"

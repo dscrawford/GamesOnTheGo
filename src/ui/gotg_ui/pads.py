@@ -75,6 +75,20 @@ def _allowed(event) -> bool:
     return _owners.may_drive(instance)
 
 
+def player(event) -> int | None:
+    """Which seat this event came from, or None for a pad that has none.
+
+    The seat number is in the clone's name and in its GUID's CRC, so it costs
+    nothing to know -- and a screen that draws a press against the player who
+    made it is the difference between "a button works" and "your button
+    works". See `clones.player_of`.
+    """
+    instance = getattr(event, "instance_id", None)
+    if instance is None:
+        instance = getattr(event, "joy", None)
+    return _owners.player(instance)
+
+
 def button(event) -> str | None:
     """The name of the button this event is, or None if it is not one."""
     if event.type not in (pygame.CONTROLLERBUTTONDOWN, pygame.JOYBUTTONDOWN):

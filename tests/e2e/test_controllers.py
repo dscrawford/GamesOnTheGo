@@ -959,6 +959,12 @@ def test_the_door_ignores_a_button_that_is_down_when_it_opens(daemon, sdl):
         took = time.monotonic() - opened
         assert door.done(time.monotonic()), "a fresh second-long hold did not open the door"
         assert 0.9 <= took <= 2.0, f"the door opened after {took:.2f}s, not a second"
+
+        # And the door knows *who*. The go ring is drawn around that player's
+        # own badge, so a second player holding a button has to be attributed
+        # to the second player rather than to whoever sat down first.
+        assert door.holder == 1, f"the hold was credited to {door.holder}, not to player one"
+        assert 1 in door.heard(time.monotonic(), window=60.0), "the press was not attributed to a seat"
         picker.close()
 
 

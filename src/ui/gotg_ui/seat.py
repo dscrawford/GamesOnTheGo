@@ -35,7 +35,7 @@ import pygame  # noqa: E402 - the line above only works ahead of the import
 
 from . import devices, profiles, trace
 from . import pads as sdl_pads
-from .controllers import Diagram, assets_dir, draw_reveal
+from .controllers import Diagram, assets_dir, draw_reveal, draw_ring, draw_tick, icon_surface
 from .controllers import draw as draw_diagram
 from .gate import (
     CHECKING,
@@ -52,6 +52,7 @@ from .gate import (
 )
 from .padmap import Padmap, ensure_daemon
 from .padstrip import EMPTY_RING, LABEL, LABEL_DIM, PANEL, colour_for
+from .padstrip import READY as SETTLED_GREEN  # gate.READY is a state; this is a colour
 from .pressing import controls_for
 
 WINDOW = tuple(config.get("theme.window", [1280, 800]))
@@ -73,6 +74,11 @@ COUNTDOWN = float(os.environ.get("GOTG_SEAT_COUNTDOWN") or config.get("theme.tim
 # started the game before they had let go. The daemon's accept is padmap's
 # business; this second is ours, read from the clone it just published.
 GO_HOLD = float(os.environ.get("GOTG_SEAT_GO_HOLD") or config.get("theme.timeouts.seat_go_hold", 1.0))
+
+# How long a press stays lit beside its seat. Long enough to see a tap from
+# across a room, short enough that four people pressing at once still reads as
+# four separate answers rather than four lights left on.
+PRESS_SHOWN = 0.45
 
 
 def draw(screen, font_at, gate: Gate, title: str, diagram: Diagram | None = None) -> None:
@@ -139,6 +145,18 @@ def draw(screen, font_at, gate: Gate, title: str, diagram: Diagram | None = None
     screen.blit(footer, ((width - footer.get_width()) // 2, int(height * 0.92)))
 
 
+def _said(why: str) -> None:
+    """One line on stderr and one in the trace, for every way out of here.
+
+    Every exit from this gate used to be a silent `return 0`, which is the
+    same thing on a terminal as the gate never having run -- and "it went
+    straight to the game" is then a report nobody can act on. `gotg play`
+    keeps stderr, so this lands in front of whoever launched it.
+    """
+    print(f"gotg-seat: {why}", file=sys.stderr)
+    trace.say("seat-exit", why=why)
+
+
 def run(platform: str, title: str) -> int:
     """Ask what needs asking, then get out of the way. Always returns 0."""
     # The same session name the picker used, when there was one: this pid is
@@ -176,6 +194,11 @@ def run(platform: str, title: str) -> int:
 
     gate, command = decide(gate)
     if gate.done:
+        # Nothing to ask: every seat is taken and mapped already. Said out
+        # loud, because this is the one exit that shows no window at all and
+        # a launch that skipped the gate in silence is indistinguishable from
+        # a gate that was never called.
+        _said(f"nothing to ask ({gate.state}, {gate.seated} seated); starting")
         return 0
     if command is not None:
         pads.send(command)
@@ -234,6 +257,7 @@ def run(platform: str, title: str) -> int:
                 for message in pads.poll():
                     gate = apply(gate, message)
                 if not pads.connected:
+                    _said("padmap went away while the gate was up; starting anyway")
                     break
                 gate, command = decide(gate)
                 if command is not None:
@@ -243,6 +267,7 @@ def run(platform: str, title: str) -> int:
                 pygame.display.flip()
                 clock.tick(60)
             if not (gate.state == READY and gate.seated):
+                _said(f"no door: {gate.state}, {gate.seated} seated")
                 stop_listening()
                 break
             # The door: the bindings on the pad, a press ringed as it happens, a
@@ -292,6 +317,12 @@ class Door:
         self.lit: str | None = None
         self.y_down = False
         self.rebind = False
+        # Whose hold is on the clock, and when each seat was last heard from.
+        # The go ring used to be drawn in player one's colour at the corner of
+        # the screen whoever was holding, which told the second player nothing
+        # and the first player something untrue.
+        self.holder: int | None = None
+        self.pressing: dict[int, float] = {}
         trace.say("door-open", pads=len(sticks), held_at_open=self.hold.held_at_open)
 
     def handle(self, event, now: float) -> bool:
@@ -315,6 +346,7 @@ class Door:
             pressed = sdl_pads.button(event)
             if pressed in self.GO:
                 self.hold.pressed(now)
+                self.holder = sdl_pads.player(event) or self.holder
             # Y, tapped, is "walk the buttons again", and it cannot also be
             # the hold that starts the game.
             if pressed == sdl_pads.Y:
@@ -332,6 +364,12 @@ class Door:
             trace.say("door-release")
         raw = sdl_pads.raw_input(event)
         if raw is not None:
+            # Who it was, so the screen can light that seat. An axis coming
+            # back to rest is still that seat being heard from: a stick a
+            # player waggles to check it works is exactly what this answers.
+            seat = sdl_pads.player(event)
+            if seat is not None:
+                self.pressing[seat] = now
             named = controls_for(self.buttons, *raw)
             if named:
                 self.lit = named[0]
@@ -346,6 +384,10 @@ class Door:
 
     def progress(self, now: float) -> float:
         return self.hold.progress(now)
+
+    def heard(self, now: float, window: float = PRESS_SHOWN) -> set[int]:
+        """The seats that have sent anything in the last moment."""
+        return {player for player, when in self.pressing.items() if now - when <= window}
 
 
 def _wait_for_go(screen, font_at, clock, pads: Padmap, gate: Gate, title: str) -> tuple[str, Gate]:
@@ -370,6 +412,7 @@ def _wait_for_go(screen, font_at, clock, pads: Padmap, gate: Gate, title: str) -
         for message in pads.poll():
             gate = apply(gate, message)
         if not pads.connected:
+            _said("padmap went away at the door; starting")
             return "go", gate
         # A pad seated at this screen that has never been mapped for this
         # console: back to the wizard, and back here after it.
@@ -382,16 +425,33 @@ def _wait_for_go(screen, font_at, clock, pads: Padmap, gate: Gate, title: str) -
                 return "rebind", gate
         if door.done(now):
             return "go", gate
-        _draw_go(screen, font_at, gate, title, door.progress(now), bound, door.lit, cache)
+        _draw_go(
+            screen, font_at, gate, title, door.progress(now), bound, door.lit, cache,
+            holder=door.holder, heard=door.heard(now),
+        )
         pygame.display.flip()
         clock.tick(60)
 
 
 def _draw_go(
-    screen, font_at, gate: Gate, title: str, fraction: float, bound: dict, lit: str | None, cache: dict
+    screen,
+    font_at,
+    gate: Gate,
+    title: str,
+    fraction: float,
+    bound: dict,
+    lit: str | None,
+    cache: dict,
+    holder: int | None = None,
+    heard: set[int] | None = None,
 ) -> None:
     """The door: what every button does on this pad, the one being pressed
-    ringed, the seats along the bottom, and the second filling in."""
+    ringed, and the seats along the bottom.
+
+    The hold is drawn around the badge of whoever is holding, not in the
+    corner: the corner drawing was player one's colour whoever was pressing,
+    which told the second player their pad was doing nothing.
+    """
     width, height = screen.get_size()
     try:
         names = ", ".join(seat.name or "pad" for seat in gate.seats)
@@ -419,28 +479,66 @@ def _draw_go(
 
     # Who has control, in the colours the strip and the grid use, so a second
     # player holding a button sees themselves appear rather than wondering.
-    _draw_seats(screen, font_at, gate, int(height * 0.80))
-    first = gate.seats[0] if gate.seats else None
-    draw_reveal(
-        screen, (int(width * 0.92), int(height * 0.10)),
-        first.name if first else None, colour_for(1), fraction, int(height * 0.09),
-        devices.ids_for(first.node) if first else None,
-    )
+    _draw_seats(screen, font_at, gate, int(height * 0.80), fraction, holder, heard or set())
 
 
-def _draw_seats(screen, font_at, gate: Gate, middle: int) -> None:
-    """A badge and a controller per seat, left to right, player colours."""
+# How much of a settled seat's controller drawing is left. Down from opaque,
+# because by this screen the picture has done its job -- the person checked it
+# against what is in their hands two screens ago -- and what is worth the eye
+# now is the tick saying this one is ready.
+SETTLED = 130
+
+
+def _draw_seats(
+    screen,
+    font_at,
+    gate: Gate,
+    middle: int,
+    fraction: float = 0.0,
+    holder: int | None = None,
+    heard: set[int] | None = None,
+) -> None:
+    """A badge and a controller per seat, left to right, player colours.
+
+    Three things on one badge, and they do not collide: the drawing behind it
+    faded, a green tick over it saying this seat is settled, and -- while
+    somebody holds A -- a ring closing around the one badge that is holding.
+    A press on any seat lights its own badge for a moment, which is the only
+    thing on this screen that answers "is my controller doing anything".
+    """
     width = screen.get_width()
+    heard = heard or set()
     radius = 22
     step = radius * 2 + 78
     left = (width - step * max(1, gate.seated)) // 2 + step // 2
     for index, seat in enumerate(gate.seats):
         centre = (left + index * step, middle)
         colour = colour_for(seat.player)
+
+        icon = icon_surface(seat.name, 40, colour, devices.ids_for(seat.node))
+        if icon is not None:
+            icon.set_alpha(SETTLED)
+            screen.blit(icon, icon.get_rect(center=(centre[0] + radius + 30, middle)))
+            icon.set_alpha(255)
+
+        if holder == seat.player and fraction > 0:
+            draw_ring(screen, centre, radius + 10, colour, fraction, 5)
         pygame.draw.aacircle(screen, colour, centre, radius)
         number = font_at(28).render(str(seat.player), True, (20, 20, 24))
         screen.blit(number, number.get_rect(center=centre))
-        draw_reveal(screen, (centre[0] + radius + 30, middle), seat.name, colour, 1.0, 40, devices.ids_for(seat.node))
+
+        # The tick sits on the badge's shoulder rather than across it: over
+        # the number it hid the one thing the badge is for, and a player
+        # counting seats on a sofa reads the number first.
+        corner = (centre[0] + radius - 3, centre[1] + radius - 3)
+        pygame.draw.aacircle(screen, (16, 22, 18), corner, 11)
+        draw_tick(screen, corner, 13, SETTLED_GREEN)
+
+        if seat.player in heard:
+            # A press, on the seat that made it. Drawn as this seat's own
+            # colour, brightly, outside the badge: nothing else on this screen
+            # moves, so a flicker here is unmistakably an answer to a thumb.
+            pygame.draw.aacircle(screen, colour, (centre[0], centre[1] - radius - 16), 8)
 
 
 def _hold_the_door(title: str, reason: str) -> int:
