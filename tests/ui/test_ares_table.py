@@ -13,7 +13,7 @@ import pathlib
 
 import pytest
 
-from gotg_ui.bindings import describe_all
+from gotg_ui.bindings import describe_all, pad_controls
 
 TABLE = json.loads((pathlib.Path(__file__).parents[2] / "src" / "client" / "data" / "ares-pads.json").read_text())
 N64 = TABLE["Nintendo64"]["buttons"]
@@ -47,3 +47,35 @@ def test_the_n64_stick_is_the_stick_and_the_dpad_is_the_dpad():
 )
 def test_the_gate_describes_an_n64_pad_in_words_somebody_can_check(control, expected):
     assert describe_all(N64[control]) == expected
+
+
+@pytest.mark.parametrize(
+    "padmap_id,expected",
+    [
+        ("dpup", "Up"),
+        ("a", "A"),
+        ("x", "B"),                 # the N64's B is the pad's X
+        ("leftshoulder", "L"),
+        ("lefttrigger", "Z"),
+        ("rightstick_up", "C-Up"),  # padmap's spelling of righty-
+        ("leftstick_left", "X-Axis/Lo"),
+        ("b", None),                # drives nothing on an N64 pad
+    ],
+)
+def test_a_press_is_named_by_what_the_console_calls_it(padmap_id, expected, monkeypatch):
+    """The bug the dots were invisible for.
+
+    padmap's profile answers `leftshoulder`; every label on the drawing is
+    called `L`. Nothing compared the two, so a press lit nothing at all.
+    """
+    monkeypatch.setenv("GOTG_DATA", str(pathlib.Path(__file__).parents[2] / "src" / "client" / "data"))
+    assert pad_controls("Nintendo64").get(padmap_id) == expected
+
+
+def test_a_console_the_table_has_never_heard_of_translates_nothing(monkeypatch):
+    # Dolphin's two publish no console, and there the drawing is labelled with
+    # padmap's own ids already -- so an empty table is the right answer, and
+    # the door falls back to passing the id through.
+    monkeypatch.setenv("GOTG_DATA", str(pathlib.Path(__file__).parents[2] / "src" / "client" / "data"))
+    assert pad_controls("GameCube") == {}
+    assert pad_controls(None) == {}

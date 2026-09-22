@@ -1004,9 +1004,11 @@ def test_a_controller_switched_on_while_the_gate_is_up_takes_a_seat(daemon, sdl)
 # --- change the bindings from the door ------------------------------------------
 
 
-def test_a_tap_of_y_at_the_door_walks_the_buttons_again(daemon, sdl):
-    """Note 2: from the door, somebody can ask for the wizard again. Y, tapped
-    on the seated pad, and the daemon starts a fresh capture."""
+def test_a_hold_of_y_at_the_door_walks_the_buttons_again(daemon, sdl):
+    """Note 2: from the door, somebody can ask for the wizard again. Y, held
+    on the seated pad, and the daemon starts a fresh capture. Held rather than
+    tapped: a thumb brushing Y reaching for A went back to the wizard, which
+    reads exactly like the bindings not being remembered."""
     import signal
 
     with FakePad("E2E Xbox Pad") as pad:
@@ -1033,21 +1035,25 @@ def test_a_tap_of_y_at_the_door_walks_the_buttons_again(daemon, sdl):
                         mapped = True
             assert mapped and steps >= 10, f"the first wizard did not run: {steps} steps"
 
-            # The door is up. Tapped -- down, up, well short of a second --
-            # Y asks for the walk again. Which raw button SDL calls Y depends
-            # on whether padmap's mapping file existed when the gate started
-            # (raw 2, the walk above) or SDL fell back to its Xbox layout
-            # (raw 3); a person would press the one labelled Y. Try both.
+            # The door is up. A tap of Y does nothing at all now, and a hold
+            # of it asks for the walk again. Which raw button SDL calls Y
+            # depends on whether padmap's mapping file existed when the gate
+            # started (raw 2, the walk above) or SDL fell back to its Xbox
+            # layout (raw 3); a person would press the one labelled Y. Both.
             time.sleep(1.5)
             assert seat.poll() is None
-            again = None
             for raw in (0x134, 0x133):
                 pad.tap(raw, hold=0.15)
+            assert daemon.wait_for("mapping", seconds=2.0) is None, "a tap of Y still walks the buttons"
+
+            again = None
+            for raw in (0x134, 0x133):
+                pad.hold(raw, 1.6)
                 again = daemon.wait_for("mapping", seconds=4.0)
                 if again is not None:
                     break
-            assert again is not None and not again.get("done"), "Y at the door started no second walk"
-            assert seat.poll() is None, "the gate exited on a tap"
+            assert again is not None and not again.get("done"), "a hold of Y started no second walk"
+            assert seat.poll() is None, "the gate exited instead of rebinding"
         finally:
             seat.send_signal(signal.SIGTERM)
             seat.wait(timeout=5)
@@ -1399,3 +1405,239 @@ def test_a_second_controller_joins_at_the_door_and_is_asked_for_its_buttons(daem
         finally:
             seat.send_signal(signal.SIGTERM)
             seat.wait(timeout=5)
+
+
+# --- the dots beside the labels ---------------------------------------------
+#
+# What the door draws while somebody presses a button: a circle in that
+# player's colour beside the label for the control they are pressing. It was
+# drawn and it never appeared, because the two halves were speaking different
+# languages -- padmap's profile answers `leftshoulder` and every label on an
+# N64 drawing is called `L` -- and nothing in the suite compared the two. So
+# this presses every control of a console on a real pad, through a real
+# daemon's clone, and asks the door which label it would light.
+
+# The fake pad declares BTN_SOUTH, EAST, NORTH, WEST, TL, TR, SELECT, START,
+# which SDL numbers 0..7 in that order, and ABS_X/ABS_Y as axes 0 and 1. A
+# padmap profile is written against those numbers, exactly as padmap's own
+# capture would record them.
+E2E_PROFILE_BUTTONS = {
+    "a": {"kind": "button", "index": 0, "value": 0},
+    "b": {"kind": "button", "index": 1, "value": 0},
+    "x": {"kind": "button", "index": 2, "value": 0},
+    "y": {"kind": "button", "index": 3, "value": 0},
+    "leftshoulder": {"kind": "button", "index": 4, "value": 0},
+    "rightshoulder": {"kind": "button", "index": 5, "value": 0},
+    "back": {"kind": "button", "index": 6, "value": 0},
+    "start": {"kind": "button", "index": 7, "value": 0},
+    "leftstick_left": {"kind": "axis", "index": 0, "value": -1},
+    "leftstick_right": {"kind": "axis", "index": 0, "value": 1},
+    "leftstick_up": {"kind": "axis", "index": 1, "value": -1},
+    "leftstick_down": {"kind": "axis", "index": 1, "value": 1},
+}
+
+# button code -> the label an N64 drawing puts it under, through
+# src/client/data/ares-pads.json. `x` is the N64's B, which is the case worth
+# having in here: a press is named by what the console calls it, not by what
+# the pad calls it.
+N64_CONTROLS = [
+    (BTN_SOUTH, "A"),
+    (0x133, "B"),          # BTN_NORTH -- the pad's X
+    (0x136, "L"),          # BTN_TL
+    (0x137, "R"),          # BTN_TR
+    (BTN_START, "Start"),
+]
+
+
+def _profile(directory, name: str, buttons: dict | None = None) -> None:
+    """A padmap device profile, written where the picker reads them."""
+    import json
+    import os
+
+    os.makedirs(directory, exist_ok=True)
+    with open(os.path.join(directory, f"{name.replace(' ', '_')}.json"), "w") as out:
+        # Both places padmap writes them: the top-level table, which is what
+        # the door reads, and the universal scope beside it.
+        json.dump(
+            {
+                "name": name,
+                "buttons": buttons or E2E_PROFILE_BUTTONS,
+                "mappings": {"": {"buttons": buttons or E2E_PROFILE_BUTTONS}},
+            },
+            out,
+        )
+
+
+def _door(sdl, sticks, tmp_path, monkeypatch, seats_named: dict[int, str]):
+    """A door over these pads, reading profiles from tmp_path."""
+    import pathlib
+
+    from gotg_ui import profiles
+    from gotg_ui.bindings import pad_controls
+    from gotg_ui.seat import Door
+
+    devices = str(tmp_path / "devices")
+    for name in set(seats_named.values()):
+        _profile(devices, name)
+    monkeypatch.setenv("PADMAP_DEVICES", devices)
+    # The ares table, from the checkout: `pad_controls` is the translation
+    # under test and it is read off that file.
+    monkeypatch.setenv("GOTG_DATA", str(pathlib.Path(__file__).parents[2] / "src" / "client" / "data"))
+    names = pad_controls("Nintendo64")
+    assert names.get("leftshoulder") == "L", "the ares table did not load; the rest proves nothing"
+
+    by_seat = {
+        player: (profiles.for_pad(name) or {}).get("buttons") or {}
+        for player, name in seats_named.items()
+    }
+    assert all(by_seat.values()), f"no profile read for {seats_named}"
+    door = Door(sticks, time.monotonic(), seconds=1.0, buttons_by=by_seat, names=names)
+    return door
+
+
+def _pump(sdl, door, seconds: float = 0.25) -> None:
+    """Hand the door every event SDL has, for this long."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        now = time.monotonic()
+        for event in sdl.event.get():
+            door.handle(event, now)
+        time.sleep(0.01)
+
+
+def test_a_press_lights_the_label_for_that_control(daemon, sdl, tmp_path, monkeypatch):
+    """Every control, one at a time: pressed it names its own label, released
+    it names nothing. A dot that never appears is this returning {}."""
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        pad.hold(BTN_SOUTH, 0.7)
+        assert picker.until(lambda p: p.seated(1)), "the pad took no seat"
+        picker.run(0.8)
+
+        door = _door(sdl, picker.sticks, tmp_path, monkeypatch, {1: "E2E Xbox Pad"})
+        _pump(sdl, door, 0.3)
+
+        for code, label in N64_CONTROLS:
+            pad.down(code)
+            _pump(sdl, door, 0.3)
+            assert door.lit_by == {1: {label}}, (
+                f"pressing {hex(code)} lit {door.lit_by}, not {{1: {{{label!r}}}}}"
+            )
+            pad.up(code)
+            _pump(sdl, door, 0.3)
+            assert door.lit_by == {}, f"releasing {hex(code)} left {door.lit_by} lit"
+        picker.close()
+
+
+def test_the_stick_lights_the_axis_it_is_pushed_along(daemon, sdl, tmp_path, monkeypatch):
+    """An axis, which is the half a button test would miss: it has no release
+    of its own, only a return to the middle."""
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        pad.hold(BTN_SOUTH, 0.7)
+        assert picker.until(lambda p: p.seated(1))
+        picker.run(0.8)
+
+        door = _door(sdl, picker.sticks, tmp_path, monkeypatch, {1: "E2E Xbox Pad"})
+        _pump(sdl, door, 0.3)
+
+        pad.axis(ABS_X, -32767)
+        _pump(sdl, door, 0.3)
+        assert door.lit_by == {1: {"X-Axis/Lo"}}, f"the stick pushed left lit {door.lit_by}"
+        pad.axis(ABS_X, 32767)
+        _pump(sdl, door, 0.3)
+        assert door.lit_by == {1: {"X-Axis/Hi"}}, f"the stick pushed right lit {door.lit_by}"
+        pad.axis(ABS_X, 0)
+        _pump(sdl, door, 0.3)
+        assert door.lit_by == {}, f"the stick back at rest left {door.lit_by} lit"
+        picker.close()
+
+
+def test_a_held_button_stays_lit_for_as_long_as_it_is_held(daemon, sdl, tmp_path, monkeypatch):
+    """A hold is not a press that ends. The dot has to still be there a second
+    later -- which is what somebody checking their controller actually does."""
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        pad.hold(BTN_SOUTH, 0.7)
+        assert picker.until(lambda p: p.seated(1))
+        picker.run(0.8)
+
+        door = _door(sdl, picker.sticks, tmp_path, monkeypatch, {1: "E2E Xbox Pad"})
+        _pump(sdl, door, 0.3)
+
+        pad.down(0x136)  # BTN_TL, the N64's L
+        # The press has to arrive before it can stay: uinput to the daemon to
+        # the clone to SDL is a few tens of milliseconds, and a test that
+        # asserted immediately failed on the trip rather than on the hold.
+        _pump(sdl, door, 0.3)
+        assert door.lit_by == {1: {"L"}}, f"the hold never lit: {door.lit_by}"
+        end = time.monotonic() + 1.5
+        while time.monotonic() < end:
+            _pump(sdl, door, 0.1)
+            assert door.lit_by == {1: {"L"}}, f"mid-hold the label was {door.lit_by}"
+        pad.up(0x136)
+        _pump(sdl, door, 0.3)
+        assert door.lit_by == {}
+        picker.close()
+
+
+def test_two_players_pressing_at_once_light_their_own_labels(daemon, sdl, tmp_path, monkeypatch):
+    """The whole point of the colour. Player two pressing L must not read as
+    player one, and must not take player one's dot away."""
+    with FakePad("E2E Xbox Pad") as first, FakePad("E2E Other Pad", 0x2AAA, 0x5BBB, 1) as second:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        assert picker.claim(first, 1), "the first pad took no seat"
+        assert picker.claim(second, 2), "the second pad took no seat"
+        picker.run(0.8)
+
+        door = _door(
+            sdl, picker.sticks, tmp_path, monkeypatch,
+            {1: "E2E Xbox Pad", 2: "E2E Other Pad"},
+        )
+        _pump(sdl, door, 0.3)
+
+        first.down(0x136)   # L
+        second.down(BTN_SOUTH)  # A
+        _pump(sdl, door, 0.4)
+        assert door.lit_by == {1: {"L"}, 2: {"A"}}, f"two pads at once lit {door.lit_by}"
+
+        first.up(0x136)
+        _pump(sdl, door, 0.3)
+        assert door.lit_by == {2: {"A"}}, f"player one letting go left {door.lit_by}"
+        second.up(BTN_SOUTH)
+        _pump(sdl, door, 0.3)
+        assert door.lit_by == {}
+        picker.close()
+
+
+def test_the_door_rebinds_on_a_hold_of_y_and_not_a_tap(daemon, sdl):
+    """A thumb brushing Y on the way to A went back to the wizard, which reads
+    exactly like bindings not being remembered. It is a hold now."""
+    from gotg_ui.seat import Door
+
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        pad.hold(BTN_SOUTH, 0.7)
+        assert picker.until(lambda p: p.seated(1))
+        picker.run(0.8)
+
+        door = Door(picker.sticks, time.monotonic(), seconds=1.0)
+        _pump(sdl, door, 0.3)
+
+        pad.tap(0x134, hold=0.08)  # BTN_WEST, SDL's Y
+        _pump(sdl, door, 0.4)
+        assert door.rebinding(time.monotonic()) == 0.0, "a tap of Y still asks to rebind"
+
+        pad.down(0x134)
+        end = time.monotonic() + 2.0
+        while time.monotonic() < end and door.rebinding(time.monotonic()) < 1.0:
+            _pump(sdl, door, 0.05)
+        held = door.rebinding(time.monotonic())
+        pad.up(0x134)
+        assert held >= 1.0, "holding Y for two seconds did not ask to rebind"
+        picker.close()

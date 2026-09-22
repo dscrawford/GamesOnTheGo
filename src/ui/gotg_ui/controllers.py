@@ -230,15 +230,15 @@ def draw(
     font_at,
     cache: dict,
     highlight: str | None = None,
-    pressing: dict[int, str] | None = None,
+    pressing: dict[int, set[str]] | None = None,
     heading: str | None = None,
     keys: str | None = None,
     footer: str | None = None,
 ) -> None:
     """The whole screen: pad, labels, leaders, and whatever is missing.
 
-    `pressing` is player -> the control under that player's thumb right now:
-    each one puts a dot in its player's colour beside that label, so two
+    `pressing` is player -> the controls under that player's thumbs right
+    now: each puts a dot in its player's colour beside that label, so two
     people can check their own pads at once and see which is which.
     `heading`, `keys` and `footer` are the launch gate's, which shows this
     same drawing with its own words around it; None is the picker's.
@@ -295,7 +295,9 @@ def draw(
         # Whose thumbs are on this control, in seat order, and the label is
         # lit for any of them: a press by player two is as much a press as the
         # cursor sitting on it.
-        players = sorted(player for player, control in (pressing or {}).items() if control == item.anchor.input)
+        players = sorted(
+            player for player, controls in (pressing or {}).items() if item.anchor.input in (controls or ())
+        )
         lit = (highlight is not None and item.anchor.input == highlight) or bool(players)
         colour = LEADER_LIT if lit else LEADER
         pygame.draw.aalines(screen, colour, False, [(x, y) for x, y in item.points])

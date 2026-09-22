@@ -211,6 +211,11 @@ frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).
   Steam and a hold on it reaches nobody; tests hold again, people do too.
 - The picker Steam launches is a built copy — `gotg steam picker` refreshes
   it. `.envrc` auto-rebuilds only on `src/client` changes, never `src/ui`.
+- **padmap and the drawings name controls differently.** A profile answers
+  `leftshoulder`; an N64 drawing calls the same thing `L`, and padmap spells
+  a stick direction `leftstick_left` where the ares table spells it `leftx-`.
+  `bindings.pad_controls(console)` is the translation, read off the table that
+  binds them. Without it a press lit nothing, silently, for a day.
 - **A stale profile is invisible from in here.** A `gotg-seat` three days old
   had no ready-up door, so a pad was seated and the game started at once
   while every test in this repo passed — they all run the working tree.

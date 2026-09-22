@@ -35,6 +35,7 @@ import pygame  # noqa: E402 - the line above only works ahead of the import
 
 from . import devices, profiles, trace
 from . import pads as sdl_pads
+from .bindings import console_for, pad_controls
 from .controllers import Diagram, assets_dir, draw_reveal, draw_ring, draw_tick, icon_surface
 from .controllers import draw as draw_diagram
 from .gate import (
@@ -53,7 +54,7 @@ from .gate import (
 from .padmap import Padmap, ensure_daemon
 from .padstrip import EMPTY_RING, LABEL, LABEL_DIM, PANEL, colour_for
 from .padstrip import READY as SETTLED_GREEN  # gate.READY is a state; this is a colour
-from .pressing import controls_for
+from .pressing import controls_for, controls_on
 
 WINDOW = tuple(config.get("theme.window", [1280, 800]))
 BACKGROUND = config.colour("theme.colours.background", (18, 18, 20))
@@ -79,6 +80,11 @@ GO_HOLD = float(os.environ.get("GOTG_SEAT_GO_HOLD") or config.get("theme.timeout
 # across a room, short enough that four people pressing at once still reads as
 # four separate answers rather than four lights left on.
 PRESS_SHOWN = 0.45
+
+# The hold on Y that walks the buttons again. A tap was what it was, and a
+# thumb that brushed Y reaching for A landed in the wizard -- so it is a hold,
+# and the same length as the one that starts the game.
+REBIND_HOLD = float(os.environ.get("GOTG_SEAT_REBIND_HOLD") or config.get("theme.timeouts.seat_rebind_hold", 1.0))
 
 
 def draw(screen, font_at, gate: Gate, title: str, diagram: Diagram | None = None) -> None:
@@ -314,6 +320,7 @@ class Door:
         seconds: float = GO_HOLD,
         buttons: dict | None = None,
         buttons_by: dict[int, dict] | None = None,
+        names: dict[str, str] | None = None,
     ):
         self.sticks = sticks
         self.hold = GoHold(seconds=seconds, opened=now, held_at_open=sticks.any_button_down())
@@ -326,12 +333,17 @@ class Door:
         # naming player two's press from player one's profile named the wrong
         # control on the drawing.
         self.buttons_by = buttons_by or {}
-        self.lit: str | None = None
-        # The control under each player's thumb, for the dots beside the
-        # labels. Separate from `lit`, which is one ring on one control.
-        self.lit_by: dict[int, str] = {}
-        self.y_down = False
-        self.rebind = False
+        # padmap's control id -> what this console's drawing calls it. Without
+        # it a press answered `leftshoulder` and every label was called `L`,
+        # so nothing ever lit: `bindings.pad_controls`.
+        self.names = names or {}
+        # Which controls each player is holding, for the dots beside the
+        # labels. A set, because two thumbs press two things: it was one
+        # control per player, and an axis coming back to the middle then took
+        # the dot off a button that was still held.
+        self.lit_by: dict[int, set[str]] = {}
+        # When Y went down, for the hold that rebinds.
+        self.y_since: float | None = None
         # Whose hold is on the clock, and when each seat was last heard from.
         # The go ring used to be drawn in player one's colour at the corner of
         # the screen whoever was holding, which told the second player nothing
@@ -362,48 +374,71 @@ class Door:
             if pressed in self.GO:
                 self.hold.pressed(now)
                 self.holder = sdl_pads.player(event) or self.holder
-            # Y, tapped, is "walk the buttons again", and it cannot also be
-            # the hold that starts the game.
+            # Y, held, is "walk the buttons again". Tapped it was too easy to
+            # mean: a thumb brushing it on the way to A went back to the
+            # wizard, which reads exactly like bindings not being remembered.
             if pressed == sdl_pads.Y:
-                self.y_down = True
+                self.y_since = now
             trace.say(
                 "door-press", button=pressed, armed=self.hold.armed,
                 counted=self.hold.since is not None,
             )
         elif sdl_pads.released(event):
-            if self.y_down and not self.hold.done(now):
-                self.rebind = True
-            self.y_down = False
+            self.y_since = None
             self.hold.released(now)
-            self.lit = None
-            self.lit_by.pop(sdl_pads.player(event) or 0, None)
             trace.say("door-release")
+        seat = sdl_pads.player(event)
+        released = sdl_pads.raw_release(event)
+        if released is not None and seat is not None:
+            # Exactly the controls that button drives, taken off this seat --
+            # by the drawing's names for them, which is what `lit_by` holds.
+            self._let_go(seat, self._named(controls_on(self._table(seat), "button", released)))
+
         raw = sdl_pads.raw_input(event)
         if raw is not None:
             # Who it was, so the screen can light that seat. An axis coming
             # back to rest is still that seat being heard from: a stick a
             # player waggles to check it works is exactly what this answers.
-            seat = sdl_pads.player(event)
             if seat is not None:
                 self.pressing[seat] = now
-            named = controls_for(self.buttons_by.get(seat or 0) or self.buttons, *raw)
-            if named:
-                self.lit = named[0]
-                if seat is not None:
-                    self.lit_by[seat] = named[0]
-            elif raw[0] != "button":
-                # An axis or hat back at rest clears it; a button's rest is
-                # its release, handled above.
-                self.lit = None
-                if seat is not None:
-                    self.lit_by.pop(seat, None)
+            table = self._table(seat)
+            kind, index, value = raw
+            down = set(self._named(controls_for(table, kind, index, value)))
+            # And what that same input drives but is not driving now: an axis
+            # crossing back through the middle, a hat let go.
+            up = set(self._named(controls_on(table, kind, index))) - down
+            if seat is not None:
+                if down:
+                    self.lit_by[seat] = self.lit_by.get(seat, set()) | down
+                self._let_go(seat, up)
         return False
+
+    def _table(self, seat: int | None) -> dict:
+        """The profile this seat's presses are named from."""
+        return self.buttons_by.get(seat or 0) or self.buttons
+
+    def _named(self, controls: list[str]) -> list[str]:
+        """padmap's control ids, as the drawing's labels."""
+        return [self.names.get(name, name) for name in controls]
+
+    def _let_go(self, seat: int, controls) -> None:
+        left = self.lit_by.get(seat, set()) - set(controls)
+        if left:
+            self.lit_by[seat] = left
+        else:
+            self.lit_by.pop(seat, None)
 
     def done(self, now: float) -> bool:
         return self.hold.done(now)
 
     def progress(self, now: float) -> float:
         return self.hold.progress(now)
+
+    def rebinding(self, now: float) -> float:
+        """How far through the hold that walks the buttons again, 0 to 1."""
+        if self.y_since is None:
+            return 0.0
+        return min(1.0, max(0.0, (now - self.y_since) / REBIND_HOLD))
 
     def heard(self, now: float, window: float = PRESS_SHOWN) -> set[int]:
         """The seats that have sent anything in the last moment."""
@@ -419,7 +454,7 @@ def _wait_for_go(screen, font_at, clock, pads: Padmap, gate: Gate, title: str) -
     nothing. Now the seats are redrawn as they arrive, and a pad that arrives
     with no idea what this console's buttons are sends the gate back to ask.
 
-    Returns "go", "rebind" when Y was tapped, or "map" for a seat that needs
+    Returns "go", "rebind" when Y was held, or "map" for a seat that needs
     walking -- with the gate as the daemon has left it.
     """
     first = gate.seats[0] if gate.seats else None
@@ -435,6 +470,7 @@ def _wait_for_go(screen, font_at, clock, pads: Padmap, gate: Gate, title: str) -
         sdl_pads.init(), time.monotonic(),
         buttons=(profile or {}).get("buttons") or {},
         buttons_by=by_seat,
+        names=pad_controls(console_for(gate.platform)),
     )
     cache: dict = {}
     while True:
@@ -451,8 +487,8 @@ def _wait_for_go(screen, font_at, clock, pads: Padmap, gate: Gate, title: str) -
         for event in pygame.event.get():
             if door.handle(event, now):
                 return "go", gate
-            if door.rebind:
-                return "rebind", gate
+        if door.rebinding(now) >= 1.0:
+            return "rebind", gate
         if door.done(now):
             return "go", gate
         _draw_go(
@@ -469,7 +505,7 @@ def _draw_go(
     gate: Gate,
     title: str,
     fraction: float,
-    pressing: dict[int, str],
+    pressing: dict[int, set[str]],
     cache: dict,
     holder: int | None = None,
     heard: set[int] | None = None,
@@ -490,7 +526,7 @@ def _draw_go(
             heading=f"{title}  —  {names}",
             keys="",
             footer=(
-                "hold A for a second to start   ·   tap Y to change these   ·   "
+                "hold A for a second to start   ·   hold Y to change these   ·   "
                 "another player: hold a button   ·   Enter or Esc start now"
             ),
         )
