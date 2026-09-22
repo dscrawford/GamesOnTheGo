@@ -446,7 +446,7 @@ class Door:
 
 
 def _wait_for_go(screen, font_at, clock, pads: Padmap, gate: Gate, title: str) -> tuple[str, Gate]:
-    """Seated and mapped; the game starts when somebody holds A for a second.
+    """Seated and mapped; the game starts on a three-second hold of A.
 
     padmap is polled here, which it was not: a second player holding a button
     was claimed by the daemon and nothing on this screen knew, so the seat
@@ -526,7 +526,7 @@ def _draw_go(
             heading=f"{title}  —  {names}",
             keys="",
             footer=(
-                "hold A for a second to start   ·   hold Y to change these   ·   "
+                "hold A for three seconds to start   ·   hold Y to change these   ·   "
                 "another player: hold a button   ·   Enter or Esc start now"
             ),
         )
@@ -537,7 +537,7 @@ def _draw_go(
         screen.fill(BACKGROUND)
         heading = font_at(34).render(title, True, LABEL_DIM)
         screen.blit(heading, ((width - heading.get_width()) // 2, int(height * 0.10)))
-        prompt = font_at(48).render("hold A for a second to start", True, LABEL)
+        prompt = font_at(48).render("hold A for three seconds to start", True, LABEL)
         screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.40)))
         note = font_at(20).render(f"(no drawing: {error})", True, LABEL_DIM)
         screen.blit(note, ((width - note.get_width()) // 2, int(height * 0.92)))
@@ -563,17 +563,24 @@ def _draw_seats(
     holder: int | None = None,
     heard: set[int] | None = None,
 ) -> None:
-    """A badge and a controller per seat, left to right, player colours.
+    """A dot and a controller per seat, left to right, player colours.
 
-    Three things on one badge, and they do not collide: the drawing behind it
-    faded, a green tick over it saying this seat is settled, and -- while
-    somebody holds A -- a ring closing around the one badge that is holding.
-    A press on any seat lights its own badge for a moment, which is the only
-    thing on this screen that answers "is my controller doing anything".
+    No number in the dot. They are drawn in seat order and the colours are
+    the same four the grid and the strip use, so the first one is player one
+    for the same reason the first seat is -- and a numeral inside a
+    twenty-pixel circle was a third thing to read where the order already
+    said it.
+
+    Three things on one dot, and they do not collide: the controller drawing
+    beside it faded, a green tick saying this seat is settled, and -- while
+    somebody holds A -- a ring closing around the one that is holding. Any
+    press swells the dot for a moment, which is what answers "is my
+    controller doing anything" when nothing on the drawing is bound to what
+    the thumb is on.
     """
     width = screen.get_width()
     heard = heard or set()
-    radius = 22
+    radius = 13
     step = radius * 2 + 78
     left = (width - step * max(1, gate.seated)) // 2 + step // 2
     for index, seat in enumerate(gate.seats):
@@ -587,23 +594,18 @@ def _draw_seats(
             icon.set_alpha(255)
 
         if holder == seat.player and fraction > 0:
-            draw_ring(screen, centre, radius + 10, colour, fraction, 5)
-        pygame.draw.aacircle(screen, colour, centre, radius)
-        number = font_at(28).render(str(seat.player), True, (20, 20, 24))
-        screen.blit(number, number.get_rect(center=centre))
+            draw_ring(screen, centre, radius + 9, colour, fraction, 4)
+        # A press swells this seat's own dot rather than adding a second one
+        # beside it: two circles of one colour read as two players.
+        pygame.draw.aacircle(screen, colour, centre, radius + 4 if seat.player in heard else radius)
 
-        # The tick sits on the badge's shoulder rather than across it: over
-        # the number it hid the one thing the badge is for, and a player
-        # counting seats on a sofa reads the number first.
-        corner = (centre[0] + radius - 3, centre[1] + radius - 3)
-        pygame.draw.aacircle(screen, (16, 22, 18), corner, 11)
-        draw_tick(screen, corner, 13, SETTLED_GREEN)
+        # The tick sits on the dot's shoulder rather than across it: over the
+        # dot it was the only thing left to see, and the colour is what says
+        # which player this is.
+        corner = (centre[0] + radius, centre[1] + radius)
+        pygame.draw.aacircle(screen, (16, 22, 18), corner, 9)
+        draw_tick(screen, corner, 11, SETTLED_GREEN)
 
-        if seat.player in heard:
-            # A press, on the seat that made it. Drawn as this seat's own
-            # colour, brightly, outside the badge: nothing else on this screen
-            # moves, so a flicker here is unmistakably an answer to a thumb.
-            pygame.draw.aacircle(screen, colour, (centre[0], centre[1] - radius - 16), 8)
 
 
 def _hold_the_door(title: str, reason: str) -> int:

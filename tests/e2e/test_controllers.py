@@ -579,6 +579,12 @@ def _seat_process(daemon, extra: dict, root: str):
     env.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
     env.setdefault("GOTG_CONFIG", os.path.join(root, "config"))
     env.setdefault("PADMAP_NO_AUTOSETUP", "1")
+    # The shipped hold is three seconds. Most of these tests are about what a
+    # hold *means*, not how long it is, and paying three seconds a press
+    # across the suite bought nothing -- so they ask for one second, and
+    # `test_the_go_is_the_shipped_three_second_hold` runs the real length.
+    env.setdefault("GOTG_SEAT_GO_HOLD", "1.0")
+    env.setdefault("GOTG_SEAT_REBIND_HOLD", "1.0")
     return subprocess.Popen(
         [sys.executable, "-m", "gotg_ui.seat", "--platform", "gamecube", "--title", "E2E launch"],
         env=env,
@@ -901,12 +907,12 @@ def test_the_gate_holds_the_door_until_a_fresh_one_second_hold(daemon, sdl):
             time.sleep(0.5)
             assert seat.poll() is None
 
-            # A fresh press, held for a second, is the go.
+            # A fresh press, held past the hold, is the go.
             pad.hold(BTN_SOUTH, 1.3)
             end = time.monotonic() + 4.0
             while time.monotonic() < end and seat.poll() is None:
                 time.sleep(0.1)
-            assert seat.poll() == 0, "a full second's hold did not start the game"
+            assert seat.poll() == 0, "a hold past the full length did not start the game"
         finally:
             if seat.poll() is None:
                 seat.send_signal(signal.SIGTERM)
@@ -1048,7 +1054,7 @@ def test_a_hold_of_y_at_the_door_walks_the_buttons_again(daemon, sdl):
 
             again = None
             for raw in (0x134, 0x133):
-                pad.hold(raw, 1.6)
+                pad.hold(raw, 1.4)
                 again = daemon.wait_for("mapping", seconds=4.0)
                 if again is not None:
                     break
@@ -1353,7 +1359,7 @@ def test_a_stray_press_at_the_door_neither_starts_the_game_nor_rebinds(daemon, s
             walked = [e for e in daemon.seen if e.get("event") == "mapping"]
             assert not walked, "B went back to the wizard"
 
-            # A, held for a second. That is the one.
+            # A, held past the gate's hold. That is the one.
             pad.hold(BTN_SOUTH, 1.3)
             end = time.monotonic() + 4.0
             while time.monotonic() < end and seat.poll() is None:
@@ -1617,7 +1623,7 @@ def test_two_players_pressing_at_once_light_their_own_labels(daemon, sdl, tmp_pa
 def test_the_door_rebinds_on_a_hold_of_y_and_not_a_tap(daemon, sdl):
     """A thumb brushing Y on the way to A went back to the wizard, which reads
     exactly like bindings not being remembered. It is a hold now."""
-    from gotg_ui.seat import Door
+    from gotg_ui.seat import REBIND_HOLD, Door
 
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
@@ -1632,12 +1638,48 @@ def test_the_door_rebinds_on_a_hold_of_y_and_not_a_tap(daemon, sdl):
         pad.tap(0x134, hold=0.08)  # BTN_WEST, SDL's Y
         _pump(sdl, door, 0.4)
         assert door.rebinding(time.monotonic()) == 0.0, "a tap of Y still asks to rebind"
+        assert REBIND_HOLD == 3.0, f"the shipped rebind hold is {REBIND_HOLD}s, not three seconds"
 
         pad.down(0x134)
-        end = time.monotonic() + 2.0
+        end = time.monotonic() + REBIND_HOLD + 1.5
         while time.monotonic() < end and door.rebinding(time.monotonic()) < 1.0:
             _pump(sdl, door, 0.05)
         held = door.rebinding(time.monotonic())
         pad.up(0x134)
-        assert held >= 1.0, "holding Y for two seconds did not ask to rebind"
+        assert held >= 1.0, f"holding Y for {REBIND_HOLD + 1.5:.1f}s did not ask to rebind"
+        picker.close()
+
+
+def test_the_go_is_the_shipped_three_second_hold(daemon, sdl):
+    """How long the door actually waits, at the length that ships.
+
+    A second was not enough: arriving at the door with a thumb still on A --
+    which is how somebody gets there -- started the game before the screen
+    had been read. Every hold this program times is three seconds now, and
+    this one is measured through a real clone rather than read off the
+    config, because the config is the half that was already right.
+    """
+    from gotg_ui.seat import GO_HOLD, Door
+
+    assert GO_HOLD == 3.0, f"the shipped go hold is {GO_HOLD}s, not three seconds"
+
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        pad.hold(BTN_SOUTH, 0.7)
+        assert picker.until(lambda p: p.seated(1)), "the pad took no seat"
+        picker.run(1.2)                     # the seating hold is long released
+
+        door = Door(picker.sticks, time.monotonic())
+        _pump(sdl, door, 1.2)               # past ARM_QUIET, nothing held
+        pad.down(BTN_SOUTH)
+        started = time.monotonic()
+        _pump(sdl, door, 2.0)
+        assert not door.done(time.monotonic()), (
+            f"the door opened after {time.monotonic() - started:.1f}s, well short of three"
+        )
+        _pump(sdl, door, 1.6)
+        took = time.monotonic() - started
+        pad.up(BTN_SOUTH)
+        assert door.done(time.monotonic()), f"three and a half seconds of holding was not the go ({took:.1f}s)"
         picker.close()

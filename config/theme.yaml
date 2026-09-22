@@ -76,10 +76,14 @@ timeouts:
   padmap_daemon: 10
   # A daemon that is running but silent, before a launch gives up on it.
   first_state: 3.0
-  # The launch gate's two holds: the one that starts the game, and the one on
-  # Y that walks the pad's buttons again. Both a full second -- a tap of Y
-  # reached for on the way to A went back to the wizard by accident.
-  seat_go_hold: 1.0
-  seat_rebind_hold: 1.0
+  # Every hold this program times, and they are all the same length on
+  # purpose: three seconds. A second was short enough that arriving at the
+  # door with a thumb on A started the game before the screen had been read,
+  # and one length for all of them means nobody has to learn which is which.
+  # The hold that claims a seat is padmap's, not ours, and is still a quarter
+  # second -- docs/requests/how-long-a-seat-takes-to-claim.md.
+  seat_go_hold: 3.0
+  seat_rebind_hold: 3.0
+  keyboard_hold: 3.0
   service: 10
   ready: 3
