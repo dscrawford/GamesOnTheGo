@@ -154,8 +154,14 @@ device it came from. A controller is published by being held, from
 wherever the picker or game is — never from a screen somebody had to find.
 Every session — picker or game — starts with nobody seated; padmap's daemon
 is started `--fresh --follow <pid>` and ends with the session. Every launch,
-`gotg play` or Steam, meets `gotg-seat` first and it is never silently
-skipped: with no padmap it opens anyway, says why, and counts down. Enforced by
+`gotg play` or Steam, meets the gate first and it is never silently skipped:
+with no padmap it opens anyway, says why, and counts down. **From the picker
+the gate runs in the picker's own window** (`seat.before_launch`, then
+`GOTG_SEAT_MET=1` so the client does not ask again) -- it used to be a second
+process with a second window, which flickered and threw away the seat that had
+just been taken. Seats survive a launch when the daemon follows this session's
+pid (`gate.Gate.ours`, `PADMAP_FOLLOW`): what somebody paired in the picker is
+what they play with, and a daemon from another evening is still forgotten. Enforced by
 `tests/e2e/test_controllers.py`; the rule itself is `clones.py` (match the
 GUID's name-CRC, because SDL renames clones), `assign.attend` (one call per
 frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).

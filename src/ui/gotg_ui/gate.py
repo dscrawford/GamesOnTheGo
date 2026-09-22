@@ -116,7 +116,7 @@ class Gate:
     message: str = ""
     # padmap has a session open -- somebody else's `begin`. Noted, not used:
     # this gate opens none, and a claim arrives the same way either way.
-    session: bool = False
+    assigning: bool = False
     # Seating has been asked for. padmap does not acknowledge it, so it is
     # sent once and believed; a refusal names the command and is remembered.
     listening: bool = False
@@ -138,6 +138,14 @@ class Gate:
     # seats that come after are this launch's own, taken by a hold in front
     # of this screen, and forgetting those would be a gate nobody gets past.
     unseated: bool = False
+    # Which pid the daemon says it follows, and which pid this session is.
+    # padmap treats the pair as a session name, so a daemon following *this*
+    # session is holding seats somebody took a moment ago in the picker --
+    # they carry into the launch and asking for them again is asking twice.
+    # Anything else (a daemon left over from another evening, a launch with
+    # no picker) is forgotten before this gate begins.
+    following: int | None = None
+    session: int | None = None
     # A hold on a pad that has no seat yet, as far round as it has got:
     # padmap's `progress`, which is the seating screen's whole answer to "is
     # it registering my button?"
@@ -180,6 +188,11 @@ class Gate:
             if not seat.mapped(self.scope):
                 return seat
         return None
+
+    @property
+    def ours(self) -> bool:
+        """Whether the seats this daemon holds were taken in this session."""
+        return self.session is not None and self.following == self.session
 
     @property
     def done(self) -> bool:
@@ -300,7 +313,7 @@ def decide(gate: Gate) -> tuple[Gate, dict | None]:
     # the seats stand and the gate goes on as it always did.
     if (
         gate.seated and not gate.unseated and not gate.listening
-        and not gate.session and "unseat" not in gate.refused
+        and not gate.assigning and not gate.ours and "unseat" not in gate.refused
     ):
         return replace(gate, state=SEATING, awaiting="unseat", unseated=True), {"cmd": "unseat"}
 
@@ -342,8 +355,9 @@ def apply(gate: Gate, event: dict) -> Gate:
     if kind == "state":
         # "assigning" is padmap saying a session is open -- not this gate's,
         # which opens none, but a claim arrives the same way in either.
-        session = event.get("state") == "assigning"
+        assigning = event.get("state") == "assigning"
         seats = seats_from(event.get("players"))
+        following = event.get("following")
         # `begin` is answered by the state that says "assigning"; `unseat` by
         # the one with nobody in it. Not by the next state whatever it says:
         # the daemon greets a connection with one and answers `status` with
@@ -354,7 +368,8 @@ def apply(gate: Gate, event: dict) -> Gate:
         return replace(
             gate,
             seats=seats,
-            session=session,
+            assigning=assigning,
+            following=following if isinstance(following, int) else gate.following,
             awaiting="" if answered else gate.awaiting,
             # The state is the authority on what each pad knows, so whatever
             # a claim left half-said is settled here.

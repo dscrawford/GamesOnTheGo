@@ -17,7 +17,7 @@ import time
 
 import pygame
 
-from . import around, config, devices, filters, keys, meter, pads, prepare, trace
+from . import around, config, devices, filters, keys, meter, pads, prepare, seat, trace
 from .art import ArtStore
 from .assign import KeyHold, Session, Watch, attend
 from .browser import SHELF, Browser
@@ -1452,6 +1452,22 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
         # button in a game reseats nobody, and a second player arriving
         # mid-level is exactly who this is for. Seating outlives this client
         # in the daemon, which is what lets it.
+
+    # The gate, in this window rather than in a second one.
+    #
+    # The picker used to close its display and exec the client, and the client
+    # started `gotg-seat`, which opened another window -- one program, two
+    # windows, a black flicker between them, and the seat somebody had just
+    # taken thrown away in the middle of it. It runs here now, while the
+    # window is still up and the seats still stand, and the client is told the
+    # gate has been met. `theme.gate_in_window: false` puts it back in its own
+    # process, which is still how Steam and a bare terminal meet it.
+    if chosen is not None and chosen[1] == "play" and config.get("theme.gate_in_window", True):
+        try:
+            seat.before_launch(screen, clock, font_at, padmap, chosen[0].platform, chosen[0].title, hush)
+            os.environ["GOTG_SEAT_MET"] = "1"
+        except Exception as error:  # noqa: BLE001 - a screen must never stop a launch
+            trace.say("gate-in-window-failed", why=str(error))
 
     # Before the caller execs: the emulator must not inherit a window and a
     # grabbed GPU from a process that is about to stop existing -- nor the

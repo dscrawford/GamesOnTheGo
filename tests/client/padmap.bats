@@ -67,6 +67,21 @@ teardown() { stop_saves_service; }
   grep -q "env PADMAP_NO_AUTOSETUP=1 PADMAP_NO_AUTOATTACH=1 PADMAP_HOLD_SECONDS=1.5" "$PADMAP_LOG"
 }
 
+@test "the gate is not asked for twice when the picker already met it" {
+  # The picker runs the gate in its own window before it execs here, so the
+  # seats are already taken and the screen has already been seen. Saying so
+  # is not the same as turning the check off.
+  export GOTG_SEAT="$FAKE_BIN/gotg-seat"
+  GOTG_SEAT_MET=1 padmap_seat_gate n64 "Donkey Kong 64"
+  [ ! -s "$SEAT_LOG" ] || fail "the gate ran again: $(cat "$SEAT_LOG")"
+}
+
+@test "and it is asked for when nobody has met it" {
+  export GOTG_SEAT="$FAKE_BIN/gotg-seat"
+  padmap_seat_gate n64 "Donkey Kong 64"
+  grep -q "n64" "$SEAT_LOG"
+}
+
 @test "a seat takes a hold long enough to be deliberate, not a quarter second" {
   # padmap's own default claims a seat in 0.25s, which is short enough that
   # picking a controller up takes one. The picker and the gate ask for the

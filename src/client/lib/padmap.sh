@@ -57,6 +57,11 @@ padmap_ensure() {
   # -- takes the daemon's, so it is set here as well. padmap keeps its quarter
   # second for anything outside 0.05..10, and an older daemon ignores it.
   export PADMAP_HOLD_SECONDS="${PADMAP_HOLD_SECONDS:-1.5}"
+  # Which session this daemon is, for the gate that runs next: seats taken in
+  # the picker a moment ago belong to this launch -- the picker's pid is this
+  # shell's, through the execvp -- and seats a daemon has held since yesterday
+  # do not.
+  export PADMAP_FOLLOW="$$"
   if ! said="$("$(padmap_bin)" ensure-daemon --fresh --follow "$$" 2>&1)"; then
     warn "padmap has no current daemon; controllers will be whatever SDL finds"
     rm -f "$marker"
@@ -279,6 +284,15 @@ padmap_identity_apply() {
 padmap_seat_gate() {
   local platform="$1" title="${2:-}" seat
   [[ "${GOTG_SEAT_GATE:-1}" != "0" ]] || return 0
+  # Already met, in the picker's own window. The picker runs the gate before
+  # it execs here -- same program, one window, and the seats it handed out
+  # are the ones this launch will play with -- and says so this way rather
+  # than by turning the check off, which is what GOTG_SEAT_GATE=0 means and
+  # is a thing only a test should say.
+  if [[ "${GOTG_SEAT_MET:-0}" == "1" ]]; then
+    log "controllers: the picker met the gate; not asking again"
+    return 0
+  fi
   if ! seat="$(padmap_seat_bin)" || ! command -v "$seat" >/dev/null 2>&1; then
     # Said out loud. A check that is quietly not there is indistinguishable
     # from a check that ran and was happy, and the difference is a game
