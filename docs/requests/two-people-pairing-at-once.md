@@ -1,96 +1,130 @@
 # Two people pairing at once
 
-Two controllers held at the same time are indistinguishable from one, and the
-seat each ends up with does not follow the order they were pressed in.
+Most of this landed while it was being written. `progress` now names the pad
+and the seat it is filling towards, a release is a `frac: 0` for that pad, and
+`Assigner::tick` sorts the pending holds by when the button went down before
+handing out seats. GOTG draws one fill per pad from that, in press order --
+`src/ui/gotg_ui/joining.py`.
 
-Asked for in GOTG as: *"if 2+ controllers are pressing A at the same time to
-pair, both controller icons should appear in the order of who pressed A
-first. If someone lets go, they lose their place."*
+What is left is three ways an in-flight hold is destroyed by something that
+happened to somebody else. The first is the one that stops the feature
+working at all, and GOTG's e2e now watches for it:
+`test_the_seat_goes_to_whoever_pressed_first`, a strict xfail, which says so
+the day it is fixed.
 
-## What the daemon has, and what it says
+## 1. One person finishing throws away everybody else's hold
 
-`Assigner::tick` already knows both things:
+Two people hold a button together. The first one's hold completes, a `claim`
+goes out -- and the second one's fill dies on the spot. Measured, with two
+pads on a real daemon: the earlier press claims player one (press order works,
+thank you), and the second claim never comes at all until that person lets go
+and starts again.
 
 ```rust
-out.progress.push((pad, (elapsed / self.hold_seconds).clamp(0.0, 1.0)));
+// tick_seating, after a successful claim
+self.seating.reset();                  // <- Assigner::reset(): everybody
+self.refresh_seating(&mut Scan::default());
 ```
 
-`Tick.progress` is a list of `(pad, fraction)`. The broadcast throws the pad
-away:
+`Seating::reset` and `Seating::refresh` both call `Assigner::reset()`, which
+clears `holding` in full. A kernel does not re-send a down edge for a button
+that is still down, so nothing repopulates it: the second person's hold is
+gone until their thumb comes up and goes back down.
+
+What is wanted: a claim removes that pad's hold and leaves the others alone.
+`Assigner::tick` already does exactly that for the pad it claims
+(`self.holding.remove(&pad)`), so the `reset()` after it looks like belt and
+braces that costs the feature.
+
+The `refresh_seating` that follows is the same story one layer up: the pad set
+changes when a claimed pad stops being watched, `refresh` rebuilds it, and
+`refresh` resets the assigner wholesale rather than dropping the entries for
+pads that have actually gone.
+
+## 2. Changing the hold length throws away every hold in flight
 
 ```rust
-// padmap-daemon/src/server.rs, tick_seating
-for (index, fraction) in &claimed.progress {
-    if let Some(pad) = self.seating.pads().get(*index) {
-        let _ = pad;                       // <- the pad, unused
-        self.broadcast(&events::progress(*fraction));
+pub fn set_hold_seconds(&mut self, hold_seconds: f64) {
+    self.hold_seconds = hold_seconds;
+    self.holding.clear();          // <- everybody, not just this
+}
+```
+
+`Seating::open` calls it whenever the command carries `hold`, **even when the
+number is the same as the one already set**:
+
+```rust
+pub fn open(&mut self, seats: u32, hold: Option<f64>) {
+    self.open = true;
+    self.seats = seats.max(1);
+    if let Some(seconds) = hold {
+        self.assigner.set_hold_seconds(seconds);
     }
 }
 ```
 
-So two pads in flight broadcast two `{"event":"progress","frac":…}` events
-per tick, alternating, and a front-end sees one fill jumping between two
-values. In a session (`tick_session`) it is worse: the fractions are folded
-with `f64::max`, so the furthest-along hold is the only one that exists.
+GOTG sends `seating` with the same `hold` on every screen that listens, which
+is how it reaches the launch gate: the picker has seating open, somebody
+starts holding a button, the picker execs into the launch, and the gate --
+the same session, the same daemon, the same hold length -- opens seating
+again. The hold in flight is wiped at that moment. From the sofa the fill
+goes back to nothing for no reason, and the only way out is to let go and
+start again.
 
-## What is asked
+The change that was asked for (dropping holds when the *length* changes, so a
+press cannot become a claim because the number moved under it) is right. It
+just needs to be a change:
 
-**1. `progress` names the pad.** The same shape a `claim` uses, so a
-front-end can key on it:
-
-```json
-{"event": "progress", "frac": 0.42, "node": "/dev/input/event9",
- "name": "Xbox Wireless Controller", "player": 2}
+```rust
+if (hold_seconds - self.hold_seconds).abs() > f64::EPSILON {
+    self.hold_seconds = hold_seconds;
+    self.holding.clear();
+}
 ```
 
-`frac` stays where it is for anything already reading it. `player` is the
-seat this hold would take if it completed now -- which is what makes a
-front-end able to draw the pad filling in *where it will sit*.
+## 3. One person finding every seat taken clears everybody else's hold
 
-**2. A release is said out loud.** A front-end cannot tell "player two let
-go" from "player two's reading is late" when the readings are anonymous, and
-with two pads it cannot tell which of them stopped. One event, or a final
-`frac: 0` for that pad:
-
-```json
-{"event": "progress", "frac": 0.0, "node": "/dev/input/event9"}
+```rust
+let player = padmap_core::announce::next_player(&self.taken_seats());
+if player > self.seating.seats() {
+    info!("{} held a button but every seat is taken", clean(&pad.name));
+    self.seating.reset();          // <- everybody, again
+    continue;
+}
 ```
 
-**3. Seats go in the order the buttons went down.** Today
-`Assigner::tick` walks `self.holding`, which is a `BTreeMap` keyed by pad
-index, so two holds finishing in the same tick are ordered by *device number*
--- which is the order they were plugged in, not the order anybody pressed.
-Sorting the completions by their `started` timestamp is the whole change, and
-it is what "who pressed first" means to a person on a sofa.
+Four seats, all taken, and somebody picks up a spare pad and holds it: every
+other hold in the room stops. In a four-player game that is the fifth person
+at the party cancelling the fourth person joining, which reads as the pad
+being broken.
 
-**4. Letting go loses the place, and the next in line is promoted.** That
-falls out of 3 if nothing is reserved at press time: a hold that does not
-finish claims nothing, and the seats go to whoever does finish, earliest
-press first. Worth saying explicitly in the docs, because the alternative
-design -- reserving a seat when the button goes down -- is what a front-end
-would have to do if the daemon did not, and two front-ends would disagree.
+Two things here:
 
-## The scenarios that matter
+* **Scope.** Whatever is dropped should be that pad's hold, not the map.
+* **Say it.** Nothing is broadcast, so a front-end draws a fill that reaches
+  the end and then simply stops, with nothing to put on screen. An `error`,
+  or a `progress` with `frac: 1` and no `player`, or a `full` event -- any of
+  them can be drawn as "every seat is taken" rather than as nothing.
 
-Ordinary: two pads start together, both finish; seats 1 and 2, in press
-order.
+## 4. Does the daemon already have seating open, and at what length?
 
-* One lets go at 80%: the other takes seat 1, not seat 2.
-* Both finish in the same tick: press order decides, not pad index.
-* Three holders, two free seats: the two earliest presses get them and the
-  third keeps filling, claims nothing, and is told so.
-* A pad is unplugged mid-hold: its fill goes away; the others are unaffected.
-* A pad that already holds a seat presses again: no fill, no claim (this is
-  today's behaviour and should stay -- holding B to block in a fighting game
-  must not reseat anybody).
-* A hold that began before `seating` opened: either it is measured from the
-  open, or it is ignored until the button is released. Not a claim the
-  instant seating opens, which is what a front-end would look like it had
-  done by accident.
+The `state` event carries `state`, `slots`, `players`, `following` and the
+rest, but not whether seating is listening or how long its hold is. A
+front-end that knew could stop re-sending `seating` when nothing has changed
+-- which is what walks into 1 above. Two fields on `state` would do it:
 
-## How GOTG will draw it
+```json
+{"event": "state", ..., "seating": true, "hold": 1.5}
+```
 
-One filling controller per pad, side by side, in press order, each in the
-colour of the seat it would take; a release takes that one off. Until this
-lands the picker draws a single anonymous fill, which is what it has always
-done and is wrong for two people at once.
+## How these would be checked
+
+* Two pads, one pressed a third of a second before the other, both held all
+  the way: two claims, in press order. This is GOTG's
+  `test_the_seat_goes_to_whoever_pressed_first`, which gets one claim today.
+* `set_hold_seconds(1.5)` twice with a hold in flight: the hold survives the
+  second call, and still claims at its own time.
+* A `seating` command with the same `hold` as the open one, sent mid-hold:
+  same thing, through the socket.
+* Seats full, one pad holding to completion and another mid-hold: the second
+  pad's fill keeps climbing, and the first gets told something.
