@@ -27,6 +27,11 @@ colours:
   empty_ring: [208, 78, 78]
   empty_text: [208, 78, 78]
 
+  # A seat that is settled: mapped, published, nothing left to do. Green
+  # because it is the one colour in the room that means "done" without a word
+  # beside it, and it is drawn over the seat's own colour, never instead of it.
+  ready: [108, 196, 116]
+
 # Players 1-4. Nintendo's four-player order, which is what the consoles this
 # runs use on their own port lights. A fifth player wraps rather than failing:
 # padmap will seat as many as are asked for, and a pad with no colour is worse

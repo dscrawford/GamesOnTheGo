@@ -521,6 +521,45 @@ def draw_reveal(
     screen.blit(shown, shown.get_rect(center=centre))
 
 
+def draw_ring(screen, centre, radius: int, colour, fraction: float, width: int = 5, behind=BACKGROUND) -> None:
+    """A hold, as a ring filling clockwise around something already drawn.
+
+    The same pie slice `draw_reveal` reveals an icon through, punched hollow:
+    a hold looks like one thing wherever it happens. Not `pygame.draw.arc`,
+    which starts at three o'clock, runs anticlockwise and draws a visibly
+    lopsided band at this size -- it was tried, and the ring around a player's
+    badge came out thicker on one side than the other.
+    """
+    if fraction <= 0:
+        return
+    # Two degrees a step rather than the default five: at a badge's size
+    # the coarser slice showed its corners on the outer edge.
+    points = wedge(centre, radius, fraction, step=2.0)
+    if len(points) > 2:
+        pygame.draw.polygon(screen, colour, [(int(x), int(y)) for x, y in points])
+    pygame.draw.aacircle(screen, behind, centre, radius - width)
+
+
+def draw_tick(screen, centre, size: int, colour, behind=(14, 20, 16)) -> None:
+    """A checkmark. Two strokes, drawn rather than typed: a font's glyph for
+    this is a coin toss, and at this size a missing one is a blank square.
+
+    Laid down twice -- a dark stroke under a coloured one -- because this is
+    drawn over a player's badge, and green on the blue of player one at
+    twenty pixels was a smudge. The dark pass is what makes it a shape.
+    """
+    x, y = centre
+    unit = size / 2
+    points = [
+        (int(x - unit), int(y)),
+        (int(x - unit * 0.25), int(y + unit * 0.7)),
+        (int(x + unit), int(y - unit * 0.75)),
+    ]
+    width = max(3, size // 5)
+    pygame.draw.lines(screen, behind, False, points, width + 3)
+    pygame.draw.lines(screen, colour, False, points, width)
+
+
 def draw_hold(
     screen,
     centre,
