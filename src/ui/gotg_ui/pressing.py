@@ -17,6 +17,60 @@ HAT_BITS = {1: "up", 2: "right", 4: "down", 8: "left"}
 AXIS_ON = 0.5
 
 
+# `buttons.py`'s short names for SDL's standard layout, as the element names
+# the ares table binds against. The two vocabularies exist because one is for
+# a person reading a screen and the other is SDL's; this is the seam.
+STANDARD_ELEMENTS = {
+    "a": "a",
+    "b": "b",
+    "x": "x",
+    "y": "y",
+    "back": "back",
+    "start": "start",
+    "lb": "leftshoulder",
+    "rb": "rightshoulder",
+    "up": "dpup",
+    "down": "dpdown",
+    "left": "dpleft",
+    "right": "dpright",
+}
+
+# SDL's game-controller axis order, which is the same on every pad it maps,
+# and what each end of each axis is called. The triggers travel one way and
+# have one name.
+STANDARD_AXES = {
+    0: ("leftx-", "leftx+"),
+    1: ("lefty-", "lefty+"),
+    2: ("rightx-", "rightx+"),
+    3: ("righty-", "righty+"),
+    4: ("lefttrigger", "lefttrigger"),
+    5: ("righttrigger", "righttrigger"),
+}
+
+
+def element_for_button(name: str | None) -> str | None:
+    """What a standard button press is, in the table's words."""
+    return STANDARD_ELEMENTS.get(str(name or ""))
+
+
+def element_on_axis(index: int, value) -> str | None:
+    """Which way this standard axis is pushed, or None for at rest."""
+    ends = STANDARD_AXES.get(index)
+    if ends is None or not isinstance(value, (int, float)):
+        return None
+    if value <= -AXIS_ON:
+        return ends[0]
+    if value >= AXIS_ON:
+        return ends[1]
+    return None
+
+
+def elements_on_axis(index: int) -> list[str]:
+    """Both ends of this standard axis -- what a return to the middle clears."""
+    ends = STANDARD_AXES.get(index)
+    return sorted(set(ends)) if ends else []
+
+
 def controls_on(buttons: dict, kind: str, index: int) -> list[str]:
     """Every control bound to this input, whatever it currently reads.
 

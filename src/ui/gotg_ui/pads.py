@@ -150,6 +150,46 @@ def raw_input(event) -> tuple[str, int, object] | None:
     return None
 
 
+def button_up(event) -> str | None:
+    """The name of the button this release is, on a pad padmap published.
+
+    `released` answers only whether something came up. A screen showing what
+    is under a thumb needs the name, and for a pad SDL maps that name is the
+    standard one -- which is the vocabulary the binding tables use, and is why
+    this is read instead of padmap's capture: a capture holds the controls one
+    console asked for, and half the pad is missing from it.
+    """
+    if event.type not in (pygame.CONTROLLERBUTTONUP, pygame.JOYBUTTONUP):
+        return None
+    if not _allowed(event):
+        return None
+    if event.type == pygame.CONTROLLERBUTTONUP:
+        return name_for(event.button, standard=True)
+    if getattr(event, "instance_id", None) in _mapped:
+        # The same release, already reported as a controller event.
+        return None
+    return name_for(event.button, standard=False)
+
+
+def axis_move(event) -> tuple[int, float] | None:
+    """A standard axis and where it is, on a pad padmap published.
+
+    SDL's own axis order (0 leftx, 1 lefty, 2 rightx, 3 righty, 4 and 5 the
+    triggers), which holds for every pad it maps -- so which stick is being
+    pushed is answerable without asking a profile what axis 3 meant on this
+    particular controller.
+    """
+    if event.type != pygame.CONTROLLERAXISMOTION:
+        return None
+    if not _allowed(event):
+        return None
+    value = event.value
+    if isinstance(value, int) and abs(value) > 1:
+        # SDL2's raw range, which pygame passes through for some events.
+        value = value / 32767.0
+    return (event.axis, float(value))
+
+
 def raw_release(event) -> int | None:
     """The joystick button index coming back up, on a pad padmap published.
 

@@ -77,7 +77,7 @@ nix build .#controllers-image --max-jobs 2 --cores 4                            
   user's game. The suite fails fast if the real socket
   (`$XDG_RUNTIME_DIR/padmap/padmap.sock`) exists; do not override that.
 - **Prefer the cluster.** `k8s/controllers/` runs the same suite in a
-  privileged pod with `/dev/uinput`, which is where it belongs — 26 of 34
+  privileged pod with `/dev/uinput`, which is where it belongs — 28 of 36
   pass there; the eight that walk padmap's wizard do not yet (see that
   README). Build and push the image, apply the Job, read the logs.
 
