@@ -246,6 +246,14 @@ frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).
 - Every exit from `gotg-seat` says why on stderr (`gotg-seat: no door:
   skipped, 0 seated`) and in the trace. It used to `return 0` in silence,
   which on a terminal is indistinguishable from the gate never running.
+- **"It feels slow" is two problems.** `GOTG_UI_FPS=1 gotg-ui` prints, once a
+  second, what a frame cost: `draw` (this program), `present` (SDL putting it
+  on the panel), `idle` (the frame cap), and the worst frame in that second --
+  plus a line naming the driver, the size drawn, the desktop size and the
+  refresh rate. A 1280x800 surface resampled to a 4K panel costs tens of
+  milliseconds no amount of drawing less will recover, and that is invisible
+  from in here without asking. `theme.vsync` is the other lever, off by
+  default because a driver that refuses it leaves no window at all.
 - When the picker does something on a real machine the tests do not show:
   `GOTG_UI_TRACE=/tmp/gotg-trace.log gotg-ui`, ask the person to press the
   buttons in a numbered order, then read the file (one JSON object per

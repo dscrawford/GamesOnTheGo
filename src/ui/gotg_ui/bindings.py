@@ -223,12 +223,22 @@ def data_dir() -> pathlib.Path:
     return pathlib.Path("/nonexistent")
 
 
+# Read once each. Both of these are files in the store or under a GC root,
+# neither changes under a running picker, and both were being read and parsed
+# *per frame* by the screens that draw a controller.
+_table: dict | None = None
+_consoles: dict[str, str | None] = {}
+
+
 def ares_table() -> dict:
     """The console -> bindings table, or empty when it cannot be read."""
-    try:
-        return json.loads((data_dir() / "ares-pads.json").read_text())
-    except (OSError, ValueError):
-        return {}
+    global _table
+    if _table is None:
+        try:
+            _table = json.loads((data_dir() / "ares-pads.json").read_text())
+        except (OSError, ValueError):
+            _table = {}
+    return _table
 
 
 def roots_dir() -> pathlib.Path:
@@ -251,11 +261,24 @@ def console_for(platform: str) -> str | None:
     generated" — dolphin and Ryujinx write theirs elsewhere and publish no
     console — and the screen says so either way rather than inventing one.
     """
+    if platform in _consoles:
+        return _consoles[platform]
     try:
         manifest = roots_dir().resolve() / f"env-{platform}" / "share" / "gotg" / "pads.json"
-        return json.loads(manifest.read_text()).get("console") or None
+        found = json.loads(manifest.read_text()).get("console") or None
     except (OSError, ValueError):
-        return None
+        found = None
+    # An environment built while the picker is up is the one case this gets
+    # wrong, and `forget` is what the loader calls when that happens.
+    _consoles[platform] = found
+    return found
+
+
+def forget() -> None:
+    """Read the tables again: an environment has just been built."""
+    global _table
+    _table = None
+    _consoles.clear()
 
 
 def bindings_for(console: str, table: dict | None = None) -> dict[str, str]:
