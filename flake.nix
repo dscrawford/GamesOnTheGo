@@ -224,6 +224,19 @@
             ] envs;
           };
 
+          # The controller suite as a container, for Jobs on the cluster.
+          #
+          #   nix build .#controllers-image
+          #   skopeo copy docker-archive:result docker://localhost:30500/gotg-controllers:0.1.0
+          #
+          # `src` is the checkout, because a pod has no git tree and the suite
+          # is what is under test: see tests/e2e/image.nix.
+          controllers-image = pkgs.callPackage ./tests/e2e/image.nix {
+            controllerTests = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-test-controllers;
+            padmap = padmap.packages.${pkgs.stdenv.hostPlatform.system}.padmap;
+            src = ./.;
+          };
+
           # Donkey Kong 64: Recompiled — not in nixpkgs, though its siblings
           # zelda64recomp and n64recomp are.
           dk64recomp = pkgs.callPackage ./pkgs/dk64recomp { };

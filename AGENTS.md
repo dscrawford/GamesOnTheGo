@@ -61,6 +61,7 @@ nix build .#checks.x86_64-linux.python-tests --max-jobs 2 --cores 4             
 nix build .#checks.x86_64-linux.client-tests --max-jobs 2 --cores 4              # bats, whole suite
 nix run .#test-controllers --max-jobs 2 --cores 4 -- -q                          # controller e2e, real devices
 nix run .#test-controllers --max-jobs 2 --cores 4 -- -q -k "top_bar"             # one e2e test
+nix build .#controllers-image --max-jobs 2 --cores 4                            # the same suite, for k8s/controllers
 ```
 
 - The dev venv has **no pygame** on purpose: `tests/ui` tests models only,
@@ -75,6 +76,10 @@ nix run .#test-controllers --max-jobs 2 --cores 4 -- -q -k "top_bar"            
   a real daemon in seating mode seats them: one landed as player two in the
   user's game. The suite fails fast if the real socket
   (`$XDG_RUNTIME_DIR/padmap/padmap.sock`) exists; do not override that.
+- **Prefer the cluster.** `k8s/controllers/` runs the same suite in a
+  privileged pod with `/dev/uinput`, which is where it belongs — 26 of 34
+  pass there; the eight that walk padmap's wizard do not yet (see that
+  README). Build and push the image, apply the Job, read the logs.
 
 ## Lint & Typecheck
 
