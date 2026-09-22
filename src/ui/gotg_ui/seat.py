@@ -52,6 +52,7 @@ from .gate import (
     rebind,
     without_controllers,
 )
+from .hush import Hush
 from .padmap import Padmap, ensure_daemon
 from .padstrip import EMPTY_RING, LABEL, LABEL_DIM, PANEL, colour_for
 from .padstrip import READY as SETTLED_GREEN  # gate.READY is a state; this is a colour
@@ -169,7 +170,9 @@ def draw(
         said = font_at(24).render(gate.message, True, EMPTY_RING)
         screen.blit(said, ((width - said.get_width()) // 2, int(height * 0.76)))
 
-    keys = "S skip this button   Esc play without it" if gate.state == MAPPING \
+    # Nothing about Esc while the buttons are being walked: it is refused
+    # there, and offering it was offering a half-bound pad.
+    keys = "S skip this button   ·   hold a button to finish" if gate.state == MAPPING \
         else "Esc play without a controller"
     footer = font_at(22).render(keys, True, LABEL_DIM)
     screen.blit(footer, ((width - footer.get_width()) // 2, int(height * 0.92)))
@@ -252,6 +255,19 @@ def run(platform: str, title: str) -> int:
         print(f"gotg-seat: no controller drawing: {error}", file=sys.stderr)
         diagram = None
 
+    # A controller is a keyboard too, and the gate never knew.
+    #
+    # The picker holds the keyboard and mouse nodes that belong to a
+    # controller with EVIOCGRAB -- a Steam Controller in lizard mode types
+    # Enter when A is pressed, and an Xbox pad over Bluetooth carries its own
+    # keyboard collection. This screen did not, and it takes Enter as "start
+    # the game now": so pairing a Steam Controller pressed A, the kernel sent
+    # Enter, and the game started with nobody having held anything. That is
+    # the leaking input. See hush.py.
+    hush = Hush()
+    hush.refresh()
+    trace.say("gate-hush", held=sorted(hush.held))
+
     # The reveal's own clock. padmap stops sending `progress` when a button is
     # let go rather than sending a zero, so this is what makes the drawing
     # empty again -- see gate.Fade.
@@ -281,10 +297,21 @@ def run(platform: str, title: str) -> int:
         while True:
             while not gate.done:
                 for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
+                    if event.type in (pygame.JOYDEVICEADDED, pygame.JOYDEVICEREMOVED):
+                        # padmap publishing a clone is a device arriving, and
+                        # its keyboard siblings arrive with it.
+                        hush.refresh()
+                        devices.forget()
+                    elif event.type == pygame.QUIT:
                         gate = _leave(pads, gate)
                     elif event.type == pygame.KEYDOWN:
-                        if event.key in (pygame.K_ESCAPE, pygame.K_b):
+                        if event.key in (pygame.K_ESCAPE, pygame.K_b) and gate.wizard:
+                            # Not while the buttons are being walked. Leaving
+                            # half way through leaves a pad half bound, and
+                            # every way out of that screen belongs to padmap:
+                            # S skips a control, and a long hold finishes.
+                            trace.say("gate-key-ignored", key=event.key, state=gate.state)
+                        elif event.key in (pygame.K_ESCAPE, pygame.K_b):
                             gate = _leave(pads, gate)
                         elif event.key == pygame.K_s and gate.state == MAPPING:
                             # A control this pad does not have. Every layout here
@@ -324,7 +351,7 @@ def run(platform: str, title: str) -> int:
                 break
             # The door: the bindings on the pad, a press ringed as it happens, a
             # tap of Y to walk the buttons again, and the second that starts.
-            verdict, gate = _wait_for_go(screen, font_at, clock, pads, gate, title, cache)
+            verdict, gate = _wait_for_go(screen, font_at, clock, pads, gate, title, cache, hush)
             if verdict == "rebind":
                 gate, command = rebind(gate)
                 if command is not None:
@@ -339,6 +366,7 @@ def run(platform: str, title: str) -> int:
             stop_listening()
             break
     finally:
+        hush.release()
         pygame.quit()
         pads.close()
     return 0
@@ -390,6 +418,9 @@ class Door:
         self.lit_by: dict[int, set[str]] = {}
         # When Y went down, for the hold that rebinds.
         self.y_since: float | None = None
+        # Said once, when the hold finishes: a trace with sixty lines a second
+        # of "done" in it is a trace nobody reads.
+        self.said_done = False
         # Since when every pad has had nothing down. None means something is
         # being held right now -- the claim, most likely -- and until this has
         # stood for PAUSE seconds no press is a go. A door that opens onto
@@ -420,6 +451,15 @@ class Door:
         elif event.type == pygame.KEYDOWN and event.key in (
             pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE, pygame.K_b
         ):
+            # Not during the pause. A controller in lizard mode types Enter
+            # when A is pressed -- hush.py holds those nodes now, but a key
+            # that arrives in the first moment of this screen is far more
+            # likely to be the press that paired somebody than a person
+            # asking for the game, and this is the screen they just reached.
+            if not self.settled(now):
+                trace.say("door-key-ignored", key=event.key, quiet=self.quiet_since is not None)
+                return False
+            trace.say("door-key", key=event.key)
             return True
         elif sdl_pads.button(event) is not None:
             pressed = sdl_pads.button(event)
@@ -432,8 +472,13 @@ class Door:
             if pressed == sdl_pads.Y:
                 self.y_since = now
             trace.say(
-                "door-press", button=pressed, armed=self.hold.armed,
+                "door-press",
+                button=pressed,
+                player=sdl_pads.player(event),
+                armed=self.hold.armed,
+                settled=self.settled(now),
                 counted=self.hold.since is not None,
+                quiet_for=None if self.quiet_since is None else round(now - self.quiet_since, 3),
             )
         elif sdl_pads.released(event):
             self.y_since = None
@@ -532,10 +577,13 @@ class Door:
         nothing counting.
         """
         if self.sticks.any_button_down():
+            if self.quiet_since is not None:
+                trace.say("door-busy")
             self.quiet_since = None
             return
         if self.quiet_since is None:
             self.quiet_since = now
+            trace.say("door-quiet", pause=PAUSE)
         if self.hold.since is not None:
             self.hold.released(now)
         self.y_since = None
@@ -548,7 +596,17 @@ class Door:
             self.lit_by.pop(seat, None)
 
     def done(self, now: float) -> bool:
-        return self.hold.done(now)
+        finished = self.hold.done(now)
+        if finished and not self.said_done:
+            self.said_done = True
+            trace.say(
+                "door-go",
+                why="hold",
+                held_for=None if self.hold.since is None else round(now - self.hold.since, 3),
+                seconds=self.hold.seconds,
+                holder=self.holder,
+            )
+        return finished
 
     def progress(self, now: float) -> float:
         return self.hold.progress(now)
@@ -565,7 +623,7 @@ class Door:
 
 
 def _wait_for_go(
-    screen, font_at, clock, pads: Padmap, gate: Gate, title: str, cache: dict | None = None
+    screen, font_at, clock, pads: Padmap, gate: Gate, title: str, cache: dict | None = None, hush=None
 ) -> tuple[str, Gate]:
     """Seated and mapped; the game starts on a three-second hold of A.
 
@@ -608,10 +666,14 @@ def _wait_for_go(
         if gate.unmapped is not None:
             return "map", gate
         for event in pygame.event.get():
+            if hush is not None and event.type in (pygame.JOYDEVICEADDED, pygame.JOYDEVICEREMOVED):
+                hush.refresh()
             if door.handle(event, now):
+                trace.say("door-go", why="key-or-quit")
                 return "go", gate
         door.tick(now)
         if door.rebinding(now) >= 1.0:
+            trace.say("door-rebind")
             return "rebind", gate
         if door.done(now):
             return "go", gate
