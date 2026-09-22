@@ -16,7 +16,7 @@ import time
 
 import pygame
 
-from . import around, config, devices, filters, pads, prepare, trace
+from . import around, config, devices, filters, keys, pads, prepare, trace
 from .art import ArtStore
 from .assign import KeyHold, Session, Watch, attend
 from .browser import SHELF, Browser
@@ -885,6 +885,22 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     hush.refresh()
                     devices.forget()
                     continue
+
+                # The keyboard takes a seat like everything else.
+                #
+                # It used to be the fallback underneath the pad rule -- no
+                # daemon, no seat, no problem -- and that was the hole the
+                # rule exists to close: a controller is a keyboard in
+                # hardware, so "anything that types" included pads nobody had
+                # assigned. Until padmap has seated it, the only key heard is
+                # the space bar that asks for the seat. See keys.py.
+                if event.type in (pygame.KEYDOWN, pygame.KEYUP, pygame.TEXTINPUT):
+                    # The space bar is always heard: a keyboard that cannot
+                    # ask for a seat cannot be given one.
+                    asking = getattr(event, "key", None) == pygame.K_SPACE
+                    if not asking and not keys.drives(padmap.players, padmap.connected):
+                        trace.say("key-refused", key=getattr(event, "key", None))
+                        continue
 
                 # On the loader, the only input is the way out. Everything else
                 # would be the grid moving invisibly behind the build.

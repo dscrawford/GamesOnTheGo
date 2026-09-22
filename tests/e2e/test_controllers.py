@@ -142,7 +142,7 @@ def test_the_picker_opens_with_no_controllers(daemon, sdl):
 
         assert picker.players == [], "a pad was seated without anybody holding anything"
         assert seats(picker.players) == []
-        assert strip_status(picker.padmap.status_word, 0) == "hold a button on a controller"
+        assert strip_status(picker.padmap.status_word, 0) == "hold a button on a controller, or space"
         picker.close()
 
 
@@ -318,7 +318,7 @@ def test_pairing_happens_on_the_menu_and_shows_in_the_top_bar(daemon, sdl):
 
         assert not picker.seating.open, "the controller screen opened on its own"
         assert seats(picker.players) == []
-        assert strip_status(picker.padmap.status_word, 0) == "hold a button on a controller"
+        assert strip_status(picker.padmap.status_word, 0) == "hold a button on a controller, or space"
 
         pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1)), "holding a button seated nobody"
@@ -2032,4 +2032,44 @@ def test_a_stick_reads_as_a_position_not_as_four_labels(daemon, sdl):
         assert abs(door.sticks_by[1]["left"][0]) <= STICK_DEAD, (
             f"at rest the dot sat at {door.sticks_by[1]['left']}"
         )
+        picker.close()
+
+
+def test_the_keyboard_drives_nothing_until_padmap_seats_it(daemon, sdl):
+    """The keyboard goes through padmap now, like everything else.
+
+    Enter and Esc at the door mean "start the game"; an unseated keyboard is
+    any device in the room that types, and most controllers are one. So the
+    door hears no key at all until padmap reports a keyboard seat -- and the
+    space bar, which is how the keyboard asks for one, is heard always.
+    """
+    from gotg_ui import keys as keys_rule
+    from gotg_ui.seat import Door
+
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        pad.hold(BTN_SOUTH, PAIR)
+        assert picker.until(lambda p: p.seated(1)), "the pad took no seat"
+        picker.run(1.2)
+
+        assert not keys_rule.drives(picker.players, picker.padmap.connected), (
+            "a pad seat is not a keyboard seat"
+        )
+
+        door = Door(picker.sticks, time.monotonic(), seconds=1.0, keys_drive=False)
+        _pump(sdl, door, 1.2)
+        enter = sdl.event.Event(sdl.KEYDOWN, key=sdl.K_RETURN, mod=0, unicode="\\r", scancode=40)
+        assert not door.handle(enter, time.monotonic()), "an unseated keyboard started the game"
+        escape = sdl.event.Event(sdl.KEYDOWN, key=sdl.K_ESCAPE, mod=0, unicode="", scancode=41)
+        assert not door.handle(escape, time.monotonic()), "an unseated keyboard left the gate"
+
+        # padmap seats it, the rule turns over, and the same key is the way out.
+        picker.padmap.seat_keyboard()
+        assert picker.until(
+            lambda p: keys_rule.drives(p.players, p.padmap.connected), seconds=6.0
+        ), f"padmap seated no keyboard: {picker.players}"
+
+        door.keys_drive = True
+        assert door.handle(enter, time.monotonic()), "a seated keyboard could not start the game"
         picker.close()

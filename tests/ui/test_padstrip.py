@@ -90,8 +90,8 @@ def test_an_idle_padmap_with_nobody_seated_says_how_to_start():
     # keyboard nobody carried to the sofa.
     from gotg_ui.padstrip import strip_status
 
-    assert strip_status("idle", 0) == "hold a button on a controller"
-    assert strip_status("ready", 0) == "hold a button on a controller"
+    assert strip_status("idle", 0) == "hold a button on a controller, or space"
+    assert strip_status("ready", 0) == "hold a button on a controller, or space"
 
 
 def test_once_somebody_is_seated_it_goes_back_to_saying_what_is_true():

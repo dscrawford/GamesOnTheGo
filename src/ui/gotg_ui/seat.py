@@ -33,8 +33,9 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 import pygame  # noqa: E402 - the line above only works ahead of the import
 
-from . import devices, profiles, trace
+from . import devices, keys, profiles, trace
 from . import pads as sdl_pads
+from .assign import KeyHold
 from .bindings import console_for, pad_controls
 from .controllers import Diagram, assets_dir, draw_reveal, draw_tick, icon_surface
 from .controllers import draw as draw_diagram
@@ -180,9 +181,9 @@ def draw(
 
     # Nothing about Esc while the buttons are being walked: it is refused
     # there, and offering it was offering a half-bound pad.
-    keys = "S skip this button   ·   hold a button to finish" if gate.state == MAPPING \
-        else "Esc play without a controller"
-    footer = font_at(22).render(keys, True, LABEL_DIM)
+    said = "S skip this button   ·   hold a button to finish" if gate.state == MAPPING \
+        else "hold space to play with the keyboard"
+    footer = font_at(22).render(said, True, LABEL_DIM)
     screen.blit(footer, ((width - footer.get_width()) // 2, int(height * 0.92)))
 
 
@@ -263,6 +264,11 @@ def run(platform: str, title: str) -> int:
         print(f"gotg-seat: no controller drawing: {error}", file=sys.stderr)
         diagram = None
 
+    # The space bar, held, seats the keyboard. padmap never sees its keys --
+    # the keyboard is the compositor's -- so this hold is timed here and the
+    # daemon is told the answer, exactly as the picker does it.
+    space = KeyHold()
+
     # A controller is a keyboard too, and the gate never knew.
     #
     # The picker holds the keyboard and mouse nodes that belong to a
@@ -300,6 +306,22 @@ def run(platform: str, title: str) -> int:
         while True:
             while not gate.done:
                 for event in pygame.event.get():
+                    # The keyboard takes a seat like everything else -- see
+                    # keys.py -- and the space bar is how it asks, here as
+                    # well as on the grid. A launch that starts a fresh daemon
+                    # forgets the seat the picker gave it, so this screen has
+                    # to be able to hand it out again or a keyboard player
+                    # arrives at a gate that answers nothing.
+                    if event.type in (pygame.KEYDOWN, pygame.KEYUP, pygame.TEXTINPUT):
+                        if getattr(event, "key", None) == pygame.K_SPACE:
+                            if event.type == pygame.KEYDOWN:
+                                space.down(time.monotonic())
+                            else:
+                                space.up()
+                            continue
+                        if not keys.drives(pads.players, pads.connected):
+                            trace.say("key-refused", key=getattr(event, "key", None))
+                            continue
                     if event.type in (pygame.JOYDEVICEADDED, pygame.JOYDEVICEREMOVED):
                         # padmap publishing a clone is a device arriving, and
                         # its keyboard siblings arrive with it.
@@ -333,6 +355,10 @@ def run(platform: str, title: str) -> int:
                 gate, command = decide(gate)
                 if command is not None:
                     pads.send(command)
+                asked = space.due(time.monotonic())
+                if asked is not None:
+                    trace.say("sent", **asked)
+                    pads.send(asked)
 
                 if gate.state in (CHECKING, SEATING, READY):
                     # The same screen the door draws, from the first frame:
@@ -396,6 +422,7 @@ class Door:
         buttons: dict | None = None,
         buttons_by: dict[int, dict] | None = None,
         names: dict[str, str] | None = None,
+        keys_drive: bool = True,
     ):
         self.sticks = sticks
         self.hold = GoHold(seconds=seconds, opened=now, held_at_open=sticks.any_button_down())
@@ -423,6 +450,11 @@ class Door:
         self.sticks_by: dict[int, dict[str, tuple[float, float]]] = {}
         # When Y went down, for the hold that rebinds.
         self.y_since: float | None = None
+        # Whether the keyboard has a seat. Enter and Esc are a keyboard
+        # saying "start now", and an unseated keyboard is any device in the
+        # room that types -- which is most controllers. Kept fresh by the
+        # loop, because the seat can be taken while this screen is up.
+        self.keys_drive = keys_drive
         # Said once, when the hold finishes: a trace with sixty lines a second
         # of "done" in it is a trace nobody reads.
         self.said_done = False
@@ -453,6 +485,9 @@ class Door:
             self.sticks.remove(event.instance_id)
         elif event.type == pygame.QUIT:
             return True
+        elif event.type == pygame.KEYDOWN and not self.keys_drive:
+            trace.say("door-key-refused", key=event.key)
+            return False
         elif event.type == pygame.KEYDOWN and event.key in (
             pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE, pygame.K_b
         ):
@@ -671,12 +706,14 @@ def _wait_for_go(
         names=pad_controls(console_for(gate.platform)),
     )
     fade = Fade()
+    space = KeyHold()
     cache = cache if cache is not None else {}
     while True:
         now = time.monotonic()
         for message in pads.poll():
             gate = apply(gate, message)
             fade.saw(gate.progress, now)
+        door.keys_drive = keys.drives(pads.players, pads.connected)
         if not pads.connected:
             _said("padmap went away at the door; starting")
             return "go", gate
@@ -685,11 +722,26 @@ def _wait_for_go(
         if gate.unmapped is not None:
             return "map", gate
         for event in pygame.event.get():
+            # Space is the keyboard asking for a seat, here as on the grid:
+            # somebody can arrive at this screen with a keyboard and nothing
+            # else, and the door would answer nothing at all.
+            if getattr(event, "key", None) == pygame.K_SPACE and event.type in (
+                pygame.KEYDOWN, pygame.KEYUP
+            ):
+                if event.type == pygame.KEYDOWN:
+                    space.down(now)
+                else:
+                    space.up()
+                continue
             if hush is not None and event.type in (pygame.JOYDEVICEADDED, pygame.JOYDEVICEREMOVED):
                 hush.refresh()
             if door.handle(event, now):
                 trace.say("door-go", why="key-or-quit")
                 return "go", gate
+        asked = space.due(now)
+        if asked is not None:
+            trace.say("sent", **asked)
+            pads.send(asked)
         door.tick(now)
         if door.rebinding(now) >= 1.0:
             trace.say("door-rebind")
@@ -717,12 +769,12 @@ def _footer(gate: Gate, settled: bool) -> str:
     and still holding the button that paired them, and everybody ready.
     """
     if not gate.seats:
-        return "hold a button on a controller to join   ·   Esc play without a controller"
+        return "hold a button on a controller to join   ·   hold space for the keyboard"
     if not settled:
         return "let go of the button   ·   then hold A for three seconds to start"
     return (
         "hold A for three seconds to start   ·   hold Y to change these   ·   "
-        "another player: hold a button   ·   Enter or Esc start now"
+        "another player: hold a button"
     )
 
 
@@ -881,8 +933,8 @@ def _hold_the_door(title: str, reason: str) -> int:
             said, footer = without_controllers(reason, deadline - time.monotonic())
             prompt = font_at(48).render(said, True, EMPTY_RING)
             screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.40)))
-            keys = font_at(22).render(footer, True, LABEL_DIM)
-            screen.blit(keys, ((width - keys.get_width()) // 2, int(height * 0.92)))
+            line = font_at(22).render(footer, True, LABEL_DIM)
+            screen.blit(line, ((width - line.get_width()) // 2, int(height * 0.92)))
             pygame.display.flip()
             clock.tick(30)
     finally:

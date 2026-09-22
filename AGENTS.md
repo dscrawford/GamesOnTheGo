@@ -136,9 +136,17 @@ finds it by name.
 
 ## The controller requirement
 
-Two things drive the picker: the keyboard (and mouse), and a controller padmap
-has published. Nothing else -- not when padmap is missing, down, or too old.
-`GOTG_ANY_PAD=1` is the only override, and it is never set by anything.
+One thing drives the picker: a controller padmap has published -- and the
+keyboard is one of them. It used to be the fallback that always worked, which
+was the hole the rule exists to close: a controller is a keyboard in hardware,
+so "anything that types" meant pads nobody had assigned. The keyboard now
+takes a seat like everything else (`keys.py`, padmap's `seat_keyboard`), and
+until it has, **the only key heard anywhere is the space bar that asks for the
+seat** -- on the grid, at the launch gate and at the door. Nothing else drives
+anything, not when padmap is missing, down, or too old. The mouse is still the
+mouse: padmap has no seat for one, and it is the way out of a window whose
+keyboard has not paired. `GOTG_ANY_PAD=1` is the only override, and it is
+never set by anything.
 A controller that is also a keyboard or mouse (a Steam Controller's lizard
 mode, a Bluetooth Xbox pad's extra HID collections) is held with `EVIOCGRAB`
 while the picker runs -- `hush.py` -- because SDL delivers a key, not the
