@@ -164,9 +164,9 @@ def test_the_sticks_that_sit_in_an_octagon_say_so():
     assert schemes["gamecube"].gate("left") == "octagon"
     assert schemes["gamecube"].gate("right") == "octagon", "the C-stick has a gate too"
     assert schemes["n64"].gate("left") == "octagon"
-    # An N64's C group is four buttons and no gate at all. The ring standing
-    # in for it is round, because eight corners there would be invented.
-    assert schemes["n64"].gate("right") == "circle"
+    # An N64's C group is bound to the right stick by everything that plays
+    # one, and is four buttons in the hand. No ring at all: four labels.
+    assert schemes["n64"].gate("right") == "buttons"
     # Everything else is round until somebody says otherwise, which is what a
     # pad with no stick at all wants too.
     assert schemes["switch"].gate("left") == "circle"

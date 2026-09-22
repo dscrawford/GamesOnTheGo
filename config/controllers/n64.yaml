@@ -18,11 +18,12 @@ platforms: [n64]
 # padmap's control id -> what the button says.
 # The stick sits in an octagonal gate -- eight corners you can feel through
 # the thumb -- so the ring drawn over it is an octagon too. The C group is
-# four buttons and no gate at all; the ring standing in for it is round,
-# because drawing eight corners there would be inventing them.
+# bound to the right stick by everything that plays an N64, but on the
+# console it is four buttons: `buttons` keeps them as four labels rather than
+# drawing a stick that is not there.
 gate:
   left: octagon
-  right: circle
+  right: buttons
 
 controls:
   a: A
