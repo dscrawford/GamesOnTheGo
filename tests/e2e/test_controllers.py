@@ -1899,3 +1899,63 @@ def test_the_gate_holds_a_controllers_keyboard_so_it_cannot_start_the_game():
             assert joystick and joystick.rsplit("/", 1)[-1] not in held
         finally:
             hush.release()
+
+
+def test_one_input_lights_one_label_even_when_the_profile_disagrees(daemon, sdl, tmp_path, monkeypatch):
+    """A GameCube pad's right trigger lit R *and* Z at once.
+
+    Two vocabularies name a press -- SDL's standard layout for a pad it maps,
+    padmap's capture for one it does not -- and the choice was being made per
+    *event* rather than per pad: a button took the first, an axis took both.
+    A profile binding something else to the same axis then lit a second label
+    that nobody had pressed.
+
+    So the profile here disagrees on purpose. It says axis 0 is
+    `lefttrigger`, which an N64 drawing calls Z; SDL's standard layout calls
+    axis 0 the left stick's X, which that drawing calls X-Axis. The pad is one
+    SDL maps, so SDL names it -- and either way exactly one label lights.
+    """
+    import pathlib
+
+    from gotg_ui import profiles
+    from gotg_ui.bindings import pad_controls
+    from gotg_ui.seat import Door
+
+    devices = str(tmp_path / "devices")
+    _profile(devices, "E2E Xbox Pad", {
+        **E2E_PROFILE_BUTTONS,
+        "lefttrigger": {"kind": "axis", "index": 0, "value": -1},
+    })
+    monkeypatch.setenv("PADMAP_DEVICES", devices)
+    monkeypatch.setenv("GOTG_DATA", str(pathlib.Path(__file__).parents[2] / "src" / "client" / "data"))
+
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        pad.hold(BTN_SOUTH, 0.7)
+        assert picker.until(lambda p: p.seated(1)), "the pad took no seat"
+        picker.run(0.8)
+
+        door = Door(
+            picker.sticks, time.monotonic(), seconds=1.0,
+            buttons_by={1: profiles.bindings(profiles.for_pad("E2E Xbox Pad"), "console:n64")},
+            names=pad_controls("Nintendo64"),
+        )
+        assert door.buttons_by[1].get("lefttrigger"), "the disagreeing profile was not read"
+        _pump(sdl, door, 0.3)
+
+        pad.axis(ABS_X, -32767)
+        _pump(sdl, door, 0.4)
+        assert door.lit_by == {1: {"X-Axis/Lo"}}, (
+            f"one axis lit {door.lit_by}; two labels for one input is the bug"
+        )
+        pad.axis(ABS_X, 0)
+        _pump(sdl, door, 0.3)
+        assert door.lit_by == {}, f"the stick back at rest left {door.lit_by} lit"
+
+        # A button too, for the pad that was reported: one press, one label.
+        pad.down(0x136)  # BTN_TL, the N64's L
+        _pump(sdl, door, 0.4)
+        assert door.lit_by == {1: {"L"}}, f"BTN_TL lit {door.lit_by}"
+        pad.up(0x136)
+        picker.close()
