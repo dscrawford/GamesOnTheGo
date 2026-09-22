@@ -217,7 +217,17 @@ PAIR_HOLD = float(config.get("theme.timeouts.pair_hold", 1.5))
 
 @dataclass
 class Fade:
-    """The reveal's fraction, which has to fall back to nothing by itself.
+    """The reveal's fraction, which has to fall back to nothing by itself --
+    and keep moving between the readings that feed it.
+
+    padmap sends `progress` about every 20 ms, and the screen draws every 16:
+    a fill that only moved when a reading arrived stepped, visibly, and it
+    got worse the longer the hold -- at a second and a half there are eighty
+    steps to see. So between readings it advances on its own clock at the
+    rate the hold implies, which is a rate this program *chose* (it asks for
+    the hold length on every `seating`), and every reading puts it back where
+    the daemon says it is. It cannot run away: the readings stop when the
+    button comes up, and `PROGRESS_STALE` is three frames.
 
     Deliberately not part of `Gate`: a gate is rebuilt from events and has no
     clock, and this is the one thing here that is about time passing rather
@@ -226,6 +236,9 @@ class Fade:
 
     value: float = 0.0
     at: float = 0.0
+    # How long the hold behind this fill is, so the fraction can be carried
+    # forward between readings. The length the picker asks padmap for.
+    hold: float = PAIR_HOLD
 
     def saw(self, value: float, now: float) -> None:
         """A reading from the daemon. Only a fresh one restarts the clock."""
@@ -238,10 +251,13 @@ class Fade:
             self.at = now
 
     def now(self, now: float) -> float:
-        """What to draw: nothing, once the readings stop coming."""
+        """What to draw: nothing once the readings stop, and in between them
+        the last reading carried forward at the hold's own rate."""
         if self.value <= 0 or now - self.at > PROGRESS_STALE:
             return 0.0
-        return self.value
+        if self.hold <= 0:
+            return self.value
+        return min(1.0, self.value + (now - self.at) / self.hold)
 
 
 def seats_from(players: list | None) -> tuple[Seat, ...]:

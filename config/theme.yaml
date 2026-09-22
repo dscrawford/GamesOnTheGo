@@ -67,11 +67,12 @@ shelf:
   list_fraction: 0.38
 
 # Seconds, everywhere.
-# Wait for the panel before showing a frame. Off by default: it is smoother
-# and cheaper where it works, and a refusal from the driver means no window at
-# all, so it is asked for rather than assumed. `GOTG_UI_FPS=1` prints what SDL
-# actually gave us.
-vsync: false
+# Wait for the panel before showing a frame. On: a reveal filling in and a
+# stick dot moving are watched closely, and frames drawn between refreshes are
+# a hold that steps rather than moves. A driver that cannot do it refuses
+# `set_mode` outright, so both windows fall back to a plain one and say so in
+# the trace. `GOTG_UI_FPS=1` prints what SDL actually gave us.
+vsync: true
 
 timeouts:
   # A unix socket either answers at once or is not there; this is only so a
