@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import math
 import os
+import sys
 import time
 
 import pygame
 
-from . import around, config, devices, filters, keys, pads, prepare, trace
+from . import around, config, devices, filters, keys, meter, pads, prepare, trace
 from .art import ArtStore
 from .assign import KeyHold, Session, Watch, attend
 from .browser import SHELF, Browser
@@ -679,8 +680,35 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # display scales it, so a 1280x800 panel and a television at 1080p get
     # the same grid rather than one with different margins.
     flags = (pygame.FULLSCREEN | pygame.SCALED) if config.fullscreen() else 0
-    screen = pygame.display.set_mode(WINDOW, flags)
+    # vsync, when the config asks for it. Off by default because it is a trade
+    # rather than a win: SDL blocks in `flip` until the panel is ready, which
+    # is smoother and cheaper than drawing frames nobody sees, and on a driver
+    # that cannot do it `set_mode` refuses outright -- hence the fallback.
+    screen = None
+    if config.get("theme.vsync", False):
+        try:
+            screen = pygame.display.set_mode(WINDOW, flags, vsync=1)
+        except pygame.error as error:
+            trace.say("no-vsync", why=str(error))
+    if screen is None:
+        screen = pygame.display.set_mode(WINDOW, flags)
     clock = pygame.time.Clock()
+
+    # What SDL actually got, said once. A 1280x800 surface being resampled to
+    # a 4K panel every frame is tens of milliseconds that no amount of
+    # drawing less will recover, and it is invisible from in here without
+    # asking: driver, the size drawn, the size shown, and the refresh rate.
+    shown_on = {
+        "driver": pygame.display.get_driver(),
+        "drawing": list(screen.get_size()),
+        "desktop": [list(size) for size in pygame.display.get_desktop_sizes()],
+        "scaled": bool(flags & pygame.SCALED),
+        "refresh": pygame.display.get_current_refresh_rate(),
+        "vsync": bool(config.get("theme.vsync", False)),
+    }
+    trace.say("display", **shown_on)
+    if meter.wanted():
+        print(f"gotg-ui: display {shown_on}", file=sys.stderr)
     # Held open for as long as the picker runs: a pad that goes out of scope is
     # closed by SDL, and a closed one stops producing events. Opened through
     # the controller API, which is what makes "the right bumper" mean the same
@@ -690,6 +718,12 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # Controller's lizard mode, a Bluetooth Xbox pad's extra collections --
     # held so the compositor never sees them. The joystick rule cannot reach
     # those: to SDL a lizard-mode d-pad *is* the arrow keys. See hush.py.
+    # Where a frame's time goes. Silent unless GOTG_UI_FPS=1 or a trace is
+    # running: "it feels slow" is two different problems -- this program
+    # drawing, and SDL presenting what it drew -- and they are fixed in
+    # different places. See meter.py.
+    fps = meter.Meter()
+
     hush = Hush()
     hush.refresh()
 
@@ -1317,6 +1351,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 trace.say("sent", **keyboard)
                 padmap.send(keyboard)
 
+            painting = time.perf_counter()
             # The full-screen views draw into the band below the strip rather
             # than under it: each starts its heading a sixteenth of the way
             # down, which on a 800-pixel screen is where the strip ends. None
@@ -1388,10 +1423,22 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 progress=seating.filling(time.monotonic()) or space.progress(time.monotonic()),
                 joining="keyboard" if space.since is not None else None,
             )
+            drawn = time.perf_counter()
             pygame.display.flip()
+            shown = time.perf_counter()
             # The loader only mirrors streamed text; 30fps halves the redundant
             # re-render of a mostly-unchanged tail across a minutes-long build.
             clock.tick(30 if preparer is not None else 60)
+            ticked = time.perf_counter()
+            said = fps.frame(drawn - painting, shown - drawn, ticked - shown, ticked)
+            if said is not None:
+                trace.say("frame", **said)
+                if meter.wanted():
+                    print(
+                        "gotg-ui: {fps} fps   draw {draw_ms} ms   present {present_ms} ms   "
+                        "idle {idle_ms} ms   worst {worst_ms} ms".format(**said),
+                        file=sys.stderr,
+                    )
 
     finally:
         # However the loop ends — quit, exec handoff, Ctrl-C, a crash — the

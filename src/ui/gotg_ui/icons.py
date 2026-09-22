@@ -18,6 +18,14 @@ import pathlib
 
 from . import config
 
+# Read once. `config` caches the file, but rebuilding these lists out of it
+# cost eighty-odd list comprehensions a frame -- every icon on the strip asks
+# for them, sixty times a second, to answer a question whose answer cannot
+# change while the program runs.
+_rules_cache: list[tuple[str, str]] | None = None
+_ids_cache: list[tuple[str, str]] | None = None
+_manifest: dict | None = None
+
 
 def _rules() -> list[tuple[str, str]]:
     """The substring table, in the order it is written in the config.
@@ -26,11 +34,14 @@ def _rules() -> list[tuple[str, str]]:
     whole of it -- "steam virtual" has to be tried before "steam" -- and YAML
     mappings are not something to rely on the ordering of.
     """
-    out: list[tuple[str, str]] = []
-    for entry in config.get("icons.rules", []) or []:
-        if isinstance(entry, dict):
-            out.extend((str(k).lower(), str(v)) for k, v in entry.items())
-    return out
+    global _rules_cache
+    if _rules_cache is None:
+        out: list[tuple[str, str]] = []
+        for entry in config.get("icons.rules", []) or []:
+            if isinstance(entry, dict):
+                out.extend((str(k).lower(), str(v)) for k, v in entry.items())
+        _rules_cache = out
+    return _rules_cache
 
 
 def _id_rules() -> list[tuple[str, str]]:
@@ -39,11 +50,14 @@ def _id_rules() -> list[tuple[str, str]]:
     Exact matches, not substrings: an id is an identifier, which is the whole
     reason these exist beside the name rules rather than among them.
     """
-    out: list[tuple[str, str]] = []
-    for entry in config.get("icons.ids", []) or []:
-        if isinstance(entry, dict):
-            out.extend((str(k).lower().strip(), str(v)) for k, v in entry.items())
-    return out
+    global _ids_cache
+    if _ids_cache is None:
+        out: list[tuple[str, str]] = []
+        for entry in config.get("icons.ids", []) or []:
+            if isinstance(entry, dict):
+                out.extend((str(k).lower().strip(), str(v)) for k, v in entry.items())
+        _ids_cache = out
+    return _ids_cache
 
 
 def _fallback() -> str:
@@ -133,9 +147,17 @@ def icon_image(pad_name: str | None, ids: str | None = None) -> pathlib.Path | N
     build in -- and the strip then draws what it drew before.
     """
     directory = built_dir()
-    try:
-        manifest = json.loads((directory / "icons.json").read_text())
-    except (OSError, ValueError):
+    global _manifest
+    if _manifest is None:
+        # Once: the built assets are in the store and do not change under a
+        # running picker, and this was a file read and a JSON parse per icon
+        # per frame.
+        try:
+            _manifest = json.loads((directory / "icons.json").read_text())
+        except (OSError, ValueError):
+            _manifest = {}
+    manifest = _manifest
+    if not manifest:
         return None
     files = manifest.get("icons", {})
     for name in (icon_name(pad_name, ids), _fallback(), FALLBACK):
