@@ -449,7 +449,7 @@ class GoHold:
     second's quiet is a fresh one. The clock is passed in.
     """
 
-    seconds: float = 1.0
+    seconds: float = 3.0
     opened: float = 0.0
     held_at_open: bool = False
     armed: bool = False

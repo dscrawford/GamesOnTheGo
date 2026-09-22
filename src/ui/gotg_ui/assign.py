@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
-from . import trace
+from . import config, trace
 
 
 @dataclass(frozen=True)
@@ -314,10 +314,10 @@ def attend(padmap, seating: Session, watch: Watch) -> dict | None:
     return command
 
 
-# How long the space bar is held to take a seat with the keyboard. Longer
-# than padmap's quarter second on a pad: a tap on space opens the game menu,
+# How long the space bar is held to take a seat with the keyboard. The same
+# three seconds as every other hold here -- a tap on space opens the game menu,
 # and the two must not be one motion apart.
-KEYBOARD_HOLD = 0.6
+KEYBOARD_HOLD = float(config.get("theme.timeouts.keyboard_hold", 3.0))
 
 
 @dataclass
