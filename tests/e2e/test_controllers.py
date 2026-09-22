@@ -923,7 +923,7 @@ def test_the_door_ignores_a_button_that_is_down_when_it_opens(daemon, sdl):
     """A real clone that already shows A pressed when the door opens -- as a
     Steam Controller's does, since padmap forwards its state -- must count
     for nothing until it comes up. Driven in-process, event by event."""
-    from gotg_ui.seat import Door
+    from gotg_ui.seat import PAUSE, Door
 
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
@@ -949,17 +949,29 @@ def test_the_door_ignores_a_button_that_is_down_when_it_opens(daemon, sdl):
             now = time.monotonic()
             for event in sdl.event.get():
                 door.handle(event, now)
+            door.tick(now)
             assert not door.done(now), "the door opened on a hold that was never let go"
             time.sleep(0.02)
 
+        # Let go, and wait out the pause between pairing and readying up --
+        # the same wait a person makes when the screen tells them to.
         pad.up(BTN_SOUTH)
-        time.sleep(0.3)
+        end = time.monotonic() + PAUSE + 0.5
+        while time.monotonic() < end and not door.settled(time.monotonic()):
+            now = time.monotonic()
+            for event in sdl.event.get():
+                door.handle(event, now)
+            door.tick(now)
+            time.sleep(0.02)
+        assert door.settled(time.monotonic()), "the pause never ended"
+
         pad.down(BTN_SOUTH)
         opened = time.monotonic()
         while time.monotonic() < opened + 3.0 and not door.done(time.monotonic()):
             now = time.monotonic()
             for event in sdl.event.get():
                 door.handle(event, now)
+            door.tick(now)
             time.sleep(0.02)
         pad.up(BTN_SOUTH)
         took = time.monotonic() - opened
@@ -1502,12 +1514,18 @@ def _door(sdl, sticks, tmp_path, monkeypatch, seats_named: dict[int, str]):
 
 
 def _pump(sdl, door, seconds: float = 0.25) -> None:
-    """Hand the door every event SDL has, for this long."""
+    """Hand the door every event SDL has, for this long.
+
+    `tick` as well as `handle`, because that is what the gate's own loop does
+    and the door answers differently without it: the pause between pairing and
+    readying up is measured against what the pads report, not against events.
+    """
     end = time.monotonic() + seconds
     while time.monotonic() < end:
         now = time.monotonic()
         for event in sdl.event.get():
             door.handle(event, now)
+        door.tick(now)
         time.sleep(0.01)
 
 
@@ -1775,4 +1793,70 @@ def test_a_hold_whose_release_was_missed_does_not_start_the_game(daemon, sdl):
             door.tick(now)
             assert not door.done(now), "a hold nobody is holding started the game"
             time.sleep(0.02)
+        picker.close()
+
+
+def test_the_hold_that_pairs_a_controller_cannot_also_start_the_game(daemon, sdl):
+    """Pair, pause, ready -- and the pause is not optional.
+
+    padmap claims a seat after a quarter second, and a thumb does not come off
+    a button that fast. The same press went on into the go hold, so the game
+    started while somebody was still reading the screen they had just reached.
+    Nothing counts as a go until every pad has been quiet for the pause, and
+    this holds one button from before the door exists until well past the go
+    hold to prove it.
+    """
+    from gotg_ui.seat import PAUSE, Door
+
+    assert PAUSE >= 1.0, f"the shipped pause is {PAUSE}s"
+
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+
+        # The pairing hold, still down when the door opens -- which is what a
+        # person does: hold A until the screen says they are in.
+        pad.down(BTN_SOUTH)
+        assert picker.until(lambda p: p.seated(1)), "holding a button seated nobody"
+        picker.run(0.5)
+
+        door = Door(picker.sticks, time.monotonic(), seconds=1.0)
+        end = time.monotonic() + 1.0 + PAUSE + 1.5
+        while time.monotonic() < end:
+            now = time.monotonic()
+            for event in sdl.event.get():
+                door.handle(event, now)
+            door.tick(now)
+            assert not door.done(now), "the hold that paired the pad also started the game"
+            # And while the clone still reports that button down, the pause
+            # has not even begun. (A clone published *after* a press began
+            # cannot report it: padmap forwards what happens next. A Steam
+            # Controller does forward its state, which is the case
+            # `test_the_door_ignores_a_button_that_is_down_when_it_opens`
+            # covers with a real held button.)
+            if picker.sticks.any_button_down():
+                assert not door.settled(now), "the pause ended with a button still down"
+            time.sleep(0.02)
+
+        pad.up(BTN_SOUTH)
+        end = time.monotonic() + PAUSE + 0.5
+        while time.monotonic() < end and not door.settled(time.monotonic()):
+            now = time.monotonic()
+            for event in sdl.event.get():
+                door.handle(event, now)
+            door.tick(now)
+            time.sleep(0.02)
+        assert door.settled(time.monotonic()), f"the pause never ended after {PAUSE}s of quiet"
+
+        # And now a fresh hold is the go.
+        pad.down(BTN_SOUTH)
+        end = time.monotonic() + 3.0
+        while time.monotonic() < end and not door.done(time.monotonic()):
+            now = time.monotonic()
+            for event in sdl.event.get():
+                door.handle(event, now)
+            door.tick(now)
+            time.sleep(0.02)
+        pad.up(BTN_SOUTH)
+        assert door.done(time.monotonic()), "a fresh hold after the pause did not start the game"
         picker.close()

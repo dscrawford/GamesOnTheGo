@@ -88,6 +88,14 @@ GO_HOLD = float(os.environ.get("GOTG_SEAT_GO_HOLD") or config.get("theme.timeout
 # four separate answers rather than four lights left on.
 PRESS_SHOWN = 0.45
 
+# The pause between pairing and being able to start. The hold that claims a
+# seat is padmap's quarter second, and a thumb does not come off a button that
+# fast: the same press ran straight into the go hold, so the game started
+# while somebody was still looking at the screen they had just reached. Now
+# there are three moments and the middle one is doing nothing -- pair, let go,
+# ready -- and nothing counts as a go until every pad has been quiet this long.
+PAUSE = float(os.environ.get("GOTG_SEAT_PAUSE") or config.get("theme.timeouts.seat_pause", 1.0))
+
 # The hold on Y that walks the buttons again. A tap was what it was, and a
 # thumb that brushed Y reaching for A landed in the wizard -- so it is a hold,
 # and the same length as the one that starts the game.
@@ -248,6 +256,8 @@ def run(platform: str, title: str) -> int:
     # let go rather than sending a zero, so this is what makes the drawing
     # empty again -- see gate.Fade.
     fade = Fade()
+    # The diagram, once, shared with the door: it is the same screen.
+    cache: dict = {}
 
     def stop_listening() -> None:
         """Seating closed, for the length of the game.
@@ -294,7 +304,18 @@ def run(platform: str, title: str) -> int:
                 if command is not None:
                     pads.send(command)
 
-                draw(screen, font_at, gate, title, diagram, fade.now(time.monotonic()))
+                if gate.state in (CHECKING, SEATING, READY):
+                    # The same screen the door draws, from the first frame:
+                    # this game's controller, and the seats filling in under
+                    # it. What was here before was a sentence in the middle of
+                    # an empty window asking the same question.
+                    _draw_go(
+                        screen, font_at, gate, title, cache,
+                        joining=fade.now(time.monotonic()),
+                        settled=False,
+                    )
+                else:
+                    draw(screen, font_at, gate, title, diagram, fade.now(time.monotonic()))
                 pygame.display.flip()
                 clock.tick(60)
             if not (gate.state == READY and gate.seated):
@@ -303,7 +324,7 @@ def run(platform: str, title: str) -> int:
                 break
             # The door: the bindings on the pad, a press ringed as it happens, a
             # tap of Y to walk the buttons again, and the second that starts.
-            verdict, gate = _wait_for_go(screen, font_at, clock, pads, gate, title)
+            verdict, gate = _wait_for_go(screen, font_at, clock, pads, gate, title, cache)
             if verdict == "rebind":
                 gate, command = rebind(gate)
                 if command is not None:
@@ -369,6 +390,12 @@ class Door:
         self.lit_by: dict[int, set[str]] = {}
         # When Y went down, for the hold that rebinds.
         self.y_since: float | None = None
+        # Since when every pad has had nothing down. None means something is
+        # being held right now -- the claim, most likely -- and until this has
+        # stood for PAUSE seconds no press is a go. A door that opens onto
+        # pads with nothing held starts its pause at once; one that opens onto
+        # the button that paired somebody waits for it to come up.
+        self.quiet_since: float | None = None if self.hold.held_at_open else now
         # Whose hold is on the clock, and when each seat was last heard from.
         # The go ring used to be drawn in player one's colour at the corner of
         # the screen whoever was holding, which told the second player nothing
@@ -396,7 +423,7 @@ class Door:
             return True
         elif sdl_pads.button(event) is not None:
             pressed = sdl_pads.button(event)
-            if pressed in self.GO:
+            if pressed in self.GO and self.settled(now):
                 self.hold.pressed(now)
                 self.holder = sdl_pads.player(event) or self.holder
             # Y, held, is "walk the buttons again". Tapped it was too easy to
@@ -477,6 +504,22 @@ class Door:
         """One element, as the drawing's label for it."""
         return self.names.get(element, element)
 
+    def settled(self, now: float) -> bool:
+        """Whether the pause is over and a press may start the game.
+
+        Every pad quiet for PAUSE seconds. The claim hold is padmap's quarter
+        second and a thumb stays down longer than that, so without this the
+        press that paired a controller was still down when the door opened and
+        went on to start the game.
+        """
+        return self.quiet_since is not None and now - self.quiet_since >= PAUSE
+
+    def pausing(self, now: float) -> float:
+        """How far through that pause, 0 to 1, for the screen to say so."""
+        if self.quiet_since is None:
+            return 0.0
+        return min(1.0, (now - self.quiet_since) / PAUSE)
+
     def tick(self, now: float) -> None:
         """The holds, against what is actually down right now.
 
@@ -489,7 +532,10 @@ class Door:
         nothing counting.
         """
         if self.sticks.any_button_down():
+            self.quiet_since = None
             return
+        if self.quiet_since is None:
+            self.quiet_since = now
         if self.hold.since is not None:
             self.hold.released(now)
         self.y_since = None
@@ -518,7 +564,9 @@ class Door:
         return {player for player, when in self.pressing.items() if now - when <= window}
 
 
-def _wait_for_go(screen, font_at, clock, pads: Padmap, gate: Gate, title: str) -> tuple[str, Gate]:
+def _wait_for_go(
+    screen, font_at, clock, pads: Padmap, gate: Gate, title: str, cache: dict | None = None
+) -> tuple[str, Gate]:
     """Seated and mapped; the game starts on a three-second hold of A.
 
     padmap is polled here, which it was not: a second player holding a button
@@ -545,11 +593,13 @@ def _wait_for_go(screen, font_at, clock, pads: Padmap, gate: Gate, title: str) -
         buttons_by=by_seat,
         names=pad_controls(console_for(gate.platform)),
     )
-    cache: dict = {}
+    fade = Fade()
+    cache = cache if cache is not None else {}
     while True:
         now = time.monotonic()
         for message in pads.poll():
             gate = apply(gate, message)
+            fade.saw(gate.progress, now)
         if not pads.connected:
             _said("padmap went away at the door; starting")
             return "go", gate
@@ -566,11 +616,32 @@ def _wait_for_go(screen, font_at, clock, pads: Padmap, gate: Gate, title: str) -
         if door.done(now):
             return "go", gate
         _draw_go(
-            screen, font_at, gate, title, door.progress(now), door.lit_by, cache,
-            holder=door.holder, heard=door.heard(now),
+            screen, font_at, gate, title, cache,
+            fraction=door.progress(now),
+            pressing=door.lit_by,
+            holder=door.holder,
+            heard=door.heard(now),
+            joining=fade.now(now),
+            settled=door.settled(now),
         )
         pygame.display.flip()
         clock.tick(60)
+
+
+def _footer(gate: Gate, settled: bool) -> str:
+    """The one line under the drawing: what to do next, and only that.
+
+    Three moments, and each says its own: nobody paired yet, somebody paired
+    and still holding the button that paired them, and everybody ready.
+    """
+    if not gate.seats:
+        return "hold a button on a controller to join   ·   Esc play without a controller"
+    if not settled:
+        return "let go of the button   ·   then hold A for three seconds to start"
+    return (
+        "hold A for three seconds to start   ·   hold Y to change these   ·   "
+        "another player: hold a button   ·   Enter or Esc start now"
+    )
 
 
 def _draw_go(
@@ -578,47 +649,54 @@ def _draw_go(
     font_at,
     gate: Gate,
     title: str,
-    fraction: float,
-    pressing: dict[int, set[str]],
     cache: dict,
+    fraction: float = 0.0,
+    pressing: dict[int, set[str]] | None = None,
     holder: int | None = None,
     heard: set[int] | None = None,
+    joining: float = 0.0,
+    settled: bool = True,
 ) -> None:
-    """The door: what every button does on this pad, the one being pressed
-    ringed, and the seats along the bottom.
+    """The gate's one screen: this game's controller, and who is on it.
 
-    The hold is drawn around the badge of whoever is holding, not in the
-    corner: the corner drawing was player one's colour whoever was pressing,
-    which told the second player their pad was doing nothing.
+    There used to be a screen before this one -- a sentence in the middle of
+    an empty window asking somebody to hold a button -- and then this. They
+    were the same question twice. The pad for the console being played is up
+    from the first frame, the seats fill in along the bottom as people pair,
+    and the line underneath says which of the three moments this is: nobody
+    paired, somebody paired and still holding, everybody ready.
+
+    A hold is drawn on the badge of whoever is holding, not in the corner: the
+    corner drawing was player one's colour whoever was pressing, which told
+    the second player their pad was doing nothing.
     """
     width, height = screen.get_size()
     try:
         names = ", ".join(seat.name or "pad" for seat in gate.seats)
         draw_diagram(
             screen, assets_dir(), gate.platform, font_at, cache,
-            pressing=pressing,
-            heading=f"{title}  —  {names}",
+            pressing=pressing or {},
+            heading=f"{title}  —  {names}" if names else title,
             keys="",
-            footer=(
-                "hold A for three seconds to start   ·   hold Y to change these   ·   "
-                "another player: hold a button   ·   Enter or Esc start now"
-            ),
+            footer=_footer(gate, settled),
         )
     except Exception as error:  # noqa: BLE001 - a drawing must not start a game
-        # The drawing is a courtesy; the door is not. A missing table or
-        # artwork falls back to the words, and the second still has to be
-        # held -- a traceback here once exited the gate and started the game.
+        # The drawing is a courtesy; the gate is not. A missing table or
+        # artwork falls back to the words, and the hold still has to be held
+        # -- a traceback here once exited the gate and started the game.
         screen.fill(BACKGROUND)
         heading = font_at(34).render(title, True, LABEL_DIM)
         screen.blit(heading, ((width - heading.get_width()) // 2, int(height * 0.10)))
-        prompt = font_at(48).render("hold A for three seconds to start", True, LABEL)
+        prompt = font_at(48).render(_footer(gate, settled).split("   ·   ")[0], True, LABEL)
         screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.40)))
         note = font_at(20).render(f"(no drawing: {error})", True, LABEL_DIM)
         screen.blit(note, ((width - note.get_width()) // 2, int(height * 0.92)))
 
     # Who has control, in the colours the strip and the grid use, so a second
     # player holding a button sees themselves appear rather than wondering.
-    _draw_seats(screen, font_at, gate, int(height * 0.80), fraction, holder, heard or set())
+    _draw_seats(
+        screen, font_at, gate, int(height * 0.80), fraction, holder, heard or set(), joining,
+    )
 
 
 # How much of a settled seat's controller drawing is left. Down from opaque,
@@ -636,6 +714,7 @@ def _draw_seats(
     fraction: float = 0.0,
     holder: int | None = None,
     heard: set[int] | None = None,
+    joining: float = 0.0,
 ) -> None:
     """One controller drawing per seat, left to right, in player colours.
 
@@ -656,7 +735,10 @@ def _draw_seats(
     heard = heard or set()
     height = 44
     step = 96
-    left = (width - step * max(1, gate.seated)) // 2 + step // 2
+    # Room for the one arriving, so the row does not jump sideways the moment
+    # somebody pairs: a seat that is filling in is already taking its place.
+    shown = gate.seated + (1 if joining > 0 else 0)
+    left = (width - step * max(1, shown)) // 2 + step // 2
     for index, seat in enumerate(gate.seats):
         centre = (left + index * step, middle)
         colour = colour_for(seat.player)
@@ -681,6 +763,12 @@ def _draw_seats(
         corner = (centre[0] + height // 2 - 2, centre[1] + height // 3)
         pygame.draw.aacircle(screen, (16, 22, 18), corner, 9)
         draw_tick(screen, corner, 11, SETTLED_GREEN)
+
+    if joining > 0:
+        # The seat being claimed right now, in the colour it is about to be:
+        # padmap's own progress, drawn where that player will sit.
+        centre = (left + gate.seated * step, middle)
+        draw_reveal(screen, centre, None, colour_for(gate.seated + 1), joining, height)
 
 
 def _hold_the_door(title: str, reason: str) -> int:
