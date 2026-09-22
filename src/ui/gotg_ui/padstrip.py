@@ -105,7 +105,10 @@ def strip_status(status: str, seated: int) -> str:
     the long way round and is on a keyboard nobody took to the sofa.
     """
     if seated == 0 and status in ("idle", "ready"):
-        return "hold a button on a controller"
+        # Both ways in, because the keyboard is no longer the way that always
+        # worked: it takes a seat like everything else now (keys.py), and
+        # space is how it asks.
+        return "hold a button on a controller, or space"
     return status_text(status)
 
 
