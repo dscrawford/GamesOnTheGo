@@ -9,6 +9,8 @@ for nothing more, or the check is a toll on every launch rather than a fix
 for the launches that would not have worked.
 """
 
+import pytest
+
 from gotg_ui import gate as gate_mod
 from gotg_ui.gate import (
     CHECKING,
@@ -557,10 +559,13 @@ def test_a_hold_let_go_empties_the_drawing():
     four-fifths of a controller painted on the screen until something else
     happened. The readings stopping is the signal.
     """
-    fade = gate_mod.Fade()
+    fade = gate_mod.Fade(hold=1.5)
     fade.saw(0.4, 10.0)
     assert fade.now(10.0) == 0.4
-    assert fade.now(10.04) == 0.4, "a frame between readings must not blink"
+    # A frame between readings must not blink -- it carries on at the hold's
+    # own rate, which is what `test_the_fill_keeps_moving_between_readings`
+    # is about.
+    assert 0.4 < fade.now(10.04) < 0.43
     assert fade.now(10.3) == 0.0, "the readings stopped; the drawing did not"
 
     # And a fresh hold fills again from where the daemon says, not from where
@@ -572,11 +577,11 @@ def test_a_hold_let_go_empties_the_drawing():
 def test_a_repeated_reading_is_still_the_daemon_talking():
     # padmap repeats the same fraction while a thumb sits still. That is a
     # live hold, not a stale one.
-    fade = gate_mod.Fade()
+    fade = gate_mod.Fade(hold=1.5)
     fade.saw(0.5, 10.0)
     fade.saw(0.5, 10.04)
     fade.saw(0.5, 10.08)
-    assert fade.now(10.10) == 0.5
+    assert fade.now(10.10) == pytest.approx(0.5 + 0.02 / 1.5, abs=1e-6)
     assert fade.now(10.5) == 0.0
 
 
@@ -605,3 +610,36 @@ def test_seating_asks_for_a_hold_long_enough_to_be_deliberate():
     # would quietly be the thing this exists to avoid.
     assert 0.05 <= PAIR_HOLD <= 10.0, f"padmap would ignore a hold of {PAIR_HOLD}s"
     assert PAIR_HOLD > 0.25, "the point is that it is longer than padmap's default"
+
+
+def test_the_fill_keeps_moving_between_readings():
+    """padmap sends a reading every 20 ms and the screen draws every 16.
+
+    A fill that only moved when a reading arrived stepped, and a second and a
+    half of hold is eighty steps to watch. Between readings it carries on at
+    the rate the hold implies.
+    """
+    fade = gate_mod.Fade(hold=1.5)
+    fade.saw(0.30, 10.0)
+    assert fade.now(10.0) == 0.30
+    # Half a frame later it has moved, by the fraction of the hold that has
+    # passed and not by a guess.
+    assert fade.now(10.008) == pytest.approx(0.30 + 0.008 / 1.5, abs=1e-6)
+    # And the next reading is the authority again, even if it is behind.
+    fade.saw(0.31, 10.02)
+    assert fade.now(10.02) == 0.31
+
+
+def test_the_fill_cannot_run_past_full_or_past_the_readings():
+    fade = gate_mod.Fade(hold=1.5)
+    fade.saw(0.99, 10.0)
+    assert fade.now(10.04) == 1.0, "a fill carried forward stops at full"
+    # The readings stopping is still the end of it: a hold let go empties the
+    # drawing rather than coasting to the end on its own.
+    assert fade.now(10.5) == 0.0
+
+
+def test_a_fill_with_no_hold_length_does_not_move_on_its_own():
+    fade = gate_mod.Fade(hold=0.0)
+    fade.saw(0.4, 10.0)
+    assert fade.now(10.02) == 0.4

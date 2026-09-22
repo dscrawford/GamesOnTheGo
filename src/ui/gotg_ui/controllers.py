@@ -84,6 +84,8 @@ class Diagram:
         self.anchors: dict[str, tuple[float, float]] = {k: tuple(v) for k, v in entry["anchors"].items()}
         self._images = {int(d): assets / f for d, f in entry["images"].items()}
         self._cache: dict[int, pygame.Surface] = {}
+        # The last scale, kept: the window does not resize between frames.
+        self._fitted: tuple[tuple[int, int], pygame.Surface] | None = None
 
     def surface(self, width: int) -> pygame.Surface:
         """The pad at `width` pixels, from the smallest tier big enough.
@@ -100,7 +102,13 @@ class Diagram:
         height = round(width * self.size[1] / self.size[0])
         if source.get_size() == (width, height):
             return source
-        return pygame.transform.smoothscale(source, (width, height))
+        # Kept, because the window does not resize between frames and this was
+        # a full smoothscale of a controller drawing sixty times a second --
+        # the gate's own screen, which is where the reveal and the stick dots
+        # were said to lag.
+        if self._fitted is None or self._fitted[0] != (want, width):
+            self._fitted = ((want, width), pygame.transform.smoothscale(source, (width, height)))
+        return self._fitted[1]
 
 
 def diagram_for(assets: pathlib.Path, name: str, cache: dict) -> Diagram | None:
@@ -254,7 +262,7 @@ def draw(
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
 
-    title = font_at(46).render(heading if heading is not None else f"Controller — {platform}", True, TEXT)
+    title = words(font_at(46), heading if heading is not None else f"Controller — {platform}", TEXT)
     screen.blit(title, ((width - title.get_width()) // 2, int(height * 0.045)))
 
     shown = resolve(platform)
@@ -351,7 +359,7 @@ def draw(
             pygame.draw.aalines(screen, colour, False, [(int(x), int(y)) for x, y in item.points], 2)
         pygame.draw.aacircle(screen, colour if lit else DOT, (int(item.points[0][0]), int(item.points[0][1])), 4)
 
-        text = label_font.render(item.anchor.label, True, TEXT if lit else TEXT_DIM)
+        text = words(label_font, item.anchor.label, TEXT if lit else TEXT_DIM)
         x = item.x + 8 if item.align == "left" else item.x - text.get_width() - 8
         screen.blit(text, (int(x), int(item.y)))
 
@@ -379,15 +387,13 @@ def draw(
         f"{console}  ·  {len(anchors)} of {len(bindings)} inputs  ·  "
         f"{seats} player{'s' if seats != 1 else ''}   —   applied to every game on this platform"
     )
-    screen.blit(
-        font_at(24).render(line, True, TEXT_DIM),
-        ((width - font_at(24).size(line)[0]) // 2, int(height * 0.93)),
-    )
+    said = words(font_at(24), line, TEXT_DIM)
+    screen.blit(said, ((width - said.get_width()) // 2, int(height * 0.93)))
 
     # Said, because a cursor that moves is not obviously a cursor that can be
     # moved. Nothing about adding a second input: padmap holds one binding per
     # control, so offering it would be offering something with nowhere to go.
-    hint = font_at(20).render(keys if keys is not None else "d-pad or arrows to move around the pad", True, TEXT_DIM)
+    hint = words(font_at(20), keys if keys is not None else "d-pad or arrows to move around the pad", TEXT_DIM)
     screen.blit(hint, ((width - hint.get_width()) // 2, int(height * 0.055)))
 
     # Said out loud rather than left to be noticed: a diagram that quietly drew
@@ -404,11 +410,8 @@ def draw(
     # they started being drawn properly.
     missing = len(bindings) - len(anchors) - len(sticky)
     if missing:
-        note = f"{missing} more bound, with nowhere on this drawing to point at"
-        screen.blit(
-            font_at(21).render(note, True, LEADER),
-            ((width - font_at(21).size(note)[0]) // 2, int(height * 0.965)),
-        )
+        note = words(font_at(21), f"{missing} more bound, with nowhere on this drawing to point at", LEADER)
+        screen.blit(note, ((width - note.get_width()) // 2, int(height * 0.965)))
 
 
 def _note(screen, font_at, headline: str, detail: str) -> None:
@@ -422,6 +425,24 @@ def _note(screen, font_at, headline: str, detail: str) -> None:
 # Tinted icons, by (file, height, colour). A strip is redrawn every frame and
 # these change only when somebody picks up a different controller.
 _icons: dict[tuple[str, int, tuple[int, int, int]], object] = {}
+
+# Rendered words, by (text, size, colour). The gate draws twenty-odd labels,
+# a heading and a footer, and re-rendered every one of them sixty times a
+# second to say the same thing again. Bounded because a search box types a
+# new string per keystroke and this would otherwise keep every one of them.
+_words: dict[tuple[str, int, tuple[int, int, int]], object] = {}
+_WORDS_KEPT = 400
+
+
+def words(font, text: str, colour) -> object:
+    """`font.render(text, True, colour)`, kept for the next frame."""
+    key = (text, font.get_height(), tuple(colour))
+    found = _words.get(key)
+    if found is None:
+        if len(_words) >= _WORDS_KEPT:
+            _words.clear()
+        found = _words[key] = font.render(text, True, colour)
+    return found
 
 
 def icon_surface(pad_name: str | None, height: int, colour: tuple[int, int, int], ids: str | None = None):

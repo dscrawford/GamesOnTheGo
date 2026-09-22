@@ -33,7 +33,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 import pygame  # noqa: E402 - the line above only works ahead of the import
 
-from . import devices, keys, profiles, trace
+from . import devices, keys, meter, profiles, trace
 from . import pads as sdl_pads
 from .assign import KeyHold
 from .bindings import console_for, pad_controls
@@ -187,6 +187,38 @@ def draw(
     screen.blit(footer, ((width - footer.get_width()) // 2, int(height * 0.92)))
 
 
+def _open(size) -> pygame.Surface:
+    """The window, vsynced where the driver will do it.
+
+    Waiting for the panel is what makes a reveal look like one movement
+    rather than a series of frames, and it costs nothing: the loop was
+    sleeping in its frame cap anyway. A driver that cannot do it refuses
+    `set_mode` outright, so the plain one is the fallback rather than the
+    default. `theme.vsync: false` turns it off.
+    """
+    if config.get("theme.vsync", True):
+        try:
+            return pygame.display.set_mode(size, vsync=1)
+        except pygame.error as error:
+            trace.say("no-vsync", why=str(error))
+    return pygame.display.set_mode(size)
+
+
+def _frame(fps: meter.Meter, painting: float, drawn: float, shown: float, ticked: float) -> None:
+    """One frame's cost, said once a second. The gate is the screen where a
+    reveal and a stick dot are watched closely, so it counts them too."""
+    said = fps.frame(drawn - painting, shown - drawn, ticked - shown, ticked)
+    if said is None:
+        return
+    trace.say("frame", where="gate", **said)
+    if meter.wanted():
+        print(
+            "gotg-seat: {fps} fps   draw {draw_ms} ms   present {present_ms} ms   "
+            "idle {idle_ms} ms   worst {worst_ms} ms".format(**said),
+            file=sys.stderr,
+        )
+
+
 def _said(why: str) -> None:
     """One line on stderr and one in the trace, for every way out of here.
 
@@ -247,7 +279,7 @@ def run(platform: str, title: str) -> int:
 
     pygame.init()
     pygame.display.set_caption("GamesOnTheGo")
-    screen = pygame.display.set_mode(WINDOW)
+    screen = _open(WINDOW)
     clock = pygame.time.Clock()
     fonts: dict[int, pygame.font.Font] = {}
 
@@ -268,6 +300,8 @@ def run(platform: str, title: str) -> int:
     # the keyboard is the compositor's -- so this hold is timed here and the
     # daemon is told the answer, exactly as the picker does it.
     space = KeyHold()
+    # Where a frame's time goes, for the screen a reveal is watched on.
+    fps = meter.Meter()
 
     # A controller is a keyboard too, and the gate never knew.
     #
@@ -360,6 +394,7 @@ def run(platform: str, title: str) -> int:
                     trace.say("sent", **asked)
                     pads.send(asked)
 
+                painting = time.perf_counter()
                 if gate.state in (CHECKING, SEATING, READY):
                     # The same screen the door draws, from the first frame:
                     # this game's controller, and the seats filling in under
@@ -372,8 +407,11 @@ def run(platform: str, title: str) -> int:
                     )
                 else:
                     draw(screen, font_at, gate, title, diagram, fade.now(time.monotonic()))
+                drawn = time.perf_counter()
                 pygame.display.flip()
+                shown = time.perf_counter()
                 clock.tick(60)
+                _frame(fps, painting, drawn, shown, time.perf_counter())
             if not (gate.state == READY and gate.seated):
                 _said(f"no door: {gate.state}, {gate.seated} seated")
                 break
@@ -707,6 +745,7 @@ def _wait_for_go(
     )
     fade = Fade()
     space = KeyHold()
+    fps = meter.Meter()
     cache = cache if cache is not None else {}
     while True:
         now = time.monotonic()
@@ -748,6 +787,7 @@ def _wait_for_go(
             return "rebind", gate
         if door.done(now):
             return "go", gate
+        painting = time.perf_counter()
         _draw_go(
             screen, font_at, gate, title, cache,
             fraction=door.progress(now),
@@ -758,8 +798,11 @@ def _wait_for_go(
             joining=fade.now(now),
             settled=door.settled(now),
         )
+        drawn = time.perf_counter()
         pygame.display.flip()
+        shown = time.perf_counter()
         clock.tick(60)
+        _frame(fps, painting, drawn, shown, time.perf_counter())
 
 
 def _footer(gate: Gate, settled: bool) -> str:

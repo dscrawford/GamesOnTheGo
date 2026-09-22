@@ -685,7 +685,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # is smoother and cheaper than drawing frames nobody sees, and on a driver
     # that cannot do it `set_mode` refuses outright -- hence the fallback.
     screen = None
-    if config.get("theme.vsync", False):
+    if config.get("theme.vsync", True):
         try:
             screen = pygame.display.set_mode(WINDOW, flags, vsync=1)
         except pygame.error as error:
@@ -704,7 +704,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
         "desktop": [list(size) for size in pygame.display.get_desktop_sizes()],
         "scaled": bool(flags & pygame.SCALED),
         "refresh": pygame.display.get_current_refresh_rate(),
-        "vsync": bool(config.get("theme.vsync", False)),
+        "vsync": bool(config.get("theme.vsync", True)),
     }
     trace.say("display", **shown_on)
     if meter.wanted():
