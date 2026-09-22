@@ -8,6 +8,7 @@ event from the daemon. These pin what a given sequence leaves on screen.
 from __future__ import annotations
 
 from gotg_ui.assign import Assignment, KeyHold, Session, Watch, apply, attend
+from gotg_ui.gate import PAIR_HOLD
 
 
 def test_nothing_yet_says_how_to_start():
@@ -113,7 +114,7 @@ def test_the_session_closes_itself_when_padmap_accepts():
 
 def test_it_asks_padmap_to_listen_as_soon_as_there_is_a_connection():
     watch = Watch()
-    assert watch.wanted(True, "idle", 0) == {"cmd": "seating", "open": True, "players": 4}
+    assert watch.wanted(True, "idle", 0) == {"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD}
 
 
 def test_it_does_not_ask_again_for_the_same_state():
@@ -274,7 +275,7 @@ def test_padmap_is_told_to_listen_for_a_hold_without_being_asked():
     # The requirement: controllers pair from wherever the picker is, so the
     # command goes out on its own rather than waiting for a screen.
     command = attend(FakeDaemon(), Session(), Watch())
-    assert command == {"cmd": "seating", "open": True, "players": 4}
+    assert command == {"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD}
 
 
 def test_the_picker_never_opens_a_session_by_itself():

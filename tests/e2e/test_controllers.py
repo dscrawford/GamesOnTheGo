@@ -21,7 +21,6 @@ from __future__ import annotations
 import struct
 import time
 
-import pytest
 from fakepad import ABS_X, BTN_SOUTH, BTN_START, FakePad, event_node, kernel_names
 
 from gotg_ui import pads
@@ -32,6 +31,15 @@ from gotg_ui.padstrip import next_seat, seats, strip_status
 # Long enough for a daemon scan (1s), a hold (0.25s) and a republish, with the
 # slack a loaded machine needs. Tests wait for a condition, not for this.
 PATIENCE = 12.0
+
+# Long enough to claim a seat, whatever the picker asks padmap for. It used to
+# be a flat 0.7 s, which was comfortably past padmap's own quarter second --
+# and then the picker started asking for a second and a half, and every test
+# that seated a pad stopped seating one. A hold is as long as the thing being
+# tested says it is.
+from gotg_ui.gate import PAIR_HOLD  # noqa: E402 - beside the constant it feeds
+
+PAIR = PAIR_HOLD + 0.6
 
 
 class Picker:
@@ -113,7 +121,7 @@ class Picker:
             # that slept through it left the picker with nothing to draw and
             # the test with nothing to prove.
             pad.down(BTN_SOUTH)
-            self.run(0.8)
+            self.run(PAIR)
             pad.up(BTN_SOUTH)
             if self.until(lambda p: p.seated(player), seconds=4.0):
                 return True
@@ -188,7 +196,7 @@ def test_and_that_controller_then_drives_the_picker(daemon, sdl):
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1)), "holding a button seated nobody"
         picker.run(1.0)          # let SDL announce the clone; the loop opens it
 
@@ -228,7 +236,7 @@ def test_the_picker_never_opens_a_session_of_its_own(daemon, sdl):
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         picker.until(lambda p: p.seated(1))
         picker.run(0.5)
 
@@ -312,7 +320,7 @@ def test_pairing_happens_on_the_menu_and_shows_in_the_top_bar(daemon, sdl):
         assert seats(picker.players) == []
         assert strip_status(picker.padmap.status_word, 0) == "hold a button on a controller"
 
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1)), "holding a button seated nobody"
         picker.run(0.3)
 
@@ -335,13 +343,13 @@ def test_a_controller_can_still_join_after_the_picker_has_left_for_a_game(daemon
     with FakePad("E2E Xbox Pad") as first, FakePad("E2E Other Pad", 0x2AAA, 0x5BBB, 1) as second:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
-        first.hold(BTN_SOUTH, 0.7)
+        first.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1))
         picker.close()          # the picker execs into the game
         daemon.close()          # and nothing else is listening
         time.sleep(0.5)
 
-        second.hold(BTN_SOUTH, 0.7)
+        second.hold(BTN_SOUTH, PAIR)
         time.sleep(2.0)
 
         later = Daemon(daemon.path)
@@ -356,11 +364,6 @@ def test_a_controller_can_still_join_after_the_picker_has_left_for_a_game(daemon
 # --- every session starts unseated ------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="replacing a daemon that has a pad seated fails at this pin; "
-           "see docs/requests/replacing-a-daemon-with-a-seat.md",
-)
 def test_a_new_session_opens_with_nobody_seated_whatever_padmap_remembers(daemon, sdl, monkeypatch):
     """Open the picker: nobody is seated until somebody holds a button.
 
@@ -376,7 +379,7 @@ def test_a_new_session_opens_with_nobody_seated_whatever_padmap_remembers(daemon
     with FakePad("E2E Xbox Pad") as pad:
         earlier = Picker(_socket(daemon), sdl)
         earlier.run(1.0)
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         assert earlier.until(lambda p: p.seated(1))
         earlier.close()
 
@@ -404,7 +407,7 @@ def test_a_new_session_opens_with_nobody_seated_whatever_padmap_remembers(daemon
             )
             # And the seat is still there for the taking: the same pad, held
             # again, is player one again.
-            pad.hold(BTN_SOUTH, 0.7)
+            pad.hold(BTN_SOUTH, PAIR)
             assert picker.until(lambda p: p.seated(1)), "the fresh daemon seated nobody"
         finally:
             fresh_pid = picker.padmap.state.get("pid")
@@ -427,7 +430,7 @@ def test_a_game_launch_begins_with_a_hold_whatever_was_seated(daemon, sdl):
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1))
         picker.close()          # execvp into the game; the gate is next
 
@@ -461,7 +464,9 @@ def test_a_game_launch_begins_with_a_hold_whatever_was_seated(daemon, sdl):
         try:
             step(2.0)
             assert sent and sent[0] == {"cmd": "unseat"}, f"the gate's first word was not unseat: {sent}"
-            assert {"cmd": "seating", "open": True, "players": 4} in sent, f"no hold was listened for: {sent}"
+            assert {"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD} in sent, (
+                f"no hold was listened for: {sent}"
+            )
             assert not any(c.get("cmd") == "begin" for c in sent), "the gate opened a session"
             assert gate.state == SEATING
             assert gate.seated == 0, "the gate is asking for a hold with somebody still seated"
@@ -473,7 +478,7 @@ def test_a_game_launch_begins_with_a_hold_whatever_was_seated(daemon, sdl):
                 step(0.2)
             assert "padmap Player 1" not in kernel_names(), "the old seat's clone is still published"
 
-            pad.hold(BTN_SOUTH, 0.7)
+            pad.hold(BTN_SOUTH, PAIR)
             step(2.0)
             assert gate.seated == 1, "the hold in front of the gate seated nobody"
             assert [s.player for s in gate.seats] == [1]
@@ -608,7 +613,7 @@ def test_a_launch_from_the_grid_meets_the_gate_first_which_forgets_the_seat(daem
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1))
         picker.close()
         daemon.drain(0.5)
@@ -628,7 +633,7 @@ def test_a_launch_from_the_grid_meets_the_gate_first_which_forgets_the_seat(daem
             assert "assigning" not in daemon.states, "the gate opened a session; a pad switched on now could not join"
 
             time.sleep(1.0)                 # the gate's seating command lands
-            pad.hold(BTN_SOUTH, 0.7)
+            pad.hold(BTN_SOUTH, PAIR)
             claimed = daemon.wait_for("claim", seconds=8.0)
             assert claimed is not None and claimed.get("player") == 1, "a hold in front of the gate seated nobody"
             assert seat.poll() is None, "the gate exited before anybody was ready"
@@ -637,11 +642,6 @@ def test_a_launch_from_the_grid_meets_the_gate_first_which_forgets_the_seat(daem
             seat.wait(timeout=5)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="replacing a daemon that has a pad seated fails at this pin; "
-           "see docs/requests/replacing-a-daemon-with-a-seat.md",
-)
 def test_a_launch_from_steam_meets_the_gate_first_on_a_daemon_of_its_own(daemon, sdl):
     """The Steam route: no picker, so the gate starts a fresh daemon following itself,
     and that daemon ends with it."""
@@ -653,7 +653,7 @@ def test_a_launch_from_steam_meets_the_gate_first_on_a_daemon_of_its_own(daemon,
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1))
         picker.close()
         daemon.close()          # nothing of the picker's survives a Steam launch
@@ -692,7 +692,7 @@ def test_a_launch_from_steam_meets_the_gate_first_on_a_daemon_of_its_own(daemon,
                 )
             assert state.get("players") == [], "the Steam route started with yesterday's seat"
             time.sleep(1.0)                 # the gate's seating command lands
-            pad.hold(BTN_SOUTH, 0.7)
+            pad.hold(BTN_SOUTH, PAIR)
             claimed = later.wait_for("claim", seconds=8.0)
             assert claimed is not None and claimed.get("player") == 1, "a hold in front of the gate seated nobody"
             assert "assigning" not in later.states, "the gate opened a session"
@@ -762,7 +762,7 @@ def test_the_keyboard_takes_a_seat_when_asked(daemon, sdl):
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1))
 
         picker.padmap.seat_keyboard()
@@ -841,8 +841,8 @@ def test_the_gate_reaches_ready_with_no_session_and_sends_no_accept(daemon, sdl)
 
         try:
             step(1.5)
-            assert {"cmd": "seating", "open": True, "players": 4} in sent
-            pad.hold(BTN_SOUTH, 0.7)
+            assert {"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD} in sent
+            pad.hold(BTN_SOUTH, PAIR)
             end = time.monotonic() + 30.0
             while time.monotonic() < end and not gate.done:
                 step(0.3)
@@ -874,7 +874,7 @@ def test_the_gate_holds_the_door_until_a_fresh_one_second_hold(daemon, sdl):
             # the one that used to start the game.
             assert daemon.wait_for("state", seconds=8.0) is not None
             time.sleep(1.0)
-            pad.hold(BTN_SOUTH, 0.7)
+            pad.hold(BTN_SOUTH, PAIR)
             assert daemon.wait_for("claim", seconds=8.0) is not None, "a hold in front of the gate seated nobody"
             mapped = False
             end = time.monotonic() + 40.0
@@ -928,7 +928,7 @@ def test_the_door_ignores_a_button_that_is_down_when_it_opens(daemon, sdl):
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1))
         picker.run(1.0)                      # the clone is open in `sticks`
         sticks = picker.sticks
@@ -997,7 +997,7 @@ def test_a_controller_switched_on_while_the_gate_is_up_takes_a_seat(daemon, sdl)
         try:
             assert daemon.wait_for("state", seconds=8.0) is not None
             time.sleep(1.0)
-            first.hold(BTN_SOUTH, 0.7)
+            first.hold(BTN_SOUTH, PAIR)
             claimed = daemon.wait_for("claim", seconds=8.0)
             assert claimed is not None and claimed.get("player") == 1
 
@@ -1006,7 +1006,7 @@ def test_a_controller_switched_on_while_the_gate_is_up_takes_a_seat(daemon, sdl)
                 time.sleep(1.5)                 # padmap's scan finds it
                 claimed = None
                 for _ in range(3):
-                    second.hold(BTN_SOUTH, 0.7)
+                    second.hold(BTN_SOUTH, PAIR)
                     claimed = daemon.wait_for("claim", seconds=4.0)
                     if claimed is not None:
                         break
@@ -1034,7 +1034,7 @@ def test_a_hold_of_y_at_the_door_walks_the_buttons_again(daemon, sdl):
         try:
             assert daemon.wait_for("state", seconds=8.0) is not None
             time.sleep(1.0)
-            pad.hold(BTN_SOUTH, 0.7)
+            pad.hold(BTN_SOUTH, PAIR)
             assert daemon.wait_for("claim", seconds=8.0) is not None
             steps = 0
             mapped = False
@@ -1153,7 +1153,7 @@ def _seat_and_open_clone(daemon, sdl, pad: FakePad):
 
     picker = Picker(_socket(daemon), sdl)
     picker.run(1.0)
-    pad.hold(BTN_SOUTH, 0.7)
+    pad.hold(BTN_SOUTH, PAIR)
     assert picker.until(lambda p: p.seated(1)), "the pad took no seat"
     node = None
     end = time.monotonic() + 8.0
@@ -1243,11 +1243,6 @@ def test_the_stick_loses_nothing_on_the_way_through(daemon, sdl):
             picker.close()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="padmap rescans every tick while seating is open; "
-           "see docs/requests/seating-costs-the-game-its-input.md",
-)
 def test_a_pad_can_join_mid_game_without_costing_the_game_its_input(daemon, sdl):
     """The one GOTG gave up to get the latency back.
 
@@ -1261,7 +1256,7 @@ def test_a_pad_can_join_mid_game_without_costing_the_game_its_input(daemon, sdl)
     with FakePad("PERF Pad") as pad:
         picker, fd = _seat_and_open_clone(daemon, sdl, pad)
         try:
-            picker.padmap.send({"cmd": "seating", "open": True, "players": 4})
+            picker.padmap.send({"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD})
             time.sleep(1.0)
             latencies = _tap_latencies(pad, fd)
             assert len(latencies) > 60, f"only {len(latencies)} presses arrived at all"
@@ -1309,7 +1304,7 @@ def test_a_pad_that_has_been_mapped_is_never_asked_again(daemon, sdl):
         try:
             assert daemon.wait_for("state", seconds=8.0) is not None
             time.sleep(1.0)
-            pad.hold(BTN_SOUTH, 0.7)
+            pad.hold(BTN_SOUTH, PAIR)
             assert daemon.wait_for("claim", seconds=8.0) is not None
             assert _walk_the_wizard(daemon, pad), "the first walk never finished"
             time.sleep(1.5)
@@ -1329,7 +1324,7 @@ def test_a_pad_that_has_been_mapped_is_never_asked_again(daemon, sdl):
             # nobody. A person holds again; so does this.
             seated = False
             for _ in range(4):
-                pad.hold(BTN_SOUTH, 0.7)
+                pad.hold(BTN_SOUTH, PAIR)
                 end = time.monotonic() + 4.0
                 while time.monotonic() < end and not seated:
                     daemon.drain(0.2)
@@ -1358,7 +1353,7 @@ def test_a_stray_press_at_the_door_neither_starts_the_game_nor_rebinds(daemon, s
         try:
             assert daemon.wait_for("state", seconds=8.0) is not None
             time.sleep(1.0)
-            pad.hold(BTN_SOUTH, 0.7)
+            pad.hold(BTN_SOUTH, PAIR)
             assert daemon.wait_for("claim", seconds=8.0) is not None
             assert _walk_the_wizard(daemon, pad), "the walk never finished"
             time.sleep(1.5)
@@ -1393,7 +1388,7 @@ def test_a_second_controller_joins_at_the_door_and_is_asked_for_its_buttons(daem
         try:
             assert daemon.wait_for("state", seconds=8.0) is not None
             time.sleep(1.0)
-            first.hold(BTN_SOUTH, 0.7)
+            first.hold(BTN_SOUTH, PAIR)
             assert daemon.wait_for("claim", seconds=8.0) is not None
             assert _walk_the_wizard(daemon, first), "the first walk never finished"
             time.sleep(1.5)                      # the door is up
@@ -1408,7 +1403,7 @@ def test_a_second_controller_joins_at_the_door_and_is_asked_for_its_buttons(daem
                 # that scan is cheap, one hold will do.
                 claimed = None
                 for _ in range(5):
-                    second.hold(BTN_SOUTH, 1.2)
+                    second.hold(BTN_SOUTH, PAIR)
                     claimed = daemon.wait_for("claim", seconds=4.0)
                     if claimed is not None:
                         break
@@ -1535,7 +1530,7 @@ def test_a_press_lights_the_label_for_that_control(daemon, sdl, tmp_path, monkey
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1)), "the pad took no seat"
         picker.run(0.8)
 
@@ -1560,7 +1555,7 @@ def test_the_stick_lights_the_axis_it_is_pushed_along(daemon, sdl, tmp_path, mon
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1))
         picker.run(0.8)
 
@@ -1585,7 +1580,7 @@ def test_a_held_button_stays_lit_for_as_long_as_it_is_held(daemon, sdl, tmp_path
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1))
         picker.run(0.8)
 
@@ -1646,7 +1641,7 @@ def test_the_door_rebinds_on_a_hold_of_y_and_not_a_tap(daemon, sdl):
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1))
         picker.run(0.8)
 
@@ -1684,7 +1679,7 @@ def test_the_go_is_the_shipped_three_second_hold(daemon, sdl):
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1)), "the pad took no seat"
         picker.run(1.2)                     # the seating hold is long released
 
@@ -1724,7 +1719,7 @@ def test_a_press_lights_its_label_with_no_padmap_profile_at_all(daemon, sdl, tmp
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1)), "the pad took no seat"
         picker.run(0.8)
 
@@ -1761,7 +1756,7 @@ def test_a_hold_whose_release_was_missed_does_not_start_the_game(daemon, sdl):
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1))
         picker.run(1.2)
 
@@ -1932,7 +1927,7 @@ def test_one_input_lights_one_label_even_when_the_profile_disagrees(daemon, sdl,
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
-        pad.hold(BTN_SOUTH, 0.7)
+        pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1)), "the pad took no seat"
         picker.run(0.8)
 
@@ -1959,3 +1954,39 @@ def test_one_input_lights_one_label_even_when_the_profile_disagrees(daemon, sdl,
         assert door.lit_by == {1: {"L"}}, f"BTN_TL lit {door.lit_by}"
         pad.up(0x136)
         picker.close()
+
+
+def test_a_seat_takes_the_hold_the_picker_asked_for(daemon, sdl):
+    """A quarter second was padmap's, and it was too quick.
+
+    Picking a controller up, or resting a thumb on one while reading the
+    screen, claimed a seat nobody meant to claim. padmap now takes the length
+    on the `seating` command (98fd757); this is that asked for and measured
+    through the daemon, because a field a daemon ignores looks exactly like a
+    field that works.
+    """
+    from gotg_ui.gate import PAIR_HOLD
+
+    assert PAIR_HOLD >= 1.0, f"this test is about a deliberate hold, not {PAIR_HOLD}s"
+
+    with FakePad("E2E Xbox Pad") as pad:
+        daemon.send({"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD})
+        daemon.drain(1.0)
+
+        # Well past padmap's own default, and well short of what was asked for.
+        pad.hold(BTN_SOUTH, 0.6)
+        assert daemon.wait_for("claim", seconds=1.5) is None, (
+            "a hold shorter than the one asked for still took a seat"
+        )
+
+        # And the length actually asked for does claim one. Twice, because a
+        # hold can be missed outright while seating rescans every device --
+        # docs/requests/seating-costs-the-game-its-input.md.
+        claimed = None
+        for _ in range(3):
+            pad.hold(BTN_SOUTH, PAIR_HOLD + 1.0)
+            claimed = daemon.wait_for("claim", seconds=3.0)
+            if claimed is not None:
+                break
+        assert claimed is not None, f"a hold of {PAIR_HOLD + 1.0}s took no seat"
+        assert claimed.get("player") == 1

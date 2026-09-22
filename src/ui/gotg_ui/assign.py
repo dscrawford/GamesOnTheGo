@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass, field, replace
 
 from . import config, trace
-from .gate import Fade
+from .gate import PAIR_HOLD, Fade
 
 
 @dataclass(frozen=True)
@@ -307,7 +307,9 @@ class Watch:
         if here == self.asked:
             return None
         self.asked = here
-        return {"cmd": "seating", "open": True, "players": self.slots}
+        # The same length the gate asks for: pairing should not be quicker
+        # from the grid than it is in front of a launch.
+        return {"cmd": "seating", "open": True, "players": self.slots, "hold": PAIR_HOLD}
 
 
 
