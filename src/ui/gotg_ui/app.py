@@ -1367,7 +1367,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 strip_status(padmap.status_word, len(padmap.players))
                 if padmap.connected
                 else (padmap_trouble or status_text(padmap.status_word)),
-                progress=seating.view.progress or space.progress(time.monotonic()),
+                # `filling`, not the last reading: a hold let go is padmap
+                # going quiet, and the strip has to empty on its own.
+                progress=seating.filling(time.monotonic()) or space.progress(time.monotonic()),
                 joining="keyboard" if space.since is not None else None,
             )
             pygame.display.flip()

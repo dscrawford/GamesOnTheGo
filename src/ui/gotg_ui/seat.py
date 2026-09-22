@@ -44,6 +44,7 @@ from .gate import (
     READY,
     SEATING,
     SKIPPED,
+    Fade,
     Gate,
     GoHold,
     apply,
@@ -93,7 +94,15 @@ PRESS_SHOWN = 0.45
 REBIND_HOLD = float(os.environ.get("GOTG_SEAT_REBIND_HOLD") or config.get("theme.timeouts.seat_rebind_hold", 1.0))
 
 
-def draw(screen, font_at, gate: Gate, title: str, diagram: Diagram | None = None) -> None:
+def draw(
+    screen, font_at, gate: Gate, title: str, diagram: Diagram | None = None, progress: float | None = None
+) -> None:
+    """The gate, whatever it is waiting for.
+
+    `progress` is the reveal's fraction as the clock sees it (`gate.Fade`),
+    rather than the last reading padmap sent: a hold let go says nothing, and
+    the drawing has to fall back to nothing by itself.
+    """
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
 
@@ -108,7 +117,8 @@ def draw(screen, font_at, gate: Gate, title: str, diagram: Diagram | None = None
         # the generic pad, dark, filling in as they hold. One, because one
         # controller is what this is waiting for.
         centre = (width // 2, int(height * 0.52))
-        draw_reveal(screen, centre, None, colour_for(1), gate.progress, int(height * 0.22))
+        filling = gate.progress if progress is None else progress
+        draw_reveal(screen, centre, None, colour_for(1), filling, int(height * 0.22))
 
     if gate.state == MAPPING and diagram is not None:
         # The pad, with the button being asked for ringed on it. "press Z" is
@@ -234,6 +244,11 @@ def run(platform: str, title: str) -> int:
         print(f"gotg-seat: no controller drawing: {error}", file=sys.stderr)
         diagram = None
 
+    # The reveal's own clock. padmap stops sending `progress` when a button is
+    # let go rather than sending a zero, so this is what makes the drawing
+    # empty again -- see gate.Fade.
+    fade = Fade()
+
     def stop_listening() -> None:
         """Seating closed, for the length of the game.
 
@@ -268,6 +283,10 @@ def run(platform: str, title: str) -> int:
 
                 for message in pads.poll():
                     gate = apply(gate, message)
+                    # Per message, not per frame: the reveal empties because
+                    # the readings stop, and asking the gate every frame would
+                    # keep answering with the last one for ever.
+                    fade.saw(gate.progress, time.monotonic())
                 if not pads.connected:
                     _said("padmap went away while the gate was up; starting anyway")
                     break
@@ -275,7 +294,7 @@ def run(platform: str, title: str) -> int:
                 if command is not None:
                     pads.send(command)
 
-                draw(screen, font_at, gate, title, diagram)
+                draw(screen, font_at, gate, title, diagram, fade.now(time.monotonic()))
                 pygame.display.flip()
                 clock.tick(60)
             if not (gate.state == READY and gate.seated):

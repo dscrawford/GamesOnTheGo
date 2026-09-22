@@ -9,6 +9,7 @@ for nothing more, or the check is a toll on every launch rather than a fix
 for the launches that would not have worked.
 """
 
+from gotg_ui import gate as gate_mod
 from gotg_ui.gate import (
     CHECKING,
     MAPPING,
@@ -545,3 +546,42 @@ def test_and_a_pad_that_really_is_unmapped_is_still_asked():
 def test_a_claim_carries_padmaps_own_word_for_bound():
     gate = apply(Gate(platform="gamecube"), {"event": "claim", "player": 1, "name": "pad", "configured": True})
     assert gate.seats[0].configured
+
+
+def test_a_hold_let_go_empties_the_drawing():
+    """padmap says nothing when a button is released.
+
+    It sends `progress` about every 20 ms while one is held and no zero at
+    the end, so a hold abandoned four-fifths of the way through left
+    four-fifths of a controller painted on the screen until something else
+    happened. The readings stopping is the signal.
+    """
+    fade = gate_mod.Fade()
+    fade.saw(0.4, 10.0)
+    assert fade.now(10.0) == 0.4
+    assert fade.now(10.04) == 0.4, "a frame between readings must not blink"
+    assert fade.now(10.3) == 0.0, "the readings stopped; the drawing did not"
+
+    # And a fresh hold fills again from where the daemon says, not from where
+    # the last one was abandoned.
+    fade.saw(0.1, 11.0)
+    assert fade.now(11.0) == 0.1
+
+
+def test_a_repeated_reading_is_still_the_daemon_talking():
+    # padmap repeats the same fraction while a thumb sits still. That is a
+    # live hold, not a stale one.
+    fade = gate_mod.Fade()
+    fade.saw(0.5, 10.0)
+    fade.saw(0.5, 10.04)
+    fade.saw(0.5, 10.08)
+    assert fade.now(10.10) == 0.5
+    assert fade.now(10.5) == 0.0
+
+
+def test_a_claim_takes_the_reveal_off_the_screen():
+    # `apply` zeroes progress on a claim, and zero is nothing to draw.
+    fade = gate_mod.Fade()
+    fade.saw(0.9, 10.0)
+    fade.saw(0.0, 10.02)
+    assert fade.now(10.02) == 0.0
