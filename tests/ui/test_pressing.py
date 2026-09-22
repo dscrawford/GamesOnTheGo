@@ -6,7 +6,7 @@ Controller, trimmed. Every value in it was measured by padmap.
 
 from __future__ import annotations
 
-from gotg_ui.pressing import controls_for
+from gotg_ui.pressing import controls_for, controls_on
 
 BUTTONS = {
     "a": {"index": 0, "kind": "button", "value": 0},
@@ -43,3 +43,21 @@ def test_an_axis_is_pressed_past_half_and_in_its_bound_direction():
 def test_a_profile_with_nothing_in_it_names_nothing():
     assert controls_for({}, "button", 0, 1) == []
     assert controls_for(None, "button", 0, 1) == []
+
+
+def test_every_control_an_input_could_be():
+    """`controls_on` is how a dot is taken away again.
+
+    An axis crossing back through the middle is not a press, and the only way
+    to know which dot to remove is to ask what that axis is bound to -- the
+    threshold question `controls_for` answers cannot.
+    """
+    buttons = {
+        "leftstick_left": {"kind": "axis", "index": 0, "value": -1},
+        "leftstick_right": {"kind": "axis", "index": 0, "value": 1},
+        "a": {"kind": "button", "index": 0, "value": 0},
+    }
+    assert controls_on(buttons, "axis", 0) == ["leftstick_left", "leftstick_right"]
+    assert controls_on(buttons, "button", 0) == ["a"]
+    assert controls_on(buttons, "button", 9) == []
+    assert controls_on({}, "axis", 0) == []

@@ -62,6 +62,47 @@ AXIS_DIRECTION = {
 }
 
 
+# padmap's own control ids, where they differ from the names this table uses.
+# padmap spells a stick direction `leftstick_left`; ares' table spells the same
+# thing `leftx-`. Nothing else disagrees -- both sides took their button names
+# from SDL -- but these eight did, and the mismatch is why a press lit nothing:
+# a profile answered `rightstick_up` and every label on the drawing was called
+# `C-Up`.
+PADMAP_ELEMENTS = {
+    "leftstick_left": "leftx-",
+    "leftstick_right": "leftx+",
+    "leftstick_up": "lefty-",
+    "leftstick_down": "lefty+",
+    "rightstick_left": "rightx-",
+    "rightstick_right": "rightx+",
+    "rightstick_up": "righty-",
+    "rightstick_down": "righty+",
+}
+
+
+def pad_controls(console: str | None) -> dict[str, str]:
+    """padmap's control id -> this console's own name for it.
+
+    The bridge between what a profile says somebody pressed (`dpup`) and what
+    the drawing calls it (`Up`), read off the same table that binds them, so
+    the two cannot disagree. Several console inputs can share an element --
+    the stick doubling as the D-pad -- and the first in the table wins, since
+    it is the one the label is for.
+
+    Empty for a console this table has never heard of, which is Dolphin's two:
+    there the drawing is labelled with padmap's own ids already.
+    """
+    table = (ares_table().get(console or "") or {}).get("buttons") or {}
+    out: dict[str, str] = {}
+    for control, value in table.items():
+        for element in value if isinstance(value, list) else [value]:
+            out.setdefault(str(element), control)
+    for padmap_id, element in PADMAP_ELEMENTS.items():
+        if element in out:
+            out.setdefault(padmap_id, out[element])
+    return out
+
+
 def describe(element: str) -> str:
     """One SDL element, in words."""
     if element and element[-1] in "-+":

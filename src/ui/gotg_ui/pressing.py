@@ -17,6 +17,22 @@ HAT_BITS = {1: "up", 2: "right", 4: "down", 8: "left"}
 AXIS_ON = 0.5
 
 
+def controls_on(buttons: dict, kind: str, index: int) -> list[str]:
+    """Every control bound to this input, whatever it currently reads.
+
+    The other half of `controls_for`: that one answers "what is pressed", and
+    this one "what could this input have been". A screen showing what is under
+    each thumb needs both -- an axis back in the middle is not a press, and
+    the only way to know which dot to take away is to know what that axis is
+    bound to.
+    """
+    return sorted(
+        control
+        for control, binding in (buttons or {}).items()
+        if isinstance(binding, dict) and binding.get("kind") == kind and binding.get("index") == index
+    )
+
+
 def controls_for(buttons: dict, kind: str, index: int, value) -> list[str]:
     """The controls this input is bound to, on this profile. Usually one."""
     out = []

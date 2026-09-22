@@ -76,5 +76,10 @@ timeouts:
   padmap_daemon: 10
   # A daemon that is running but silent, before a launch gives up on it.
   first_state: 3.0
+  # The launch gate's two holds: the one that starts the game, and the one on
+  # Y that walks the pad's buttons again. Both a full second -- a tap of Y
+  # reached for on the way to A went back to the wizard by accident.
+  seat_go_hold: 1.0
+  seat_rebind_hold: 1.0
   service: 10
   ready: 3

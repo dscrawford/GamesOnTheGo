@@ -150,6 +150,22 @@ def raw_input(event) -> tuple[str, int, object] | None:
     return None
 
 
+def raw_release(event) -> int | None:
+    """The joystick button index coming back up, on a pad padmap published.
+
+    `released` answers only whether *something* came up, which is all the
+    launch gate's hold needs. A screen showing which controls are under a
+    thumb needs to know which one let go -- two buttons held and one released
+    must take one dot away, not both -- and only the raw event carries the
+    index.
+    """
+    if event.type != pygame.JOYBUTTONUP:
+        return None
+    if not _allowed(event):
+        return None
+    return event.button
+
+
 def direction(event) -> tuple[int, int] | None:
     """Which way this event points, or None.
 
