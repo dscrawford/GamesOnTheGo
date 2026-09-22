@@ -1990,3 +1990,46 @@ def test_a_seat_takes_the_hold_the_picker_asked_for(daemon, sdl):
                 break
         assert claimed is not None, f"a hold of {PAIR_HOLD + 1.0}s took no seat"
         assert claimed.get("player") == 1
+
+
+def test_a_stick_reads_as_a_position_not_as_four_labels(daemon, sdl):
+    """What the ring on the drawing draws.
+
+    Four labels say what a stick is made of and none of them says where it is,
+    so the directions became one ring with a dot in it. The dot is this:
+    player -> stick -> (x, y), taken from SDL's own axis order through a real
+    clone, with a deadzone so a pad that rests a percent off centre does not
+    draw a dot that never sits still.
+    """
+    from gotg_ui.seat import STICK_DEAD, Door
+
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        pad.hold(BTN_SOUTH, PAIR)
+        assert picker.until(lambda p: p.seated(1)), "the pad took no seat"
+        picker.run(0.8)
+
+        door = Door(picker.sticks, time.monotonic(), seconds=1.0)
+        _pump(sdl, door, 0.3)
+        assert door.sticks_by == {}, "a stick nobody has touched is not a reading"
+
+        pad.axis(ABS_X, -32767)
+        _pump(sdl, door, 0.4)
+        where = door.sticks_by.get(1, {}).get("left")
+        assert where is not None, f"the stick moved and nothing read it: {door.sticks_by}"
+        assert where[0] < -0.8, f"pushed hard left, the dot sat at {where}"
+        assert abs(where[1]) <= STICK_DEAD, f"the other axis moved on its own: {where}"
+
+        pad.axis(ABS_X, 32767)
+        _pump(sdl, door, 0.4)
+        assert door.sticks_by[1]["left"][0] > 0.8, f"pushed hard right: {door.sticks_by}"
+
+        # Back to the middle, and it reads as the middle rather than as a few
+        # percent of drift.
+        pad.axis(ABS_X, 0)
+        _pump(sdl, door, 0.4)
+        assert abs(door.sticks_by[1]["left"][0]) <= STICK_DEAD, (
+            f"at rest the dot sat at {door.sticks_by[1]['left']}"
+        )
+        picker.close()

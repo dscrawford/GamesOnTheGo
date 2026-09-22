@@ -80,6 +80,89 @@ PADMAP_ELEMENTS = {
 }
 
 
+# Which stick each element belongs to. A stick is drawn as a circle with a
+# dot in it rather than as four labels reading X-Axis/Lo, X-Axis/Hi,
+# Y-Axis/Lo, Y-Axis/Hi down the side of the drawing: a stick is a position,
+# and four words are not. The D-pad stays four labels, because it *is* four
+# switches and reads that way in the hand.
+STICK_OF = {
+    "leftx-": "left",
+    "leftx+": "left",
+    "lefty-": "left",
+    "lefty+": "left",
+    "rightx-": "right",
+    "rightx+": "right",
+    "righty-": "right",
+    "righty+": "right",
+    # padmap's own spelling, for the consoles with no ares table -- the
+    # drawing is labelled with its control ids there.
+    "leftstick_left": "left",
+    "leftstick_right": "left",
+    "leftstick_up": "left",
+    "leftstick_down": "left",
+    "rightstick_left": "right",
+    "rightstick_right": "right",
+    "rightstick_up": "right",
+    "rightstick_down": "right",
+}
+
+# Which way each end of a stick points, for placing the dot: (x, y) with y
+# down, as a screen counts.
+STICK_WAY = {
+    "leftx-": (-1, 0),
+    "leftx+": (1, 0),
+    "lefty-": (0, -1),
+    "lefty+": (0, 1),
+    "rightx-": (-1, 0),
+    "rightx+": (1, 0),
+    "righty-": (0, -1),
+    "righty+": (0, 1),
+    "leftstick_left": (-1, 0),
+    "leftstick_right": (1, 0),
+    "leftstick_up": (0, -1),
+    "leftstick_down": (0, 1),
+    "rightstick_left": (-1, 0),
+    "rightstick_right": (1, 0),
+    "rightstick_up": (0, -1),
+    "rightstick_down": (0, 1),
+}
+
+
+def stick_groups(console: str | None) -> dict[str, dict[str, tuple[int, int]]]:
+    """This console's controls that are really one stick, and which way each
+    of them points.
+
+    `{"left": {"X-Axis/Lo": (-1, 0), ...}, "right": {"C-Up": (0, -1), ...}}`.
+    An N64's C buttons are four switches on the console and the right stick on
+    everything that plays it, so they are grouped by what the table binds them
+    to rather than by what they are called.
+
+    Empty for a console the ares table has never heard of -- Dolphin's two --
+    where the drawing is labelled with padmap's control ids, and those are
+    grouped by their own names instead.
+    """
+    table = (ares_table().get(console or "") or {}).get("buttons") or {}
+    out: dict[str, dict[str, tuple[int, int]]] = {}
+    for control, value in table.items():
+        for element in value if isinstance(value, list) else [value]:
+            stick = STICK_OF.get(str(element))
+            if stick is None:
+                continue
+            out.setdefault(stick, {})[control] = STICK_WAY[str(element)]
+            break
+    return out
+
+
+def stick_groups_for_ids(controls) -> dict[str, dict[str, tuple[int, int]]]:
+    """The same, for a drawing labelled with padmap's own control ids."""
+    out: dict[str, dict[str, tuple[int, int]]] = {}
+    for control in controls:
+        stick = STICK_OF.get(str(control))
+        if stick is not None:
+            out.setdefault(stick, {})[control] = STICK_WAY[str(control)]
+    return out
+
+
 def pad_controls(console: str | None) -> dict[str, str]:
     """padmap's control id -> this console's own name for it.
 
