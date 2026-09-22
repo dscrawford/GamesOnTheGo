@@ -293,29 +293,35 @@ def draw(
     screen.blit(art, (int(rect[0]), int(rect[1])))
 
     every = anchors_for(diagram, bindings, rect, with_binding=named, alias=alias)
-    placed = {anchor.input: anchor for anchor in every}
     # A stick is one thing on the drawing, not four rails of text: its
-    # directions are taken out of the labels and drawn as a ring with a dot
-    # in it, where their own anchors are. The D-pad keeps its four, because it
-    # is four switches and reads that way in the hand.
-    groups = stick_groups(console) if named else stick_groups_for_ids(bindings)
+    # directions are drawn as a ring with a dot in it, where the artwork marks
+    # them. The D-pad keeps its four labels, because it is four switches and
+    # reads that way in the hand.
+    #
+    # Read off the *artwork*, not off the bindings. A stick's position is a
+    # reading rather than a binding -- padmap's clone forwards the axes
+    # whether or not its capture ever asked about them, and its GameCube,
+    # Switch and Wii U layouts do not ask (docs/requests/the-analog-stick.md).
+    # So the ring is drawn wherever the drawing has a stick, and a console
+    # that binds those directions loses their labels to it.
+    groups = stick_groups(console) if named else stick_groups_for_ids(diagram.anchors)
+    left, top, box_w, box_h = rect
     rings: list[tuple[str, tuple[int, int], int]] = []
     sticky: set[str] = set()
     for stick, ways in groups.items():
-        known = [(placed[name], way) for name, way in ways.items() if name in placed]
-        if len(known) < 2:
+        points = [
+            (left + diagram.anchors[name][0] * box_w, top + diagram.anchors[name][1] * box_h)
+            for name in ways
+            if name in diagram.anchors
+        ]
+        if len(points) < 2:
             # One direction alone says nothing about where the middle is;
             # leave it as a label.
             continue
-        middle = (
-            sum(anchor.x for anchor, _ in known) / len(known),
-            sum(anchor.y for anchor, _ in known) / len(known),
-        )
-        reach = max(
-            math.hypot(anchor.x - middle[0], anchor.y - middle[1]) for anchor, _ in known
-        )
+        middle = (sum(x for x, _ in points) / len(points), sum(y for _, y in points) / len(points))
+        reach = max(math.hypot(x - middle[0], y - middle[1]) for x, y in points)
         rings.append((stick, (int(middle[0]), int(middle[1])), int(max(14, reach + 6))))
-        sticky.update(name for name, _ in ways.items() if name in placed)
+        sticky.update(ways)
     anchors = [anchor for anchor in every if anchor.input not in sticky]
     label_height = label_font.get_linesize()
     for item in place(anchors, rect, label_height, PINNED):

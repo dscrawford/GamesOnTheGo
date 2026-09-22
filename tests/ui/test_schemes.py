@@ -113,7 +113,24 @@ def test_the_gamecube_drawing_marks_every_control():
     others are older artwork and are allowed gaps -- an N64's Z is underneath
     the pad, and the drawing is from the front."""
     scheme = all_schemes()["gamecube"]
-    assert set(scheme.controls) == anchors_of("gamecube")
+    assert set(scheme.controls) <= anchors_of("gamecube")
+
+
+def test_the_drawings_mark_the_sticks_padmap_never_asks_about():
+    """A stick is a reading, not a binding.
+
+    padmap's gamecube, switch and wiiu layouts have no `leftstick_*` in them,
+    so its capture never asks for the main stick and the scheme cannot list
+    it -- `test_the_controls_are_padmaps_own` holds those two together. The
+    clone forwards the axes regardless, so the ring on the drawing shows
+    where the stick is whether or not anything ever bound it. That needs the
+    artwork to mark it: docs/requests/the-analog-stick.md.
+    """
+    for artwork in ("gamecube", "generic"):
+        drawn = anchors_of(artwork)
+        for way in ("up", "down", "left", "right"):
+            assert f"leftstick_{way}" in drawn, f"{artwork}.svg has no left stick to point at"
+            assert f"rightstick_{way}" in drawn, f"{artwork}.svg has no right stick to point at"
 
 
 # --- agreement with padmap ---------------------------------------------------
