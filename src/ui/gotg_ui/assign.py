@@ -23,6 +23,7 @@ from dataclasses import dataclass, field, replace
 
 from . import config, trace
 from .gate import PAIR_HOLD, Fade
+from .joining import Joining
 
 
 @dataclass(frozen=True)
@@ -188,6 +189,10 @@ class Session:
     # the strip for ever: `gate.Fade` is what empties it. Fed from `handle`,
     # which is where a reading actually arrives.
     fade: Fade = field(default_factory=Fade)
+    # Every pad holding a button right now, oldest press first. The strip
+    # draws one fill each: two people pairing at once is a queue, and being
+    # second is a thing somebody has to be able to see. See joining.py.
+    joining: Joining = field(default_factory=lambda: Joining(hold_seconds=PAIR_HOLD))
 
     def begin(self) -> dict:
         self.open = True
@@ -238,6 +243,13 @@ class Session:
         # makes the strip empty again when a hold is let go -- padmap does not
         # say so, it simply stops talking.
         self.fade.saw(self.view.progress, time.monotonic())
+        now = time.monotonic()
+        self.joining.saw(event, now)
+        if event.get("event") in ("claim", "state"):
+            # A seat has landed, or the daemon has restated the world: what
+            # is seated is the truth and a fill left over from the hold that
+            # did it would be drawn beside its own result.
+            self.joining.clear()
         if event.get("event") == "state":
             self.open = event.get("state") == "assigning"
         if self.view.finished:
