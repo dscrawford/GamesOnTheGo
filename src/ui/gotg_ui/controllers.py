@@ -125,7 +125,6 @@ def anchors_for(
     rect,
     with_binding: bool = True,
     alias: dict[str, str] | None = None,
-    pressed: dict[str, str] | None = None,
 ) -> list[Anchor]:
     """Every bound input that the artwork has a place for.
 
@@ -147,13 +146,15 @@ def anchors_for(
             uv = diagram.anchors.get(alias[name])
         if uv is None:
             continue
-        # With a binding, the label is the input and what drives it. Without
-        # one it is what the button is called, because "dpup — " reads as a
-        # line somebody forgot to finish.
-        label = f"{name} — {description}" if with_binding else description or name
-        actual = (pressed or {}).get(name)
-        if actual:
-            label = f"{label}   {actual}"
+        # The console's own name for the control and nothing else: `L`, not
+        # `L — Left bumper  Button 4`. Which pad button it is, is answered by
+        # pressing it -- the label lights and a dot in the player's colour
+        # appears beside it -- and twenty-two rails of three-part labels were
+        # a wall of text nobody read to find that out.
+        #
+        # The consoles with no ares table are the exception: there `name` is
+        # padmap's control id and `description` is the human word for it.
+        label = name if with_binding else description or name
         out.append(Anchor(input=name, x=left + uv[0] * width, y=top + uv[1] * height, label=label))
     return out
 
@@ -229,30 +230,29 @@ def draw(
     font_at,
     cache: dict,
     highlight: str | None = None,
-    bound: dict[str, str] | None = None,
+    pressing: dict[int, str] | None = None,
     heading: str | None = None,
     keys: str | None = None,
     footer: str | None = None,
 ) -> None:
     """The whole screen: pad, labels, leaders, and whatever is missing.
 
-    `bound` is what each control is actually bound to on the controller in
-    hand, read off padmap's profile. Without it the screen can say a console
-    has a Z button; with it, it can say which button Z is. `heading`, `keys`
-    and `footer` are the launch gate's, which shows this same drawing with
-    its own words around it; None is the picker's.
+    `pressing` is player -> the control under that player's thumb right now:
+    each one puts a dot in its player's colour beside that label, so two
+    people can check their own pads at once and see which is which.
+    `heading`, `keys` and `footer` are the launch gate's, which shows this
+    same drawing with its own words around it; None is the picker's.
     """
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
 
-    bound_map = bound or {}
     title = font_at(46).render(heading if heading is not None else f"Controller — {platform}", True, TEXT)
     screen.blit(title, ((width - title.get_width()) // 2, int(height * 0.045)))
 
     shown = resolve(platform)
     console, bindings = shown.console, shown.bindings
     artwork, seats = shown.artwork, shown.seats
-    bound, alias = shown.with_binding, shown.alias
+    named, alias = shown.with_binding, shown.alias
     if not bindings:
         # Not "play one and they appear here", which is only true for the
         # emulators that publish a console. Dolphin and Ryujinx never do, so
@@ -289,10 +289,14 @@ def draw(
     art = diagram.surface(pad_width)
     screen.blit(art, (int(rect[0]), int(rect[1])))
 
-    anchors = anchors_for(diagram, bindings, rect, with_binding=bound, alias=alias, pressed=bound_map)
+    anchors = anchors_for(diagram, bindings, rect, with_binding=named, alias=alias)
     label_height = label_font.get_linesize()
     for item in place(anchors, rect, label_height, PINNED):
-        lit = highlight is not None and item.anchor.input == highlight
+        # Whose thumbs are on this control, in seat order, and the label is
+        # lit for any of them: a press by player two is as much a press as the
+        # cursor sitting on it.
+        players = sorted(player for player, control in (pressing or {}).items() if control == item.anchor.input)
+        lit = (highlight is not None and item.anchor.input == highlight) or bool(players)
         colour = LEADER_LIT if lit else LEADER
         pygame.draw.aalines(screen, colour, False, [(x, y) for x, y in item.points])
         if lit:
@@ -305,6 +309,19 @@ def draw(
         text = label_font.render(item.anchor.label, True, TEXT if lit else TEXT_DIM)
         x = item.x + 8 if item.align == "left" else item.x - text.get_width() - 8
         screen.blit(text, (int(x), int(item.y)))
+
+        # The dots on the far side of the label, away from the pad, so a
+        # second one arriving pushes outward into empty space rather than
+        # across the drawing.
+        dot_r = max(4, label_height // 5)
+        middle_y = int(item.y + text.get_height() / 2)
+        step = 2 * dot_r + 4
+        for index, player in enumerate(players):
+            if item.align == "left":
+                at = (int(x + text.get_width() + 6 + dot_r + index * step), middle_y)
+            else:
+                at = (int(x - 6 - dot_r - index * step), middle_y)
+            pygame.draw.aacircle(screen, colour_for(player), at, dot_r)
 
     line = footer if footer is not None else (
         f"{console}  ·  {len(anchors)} of {len(bindings)} inputs  ·  "

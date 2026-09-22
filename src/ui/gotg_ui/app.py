@@ -16,7 +16,7 @@ import time
 
 import pygame
 
-from . import around, config, devices, filters, pads, prepare, profiles, trace
+from . import around, config, devices, filters, pads, prepare, trace
 from .art import ArtStore
 from .assign import KeyHold, Session, Watch, attend
 from .browser import SHELF, Browser
@@ -25,7 +25,6 @@ from .controllers import assets_dir, control_places, draw_assign, draw_strip
 from .controllers import draw as draw_controllers
 from .fetch import Loader
 from .filters import Filters
-from .gate import layout_for
 from .grid import Grid
 from .hush import Hush
 from .installed import installed_games
@@ -60,17 +59,6 @@ ARROWS = {
     pygame.K_UP: (0, -1),
     pygame.K_DOWN: (0, 1),
 }
-
-
-def seated_pad_name(client) -> str:
-    """The name of player one's controller, or nothing.
-
-    Player one because the diagram is one pad's worth of screen. A second
-    player with a different controller is a real case and a bigger screen than
-    this one.
-    """
-    players = client.players if client.connected else []
-    return str(players[0].get("name", "")) if players else ""
 
 
 def _fit(font_at, text: str, width: int, size: int):
@@ -747,11 +735,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # A screen rather than an overlay: it is a page of reference, not an
     # action, and nothing underneath it should keep moving.
     controllers: str | None = None
-    # Which control the cursor is on while the diagram is up, and what the
-    # seated pad has bound to each -- read off padmap's own profile, since it
-    # answers no question about the inside of a mapping.
+    # Which control the cursor is on while the diagram is up.
     focus: str = ""
-    bound: dict[str, str] = {}
     # Filled in when the diagram is drawn. Empty until then, which the cursor
     # treats as "nowhere to go" rather than as an error.
     control_anchors: dict[str, tuple[float, float]] = {}
@@ -1347,13 +1332,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     control_anchors = control_places(assets_dir(), controllers, controller_art)
                     if focus not in control_anchors:
                         focus = around.first(control_anchors)
-                    bound = profiles.described(
-                        profiles.for_pad(seated_pad_name(padmap)),
-                        f"console:{layout_for(controllers)}",
-                    )
                     draw_controllers(
                         below, assets_dir(), controllers, font_at, controller_art,
-                        highlight=focus, bound=bound,
+                        highlight=focus,
                     )
             else:
                 # Whatever the workers finished since the last frame stops being a
