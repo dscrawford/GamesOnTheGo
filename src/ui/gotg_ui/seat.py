@@ -36,7 +36,7 @@ import pygame  # noqa: E402 - the line above only works ahead of the import
 from . import devices, profiles, trace
 from . import pads as sdl_pads
 from .bindings import console_for, pad_controls
-from .controllers import Diagram, assets_dir, draw_reveal, draw_ring, draw_tick, icon_surface
+from .controllers import Diagram, assets_dir, draw_reveal, draw_tick, icon_surface
 from .controllers import draw as draw_diagram
 from .gate import (
     CHECKING,
@@ -54,7 +54,13 @@ from .gate import (
 from .padmap import Padmap, ensure_daemon
 from .padstrip import EMPTY_RING, LABEL, LABEL_DIM, PANEL, colour_for
 from .padstrip import READY as SETTLED_GREEN  # gate.READY is a state; this is a colour
-from .pressing import controls_for, controls_on
+from .pressing import (
+    controls_for,
+    controls_on,
+    element_for_button,
+    element_on_axis,
+    elements_on_axis,
+)
 
 WINDOW = tuple(config.get("theme.window", [1280, 800]))
 BACKGROUND = config.colour("theme.colours.background", (18, 18, 20))
@@ -388,14 +394,41 @@ class Door:
             self.hold.released(now)
             trace.say("door-release")
         seat = sdl_pads.player(event)
+
+        # A pad SDL maps says which control it is itself, in the standard
+        # layout the binding tables are written against. Read in preference to
+        # padmap's capture, which holds only the controls one console asked
+        # for: the Steam Controller's N64 capture has no `x` and its universal
+        # one has no `lefttrigger`, so half this screen lit nothing.
+        standard = element_for_button(sdl_pads.button(event))
+        if standard and seat is not None:
+            self.pressing[seat] = now
+            self.lit_by[seat] = self.lit_by.get(seat, set()) | {self._one(standard)}
+        gone = element_for_button(sdl_pads.button_up(event))
+        if gone and seat is not None:
+            self._let_go(seat, [self._one(gone)])
+
+        moved = sdl_pads.axis_move(event)
+        if moved is not None and seat is not None:
+            index, value = moved
+            self.pressing[seat] = now
+            pushed = element_on_axis(index, value)
+            ends = [self._one(name) for name in elements_on_axis(index)]
+            if pushed:
+                self.lit_by[seat] = self.lit_by.get(seat, set()) | {self._one(pushed)}
+                self._let_go(seat, [name for name in ends if name != self._one(pushed)])
+            else:
+                self._let_go(seat, ends)
+
         released = sdl_pads.raw_release(event)
-        if released is not None and seat is not None:
-            # Exactly the controls that button drives, taken off this seat --
-            # by the drawing's names for them, which is what `lit_by` holds.
+        if released is not None and seat is not None and not standard:
+            # A pad SDL does not map: padmap's capture is the only thing that
+            # can name its buttons, and the release has to be named the same
+            # way `lit_by` holds them.
             self._let_go(seat, self._named(controls_on(self._table(seat), "button", released)))
 
         raw = sdl_pads.raw_input(event)
-        if raw is not None:
+        if raw is not None and not standard:
             # Who it was, so the screen can light that seat. An axis coming
             # back to rest is still that seat being heard from: a stick a
             # player waggles to check it works is exactly what this answers.
@@ -420,6 +453,27 @@ class Door:
     def _named(self, controls: list[str]) -> list[str]:
         """padmap's control ids, as the drawing's labels."""
         return [self.names.get(name, name) for name in controls]
+
+    def _one(self, element: str) -> str:
+        """One element, as the drawing's label for it."""
+        return self.names.get(element, element)
+
+    def tick(self, now: float) -> None:
+        """The holds, against what is actually down right now.
+
+        Events are not enough. A release can go missing -- padmap republishes
+        a clone and the button that was down on the old one never comes up on
+        the new, and a Steam Controller forwards state rather than events --
+        and a hold that kept its start time then "finished" three seconds
+        later without anybody holding anything. That read as the gate opening
+        the instant A was touched. The pads are asked instead: nothing down,
+        nothing counting.
+        """
+        if self.sticks.any_button_down():
+            return
+        if self.hold.since is not None:
+            self.hold.released(now)
+        self.y_since = None
 
     def _let_go(self, seat: int, controls) -> None:
         left = self.lit_by.get(seat, set()) - set(controls)
@@ -487,6 +541,7 @@ def _wait_for_go(screen, font_at, clock, pads: Padmap, gate: Gate, title: str) -
         for event in pygame.event.get():
             if door.handle(event, now):
                 return "go", gate
+        door.tick(now)
         if door.rebinding(now) >= 1.0:
             return "rebind", gate
         if door.done(now):
@@ -563,49 +618,50 @@ def _draw_seats(
     holder: int | None = None,
     heard: set[int] | None = None,
 ) -> None:
-    """A dot and a controller per seat, left to right, player colours.
+    """One controller drawing per seat, left to right, in player colours.
 
-    No number in the dot. They are drawn in seat order and the colours are
-    the same four the grid and the strip use, so the first one is player one
-    for the same reason the first seat is -- and a numeral inside a
-    twenty-pixel circle was a third thing to read where the order already
-    said it.
+    The drawing is the whole badge now. There was a coloured disc beside it
+    carrying the player number, then the number went because the order says
+    it, and then the disc went too: the colour is on the drawing itself, and
+    a picture of the pad in somebody's hands is the thing they can check
+    against what they are holding.
 
-    Three things on one dot, and they do not collide: the controller drawing
-    beside it faded, a green tick saying this seat is settled, and -- while
-    somebody holds A -- a ring closing around the one that is holding. Any
-    press swells the dot for a moment, which is what answers "is my
-    controller doing anything" when nothing on the drawing is bound to what
-    the thumb is on.
+    It says three things at once. Dimmed, it is a seat that is settled and
+    idle; full colour, it is a seat being pressed right now; and while
+    somebody holds A it fills in clockwise from twelve over its own dark
+    silhouette -- the same reveal the strip and the launch gate use for a
+    hold, so a hold looks like one thing wherever it happens. The green tick
+    on its shoulder is "this one is ready".
     """
     width = screen.get_width()
     heard = heard or set()
-    radius = 13
-    step = radius * 2 + 78
+    height = 44
+    step = 96
     left = (width - step * max(1, gate.seated)) // 2 + step // 2
     for index, seat in enumerate(gate.seats):
         centre = (left + index * step, middle)
         colour = colour_for(seat.player)
-
-        icon = icon_surface(seat.name, 40, colour, devices.ids_for(seat.node))
-        if icon is not None:
-            icon.set_alpha(SETTLED)
-            screen.blit(icon, icon.get_rect(center=(centre[0] + radius + 30, middle)))
-            icon.set_alpha(255)
+        ids = devices.ids_for(seat.node)
 
         if holder == seat.player and fraction > 0:
-            draw_ring(screen, centre, radius + 9, colour, fraction, 4)
-        # A press swells this seat's own dot rather than adding a second one
-        # beside it: two circles of one colour read as two players.
-        pygame.draw.aacircle(screen, colour, centre, radius + 4 if seat.player in heard else radius)
+            draw_reveal(screen, centre, seat.name, colour, fraction, height, ids)
+        else:
+            icon = icon_surface(seat.name, height, colour, ids)
+            if icon is None:
+                # No artwork for this pad: a disc in its colour still says a
+                # seat is taken, which is the question.
+                pygame.draw.aacircle(screen, colour, centre, 13)
+            else:
+                # Dim while idle, full colour while pressed. Nothing else on
+                # this screen moves, so a drawing brightening under a thumb
+                # is unmistakably an answer to it.
+                icon.set_alpha(255 if seat.player in heard else SETTLED)
+                screen.blit(icon, icon.get_rect(center=centre))
+                icon.set_alpha(255)
 
-        # The tick sits on the dot's shoulder rather than across it: over the
-        # dot it was the only thing left to see, and the colour is what says
-        # which player this is.
-        corner = (centre[0] + radius, centre[1] + radius)
+        corner = (centre[0] + height // 2 - 2, centre[1] + height // 3)
         pygame.draw.aacircle(screen, (16, 22, 18), corner, 9)
         draw_tick(screen, corner, 11, SETTLED_GREEN)
-
 
 
 def _hold_the_door(title: str, reason: str) -> int:

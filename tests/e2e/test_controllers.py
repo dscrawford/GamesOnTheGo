@@ -1683,3 +1683,96 @@ def test_the_go_is_the_shipped_three_second_hold(daemon, sdl):
         pad.up(BTN_SOUTH)
         assert door.done(time.monotonic()), f"three and a half seconds of holding was not the go ({took:.1f}s)"
         picker.close()
+
+
+def test_a_press_lights_its_label_with_no_padmap_profile_at_all(daemon, sdl, tmp_path, monkeypatch):
+    """Half the labels lit nothing, and this is why.
+
+    padmap's capture holds the controls one console asked for: the Steam
+    Controller's N64 capture has no `x` and its universal one has no
+    `lefttrigger`, and the door was reading one table for both. A pad SDL maps
+    says which control it is itself, in the layout the binding tables are
+    written against -- so the dots no longer depend on what padmap happened to
+    capture, and a pad with no profile whatsoever still lights its labels.
+    """
+    import pathlib
+
+    from gotg_ui.bindings import pad_controls
+    from gotg_ui.seat import Door
+
+    monkeypatch.setenv("PADMAP_DEVICES", str(tmp_path / "empty"))
+    monkeypatch.setenv("GOTG_DATA", str(pathlib.Path(__file__).parents[2] / "src" / "client" / "data"))
+
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        pad.hold(BTN_SOUTH, 0.7)
+        assert picker.until(lambda p: p.seated(1)), "the pad took no seat"
+        picker.run(0.8)
+
+        door = Door(picker.sticks, time.monotonic(), seconds=1.0, names=pad_controls("Nintendo64"))
+        assert not door.buttons and not door.buttons_by, "this test is meant to have no profile"
+        _pump(sdl, door, 0.3)
+
+        pad.down(BTN_SOUTH)
+        _pump(sdl, door, 0.4)
+        assert door.lit_by == {1: {"A"}}, f"with no profile, A lit {door.lit_by}"
+        pad.up(BTN_SOUTH)
+        _pump(sdl, door, 0.4)
+        assert door.lit_by == {}, f"releasing A left {door.lit_by} lit"
+
+        pad.down(0x136)  # BTN_TL -- SDL's left shoulder, the N64's L
+        _pump(sdl, door, 0.4)
+        assert door.lit_by == {1: {"L"}}, f"with no profile, L lit {door.lit_by}"
+        pad.up(0x136)
+        picker.close()
+
+
+def test_a_hold_whose_release_was_missed_does_not_start_the_game(daemon, sdl):
+    """The gate opening "basically instantly".
+
+    A release can go missing: padmap republishes a clone and the button that
+    was down on the old one never comes up on the new, and a Steam Controller
+    forwards state rather than events. The hold kept its start time and
+    finished three seconds later with nobody holding anything -- which lands
+    as the game starting the moment A is touched. The pads are asked what is
+    down now, so a hold nothing is holding does not count.
+    """
+    from gotg_ui.seat import Door
+
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        pad.hold(BTN_SOUTH, 0.7)
+        assert picker.until(lambda p: p.seated(1))
+        picker.run(1.2)
+
+        door = Door(picker.sticks, time.monotonic(), seconds=1.0)
+        _pump(sdl, door, 1.2)               # armed: nothing held, past ARM_QUIET
+
+        # The press reaches the door; the release is dropped on the floor, as
+        # a republished clone drops it.
+        pad.down(BTN_SOUTH)
+        end = time.monotonic() + 0.4
+        while time.monotonic() < end:
+            for event in sdl.event.get():
+                door.handle(event, time.monotonic())
+            time.sleep(0.01)
+        assert door.progress(time.monotonic()) > 0, "the press was not counted at all"
+        pad.up(BTN_SOUTH)
+        for event in sdl.event.get():
+            if event.type in (sdl.CONTROLLERBUTTONUP, sdl.JOYBUTTONUP):
+                continue                     # the missing release
+            door.handle(event, time.monotonic())
+
+        end = time.monotonic() + 2.0
+        while time.monotonic() < end:
+            now = time.monotonic()
+            for event in sdl.event.get():
+                if event.type in (sdl.CONTROLLERBUTTONUP, sdl.JOYBUTTONUP):
+                    continue
+                door.handle(event, now)
+            door.tick(now)
+            assert not door.done(now), "a hold nobody is holding started the game"
+            time.sleep(0.02)
+        picker.close()
