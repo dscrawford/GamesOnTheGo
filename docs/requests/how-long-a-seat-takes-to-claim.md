@@ -1,46 +1,92 @@
 # How long a hold has to be before it claims a seat
 
 `padmap-core/src/assign.rs` sets `HOLD_SECONDS = 0.25` and nothing can change
-it. A quarter of a second is too short for the front of a launch: a person
-picking a controller up, or resting a thumb on it while reading the screen,
-takes a seat without meaning to, and on a sofa with four pads on it the wrong
-one ends up as player one. Asked for in GOTG as "time to pair a controller is
-too fast, can we make it 1.5s?".
+it. A quarter of a second is too short at the front of a launch: picking a
+controller up, or resting a thumb on it while reading the screen, claims a
+seat nobody meant to claim, and on a sofa with four pads out the wrong one
+becomes player one. Asked for in GOTG as "the pair is too fast, can you make
+it 1.5s?", twice.
 
-## What is asked
+**What is wanted: a way to say how long, with 0.25 s kept for whoever does not
+ask.** 1.5 s is the length GOTG would set.
 
-A way to say how long the hold is, with the 0.25 s default kept for whoever
-does not ask. Either shape works:
+## Why the front-end cannot do it
 
-```json
-{"cmd": "seating", "open": true, "players": 4, "hold": 1.5}
-```
+The hold is timed inside the daemon against the device, and the first a
+front-end hears is the `claim` that has already happened. The only thing GOTG
+could do is watch raw pads through SDL and keep `seating` shut until it has
+seen a long enough hold itself — which means acting on input from an unseated
+pad, the one thing GOTG's controller rule forbids, and it would still be a
+quarter-second race once seating opened.
 
-or an environment variable read at start, beside the two GOTG already sets:
+## What already fits
+
+`Assigner::new(hold_seconds)` takes the length as a parameter. Only
+`impl Default for Assigner` hardcodes the constant, and both consumers build
+one that way:
+
+* `padmap-daemon/src/session.rs:75` — `Assigner::default()`, the `begin` path.
+* `padmap-daemon/src/seating.rs:19` — `assigner: Assigner` under
+  `#[derive(Default)]`, the seating path, which is the one GOTG uses.
+
+So the change is small, and `Tick::progress` needs nothing: it is already
+`elapsed / hold_seconds`, so a front-end's reveal fills over whatever length
+is set.
+
+## Two knobs, either or both
+
+**An environment variable**, read where `Default` is built:
 
 ```
 PADMAP_HOLD_SECONDS=1.5
 ```
 
-The command field is the better of the two, because the right length differs
-by screen: a launch gate wants deliberation, and a mid-game join wants to be
-quick. If only one is possible, the variable is enough — GOTG starts the
-daemon itself.
+Enough on its own for GOTG, which starts its own daemon (`--fresh --follow`).
 
-`progress` already reports the fraction, so a front-end drawing the fill needs
-no other change; it is the same reveal either way, just slower.
+**A field on the command**, which is the better of the two:
 
-## Why not do it in the front-end
+```json
+{"cmd": "seating", "open": true, "players": 4, "hold": 1.5}
+```
 
-GOTG cannot. The hold is timed inside the daemon, against the device, and the
-first the picker hears of it is the `claim` that has already happened. The one
-thing a front-end could do is watch raw pads through SDL and keep `seating`
-shut until it has seen a long enough hold itself — which means acting on input
-from an unseated pad, the one thing GOTG's controller rule forbids, and it
-would still be a quarter-second race once seating opened.
+because the right length differs by screen — a launch gate wants deliberation,
+a mid-game join wants to be quick — and it needs no restart. That is
+`Command::Seating` (`padmap-core/src/command.rs:68`, parsed at :180) carrying
+an `Option<f64>`, routed at `padmap-daemon/src/server.rs:673` into
+`Seating::open(seats, hold)`. Note the exhaustive match in
+`padmap-core/tests/command_differential.rs:49` will want the new field too.
+
+Omitted, it should leave the length as it was rather than reset it.
+
+## What it should refuse, and how
+
+Nothing. A comfort setting is not worth failing to start over: out of range,
+unparseable or missing is the default. A range of about `0.05..=10.0` seconds
+keeps it a hold — zero is a press, and a minute is not a hold anybody holds.
+
+One thing worth getting right: **a hold in flight when the length changes
+should be dropped**, not re-measured. A press that became a claim because the
+number changed underneath it is exactly the accident this exists to prevent.
 
 ## How it would be checked
 
-A `seating` opened with `hold: 1.5`, a pad held for one second: no `claim`.
-The same pad held for two: a `claim`, and `progress` events that reach 1.0 at
-about 1.5 s rather than 0.25 s.
+* `hold_from(Some("1.5")) == 1.5`, and `""`, `"soon"`, `"0"`, `"-2"`, `"600"`,
+  `"nan"` all give 0.25 — as a function of the text, so no test has to export
+  a variable into a process shared with every other test in the binary.
+* An `Assigner::new(1.5)`: a button down at 0.0 claims nothing at 0.3 or 1.4,
+  and claims at 1.51.
+* Its `progress` at 0.75 s reads about 0.5.
+* `set_hold_seconds` mid-hold: the old hold never claims; a fresh press does.
+* Through the socket: `seating` opened with `"hold": 1.5`, a pad held for one
+  second gets no `claim`; held for two it does, with `progress` reaching 1.0
+  at about 1.5 s rather than 0.25 s.
+
+## What GOTG does when it lands
+
+`gotg-seat` and the picker send `hold` with `seating` (and the launcher
+exports `PADMAP_HOLD_SECONDS` for the games' daemon), at 1.5 s.
+
+GOTG's own pause between pairing and readying up — every pad quiet for a
+second before a press can start the game — stays either way. It exists
+because the *pairing* press used to roll straight into the go hold, and that
+is a front-end problem, not this one.
