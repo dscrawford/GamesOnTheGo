@@ -93,6 +93,12 @@ def ensure_daemon(force: bool = False, *, fresh: bool = False, follow: int | Non
     if done.returncode != 0:
         return (done.stderr or done.stdout or "padmap would not start").strip().splitlines()[-1]
     os.environ["PADMAP_SKIP_DAEMON_CHECK"] = "1"
+    if follow is not None:
+        # Which session this daemon belongs to, for whatever comes after the
+        # execvp: the launch gate reads it to tell seats somebody took in the
+        # picker a moment ago from seats a daemon has been holding since
+        # yesterday. `padmap.sh` exports the same thing for the same reason.
+        os.environ["PADMAP_FOLLOW"] = str(follow)
     return None
 
 
@@ -117,6 +123,19 @@ class DaemonWatch:
 
     def mark(self, now: float) -> None:
         self._last = now
+
+
+def session_pid() -> int | None:
+    """The pid padmap's daemon was asked to follow, if this is that session.
+
+    Set by `ensure_daemon` here and by `padmap_ensure` in the client, and the
+    picker's pid survives its execvp -- so a gate running inside the launch
+    that picker started sees its own number here.
+    """
+    try:
+        return int(os.environ["PADMAP_FOLLOW"])
+    except (KeyError, ValueError):
+        return None
 
 
 def socket_path() -> Path:

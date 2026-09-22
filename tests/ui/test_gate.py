@@ -643,3 +643,54 @@ def test_a_fill_with_no_hold_length_does_not_move_on_its_own():
     fade = gate_mod.Fade(hold=0.0)
     fade.saw(0.4, 10.0)
     assert fade.now(10.02) == 0.4
+
+
+def test_a_seat_taken_in_the_picker_carries_into_the_launch():
+    """Pair a controller on the grid, pick a game, and be asked to pair it
+    again: that was the gate forgetting seats it had no business forgetting.
+
+    padmap names a session by the pid its daemon follows, and the picker's pid
+    survives the execvp into the launch -- so a daemon following *this* pid is
+    holding seats somebody took a moment ago, in front of this screen.
+    """
+    gate = Gate(platform="n64", session=4321)
+    gate = apply(gate, {
+        "event": "state",
+        "state": "ready",
+        "following": 4321,
+        "players": [{"player": 1, "name": "Xbox Wireless Controller", "configured": True}],
+    })
+    assert gate.ours
+    # Straight to listening for anybody else, with that seat standing: one
+    # player is already in, and nobody was asked to do it twice.
+    gate, command = decide(gate)
+    assert command == {"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD}
+    assert gate.seated == 1
+
+
+def test_a_daemon_from_somebody_elses_evening_is_still_forgotten():
+    """The rule this was carved out of. A daemon outliving everything, with
+    seats restored from a session nobody here started, is exactly what
+    `unseat` exists for."""
+    gate = Gate(platform="n64", session=4321)
+    gate = apply(gate, {
+        "event": "state",
+        "state": "ready",
+        "following": 99,
+        "players": [{"player": 1, "name": "Xbox Wireless Controller", "configured": True}],
+    })
+    assert not gate.ours
+    gate, command = decide(gate)
+    assert command == {"cmd": "unseat"}
+
+
+def test_with_no_session_named_nothing_is_assumed():
+    # A launch with no picker -- Steam, a terminal -- has no session pid, and
+    # the old behaviour is the safe one.
+    gate = Gate(platform="n64")
+    gate = apply(gate, {
+        "event": "state", "state": "ready", "following": 4321,
+        "players": [{"player": 1, "name": "Pad", "configured": True}],
+    })
+    assert not gate.ours
+    assert decide(gate)[1] == {"cmd": "unseat"}

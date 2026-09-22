@@ -54,7 +54,7 @@ from .gate import (
     without_controllers,
 )
 from .hush import Hush
-from .padmap import Padmap, ensure_daemon
+from .padmap import Padmap, ensure_daemon, session_pid
 from .padstrip import EMPTY_RING, LABEL, LABEL_DIM, PANEL, colour_for
 from .padstrip import READY as SETTLED_GREEN  # gate.READY is a state; this is a colour
 from .pressing import (
@@ -253,7 +253,11 @@ def run(platform: str, title: str) -> int:
         print(f"gotg-seat: {trouble or pads.error}; starting anyway", file=sys.stderr)
         return _hold_the_door(title, trouble or pads.error or "")
 
-    gate = Gate(platform=platform)
+    # Seats taken in the picker a moment ago carry into the launch: the
+    # daemon that holds them follows the pid this launch is, because the
+    # picker's pid survived its execvp. Anything else is somebody else's
+    # evening and is forgotten first. See gate.Gate.ours.
+    gate = Gate(platform=platform, session=session_pid())
 
     # Decide before opening a window. The common case is a machine that is
     # already set up, and it should cost a socket round trip rather than a
@@ -293,6 +297,51 @@ def run(platform: str, title: str) -> int:
             fonts[size] = pygame.font.Font(None, size)
         return fonts[size]
 
+    try:
+        at(screen, clock, font_at, pads, gate, title)
+    finally:
+        pygame.quit()
+        pads.close()
+    return 0
+
+
+def before_launch(screen, clock, font_at, pads: Padmap, platform: str, title: str, hush=None) -> str:
+    """The gate, run by the picker in the window it already has.
+
+    It used to be a second process with a second window: the picker closed
+    its display, `gotg play` started `gotg-seat`, and that opened another one
+    -- the same program, twice, with a black flicker between them and the
+    seats forgotten in the middle. From here the seats carry (the daemon
+    follows this pid, and `Gate.ours` knows it), and the client is told the
+    gate has been met so it does not ask again.
+
+    Returns "go" when the launch should go ahead, which is every answer this
+    can give: the gate's own way out is to start the game anyway.
+    """
+    gate = Gate(platform=platform, session=os.getpid())
+    if pads.state:
+        gate = apply(gate, pads.state)
+    gate, command = decide(gate)
+    if gate.done:
+        _said(f"nothing to ask ({gate.state}, {gate.seated} seated); starting")
+        return "go"
+    if command is not None:
+        pads.send(command)
+    return at(screen, clock, font_at, pads, gate, title, hush)
+
+
+def at(screen, clock, font_at, pads: Padmap, gate: Gate, title: str, hush=None) -> str:
+    """The gate itself, in a window somebody else opened.
+
+    Split out for the picker, which has a window already. It used to exec
+    into the launch, the launch started `gotg-seat`, and that opened a second
+    window: one program, two windows, a black flicker between them, and the
+    seats forgotten in the middle. The picker runs this in its own window
+    instead and tells the client the gate has already been met.
+
+    Returns "go" when the game should start, and the caller owns the window
+    either way -- this neither opens nor closes one.
+    """
     # Loaded once, and absence is survivable: a console with no artwork, or a
     # build with none, still gets the words.
     try:
@@ -317,9 +366,13 @@ def run(platform: str, title: str) -> int:
     # the game now": so pairing a Steam Controller pressed A, the kernel sent
     # Enter, and the game started with nobody having held anything. That is
     # the leaking input. See hush.py.
-    hush = Hush()
-    hush.refresh()
-    trace.say("gate-hush", held=sorted(hush.held))
+    # A caller with its own grabs (the picker) hands them over rather than
+    # taking them twice; a caller without gets its own for the length of this.
+    mine = None if hush is not None else Hush()
+    if mine is not None:
+        mine.refresh()
+        trace.say("gate-hush", held=sorted(mine.held))
+    hush = hush if hush is not None else mine
 
     # The reveal's own clock. padmap stops sending `progress` when a button is
     # let go rather than sending a zero, so this is what makes the drawing
@@ -436,10 +489,9 @@ def run(platform: str, title: str) -> int:
                 continue
             break
     finally:
-        hush.release()
-        pygame.quit()
-        pads.close()
-    return 0
+        if mine is not None:
+            mine.release()
+    return "go"
 
 
 class Door:
