@@ -482,6 +482,7 @@ def icon_surface(pad_name: str | None, height: int, colour: tuple[int, int, int]
 def draw_strip(
     screen, font_at, players: list[dict], slots: int, status: str,
     progress: float = 0.0, joining: str | None = None,
+    holds: list | None = None,
 ) -> int:
     """Draw the strip along the top. Returns the height it used.
 
@@ -490,7 +491,11 @@ def draw_strip(
 
     `progress` is a hold in flight, as a fraction, and `joining` is which
     drawing is being revealed by it -- None for the generic pad, "keyboard"
-    for the space bar. It is drawn here rather than only on the assignment
+    for the space bar. `holds` is `joining.Joining.now()`: every pad holding
+    a button right now, oldest press first, each drawn filling in on its own
+    so two people pairing at once can both see themselves and see who is
+    second. It falls back to the single `progress` fill for a daemon that
+    does not name its pads. It is drawn here rather than only on the assignment
     screen because that is where the hold happens: somebody picks a
     controller up in front of the library and holds a button, and the pad
     filling in above the games is the only thing that says the machine
@@ -537,8 +542,11 @@ def draw_strip(
                     (x - dx * reach, middle - dy * reach),
                     2,
                 )
-        label = tiny.render("no controllers", True, EMPTY_TEXT)
-        screen.blit(label, (x + 8, middle - label.get_height() // 2))
+        if not holds:
+            # Silent while somebody is pairing: the fills are the answer, and
+            # "no controllers" beside two of them reads as a contradiction.
+            label = tiny.render("no controllers", True, EMPTY_TEXT)
+            screen.blit(label, (x + 8, middle - label.get_height() // 2))
     for player, seat in occupied:
         colour = colour_for(player)
         # aacircle, not circle: a hard-edged disc at this size is visibly
@@ -572,8 +580,25 @@ def draw_strip(
         x += PAD_RADIUS * 2 + width_used + GAP * 2
         joining_at = x
 
-    if progress > 0:
-        draw_hold(screen, (joining_at, middle), next_seat(players, slots), progress, icon_height, joining)
+    # One fill per pad holding a button, in the order they started, each
+    # where that player will sit. A daemon that does not name its pads can
+    # only describe one hold, and `holds` is then that one or empty --
+    # docs/requests/two-people-pairing-at-once.md.
+    seat_next = next_seat(players, slots)
+    for step, hold in enumerate(holds or []):
+        if hold.fraction <= 0:
+            continue
+        taking = hold.player if hold.player else (seat_next + step if seat_next else None)
+        draw_hold(
+            screen,
+            (joining_at + step * (icon_height + GAP), middle),
+            taking,
+            hold.fraction,
+            icon_height,
+            hold.name or joining,
+        )
+    if not holds and progress > 0:
+        draw_hold(screen, (joining_at, middle), seat_next, progress, icon_height, joining)
 
     word = tiny.render(status, True, LABEL_DIM)
     screen.blit(word, (width - word.get_width() - GAP, middle - word.get_height() // 2))

@@ -42,6 +42,7 @@ from .controllers import draw as draw_diagram
 from .gate import (
     CHECKING,
     MAPPING,
+    PAIR_HOLD,
     READY,
     SEATING,
     SKIPPED,
@@ -54,6 +55,7 @@ from .gate import (
     without_controllers,
 )
 from .hush import Hush
+from .joining import Joining
 from .padmap import Padmap, ensure_daemon, session_pid
 from .padstrip import EMPTY_RING, LABEL, LABEL_DIM, PANEL, colour_for
 from .padstrip import READY as SETTLED_GREEN  # gate.READY is a state; this is a colour
@@ -378,6 +380,9 @@ def at(screen, clock, font_at, pads: Padmap, gate: Gate, title: str, hush=None) 
     # let go rather than sending a zero, so this is what makes the drawing
     # empty again -- see gate.Fade.
     fade = Fade()
+    # And who is holding a button right now, in the order they started: two
+    # people pairing at once is a queue, not a fraction. See joining.py.
+    queue = Joining(hold_seconds=PAIR_HOLD)
     # The diagram, once, shared with the door: it is the same screen.
     cache: dict = {}
 
@@ -440,7 +445,11 @@ def at(screen, clock, font_at, pads: Padmap, gate: Gate, title: str, hush=None) 
                     # Per message, not per frame: the reveal empties because
                     # the readings stop, and asking the gate every frame would
                     # keep answering with the last one for ever.
-                    fade.saw(gate.progress, time.monotonic())
+                    now = time.monotonic()
+                    fade.saw(gate.progress, now)
+                    queue.saw(message, now)
+                    if message.get("event") in ("claim", "state"):
+                        queue.clear()
                 if not pads.connected:
                     _said("padmap went away while the gate was up; starting anyway")
                     break
@@ -461,6 +470,7 @@ def at(screen, clock, font_at, pads: Padmap, gate: Gate, title: str, hush=None) 
                     _draw_go(
                         screen, font_at, gate, title, cache,
                         joining=fade.now(time.monotonic()),
+                        queue=queue.now(time.monotonic()),
                         settled=False,
                     )
                 else:
@@ -896,6 +906,7 @@ def _draw_go(
     holder: int | None = None,
     heard: set[int] | None = None,
     joining: float = 0.0,
+    queue: list | None = None,
     settled: bool = True,
 ) -> None:
     """The gate's one screen: this game's controller, and who is on it.
@@ -937,7 +948,7 @@ def _draw_go(
     # Who has control, in the colours the strip and the grid use, so a second
     # player holding a button sees themselves appear rather than wondering.
     _draw_seats(
-        screen, font_at, gate, int(height * 0.80), fraction, holder, heard or set(), joining,
+        screen, font_at, gate, int(height * 0.80), fraction, holder, heard or set(), joining, queue,
     )
 
 
@@ -957,6 +968,7 @@ def _draw_seats(
     holder: int | None = None,
     heard: set[int] | None = None,
     joining: float = 0.0,
+    queue: list | None = None,
 ) -> None:
     """One controller drawing per seat, left to right, in player colours.
 
@@ -979,7 +991,7 @@ def _draw_seats(
     step = 96
     # Room for the one arriving, so the row does not jump sideways the moment
     # somebody pairs: a seat that is filling in is already taking its place.
-    shown = gate.seated + (1 if joining > 0 else 0)
+    shown = gate.seated + max(len(queue or []), 1 if joining > 0 else 0)
     left = (width - step * max(1, shown)) // 2 + step // 2
     for index, seat in enumerate(gate.seats):
         centre = (left + index * step, middle)
@@ -1018,9 +1030,17 @@ def _draw_seats(
             pygame.draw.aacircle(screen, (16, 22, 18), corner, 9)
             draw_tick(screen, corner, 11, SETTLED_GREEN)
 
-    if joining > 0:
-        # The seat being claimed right now, in the colour it is about to be:
-        # padmap's own progress, drawn where that player will sit.
+    # Everybody holding a button, in the order they started, each where they
+    # will sit. Two at once is a queue -- see joining.py -- and the single
+    # `joining` fraction is what a daemon that does not name its pads can
+    # describe, which is one of them.
+    for step_along, hold in enumerate(queue or []):
+        if hold.fraction <= 0:
+            continue
+        seat_number = hold.player or (gate.seated + step_along + 1)
+        centre = (left + (gate.seated + step_along) * step, middle)
+        draw_reveal(screen, centre, hold.name or None, colour_for(seat_number), hold.fraction, height)
+    if not queue and joining > 0:
         centre = (left + gate.seated * step, middle)
         draw_reveal(screen, centre, None, colour_for(gate.seated + 1), joining, height)
 

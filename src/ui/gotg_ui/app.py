@@ -1422,6 +1422,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 # going quiet, and the strip has to empty on its own.
                 progress=seating.filling(time.monotonic()) or space.progress(time.monotonic()),
                 joining="keyboard" if space.since is not None else None,
+                holds=seating.joining.now(time.monotonic()),
             )
             drawn = time.perf_counter()
             pygame.display.flip()
