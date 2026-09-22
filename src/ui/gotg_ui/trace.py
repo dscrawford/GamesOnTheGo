@@ -28,7 +28,10 @@ def say(kind: str, **fields) -> None:
     """One line, or nothing at all when tracing is off."""
     if not _path:
         return
-    line = {"t": round(time.monotonic() - _started, 3), "kind": kind, **fields}
+    # The pid, because the picker and the gate append to one file -- the
+    # picker execs into the launch, so their lines interleave and only this
+    # says which program decided what.
+    line = {"t": round(time.monotonic() - _started, 3), "pid": os.getpid(), "kind": kind, **fields}
     try:
         with open(_path, "a") as out:
             out.write(json.dumps(line, default=str) + "\n")

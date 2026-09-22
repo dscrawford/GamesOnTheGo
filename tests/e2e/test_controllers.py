@@ -22,7 +22,7 @@ import struct
 import time
 
 import pytest
-from fakepad import ABS_X, BTN_SOUTH, BTN_START, FakePad, kernel_names
+from fakepad import ABS_X, BTN_SOUTH, BTN_START, FakePad, event_node, kernel_names
 
 from gotg_ui import pads
 from gotg_ui.assign import Session, Watch, attend
@@ -1860,3 +1860,42 @@ def test_the_hold_that_pairs_a_controller_cannot_also_start_the_game(daemon, sdl
         pad.up(BTN_SOUTH)
         assert door.done(time.monotonic()), "a fresh hold after the pause did not start the game"
         picker.close()
+
+
+def test_the_gate_holds_a_controllers_keyboard_so_it_cannot_start_the_game():
+    """The leaking input, named.
+
+    A Steam Controller in lizard mode types Enter when A is pressed, and the
+    door takes Enter as "start now" -- so pairing one started the game with
+    nobody having held anything. The picker has held those nodes since the day
+    it was written; this screen never did.
+    """
+    from gotg_ui.hush import Hush, a_controllers, parse
+
+    # A pad and the keyboard that belongs to it, sharing a phys the way an
+    # Xbox pad's collections do on a USB port.
+    with FakePad("E2E Xbox Pad", phys="e2e-hush/input0"), FakePad(
+        "E2E Xbox Pad Keyboard", 0x045E, 0x028E, 2, phys="e2e-hush/input0", keyboard=True
+    ):
+        time.sleep(0.6)
+        with open("/proc/bus/input/devices") as devices:
+            text = devices.read()
+        wanted = [node.name for node in a_controllers(parse(text))]
+        assert any("E2E Xbox Pad Keyboard" in name for name in wanted), (
+            f"the rule did not see the pad's keyboard as one: {wanted}"
+        )
+
+        hush = Hush()
+        held = hush.refresh(text)
+        try:
+            node = event_node("E2E Xbox Pad Keyboard")
+            assert node, "the fake keyboard has no event node to hold"
+            assert node.rsplit("/", 1)[-1] in held, (
+                f"the gate did not hold {node}; it could still type into the door"
+            )
+            # And the pad itself is untouched: grabbing that would take the
+            # presses away from padmap, which is the thing reading them.
+            joystick = event_node("E2E Xbox Pad")
+            assert joystick and joystick.rsplit("/", 1)[-1] not in held
+        finally:
+            hush.release()
