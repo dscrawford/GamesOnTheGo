@@ -182,10 +182,14 @@ frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).
 - SDL renames a padmap clone that mirrors a pad it knows (`Xbox 360
   Controller`), so device *names* cannot identify padmap's pads. The GUID's
   bytes 2–3 carry a CRC-16 of the real name; that is what `clones.py` reads.
-- Controllers are keyboards too. The Steam Controller Puck is four keyboards
-  and four mice in hardware until something sends lizard-off over hidraw; a
-  Bluetooth Xbox pad has `Keyboard`/`Mouse`/`Consumer Control` nodes on the
-  same `Uniq` as its joystick. Over Bluetooth every device's `Phys` is the
+- Controllers are keyboards too, **on every screen that reads input**. The
+  Steam Controller Puck is four keyboards and four mice in hardware until
+  something sends lizard-off over hidraw; a Bluetooth Xbox pad has
+  `Keyboard`/`Mouse`/`Consumer Control` nodes on the same `Uniq` as its
+  joystick. The picker held those nodes from the start and `gotg-seat` did
+  not, which is the whole of "the game starts as soon as I pair": lizard mode
+  types Enter when A is pressed, and the door took Enter as "start now".
+  Anything with a keyboard shortcut runs `hush.Hush()` for its own lifetime. Over Bluetooth every device's `Phys` is the
   *adapter's* address (the phone's media keys share it with the pad), so
   siblings are matched by `Uniq`, never by `Phys`.
 - padmap grabs every pad for the length of a `begin` session, so the
