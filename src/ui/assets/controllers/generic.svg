@@ -78,7 +78,7 @@
 
   <!-- The anchors. Invisible, unstroked, and the only thing the build reads. -->
   <g id="anchors" fill="none" stroke="none">
-    <circle id="anchor-Up" cx="235" cy="200" r="6"/>
+    <circle id="anchor-leftstick_up" cx="330" cy="262" r="6"/><circle id="anchor-leftstick_down" cx="330" cy="318" r="6"/><circle id="anchor-leftstick_left" cx="302" cy="290" r="6"/><circle id="anchor-leftstick_right" cx="358" cy="290" r="6"/><circle id="anchor-rightstick_up" cx="468" cy="262" r="6"/><circle id="anchor-rightstick_down" cx="468" cy="318" r="6"/><circle id="anchor-rightstick_left" cx="440" cy="290" r="6"/><circle id="anchor-rightstick_right" cx="496" cy="290" r="6"/><circle id="anchor-Up" cx="235" cy="200" r="6"/>
     <circle id="anchor-Down" cx="235" cy="294" r="6"/>
     <circle id="anchor-Left" cx="188" cy="247" r="6"/>
     <circle id="anchor-Right" cx="282" cy="247" r="6"/>
