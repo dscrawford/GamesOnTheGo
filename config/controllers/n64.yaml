@@ -16,6 +16,14 @@ ares: [Nintendo64]
 platforms: [n64]
 
 # padmap's control id -> what the button says.
+# The stick sits in an octagonal gate -- eight corners you can feel through
+# the thumb -- so the ring drawn over it is an octagon too. The C group is
+# four buttons and no gate at all; the ring standing in for it is round,
+# because drawing eight corners there would be inventing them.
+gate:
+  left: octagon
+  right: circle
+
 controls:
   a: A
   b: B
@@ -31,6 +39,10 @@ controls:
   rightstick_down: C-down
   rightstick_left: C-left
   rightstick_right: C-right
+  leftstick_up: Control stick up
+  leftstick_down: Control stick down
+  leftstick_left: Control stick left
+  leftstick_right: Control stick right
 
 # Where the drawing marks it, when the circle is not named after the
 # control. These drawings predate padmap and use the console's letters.

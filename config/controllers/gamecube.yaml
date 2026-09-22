@@ -14,6 +14,10 @@ players: 4
 platforms: [gamecube, wii]
 
 # padmap's control id -> what the button says.
+# Both sticks sit in octagonal gates, which is the thing a GameCube player
+# feels first; the ring drawn over them follows.
+gate: octagon
+
 controls:
   a: A (large centre)
   b: B (small, lower left)
@@ -31,3 +35,7 @@ controls:
   rightstick_down: C-stick down
   rightstick_left: C-stick left
   rightstick_right: C-stick right
+  leftstick_up: Control stick up
+  leftstick_down: Control stick down
+  leftstick_left: Control stick left
+  leftstick_right: Control stick right

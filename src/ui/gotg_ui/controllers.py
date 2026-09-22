@@ -16,7 +16,7 @@ import json
 import math
 import os
 import pathlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pygame
 
@@ -174,6 +174,11 @@ class Shown:
     seats: int
     with_binding: bool
     alias: dict
+    # stick -> "octagon" or "circle": what shape each gate is on the pad this
+    # drawing is of. An N64's stick and a GameCube's two have eight corners
+    # you can feel; an Xbox pad's are round, and so is anything standing in
+    # for a stick that is really four buttons.
+    gates: dict = field(default_factory=dict)
 
 
 def resolve(platform: str) -> Shown:
@@ -183,7 +188,7 @@ def resolve(platform: str) -> Shown:
         known = for_ares(console)
         artwork = known.artwork if known else FALLBACK
         seats = players_for(console)
-        return Shown(console, bindings, artwork, seats, True, {})
+        return Shown(console, bindings, artwork, seats, True, {}, dict(known.gates) if known else {})
     else:
         # No ares console. For most platforms that means the environment has
         # not been built yet and playing a game once fills it in -- but for
@@ -199,7 +204,7 @@ def resolve(platform: str) -> Shown:
         # What the controller seats, from its own file. The ares table has
         # never heard of this console and would answer one for a pad that
         # takes four.
-        return Shown(console, bindings, artwork, scheme.players, False, scheme.anchors)
+        return Shown(console, bindings, artwork, scheme.players, False, scheme.anchors, dict(scheme.gates))
 
 
 
@@ -299,11 +304,11 @@ def draw(
     # reads that way in the hand.
     #
     # Read off the *artwork*, not off the bindings. A stick's position is a
-    # reading rather than a binding -- padmap's clone forwards the axes
-    # whether or not its capture ever asked about them, and its GameCube,
-    # Switch and Wii U layouts do not ask (docs/requests/the-analog-stick.md).
-    # So the ring is drawn wherever the drawing has a stick, and a console
-    # that binds those directions loses their labels to it.
+    # reading rather than a binding: padmap's clone forwards the axes whether
+    # or not its capture ever asked about them, and for a while its GameCube,
+    # Switch and Wii U layouts did not ask at all. So the ring is drawn
+    # wherever the drawing has a stick, and a console that binds those
+    # directions loses their labels to it.
     groups = stick_groups(console) if named else stick_groups_for_ids(diagram.anchors)
     left, top, box_w, box_h = rect
     rings: list[tuple[str, tuple[int, int], int]] = []
@@ -359,7 +364,7 @@ def draw(
             pygame.draw.aacircle(screen, colour_for(player), at, dot_r)
 
     for stick, middle, radius in rings:
-        draw_stick(screen, middle, radius, {
+        draw_stick(screen, middle, radius, gate=shown.gates.get(stick, "circle"), at={
             player: where
             for player, held in (sticks or {}).items()
             if (where := held.get(stick)) is not None
@@ -583,8 +588,22 @@ def draw_reveal(
     screen.blit(shown, shown.get_rect(center=centre))
 
 
-def draw_stick(screen, centre, radius: int, at: dict[int, tuple[float, float]]) -> None:
-    """A stick, as a circle with a dot in it.
+def gate_points(centre, radius: float, sides: int = 8) -> list[tuple[int, int]]:
+    """An octagon around this centre, flat side up, as a real gate sits."""
+    turn = math.pi / sides
+    return [
+        (
+            int(centre[0] + radius * math.sin(2 * math.pi * corner / sides + turn)),
+            int(centre[1] - radius * math.cos(2 * math.pi * corner / sides + turn)),
+        )
+        for corner in range(sides)
+    ]
+
+
+def draw_stick(
+    screen, centre, radius: int, at: dict[int, tuple[float, float]], gate: str = "circle"
+) -> None:
+    """A stick, as its own gate with a dot in it.
 
     Four labels reading X-Axis/Lo, X-Axis/Hi, Y-Axis/Lo, Y-Axis/Hi down the
     side of a drawing say what a stick is made of; none of them says where it
@@ -592,9 +611,18 @@ def draw_stick(screen, centre, radius: int, at: dict[int, tuple[float, float]]) 
     in that player's colour -- two players on one console get two dots, which
     is also how you see whose stick is drifting.
 
-    `at` is player -> (x, y), each -1..1, y down as a screen counts.
+    `at` is player -> (x, y), each -1..1, y down as a screen counts, and
+    `gate` is the shape the stick's travel is bounded by on the real pad: an
+    N64 stick and a GameCube's two sit in octagonal gates with eight corners
+    you can feel, and an Xbox pad's are round. Drawing a circle over all of
+    them was a picture of a different controller.
     """
-    pygame.draw.aacircle(screen, LEADER, centre, radius, 2)
+    if gate == "octagon":
+        # aalines, closed: a polygon outline at this size is all diagonals,
+        # which is the shape aliasing shows up on worst.
+        pygame.draw.aalines(screen, LEADER, True, gate_points(centre, radius), 2)
+    else:
+        pygame.draw.aacircle(screen, LEADER, centre, radius, 2)
     if not at:
         # Nobody's thumb: the rest position, so the ring is not an empty hoop
         # whose meaning has to be guessed.
