@@ -14,9 +14,19 @@ direnv allow          # `use flake .`; also rebuilds ~/.local/state/gotg/app on 
 
 The dev shell puts `gotg`, `gotg-ui`, `gotg-seat`, `padmap`, and
 `gotg-test-controllers` on PATH, all running the **working tree**, not the
-store. A flake sees only git-tracked files: a new module that is not
+store, and exports `GOTG_SEAT` and `GOTG_BIN` pointing at them — so a game
+launched from the picker here meets *this* checkout's gate, whatever PATH it
+inherited. A flake sees only git-tracked files: a new module that is not
 `git add`ed is silently absent from every `nix build`, while `gotg-ui` from
-the shell still runs it.
+the shell still runs it; `.envrc` lists anything untracked under `src/client`,
+`src/ui` or `config` on entry.
+
+`.envrc` also compares `~/.nix-profile`'s locked rev with HEAD, since that is
+what a launch from Steam or a bare terminal runs. Keep it current:
+
+```bash
+git push && nix profile upgrade gotg gotg-ui   # the profile follows origin
+```
 
 ## Build / Run
 
@@ -201,6 +211,13 @@ frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).
   Steam and a hold on it reaches nobody; tests hold again, people do too.
 - The picker Steam launches is a built copy — `gotg steam picker` refreshes
   it. `.envrc` auto-rebuilds only on `src/client` changes, never `src/ui`.
+- **A stale profile is invisible from in here.** A `gotg-seat` three days old
+  had no ready-up door, so a pad was seated and the game started at once
+  while every test in this repo passed — they all run the working tree.
+  Guarded by the shell's `GOTG_SEAT`/`GOTG_BIN` and `.envrc`'s rev check.
+- Every exit from `gotg-seat` says why on stderr (`gotg-seat: no door:
+  skipped, 0 seated`) and in the trace. It used to `return 0` in silence,
+  which on a terminal is indistinguishable from the gate never running.
 - When the picker does something on a real machine the tests do not show:
   `GOTG_UI_TRACE=/tmp/gotg-trace.log gotg-ui`, ask the person to press the
   buttons in a numbered order, then read the file (one JSON object per

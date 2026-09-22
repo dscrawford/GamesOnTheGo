@@ -434,6 +434,16 @@
             # even from a subdirectory.
             shellHook = ''
               export GOTG_DEV_ROOT="$PWD"
+              # The checkout's own gate and client by name, not only by PATH:
+              # a pick execs `gotg play`, which looks for `gotg-seat`, and a
+              # launch that lost this PATH found an older one that had no
+              # ready-up door and started the game on the seating hold. These
+              # are the client's and picker's existing overrides, set only if
+              # unset so a test can still substitute a recorder. The picker
+              # has no such variable, so it stays a PATH entry.
+              export GOTG_SEAT="''${GOTG_SEAT:-${seatDev}/bin/gotg-seat}"
+              export GOTG_BIN="''${GOTG_BIN:-${gotg-dev}/bin/gotg}"
+              export PATH="${pickerDev}/bin:$PATH"
               # Machinery first, then gotg's own from the checkout so edits
               # apply on save. `nix develop` only — direnv shells get theirs
               # via the XDG_DATA_DIRS publish in .envrc.
