@@ -314,6 +314,11 @@ def draw(
     rings: list[tuple[str, tuple[int, int], int]] = []
     sticky: set[str] = set()
     for stick, ways in groups.items():
+        if shown.gates.get(stick) == "buttons":
+            # Bound to a stick, and four buttons in the hand: an N64's C
+            # group. Drawing a ring there would draw a stick the console has
+            # not got, so they stay four labels.
+            continue
         points = [
             (left + diagram.anchors[name][0] * box_w, top + diagram.anchors[name][1] * box_h)
             for name in ways
@@ -388,10 +393,12 @@ def draw(
     # Said out loud rather than left to be noticed: a diagram that quietly drew
     # twenty-one of twenty-two would read as a complete answer.
     #
-    # Not always a gap to close, either. Every pad here is drawn from the front,
-    # so the N64's Z sits under the grip and has nowhere to point at — it is
-    # bound, it works, and this line is the only place that says so. A console
-    # still on the generic pad has a larger number and that one *is* a to-do.
+    # Not always a gap to close, either. Every pad here is drawn from the
+    # front, so a control on the back of one -- the N64's Z was the example,
+    # until its anchor was put on the grip the finger pressing it rests on --
+    # has nowhere of its own to point at, and this line is the only place
+    # that says so. A console still on the generic pad has a larger number
+    # and that one *is* a to-do.
     # The sticks count as drawn: their four directions are the ring, not a
     # gap. Without this the line called eight controls missing the moment
     # they started being drawn properly.
