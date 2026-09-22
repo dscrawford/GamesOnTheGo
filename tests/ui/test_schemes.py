@@ -151,3 +151,23 @@ def test_the_controls_are_padmaps_own(name):
     assert set(scheme.controls) == {c["canonical"] for c in layout["controls"]}
     for control in layout["controls"]:
         assert scheme.controls[control["canonical"]] == control["label"]
+
+
+def test_the_sticks_that_sit_in_an_octagon_say_so():
+    """A ring is a picture of the gate, so it has to be the right shape.
+
+    An N64's stick and a GameCube's two sit in octagonal gates -- eight
+    corners you can feel through the thumb -- and an Xbox pad's are round.
+    Drawing a circle over all of them drew a controller nobody owns.
+    """
+    schemes = all_schemes()
+    assert schemes["gamecube"].gate("left") == "octagon"
+    assert schemes["gamecube"].gate("right") == "octagon", "the C-stick has a gate too"
+    assert schemes["n64"].gate("left") == "octagon"
+    # An N64's C group is four buttons and no gate at all. The ring standing
+    # in for it is round, because eight corners there would be invented.
+    assert schemes["n64"].gate("right") == "circle"
+    # Everything else is round until somebody says otherwise, which is what a
+    # pad with no stick at all wants too.
+    assert schemes["switch"].gate("left") == "circle"
+    assert schemes["snes"].gate("right") == "circle"

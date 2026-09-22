@@ -42,6 +42,18 @@ class Scheme:
     # control -> the anchor in the artwork that marks it, where the drawing
     # does not name its circles after padmap's controls.
     anchors: dict[str, str] = field(default_factory=dict)
+    # What shape each stick's gate is on the real controller, by stick:
+    # `{"left": "octagon", "right": "circle"}`. An N64's stick and a
+    # GameCube's two sit in octagonal gates -- eight corners you can feel --
+    # and an Xbox pad's are round; an N64's C group is four buttons and no
+    # gate at all, so a ring standing in for it is round. A round ring over
+    # an octagonal gate is a picture of a different controller, which is the
+    # whole reason this is written down.
+    gates: dict[str, str] = field(default_factory=dict)
+
+    def gate(self, stick: str) -> str:
+        """The shape to draw around this stick. Round unless said otherwise."""
+        return self.gates.get(stick, "circle")
 
     def anchor_names(self, control: str) -> tuple[str, ...]:
         """Which anchors could mark this control, best first."""
@@ -49,6 +61,17 @@ class Scheme:
             return ()
         mapped = self.anchors.get(control)
         return (control, mapped) if mapped else (control,)
+
+
+def _gates(raw: object) -> dict[str, str]:
+    """`gate: octagon` for a pad whose sticks are all one shape, or
+    `gate: {left: octagon, right: circle}` where they are not -- an N64, whose
+    C group is four buttons standing in for a stick."""
+    if isinstance(raw, dict):
+        return {str(stick): str(shape) for stick, shape in raw.items()}
+    if isinstance(raw, str) and raw.strip():
+        return {"left": raw.strip(), "right": raw.strip()}
+    return {}
 
 
 def _scheme(name: str, raw: object) -> Scheme | None:
@@ -68,6 +91,7 @@ def _scheme(name: str, raw: object) -> Scheme | None:
         platforms=tuple(str(p) for p in platforms),
         controls={str(k): str(v) for k, v in controls.items()} if isinstance(controls, dict) else {},
         anchors={str(k): str(v) for k, v in anchors.items()} if isinstance(anchors, dict) else {},
+        gates=_gates(raw.get("gate")),
     )
 
 

@@ -30,6 +30,14 @@ controls:
   rightshoulder: R
   lefttrigger: ZL
   righttrigger: ZR
+  leftstick_up: Left stick up
+  leftstick_down: Left stick down
+  leftstick_left: Left stick left
+  leftstick_right: Left stick right
+  rightstick_up: Right stick up
+  rightstick_down: Right stick down
+  rightstick_left: Right stick left
+  rightstick_right: Right stick right
 
 # Where the drawing marks it, when the circle is not named after the
 # control. These drawings predate padmap and use the console's letters.
