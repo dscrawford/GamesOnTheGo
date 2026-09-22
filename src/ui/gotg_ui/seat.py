@@ -307,14 +307,29 @@ class Door:
     # instead -- which reads exactly like bindings not being remembered.
     GO = (sdl_pads.A, sdl_pads.START)
 
-    def __init__(self, sticks, now: float, seconds: float = GO_HOLD, buttons: dict | None = None):
+    def __init__(
+        self,
+        sticks,
+        now: float,
+        seconds: float = GO_HOLD,
+        buttons: dict | None = None,
+        buttons_by: dict[int, dict] | None = None,
+    ):
         self.sticks = sticks
         self.hold = GoHold(seconds=seconds, opened=now, held_at_open=sticks.any_button_down())
         # padmap's profile for the seated pad, so a raw input can be named:
         # which control the button under the thumb is. Ringed on the drawing
         # while it is down.
         self.buttons = buttons or {}
+        # And each seat's own table where they differ: player one on an Xbox
+        # pad and player two on a DualSense do not share button numbers, and
+        # naming player two's press from player one's profile named the wrong
+        # control on the drawing.
+        self.buttons_by = buttons_by or {}
         self.lit: str | None = None
+        # The control under each player's thumb, for the dots beside the
+        # labels. Separate from `lit`, which is one ring on one control.
+        self.lit_by: dict[int, str] = {}
         self.y_down = False
         self.rebind = False
         # Whose hold is on the clock, and when each seat was last heard from.
@@ -361,6 +376,7 @@ class Door:
             self.y_down = False
             self.hold.released(now)
             self.lit = None
+            self.lit_by.pop(sdl_pads.player(event) or 0, None)
             trace.say("door-release")
         raw = sdl_pads.raw_input(event)
         if raw is not None:
@@ -370,13 +386,17 @@ class Door:
             seat = sdl_pads.player(event)
             if seat is not None:
                 self.pressing[seat] = now
-            named = controls_for(self.buttons, *raw)
+            named = controls_for(self.buttons_by.get(seat or 0) or self.buttons, *raw)
             if named:
                 self.lit = named[0]
+                if seat is not None:
+                    self.lit_by[seat] = named[0]
             elif raw[0] != "button":
                 # An axis or hat back at rest clears it; a button's rest is
                 # its release, handled above.
                 self.lit = None
+                if seat is not None:
+                    self.lit_by.pop(seat, None)
         return False
 
     def done(self, now: float) -> bool:
@@ -404,8 +424,18 @@ def _wait_for_go(screen, font_at, clock, pads: Padmap, gate: Gate, title: str) -
     """
     first = gate.seats[0] if gate.seats else None
     profile = profiles.for_pad(first.name) if first else None
-    bound = profiles.described(profile, gate.scope)
-    door = Door(sdl_pads.init(), time.monotonic(), buttons=(profile or {}).get("buttons") or {})
+    # One profile per seat, by the name padmap gave it: whose press it is
+    # decides which table names the control.
+    by_seat = {
+        seat.player: (profiles.for_pad(seat.name) or {}).get("buttons") or {}
+        for seat in gate.seats
+        if seat.name
+    }
+    door = Door(
+        sdl_pads.init(), time.monotonic(),
+        buttons=(profile or {}).get("buttons") or {},
+        buttons_by=by_seat,
+    )
     cache: dict = {}
     while True:
         now = time.monotonic()
@@ -426,7 +456,7 @@ def _wait_for_go(screen, font_at, clock, pads: Padmap, gate: Gate, title: str) -
         if door.done(now):
             return "go", gate
         _draw_go(
-            screen, font_at, gate, title, door.progress(now), bound, door.lit, cache,
+            screen, font_at, gate, title, door.progress(now), door.lit_by, cache,
             holder=door.holder, heard=door.heard(now),
         )
         pygame.display.flip()
@@ -439,8 +469,7 @@ def _draw_go(
     gate: Gate,
     title: str,
     fraction: float,
-    bound: dict,
-    lit: str | None,
+    pressing: dict[int, str],
     cache: dict,
     holder: int | None = None,
     heard: set[int] | None = None,
@@ -457,7 +486,7 @@ def _draw_go(
         names = ", ".join(seat.name or "pad" for seat in gate.seats)
         draw_diagram(
             screen, assets_dir(), gate.platform, font_at, cache,
-            highlight=lit, bound=bound,
+            pressing=pressing,
             heading=f"{title}  —  {names}",
             keys="",
             footer=(
