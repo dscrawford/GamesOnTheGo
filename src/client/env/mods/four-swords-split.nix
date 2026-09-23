@@ -141,7 +141,17 @@
         exit 1
       '';
 
+      #
+      # The witness caught it on its first night: not Dolphin at all, but
+      # Game Mode's own Vulkan layer, which SteamOS loads into everything --
+      # "Gamescope WSI Layer Error: CreateSwapchainKHR: Creating swapchain
+      # for non-Gamescope swapchain. Hooking has failed somewhere!" -- asked
+      # at the swapchain and again at the first present, and blocking on the
+      # answer. Dolphin draws into the nested sway here, not onto gamescope,
+      # so the layer has nothing to hook; its own off switch keeps it out of
+      # Dolphin entirely, and the witness stays for whatever asks next.
       dolphin = pkgs.writeShellScript "gotg-fsa-dolphin" ''
+        export DISABLE_GAMESCOPE_WSI=1
         export PATH=${popupWitness}/bin:$PATH
         exec ${gotgPkgs.padmap-rs}/bin/padmap-rs exec -- \
           ${base.emulator}/bin/${base.bin} -C Dolphin.Interface.UsePanicHandlers=False "$@"
