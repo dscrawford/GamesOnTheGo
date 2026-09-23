@@ -1,0 +1,9 @@
+[Logs]
+CI = True
+PAD = True
+SI = True
+[Options]
+Verbosity = 4
+WriteToConsole = False
+WriteToFile = True
+WriteToWindow = False

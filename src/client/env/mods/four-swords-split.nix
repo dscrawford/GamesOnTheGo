@@ -46,18 +46,62 @@
       # it wrote `GBA1 <- SDL/0/Steam Deck`, a name that does not exist
       # inside. So the pads are not counted.
       #
-      # Nor are they named. They were: --pad "sdl:padmap Player N", which is
-      # what the *kernel* calls padmap's clones and what Dolphin never hears.
-      # A clone mirrors the identity of the pad behind it, so SDL finds
-      # 045e:028e in its own database and hands Dolphin "Xbox 360
-      # Controller"; the name padmap gave it is gone. Four Swords Adventures
-      # had no controls at all, and only for the pads SDL recognises -- the
-      # clone of something it has never heard of keeps its name, which is why
-      # this worked for one pad and not another.
-      #
       # --pad "padmap:N" below. The wrapper finds player N's clone by its
       # GUID, which carries a CRC of the real name taken before SDL renames
-      # anything, and keeps the slot that tells two pads of one model apart.
+      # anything, and writes the name it finds in the pad list -- which is
+      # why the list is rewritten below to say what Dolphin calls each clone.
+      # What Dolphin calls padmap's clones, put in the pad list in place of
+      # what gotg-pads calls them.
+      #
+      # The two disagree, and Dolphin's own log is the one that counts. For
+      # the Xbox pad's clone gotg-pads reports SDL's joystick name, `Xbox 360
+      # Controller` -- the same name as the raw pad padmap has grabbed -- and
+      # Dolphin, running under `padmap-rs exec` with padmap's mapping for that
+      # GUID, lists it as `SDL/0/padmap Player 1`. The binder took gotg-pads'
+      # word for it, wrote `GBA1 <- SDL/0/Xbox 360 Controller`, and bound
+      # player one to the grabbed pad: nothing moved at all, because player
+      # one drives the menus. Measured with Dolphin's CI log on:
+      #
+      #   Added device: SDL/0/Xbox 360 Controller     (the raw pad, grabbed)
+      #   Added device: SDL/0/padmap Player 1         (its clone)
+      #   Added device: SDL/0/padmap Player 2         (the Steam Controller's)
+      #
+      # A clone is recognised by its GUID's name-CRC, which SDL cannot
+      # rename, and every clone's name is its own, so its slot is 0.
+      dolphinNames = pkgs.writeText "gotg-fsa-dolphin-names.py" ''
+        import json
+        import sys
+
+        PREFIX = "padmap Player "
+
+
+        def crc16(data):
+            crc = 0
+            for byte in data:
+                crc ^= byte
+                for _ in range(8):
+                    crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+            return crc & 0xFFFF
+
+
+        NAMES = {crc16(f"{PREFIX}{n}".encode()): f"{PREFIX}{n}" for n in range(1, 9)}
+
+        try:
+            rows = json.load(sys.stdin)
+        except ValueError:
+            sys.exit(1)
+        for row in rows if isinstance(rows, list) else []:
+            guid = str(row.get("guid") or "")
+            try:
+                pair = bytes.fromhex(guid[4:8])
+            except ValueError:
+                continue
+            if len(pair) == 2 and (pair[0] | pair[1] << 8) in NAMES:
+                row["name"] = NAMES[pair[0] | pair[1] << 8]
+                row["slot"] = 0
+        json.dump(rows, sys.stdout)
+      '';
+
       dolphin = pkgs.writeShellScript "gotg-fsa-dolphin" ''
         exec ${gotgPkgs.padmap-rs}/bin/padmap-rs exec -- \
           ${base.emulator}/bin/${base.bin} "$@"
@@ -113,13 +157,9 @@
           #
           # `--pad padmap:N` is resolved by a step that runs in the session,
           # outside the sandbox -- and out there the raw pads are visible
-          # beside padmap's clones. Two things go wrong with that. SDL renames
-          # a clone to the pad it mirrors, so the name written is one two
-          # devices answer to; and the slot, which is what tells those two
-          # apart, counts a different set of pads outside than inside. The
-          # session's own log has both failures in it: `GBA1 <- SDL/0/Xbox 360
-          # Controller` written from outside, and `padmap has published no pad
-          # for player 2` when the list was read too early.
+          # beside padmap's clones, and the slots count a different set of
+          # pads than Dolphin will. And the names come out of the pipe below
+          # as Dolphin says them, not as gotg-pads does: see `dolphinNames`.
           #
           # So the enumerator runs inside the sandbox, through padmap, exactly
           # as Dolphin will. `GOTG_PADS` is what the resolver looks for, and
@@ -135,7 +175,8 @@
           cat >"$state/splitscreen/gotg-pads" <<'SHIM'
           #!/bin/sh
           export SDL_JOYSTICK_HIDAPI=0 SDL_JOYSTICK_HIDAPI_STEAM=0
-          exec ${gotgPkgs.padmap-rs}/bin/padmap-rs exec -- ${gotgPkgs.gotg-pads}/bin/gotg-pads "$@"
+          ${gotgPkgs.padmap-rs}/bin/padmap-rs exec -- ${gotgPkgs.gotg-pads}/bin/gotg-pads "$@" |
+            ${pkgs.python3}/bin/python3 ${dolphinNames}
           SHIM
           chmod +x "$state/splitscreen/gotg-pads"
           export GOTG_PADS="$state/splitscreen/gotg-pads"
