@@ -252,15 +252,17 @@ qa_host_lacks_gl() {
 # from memory. A result is worth what the build behind it is, so the
 # client's own path goes in too.
 qa_record_run() {
-  local rundir="$1" id="$2" variant="$3" machine="$4" duration="$5" boot_wait="$6" bless="$7"
+  local rundir="$1" id="$2" variant="$3" machine="$4" duration="$5" boot_wait="$6" bless="$7" overlay_at="${8:-}"
   mkdir -p "$rundir"
   jq -n --arg id "$id" --arg variant "$variant" --arg machine "$machine" \
     --argjson duration "$duration" --argjson boot_wait "$boot_wait" \
     --argjson bless "$([[ -n "$bless" ]] && echo true || echo false)" \
+    --arg overlay_at "$overlay_at" \
     --arg gotg "$GOTG_ROOT" --arg at "$(date -Is 2>/dev/null || true)" \
     '{version: 1, id: $id, variant: (if $variant == "" then null else $variant end),
       machine: $machine, duration: $duration, boot_wait: $boot_wait,
-      bless: $bless, gotg: $gotg, at: $at}' >"$rundir/run.json"
+      bless: $bless, gotg: $gotg, at: $at}
+     + (if $overlay_at == "" then {} else {overlay_at: ($overlay_at | tonumber)} end)' >"$rundir/run.json"
 }
 
 # One run directory, by name or `latest`.
@@ -297,6 +299,9 @@ qa_rerun_args() {
   printf '%s' "$id"
   [[ -z "$variant" ]] || printf ' %s' "$variant"
   printf ' --machine %s --duration %s --boot-wait %s' "$machine" "$duration" "$boot_wait"
+  local overlay_at
+  overlay_at="$(jq -r '.overlay_at // empty' "$rec")"
+  [[ -z "$overlay_at" ]] || printf ' --overlay-at %s' "$overlay_at"
 }
 
 # The real machine first, the stand-in second.
@@ -339,7 +344,7 @@ qa_where() {
 }
 
 cmd_qa() {
-  local want="" variant="" duration=60 boot_wait=15 bless="" machine="desktop"
+  local want="" variant="" duration=60 boot_wait=15 bless="" machine="desktop" overlay_at=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -h | --help)
@@ -357,6 +362,9 @@ usage: gotg qa <id> [variant] [--duration N] [--boot-wait N] [--bless] [--machin
     --duration N   seconds to run the game for (default 60)
     --boot-wait N  seconds before the pad starts pressing (default 15)
     --bless        store this run's reference frame as the golden image
+    --overlay-at N N seconds in, a pad joins through a stand-in padmap and
+                   the virtual pad holds L+R+Start short of stopping the
+                   game; grade whether gotg-killswitch's bar was drawn over it
     --machine M    pretend to be that machine: desktop (default), deck,
                    deck-desktop. A profile is the conditions that told a
                    machine apart when a launch worked here and failed there
@@ -371,6 +379,7 @@ EOF
       --boot-wait) boot_wait="${2:-}"; shift 2 ;;
       --bless) bless=1; shift ;;
       --machine) machine="${2:-}"; shift 2 ;;
+      --overlay-at) overlay_at="${2:-}"; shift 2 ;;
       --rerun)
         # Whatever that run was, again -- and flags after it still win, so
         # `--rerun x --duration 90` is a longer run of the same thing.
@@ -393,6 +402,11 @@ EOF
   [[ -n "$want" ]] || die "usage: gotg qa <id> [variant] [--duration N] [--boot-wait N] [--bless]"
   [[ "$duration" =~ ^[0-9]+$ && "$boot_wait" =~ ^[0-9]+$ ]] ||
     die "--duration and --boot-wait take whole seconds"
+  [[ -z "$overlay_at" || "$overlay_at" =~ ^[0-9]+$ ]] || die "--overlay-at takes whole seconds"
+  # The join and the exit ring take six seconds from N (qa/session.sh); a run
+  # that ends inside them grades a bar that was never finished.
+  [[ -z "$overlay_at" ]] || ((10#$overlay_at + 8 <= 10#$duration)) ||
+    die "--overlay-at $overlay_at leaves no room for the overlay in a ${duration}s run (needs N + 8 <= duration)"
   # Checked before anything is built or downloaded: a typo here is the
   # cheapest thing to be wrong about after the id.
   qa_machine_env "$machine" >/dev/null
@@ -407,6 +421,7 @@ EOF
       [[ -z "$variant" ]] || there+=("$variant")
       there+=(--duration "$duration" --boot-wait "$boot_wait")
       [[ -z "$bless" ]] || there+=(--bless)
+      [[ -z "$overlay_at" ]] || there+=(--overlay-at "$overlay_at")
       "$(qa_ssh_bin)" -o BatchMode=yes "$host" gotg qa "${there[@]}"
       return
     fi
@@ -424,6 +439,11 @@ EOF
     game="$(manifest_find "$want")"
   fi
 
+  # Asked for and nothing to draw it: said here, not found as a failed axis.
+  local killswitch=""
+  [[ -z "$overlay_at" ]] || killswitch="$(killswitch_bin)" ||
+    die "--overlay-at needs gotg-killswitch, and there is none on PATH or in GOTG_KILLSWITCH_BIN"
+
   [[ -w /dev/uinput ]] ||
     die "cannot write /dev/uinput — the virtual pad needs it.
      Add yourself to the group that owns it (usually 'input') and log in again."
@@ -436,7 +456,7 @@ EOF
 
   # What this run is, before it starts: one that dies half way is still one
   # somebody may want to repeat.
-  qa_record_run "$rundir" "$want" "$variant" "$machine" "$duration" "$boot_wait" "$bless"
+  qa_record_run "$rundir" "$want" "$variant" "$machine" "$duration" "$boot_wait" "$bless" "$overlay_at"
 
   # Scratch launch state, set before play_prepare so every helper that derives
   # a path from env_state_dir agrees on it.
@@ -460,7 +480,7 @@ EOF
   # `python3` resolves to depends on how the two got onto PATH.
   local padlog="$rundir/pad.log"
   gotg-qa-python "$GOTG_ROOT/qa/pad.py" --ready-file "$rundir/pad-ready" \
-    --boot-wait "$boot_wait" >"$padlog" 2>&1 &
+    --boot-wait "$boot_wait" --chord-file "$rundir/chord" >"$padlog" 2>&1 &
   QA_PAD_PID=$!
   local waited=0
   while [[ ! -e "$rundir/pad-ready" ]]; do
@@ -548,6 +568,7 @@ EOF
     GOTG_FULLSCREEN=0 \
     PULSE_SINK="gotgqa$$" SDL_AUDIODRIVER=pulseaudio SDL_AUDIO_DRIVER=pulseaudio \
     GOTG_QA_DIR="$rundir" GOTG_QA_DURATION="$duration" \
+    GOTG_QA_OVERLAY_AT="$overlay_at" GOTG_QA_KILLSWITCH="$killswitch" \
     timeout -k 10 "$((duration + 90))" \
     cage -- "$GOTG_ROOT/qa/session.sh" "$(env_bin "$PLAY_ATTR")" "$PLAY_TARGET" \
     >"$rundir/session.log" 2>&1 || cage_status=$?
