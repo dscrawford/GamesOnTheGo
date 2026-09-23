@@ -1,16 +1,17 @@
 # Two people pairing at once
 
-Most of this landed while it was being written. `progress` now names the pad
-and the seat it is filling towards, a release is a `frac: 0` for that pad, and
-`Assigner::tick` sorts the pending holds by when the button went down before
-handing out seats. GOTG draws one fill per pad from that, in press order --
-`src/ui/gotg_ui/joining.py`.
+Most of this has landed -- thank you: named progress in press order
+(d2000c5), the same hold length no longer resetting holds (26754a9), a full
+room stopping one hold rather than everybody's (bc61806), and `state` saying
+whether seating listens and for how long (ee56811).
 
-What is left is three ways an in-flight hold is destroyed by something that
-happened to somebody else. The first is the one that stops the feature
-working at all, and GOTG's e2e now watches for it:
-`test_the_seat_goes_to_whoever_pressed_first`, a strict xfail, which says so
-the day it is fixed.
+**One item is left, and it is now the one people hit.** Reported from the
+sofa this week: "in different screens, if someone claims a controller, it
+cancels another controller and they have to hold A again." Four people
+picking up pads at a party is the case: each hold after the first is thrown
+away by the claim before it. GOTG's e2e watches for it --
+`test_the_seat_goes_to_whoever_pressed_first`, a strict xfail, and a
+four-pad suite beside it -- and they say so the day it is fixed.
 
 ## 1. One person finishing throws away everybody else's hold
 
@@ -41,7 +42,41 @@ changes when a claimed pad stops being watched, `refresh` rebuilds it, and
 `refresh` resets the assigner wholesale rather than dropping the entries for
 pads that have actually gone.
 
+### 1b. A press made during a claim's republish is lost
+
+After a claim, `tick_seating` sends the claim, makes every clone again, sends
+`state`, and only then reopens the watched pads. A button pressed in between
+is queued on the old handle and thrown away. It stays down, so the kernel
+sends no new edge, and that person's hold never starts; they have to let go
+and press again. On the cluster that window was 0.3-1.5 s, growing with every
+seat (see a-join-keeps-everybody-elses-clone.md). So even the workaround,
+pressing again, fails if you press too soon. Carrying the held state across
+the reopen (read the key state with `EVIOCGKEY` on reopen, and start a hold
+for any button already down) would cover both this and a pad switched on
+mid-hold. Checked by `test_a_press_made_while_a_claim_republishes_is_not_lost`.
+
+### 1a. Two claims in one tick seat by stale indices
+
+With the reset gone this is the next thing a room of four meets. `tick`
+returns `claimed.pads` as indices into the pad list as it was, and the loop
+over them calls `refresh_seating` after each claim -- which rebuilds that list
+without the pad just seated. The second index in the same tick then points
+one pad along: the wrong pad is seated, or `get(index)` misses and a finished
+hold is dropped with no claim. Two people who started within one 20 ms tick
+of each other is not rare when a room picks up pads on "go".
+
+What is wanted: resolve every claimed index to its pad before the first
+refresh (or refresh once, after the loop), so the loop seats pads rather than
+positions.
+
+Also seen from here: the picker used to re-send `seating` ~200 ms after every
+claim, which at 26754a9 is harmless and before it wiped the room. GOTG no
+longer does (`assign.Watch` asks once per connection, after a session, and
+when a full room frees a seat).
+
 ## 2. Changing the hold length throws away every hold in flight
+
+*Answered -- see above.*
 
 ```rust
 pub fn set_hold_seconds(&mut self, hold_seconds: f64) {
@@ -84,6 +119,8 @@ if (hold_seconds - self.hold_seconds).abs() > f64::EPSILON {
 
 ## 3. One person finding every seat taken clears everybody else's hold
 
+*Answered -- see above.*
+
 ```rust
 let player = padmap_core::announce::next_player(&self.taken_seats());
 if player > self.seating.seats() {
@@ -108,6 +145,8 @@ Two things here:
 
 ## 4. Does the daemon already have seating open, and at what length?
 
+*Answered -- see above.*
+
 The `state` event carries `state`, `slots`, `players`, `following` and the
 rest, but not whether seating is listening or how long its hold is. A
 front-end that knew could stop re-sending `seating` when nothing has changed
@@ -119,6 +158,16 @@ front-end that knew could stop re-sending `seating` when nothing has changed
 
 ## How these would be checked
 
+GOTG's `tests/e2e/test_pairing.py` is all of the below against a real daemon,
+four fake pads at once; each open item is a strict xfail that fails the suite
+the day it passes.
+
+* Four pads pressed 0.3 s apart and held: four claims, seats 1-4 in press
+  order, no second press. And the evening it was reported, replayed: the
+  second pad 1.22 s behind, its fill climbing straight through the first
+  claim.
+* Four pads pressed in one tick: four different pads seated, each once.
+* A pad switched on while another is holding: the hold carries on.
 * Two pads, one pressed a third of a second before the other, both held all
   the way: two claims, in press order. This is GOTG's
   `test_the_seat_goes_to_whoever_pressed_first`, which gets one claim today.
