@@ -1,0 +1,30 @@
+# GOTG's native programs, in Rust: the controller lister and the kill switch
+# with its overlay. Rust, Python and Nix are this repo's languages; these
+# were C until 2026-09.
+[workspace]
+resolver = "2"
+members = ["crates/gotg-pads", "crates/gotg-killswitch"]
+
+[workspace.package]
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
+
+[workspace.dependencies]
+# SDL3 through its generated bindings, linked against the system's SDL3 via
+# pkg-config: the same library every emulator asks, which is the point.
+sdl3-sys = { version = "0.7", features = ["use-pkg-config"] }
+serde_json = "1"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"

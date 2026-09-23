@@ -89,9 +89,12 @@ nix build .#controllers-image --max-jobs 2 --cores 4                            
 ruff check src/ui tests/ui tests/e2e                              # the picker (dev)
 nix build .#checks.x86_64-linux.ruff --max-jobs 2 --cores 4        # src/gotg + tests: check AND format
 nix build .#checks.x86_64-linux.shellcheck --max-jobs 2 --cores 4  # the client
+nix build .#checks.x86_64-linux.rust --max-jobs 2 --cores 4        # rust/: test, clippy -D warnings, fmt
 ```
 
-Both must pass before a change is done. `ruff format` is enforced only on
+All must pass before a change is done. In a checkout, `cargo test` in `rust/`
+needs SDL3 and libwayland on `PKG_CONFIG_PATH` (`nix shell nixpkgs#cargo
+nixpkgs#rustc nixpkgs#pkg-config nixpkgs#sdl3.dev nixpkgs#wayland.dev`). `ruff format` is enforced only on
 `src/gotg`; the picker is `ruff check` (E, F, I, W, B, UP, line length 120).
 
 ## Code Style & Conventions
@@ -103,6 +106,10 @@ Both must pass before a change is done. `ruff format` is enforced only on
   frozen dataclass rebuilt from each event (`assign.Assignment`, `gate.Gate`)
   plus a `decide`/`apply` pair. Put logic there, keep `app.py` a loop.
 - **Immutable by default**: `dataclasses.replace`, never mutate a view.
+- **Rust, Python and Nix** are this repo's languages (plus the bash client
+  that predates the rule). No new C: native programs are crates in `rust/`,
+  built through the flake with `cargoLock`. `gotg-pads` and
+  `gotg-killswitch` were C until 2026-09.
 - `src/gotg` is **stdlib-only** — it faces the internet and holds every
   credential; that is its supply-chain posture. PyYAML is the indexer's
   optional extra, nothing else.
@@ -122,6 +129,8 @@ src/gotg/indexer     catalog builder; rules.yaml                  (pyyaml extra)
 src/client/bin,lib   `gotg`: install/play/steam/controllers       (bash, bats)
 src/client/env       one Nix environment per platform/game; mods/ per-game overrides
 src/client/qa        the QA harness and its synthetic pad         (runs in k8s/qa)
+rust/crates          gotg-pads (what SDL sees) and gotg-killswitch (the exit chord
+                     and the overlay bar; pure models + overlay/painter)   (cargo)
 src/ui/gotg_ui       the picker: app.py loop; models in assign/gate/clones/padstrip;
                      pads.py + controllers.py are the pygame half
 src/ui/assets        controller SVGs -> assets/built at build time (generated)
