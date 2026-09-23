@@ -22,6 +22,7 @@ import pygame
 
 from . import config, devices, icons
 from .bindings import bindings_for, console_for, players_for, stick_groups, stick_groups_for_ids
+from .display import image
 from .leaders import Anchor, place
 from .padstrip import (
     EMPTY,
@@ -40,6 +41,7 @@ from .padstrip import (
     seats,
     wedge,
 )
+from .recent import Recent
 from .schemes import for_ares, for_platform
 
 BACKGROUND = config.colour("theme.colours.background", (18, 18, 20))
@@ -98,7 +100,7 @@ class Diagram:
         tiers = sorted(self._images)
         want = next((t for t in tiers if self.size[0] * t >= width), tiers[-1])
         if want not in self._cache:
-            self._cache[want] = pygame.image.load(str(self._images[want])).convert_alpha()
+            self._cache[want] = image(self._images[want])
         source = self._cache[want]
         height = round(width * self.size[1] / self.size[0])
         if source.get_size() == (width, height):
@@ -431,8 +433,11 @@ _icons: dict[tuple[str, int, tuple[int, int, int]], object] = {}
 # a heading and a footer, and re-rendered every one of them sixty times a
 # second to say the same thing again. Bounded because a search box types a
 # new string per keystroke and this would otherwise keep every one of them.
-_words: dict[tuple[str, int, tuple[int, int, int]], object] = {}
 _WORDS_KEPT = 400
+# The same least-recently-used rule as the shapes, for the same reason: a
+# cache that forgets everything when it fills re-renders every label on the
+# screen in the frame after.
+_words = Recent(_WORDS_KEPT)
 
 
 def words(font, text: str, colour) -> object:
@@ -440,9 +445,7 @@ def words(font, text: str, colour) -> object:
     key = (text, font.get_height(), tuple(colour))
     found = _words.get(key)
     if found is None:
-        if len(_words) >= _WORDS_KEPT:
-            _words.clear()
-        found = _words[key] = font.render(text, True, colour)
+        found = _words.put(key, font.render(text, True, colour))
     return found
 
 
@@ -464,7 +467,7 @@ def icon_surface(pad_name: str | None, height: int, colour: tuple[int, int, int]
         return None
     key = (str(path), height, colour)
     if key not in _icons:
-        source = pygame.image.load(str(path)).convert_alpha()
+        source = image(path)
         width = max(1, round(source.get_width() * height / source.get_height()))
         scaled = pygame.transform.smoothscale(source, (width, height))
         # Flattened to a silhouette first. Not every drawing is pure black --
@@ -716,8 +719,15 @@ def draw_stick(
 # transparent surface and smoothscaled down, which is anti-aliasing by
 # averaging and costs nothing after the first frame: every one of these is
 # the same shape again next frame.
-_shapes: dict[tuple, object] = {}
+#
+# Least recently used goes first. It used to be a dict emptied outright when
+# it filled, which turned one shape too many into every ring, tick and mask on
+# screen being painted again at four times the size in a single frame -- a
+# hitch exactly when the screen was busiest. Each shape is cheap (0.13 ms
+# measured for a ring the first time, 0.007 ms after); a hundred at once is
+# not.
 _SHAPES_KEPT = 600
+_shapes = Recent(_SHAPES_KEPT)
 
 # How much bigger to paint. Four is where the stairs stop being visible at
 # these sizes; eight costs four times the memory for a difference nobody saw.
@@ -738,14 +748,7 @@ def crisp(key: tuple, size: tuple[int, int], paint) -> object:
     big = pygame.Surface((width * CRISP, height * CRISP), pygame.SRCALPHA)
     paint(big, CRISP)
     small = pygame.transform.smoothscale(big, (width, height))
-    if len(_shapes) >= _SHAPES_KEPT:
-        # A hold visits about ninety fractions and a screen has a handful of
-        # seats; this only fills up if something is drawing shapes nobody
-        # will ask for twice, and then forgetting them all is the right size
-        # of mistake.
-        _shapes.clear()
-    _shapes[key] = small
-    return small
+    return _shapes.put(key, small)
 
 
 def draw_arc(screen, centre, radius: float, colour, fraction: float, width: int = 4) -> None:

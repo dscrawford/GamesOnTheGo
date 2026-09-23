@@ -1,6 +1,6 @@
 """Readying up, per person, because a room has more than one.
 
-Everybody seated holds A for three seconds; when the last of them is ready,
+Everybody seated holds A for `seat_go_hold`; when the last of them is ready,
 the game starts. That is one rule with two halves, and the first version of
 it had neither.
 

@@ -33,7 +33,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 import pygame  # noqa: E402 - the line above only works ahead of the import
 
-from . import devices, keys, meter, profiles, trace
+from . import devices, display, keys, meter, profiles, trace
 from . import pads as sdl_pads
 from .assign import KeyHold
 from .bindings import console_for, pad_controls
@@ -81,12 +81,13 @@ FIRST_STATE_TIMEOUT = float(config.get("theme.timeouts.first_state", 3.0))
 # keyboard in the room is not stuck on it. The environment wins, for tests.
 COUNTDOWN = float(os.environ.get("GOTG_SEAT_COUNTDOWN") or config.get("theme.timeouts.seat_countdown", 8.0))
 
-# The hold that starts the game, once padmap has accepted the seats. A full
-# second, on a press that began on this screen: the hold that took the seat
-# ran straight into padmap's confirm, and one press seated somebody and
+# The hold that starts the game, once padmap has accepted the seats. A second
+# and a half, on a press that began on this screen: the hold that took the
+# seat ran straight into padmap's confirm, and one press seated somebody and
 # started the game before they had let go. The daemon's accept is padmap's
-# business; this second is ours, read from the clone it just published.
-GO_HOLD = float(os.environ.get("GOTG_SEAT_GO_HOLD") or config.get("theme.timeouts.seat_go_hold", 1.0))
+# business; this hold is ours, read from the clone it just published, and it
+# is the same length as the one that paired them.
+GO_HOLD = float(os.environ.get("GOTG_SEAT_GO_HOLD") or config.get("theme.timeouts.seat_go_hold", 1.5))
 
 # How long a press stays lit beside its seat. Long enough to see a tap from
 # across a room, short enough that four people pressing at once still reads as
@@ -117,7 +118,7 @@ STICK_DEAD = 0.12
 # The hold on Y that walks the buttons again. A tap was what it was, and a
 # thumb that brushed Y reaching for A landed in the wizard -- so it is a hold,
 # and the same length as the one that starts the game.
-REBIND_HOLD = float(os.environ.get("GOTG_SEAT_REBIND_HOLD") or config.get("theme.timeouts.seat_rebind_hold", 1.0))
+REBIND_HOLD = float(os.environ.get("GOTG_SEAT_REBIND_HOLD") or config.get("theme.timeouts.seat_rebind_hold", 1.5))
 
 
 def draw(
@@ -193,23 +194,6 @@ def draw(
         else "hold space to play with the keyboard"
     footer = font_at(22).render(said, True, LABEL_DIM)
     screen.blit(footer, ((width - footer.get_width()) // 2, int(height * 0.92)))
-
-
-def _open(size) -> pygame.Surface:
-    """The window, vsynced where the driver will do it.
-
-    Waiting for the panel is what makes a reveal look like one movement
-    rather than a series of frames, and it costs nothing: the loop was
-    sleeping in its frame cap anyway. A driver that cannot do it refuses
-    `set_mode` outright, so the plain one is the fallback rather than the
-    default. `theme.vsync: false` turns it off.
-    """
-    if config.get("theme.vsync", True):
-        try:
-            return pygame.display.set_mode(size, vsync=1)
-        except pygame.error as error:
-            trace.say("no-vsync", why=str(error))
-    return pygame.display.set_mode(size)
 
 
 def _frame(fps: meter.Meter, painting: float, drawn: float, shown: float, ticked: float) -> None:
@@ -290,9 +274,7 @@ def run(platform: str, title: str) -> int:
         pads.send(command)
 
     pygame.init()
-    pygame.display.set_caption("GamesOnTheGo")
-    screen = _open(WINDOW)
-    clock = pygame.time.Clock()
+    shown = display.open(WINDOW, fullscreen=config.fullscreen())
     fonts: dict[int, pygame.font.Font] = {}
 
     def font_at(size: int) -> pygame.font.Font:
@@ -301,14 +283,14 @@ def run(platform: str, title: str) -> int:
         return fonts[size]
 
     try:
-        at(screen, clock, font_at, pads, gate, title)
+        at(shown, font_at, pads, gate, title)
     finally:
         pygame.quit()
         pads.close()
     return 0
 
 
-def before_launch(screen, clock, font_at, pads: Padmap, platform: str, title: str, hush=None) -> str:
+def before_launch(shown: display.Display, font_at, pads: Padmap, platform: str, title: str, hush=None) -> str:
     """The gate, run by the picker in the window it already has.
 
     It used to be a second process with a second window: the picker closed
@@ -330,10 +312,10 @@ def before_launch(screen, clock, font_at, pads: Padmap, platform: str, title: st
         return "go"
     if command is not None:
         pads.send(command)
-    return at(screen, clock, font_at, pads, gate, title, hush)
+    return at(shown, font_at, pads, gate, title, hush)
 
 
-def at(screen, clock, font_at, pads: Padmap, gate: Gate, title: str, hush=None) -> str:
+def at(shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, hush=None) -> str:
     """The gate itself, in a window somebody else opened.
 
     Split out for the picker, which has a window already. It used to exec
@@ -345,6 +327,7 @@ def at(screen, clock, font_at, pads: Padmap, gate: Gate, title: str, hush=None) 
     Returns "go" when the game should start, and the caller owns the window
     either way -- this neither opens nor closes one.
     """
+    screen = shown.surface
     # Loaded once, and absence is survivable: a console with no artwork, or a
     # build with none, still gets the words.
     try:
@@ -449,8 +432,13 @@ def at(screen, clock, font_at, pads: Padmap, gate: Gate, title: str, hush=None) 
                     now = time.monotonic()
                     fade.saw(gate.progress, now)
                     queue.saw(message, now)
-                    if message.get("event") in ("claim", "state"):
+                    if message.get("event") == "claim":
                         queue.clear()
+                    elif message.get("event") == "state":
+                        # Only the holds that are seats now. A `state` arrives
+                        # while somebody is still holding, and clearing the
+                        # queue on one flashed their controller back to empty.
+                        queue.seated(message.get("players"))
                 if not pads.connected:
                     _said("padmap went away while the gate was up; starting anyway")
                     break
@@ -470,23 +458,26 @@ def at(screen, clock, font_at, pads: Padmap, gate: Gate, title: str, hush=None) 
                     # an empty window asking the same question.
                     _draw_go(
                         screen, font_at, gate, title, cache,
-                        joining=fade.now(time.monotonic()),
+                        joining=queue.anonymous(fade.now(time.monotonic())),
                         queue=queue.now(time.monotonic()),
                         settled=False,
                     )
                 else:
                     draw(screen, font_at, gate, title, diagram, fade.now(time.monotonic()))
                 drawn = time.perf_counter()
-                pygame.display.flip()
-                shown = time.perf_counter()
-                clock.tick(60)
-                _frame(fps, painting, drawn, shown, time.perf_counter())
+                # Never idle here: every screen of the gate has something
+                # counting on a clock -- a reveal, a pause, a hold.
+                shown.pace.busy(time.monotonic())
+                shown.present()
+                presented = time.perf_counter()
+                shown.rest()
+                _frame(fps, painting, drawn, presented, time.perf_counter())
             if not (gate.state == READY and gate.seated):
                 _said(f"no door: {gate.state}, {gate.seated} seated")
                 break
             # The door: the bindings on the pad, a press ringed as it happens, a
             # tap of Y to walk the buttons again, and the second that starts.
-            verdict, gate = _wait_for_go(screen, font_at, clock, pads, gate, title, cache, hush)
+            verdict, gate = _wait_for_go(shown, font_at, pads, gate, title, cache, hush)
             if verdict == "rebind":
                 gate, command = rebind(gate)
                 if command is not None:
@@ -817,7 +808,7 @@ class Door:
 
 
 def _wait_for_go(
-    screen, font_at, clock, pads: Padmap, gate: Gate, title: str, cache: dict | None = None, hush=None
+    shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, cache: dict | None = None, hush=None
 ) -> tuple[str, Gate]:
     """Seated and mapped; the game starts on a three-second hold of A.
 
@@ -830,6 +821,7 @@ def _wait_for_go(
     Returns "go", "rebind" when Y was held, or "map" for a seat that needs
     walking -- with the gate as the daemon has left it.
     """
+    screen = shown.surface
     first = gate.seats[0] if gate.seats else None
     profile = profiles.for_pad(first.name) if first else None
     # One profile per seat, by the name padmap gave it: whose press it is
@@ -850,6 +842,10 @@ def _wait_for_go(
         names=pad_controls(console_for(gate.platform)),
     )
     fade = Fade()
+    # Somebody can pair at this screen too, and a pad that arrives mid-door
+    # has to be drawn filling in like anywhere else -- by name, so it is not
+    # confused with the seats already here. See joining.py.
+    queue = Joining(hold_seconds=PAIR_HOLD)
     space = KeyHold()
     fps = meter.Meter()
     finished: float | None = None
@@ -859,6 +855,11 @@ def _wait_for_go(
         for message in pads.poll():
             gate = apply(gate, message)
             fade.saw(gate.progress, now)
+            queue.saw(message, now)
+            if message.get("event") == "claim":
+                queue.clear()
+            elif message.get("event") == "state":
+                queue.seated(message.get("players"))
         door.keys_drive = keys.drives(pads.players, pads.connected)
         # Who is in the room, every frame: somebody can pair at this screen,
         # and a pad that arrives has to ready up like everybody else.
@@ -916,14 +917,22 @@ def _wait_for_go(
             sticks=door.sticks_by,
             holder=door.holder,
             heard=door.heard(now),
-            joining=fade.now(now),
+            # The nameless reveal is for a daemon that does not say whose
+            # hold it is, and at this screen everybody is seated already: the
+            # hold it would be describing is somebody readying up, and an
+            # empty controller appearing beside the full ones for it was the
+            # flash. A pad genuinely arriving here comes through the queue,
+            # with a name on it.
+            joining=0.0 if door.sticks.any_button_down() else queue.anonymous(fade.now(now)),
+            queue=queue.now(now),
             settled=door.settled(now),
         )
         drawn = time.perf_counter()
-        pygame.display.flip()
-        shown = time.perf_counter()
-        clock.tick(60)
-        _frame(fps, painting, drawn, shown, time.perf_counter())
+        shown.pace.busy(now)
+        shown.present()
+        presented = time.perf_counter()
+        shown.rest()
+        _frame(fps, painting, drawn, presented, time.perf_counter())
 
 
 def _footer(gate: Gate, settled: bool, waiting: set[int] | None = None) -> str:
@@ -935,7 +944,7 @@ def _footer(gate: Gate, settled: bool, waiting: set[int] | None = None) -> str:
     if not gate.seats:
         return "hold a button on a controller to join   ·   hold space for the keyboard"
     if not settled:
-        return "let go of the button   ·   then hold A for three seconds to start"
+        return "let go of the button   ·   then hold A to start"
     if waiting and gate.seated > 1:
         # Whose ring is still open, said in words as well: everybody readies
         # up, and "what are we waiting for" should not need counting rings.
@@ -945,7 +954,7 @@ def _footer(gate: Gate, settled: bool, waiting: set[int] | None = None) -> str:
             "another player: hold a button"
         )
     return (
-        "hold A for three seconds to start   ·   hold Y to change these   ·   "
+        "hold A to start   ·   hold Y to change these   ·   "
         "another player: hold a button"
     )
 
@@ -1105,6 +1114,11 @@ def _draw_seats(
     # will sit. Two at once is a queue -- see joining.py -- and the single
     # `joining` fraction is what a daemon that does not name its pads can
     # describe, which is one of them.
+    # Which holds are still in flight is the queue's own business -- a claim
+    # empties it and a state drops the holds that became seats (see
+    # joining.py). Deciding it again here, off a seat number that is stale for
+    # a tick after somebody else claims, is how the second person's fill would
+    # blink.
     for step_along, hold in enumerate(queue or []):
         if hold.fraction <= 0:
             continue
@@ -1119,9 +1133,8 @@ def _draw_seats(
 def _hold_the_door(title: str, reason: str) -> int:
     """The window when there is no padmap to ask. Counts down, then starts."""
     pygame.init()
-    pygame.display.set_caption("GamesOnTheGo")
-    screen = pygame.display.set_mode(WINDOW)
-    clock = pygame.time.Clock()
+    shown = display.open(WINDOW, fullscreen=config.fullscreen())
+    screen = shown.surface
     fonts: dict[int, pygame.font.Font] = {}
 
     def font_at(size: int) -> pygame.font.Font:
@@ -1144,8 +1157,11 @@ def _hold_the_door(title: str, reason: str) -> int:
             screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.40)))
             line = font_at(22).render(footer, True, LABEL_DIM)
             screen.blit(line, ((width - line.get_width()) // 2, int(height * 0.92)))
-            pygame.display.flip()
-            clock.tick(30)
+            # A countdown is a number changing once a second; thirty frames
+            # of it is plenty, and busy so it never drops to idle's ten.
+            shown.pace.busy(time.monotonic())
+            shown.present()
+            shown.rest(cap=30)
     finally:
         pygame.quit()
     return 0

@@ -21,13 +21,14 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import shutil
 import socket
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
-from . import config
+from . import config, trace
 
 # How long to wait for the connect itself. A unix socket either answers at once
 # or is not there; this is only so a stale socket file cannot hang the frame.
@@ -163,6 +164,11 @@ class Padmap:
         # cannot leave the screen showing pads that left with the old one.
         self.state: dict = {}
         self.error: str | None = None
+        # How many events have come in, ever. The frame loop compares it
+        # across a frame to know the daemon said something -- which keeps the
+        # screen drawing at full rate while a hold is filling on a pad the
+        # picker cannot see itself. See pace.py.
+        self.heard = 0
 
     # --- connection ---------------------------------------------------------
 
@@ -222,6 +228,18 @@ class Padmap:
             return False
         return True
 
+    def pending(self) -> bool:
+        """Whether the daemon has something waiting to be read. Never blocks:
+        this is what wakes an idle screen, so a hold on a pad this program
+        cannot see fills in without waiting out a slow frame first."""
+        if self._sock is None:
+            return False
+        try:
+            readable, _, _ = select.select([self._sock], [], [], 0)
+        except (OSError, ValueError):
+            return False
+        return bool(readable) or b"\n" in self._buffer
+
     def poll(self) -> Iterator[dict]:
         """Every complete event that has arrived, and nothing else.
 
@@ -258,6 +276,8 @@ class Padmap:
             if isinstance(event, dict):
                 if event.get("event") == "state":
                     self.state = event
+                self.heard += 1
+                trace.progress_gap(event)
                 yield event
 
     # --- the commands the picker sends --------------------------------------

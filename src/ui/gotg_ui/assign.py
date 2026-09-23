@@ -245,11 +245,15 @@ class Session:
         self.fade.saw(self.view.progress, time.monotonic())
         now = time.monotonic()
         self.joining.saw(event, now)
-        if event.get("event") in ("claim", "state"):
-            # A seat has landed, or the daemon has restated the world: what
-            # is seated is the truth and a fill left over from the hold that
-            # did it would be drawn beside its own result.
+        if event.get("event") == "claim":
+            # A seat has landed: the fill that took it would otherwise be
+            # drawn beside its own result.
             self.joining.clear()
+        elif event.get("event") == "state":
+            # Not everything -- only the holds that have become seats. See
+            # Joining.seated: clearing the queue here blinked a fill that was
+            # still climbing.
+            self.joining.seated(event.get("players"))
         if event.get("event") == "state":
             self.open = event.get("state") == "assigning"
         if self.view.finished:
@@ -348,9 +352,9 @@ def attend(padmap, seating: Session, watch: Watch) -> dict | None:
 
 
 # How long the space bar is held to take a seat with the keyboard. The same
-# three seconds as every other hold here -- a tap on space opens the game menu,
-# and the two must not be one motion apart.
-KEYBOARD_HOLD = float(config.get("theme.timeouts.keyboard_hold", 3.0))
+# second and a half as every other hold here -- a tap on space opens the game
+# menu, and the two must not be one motion apart.
+KEYBOARD_HOLD = float(config.get("theme.timeouts.keyboard_hold", 1.5))
 
 
 @dataclass

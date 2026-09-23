@@ -585,10 +585,10 @@ def _seat_process(daemon, extra: dict, root: str):
     env.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
     env.setdefault("GOTG_CONFIG", os.path.join(root, "config"))
     env.setdefault("PADMAP_NO_AUTOSETUP", "1")
-    # The shipped hold is three seconds. Most of these tests are about what a
-    # hold *means*, not how long it is, and paying three seconds a press
-    # across the suite bought nothing -- so they ask for one second, and
-    # `test_the_go_is_the_shipped_three_second_hold` runs the real length.
+    # The shipped hold is a second and a half. Most of these tests are about
+    # what a hold *means*, not how long it is, and paying the full length a
+    # press across the suite bought nothing -- so they ask for one second, and
+    # `test_the_go_is_the_shipped_hold_and_not_a_tap` runs the real length.
     env.setdefault("GOTG_SEAT_GO_HOLD", "1.0")
     env.setdefault("GOTG_SEAT_REBIND_HOLD", "1.0")
     return subprocess.Popen(
@@ -1652,7 +1652,7 @@ def test_the_door_rebinds_on_a_hold_of_y_and_not_a_tap(daemon, sdl):
         pad.tap(0x134, hold=0.08)  # BTN_WEST, SDL's Y
         _pump(sdl, door, 0.4)
         assert door.rebinding(time.monotonic()) == 0.0, "a tap of Y still asks to rebind"
-        assert REBIND_HOLD == 3.0, f"the shipped rebind hold is {REBIND_HOLD}s, not three seconds"
+        assert REBIND_HOLD == 1.5, f"the shipped rebind hold is {REBIND_HOLD}s, not a second and a half"
 
         pad.down(0x134)
         end = time.monotonic() + REBIND_HOLD + 1.5
@@ -1664,18 +1664,20 @@ def test_the_door_rebinds_on_a_hold_of_y_and_not_a_tap(daemon, sdl):
         picker.close()
 
 
-def test_the_go_is_the_shipped_three_second_hold(daemon, sdl):
+def test_the_go_is_the_shipped_hold_and_not_a_tap(daemon, sdl):
     """How long the door actually waits, at the length that ships.
 
     A second was not enough: arriving at the door with a thumb still on A --
     which is how somebody gets there -- started the game before the screen
-    had been read. Every hold this program times is three seconds now, and
-    this one is measured through a real clone rather than read off the
-    config, because the config is the half that was already right.
+    had been read. Three seconds fixed that and read as the program having
+    stopped listening, so every hold is a second and a half now, the same
+    length pairing asks padmap for. Measured through a real clone rather
+    than read off the config, because the config is the half that was
+    already right.
     """
     from gotg_ui.seat import GO_HOLD, Door
 
-    assert GO_HOLD == 3.0, f"the shipped go hold is {GO_HOLD}s, not three seconds"
+    assert GO_HOLD == 1.5, f"the shipped go hold is {GO_HOLD}s, not a second and a half"
 
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
@@ -1688,14 +1690,14 @@ def test_the_go_is_the_shipped_three_second_hold(daemon, sdl):
         _pump(sdl, door, 1.2)               # past ARM_QUIET, nothing held
         pad.down(BTN_SOUTH)
         started = time.monotonic()
-        _pump(sdl, door, 2.0)
+        _pump(sdl, door, 0.9)
         assert not door.done(time.monotonic()), (
-            f"the door opened after {time.monotonic() - started:.1f}s, well short of three"
+            f"the door opened after {time.monotonic() - started:.1f}s, short of a second and a half"
         )
-        _pump(sdl, door, 1.6)
+        _pump(sdl, door, 1.1)
         took = time.monotonic() - started
         pad.up(BTN_SOUTH)
-        assert door.done(time.monotonic()), f"three and a half seconds of holding was not the go ({took:.1f}s)"
+        assert door.done(time.monotonic()), f"two seconds of holding was not the go ({took:.1f}s)"
         picker.close()
 
 
@@ -2169,6 +2171,92 @@ def test_two_pads_holding_at_once_are_two_fills(daemon, sdl):
         for node, fracs in named.items():
             assert max(fracs) > 0, f"{node} filled nothing"
             assert fracs == sorted(fracs), f"{node}'s fill went backwards: {fracs}"
+
+
+def _progress_arrivals(daemon, seconds: float) -> list[tuple[float, dict]]:
+    """Every `progress` reading of the next `seconds`, stamped as it arrives.
+
+    Not `drain`: that sleeps twenty milliseconds whenever the socket is quiet,
+    which is the same size as the gaps this is looking for.
+    """
+    import json
+    import select
+
+    found: list[tuple[float, dict]] = []
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        ready, _, _ = select.select([daemon.sock], [], [], 0.002)
+        if not ready:
+            continue
+        try:
+            chunk = daemon.sock.recv(65536)
+        except BlockingIOError:
+            continue
+        if not chunk:
+            break
+        stamp = time.monotonic()
+        daemon.buffer += chunk
+        while b"\n" in daemon.buffer:
+            line, daemon.buffer = daemon.buffer.split(b"\n", 1)
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(event, dict) and event.get("event") == "progress":
+                found.append((stamp, event))
+    return found
+
+
+def test_a_hold_is_drawn_for_every_frame_it_is_held(daemon, sdl):
+    """The flash between the red empty seat and the controller filling in.
+
+    padmap sends progress from the same loop that rescans every device once a
+    second, and a rescan is longer than the fifty milliseconds the screen used
+    to take silence as a release. So a steady press was drawn as released for
+    a frame or three, once a second. Held here through at least two rescans,
+    with the readings replayed into the queue at the moments they really
+    arrived and the queue asked at every sixtieth of a second in between:
+    the pad is on screen in every one of those frames.
+    """
+    from gotg_ui.joining import Joining
+
+    with FakePad("E2E Xbox Pad") as pad:
+        # A long hold, so the press outlasts two rescans before it claims.
+        daemon.send({"cmd": "seating", "open": True, "players": 4, "hold": 4.0})
+        daemon.drain(0.5)
+        pad.down(BTN_SOUTH)
+        arrivals = _progress_arrivals(daemon, 2.6)
+        pad.up(BTN_SOUTH)
+        daemon.drain(0.3)
+
+    named = [(stamp, event) for stamp, event in arrivals if event.get("node") and float(event.get("frac", 0)) > 0]
+    assert len(named) > 20, f"too few readings to judge: {len(named)}"
+    gaps = [b[0] - a[0] for a, b in zip(named, named[1:], strict=False)]
+    worst = max(gaps)
+    # Said on every run, pass or fail: how long padmap really goes quiet
+    # mid-hold on this machine is the number the staleness rule rests on.
+    print(
+        f"\nprogress gaps over {len(gaps)} readings: worst {worst * 1000:.0f} ms, "
+        f"over 50 ms {sum(g > 0.05 for g in gaps)}, "
+        f"median {sorted(gaps)[len(gaps) // 2] * 1000:.0f} ms"
+    )
+
+    joining = Joining(hold_seconds=4.0)
+    start, finish = named[0][0], named[-1][0]
+    pending = list(named)
+    missing = []
+    frame = start
+    while frame <= finish:
+        while pending and pending[0][0] <= frame:
+            stamp, event = pending.pop(0)
+            joining.saw(event, stamp)
+        if not joining.now(frame):
+            missing.append(round((frame - start) * 1000))
+        frame += 1 / 60
+    assert not missing, (
+        f"a held pad vanished from the screen at {missing[:8]} ms into the hold "
+        f"(worst gap between readings {worst * 1000:.0f} ms)"
+    )
 
 
 @pytest.mark.xfail(

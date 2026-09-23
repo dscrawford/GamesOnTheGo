@@ -37,3 +37,35 @@ def say(kind: str, **fields) -> None:
             out.write(json.dumps(line, default=str) + "\n")
     except OSError:
         pass
+
+
+# When each pad's hold was last heard from, for `progress_gap`.
+_heard: dict[str, float] = {}
+
+# Longer than this between two readings of one hold is worth a line. padmap
+# ticks every 20 ms; the screen used to take 50 ms of quiet as a release.
+GAP = 0.04
+
+
+def progress_gap(event: dict, now: float | None = None) -> None:
+    """One line when a hold's readings pause, and nothing otherwise.
+
+    Readings are not traced -- fifty a second per pad would drown the rest --
+    but the pauses between them are what made a steady press flash back to
+    the red empty seat: padmap sends progress from the loop that also rescans
+    every input device, and on a machine with many of them a rescan can
+    outlast the screen's patience. How long it really goes quiet is a
+    property of this machine, not of any test's, so it is measured here.
+    """
+    if not on() or event.get("event") != "progress":
+        return
+    key = str(event.get("node") or event.get("name") or "")
+    now = time.monotonic() if now is None else now
+    frac = event.get("frac")
+    if not isinstance(frac, (int, float)) or frac <= 0:
+        _heard.pop(key, None)
+        return
+    last = _heard.get(key)
+    if last is not None and now - last > GAP:
+        say("progress-gap", node=key, ms=round((now - last) * 1000), frac=round(float(frac), 3))
+    _heard[key] = now

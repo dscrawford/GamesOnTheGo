@@ -10,20 +10,23 @@ come after this has been sat in front of on a Deck.
 
 from __future__ import annotations
 
+import gc
 import math
 import os
 import sys
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 
 import pygame
 
-from . import around, config, devices, filters, keys, meter, pads, prepare, seat, trace
+from . import around, config, devices, display, filters, keys, meter, pads, prepare, seat, trace
 from .art import ArtStore
 from .assign import KeyHold, Session, Watch, attend
 from .browser import SHELF, Browser
 from .catalog import Game, Library
 from .controllers import assets_dir, control_places, draw_assign, draw_strip
 from .controllers import draw as draw_controllers
+from .decode import PENDING, Decoder
 from .fetch import Loader
 from .filters import Filters
 from .grid import Grid
@@ -675,40 +678,14 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     grabbed GPU from a process that is about to stop existing.
     """
     pygame.init()
-    pygame.display.set_caption("GamesOnTheGo")
-    # SCALED with FULLSCREEN: the layout is worked out at one size and the
-    # display scales it, so a 1280x800 panel and a television at 1080p get
-    # the same grid rather than one with different margins.
-    flags = (pygame.FULLSCREEN | pygame.SCALED) if config.fullscreen() else 0
-    # vsync, when the config asks for it. Off by default because it is a trade
-    # rather than a win: SDL blocks in `flip` until the panel is ready, which
-    # is smoother and cheaper than drawing frames nobody sees, and on a driver
-    # that cannot do it `set_mode` refuses outright -- hence the fallback.
-    screen = None
-    if config.get("theme.vsync", True):
-        try:
-            screen = pygame.display.set_mode(WINDOW, flags, vsync=1)
-        except pygame.error as error:
-            trace.say("no-vsync", why=str(error))
-    if screen is None:
-        screen = pygame.display.set_mode(WINDOW, flags)
-    clock = pygame.time.Clock()
-
-    # What SDL actually got, said once. A 1280x800 surface being resampled to
-    # a 4K panel every frame is tens of milliseconds that no amount of
-    # drawing less will recover, and it is invisible from in here without
-    # asking: driver, the size drawn, the size shown, and the refresh rate.
-    shown_on = {
-        "driver": pygame.display.get_driver(),
-        "drawing": list(screen.get_size()),
-        "desktop": [list(size) for size in pygame.display.get_desktop_sizes()],
-        "scaled": bool(flags & pygame.SCALED),
-        "refresh": pygame.display.get_current_refresh_rate(),
-        "vsync": bool(config.get("theme.vsync", True)),
-    }
-    trace.say("display", **shown_on)
+    # One window for the whole program, the gate included. Full screen when
+    # the launcher says so, scaled from one layout size, and presented on the
+    # panel's own beat -- see display.py for why that last part is the one
+    # that mattered.
+    shown = display.open(WINDOW, fullscreen=config.fullscreen())
+    screen = shown.surface
     if meter.wanted():
-        print(f"gotg-ui: display {shown_on}", file=sys.stderr)
+        print(f"gotg-ui: display {shown.info}", file=sys.stderr)
     # Held open for as long as the picker runs: a pad that goes out of scope is
     # closed by SDL, and a closed one stops producing events. Opened through
     # the controller API, which is what makes "the right bumper" mean the same
@@ -744,22 +721,31 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # Decoded surfaces, keyed by (platform, id). Decoding is not free and the
     # same ten tiles are redrawn sixty times a second.
     art: dict[tuple[str, str], object] = {}
+    # And decoded off the frame thread: ten new covers in the frame that
+    # first drew them was 13.5 ms, a page scrolling into view with a hitch in
+    # it. See decode.py.
+    decoder = Decoder(display.image)
 
     def surface_for(game):
-        """A decoded picture for one game, asking the loader if need be."""
+        """A decoded picture for one game, asking the loader if need be.
+
+        None until it is decoded, which draws the title -- the same thing a
+        tile shows while its picture is still downloading.
+        """
         if game.key in art:
             return art[game.key]
         path = loader.want(game)
         if path is None:
             return None
-        try:
-            art[game.key] = pygame.image.load(str(path)).convert_alpha()
-        except pygame.error:
+        picture = decoder.want(game.key, path)
+        if picture is PENDING:
+            return None
+        if picture is None:
             # A truncated or unreadable file: drop it so a refresh can
             # replace it, and draw the title this time round.
             store.forget(game)
-            art[game.key] = None
-        return art[game.key]
+        art[game.key] = picture
+        return picture
 
     chosen: tuple[Game, str, str | None, str | None] | None = None
     typing: str | None = None
@@ -814,6 +800,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # And asked after again whenever the connection is gone -- see DaemonWatch
     # for why reconnecting alone was not enough.
     padmap_watch = DaemonWatch()
+    # Where that asking happens, so the grid keeps drawing while it does.
+    restarter = ThreadPoolExecutor(max_workers=1, thread_name_prefix="padmap-start")
+    restarting: Future | None = None
     # The assignment screen. `open` is what decides whether it is on screen,
     # and padmap closes it by accepting rather than this program deciding.
     seating = Session()
@@ -890,10 +879,22 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
         else:
             preparer = Preparer(game, None, variant, version)
 
+    # Everything built so far -- the library of nine thousand games, the
+    # config, the caches -- lives until the picker exits, and the collector
+    # walked all of it on every full pass: 1.4 ms, measured, landing in
+    # whichever frame it chose. Frozen, a full pass costs nothing it can see.
+    gc.collect()
+    gc.freeze()
+
     try:
         while running:
             state = browser.grid
+            heard = padmap.heard
             for event in pygame.event.get():
+                # Anything at all: a key, a button, the pointer, a pad
+                # arriving. The screen draws at full rate for a moment after.
+                shown.pace.busy(time.monotonic())
+                shown.mouse(event)
                 if event.type == pygame.QUIT:
                     if preparer is not None:
                         preparer.cancel()
@@ -1332,12 +1333,21 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             # socket fails at once with ENOENT, and a daemon started while the
             # picker is open should be picked up without restarting it.
             if not padmap.connected:
-                if padmap_watch.due(time.monotonic()):
+                if restarting is None and padmap_watch.due(time.monotonic()):
                     padmap_watch.mark(time.monotonic())
                     # Not fresh: a daemon that died mid-session restores the
                     # seats it had, which is what somebody halfway through an
                     # evening wants back.
-                    padmap_trouble = ensure_daemon(force=True, follow=os.getpid())
+                    #
+                    # And not here: starting a daemon is a subprocess waited
+                    # on for up to ten seconds, and it used to be waited on
+                    # inside a frame -- the grid froze for as long as padmap
+                    # took to come back. A thread starts it; the frame only
+                    # looks to see whether it has finished.
+                    restarting = restarter.submit(ensure_daemon, force=True, follow=os.getpid())
+                if restarting is not None and restarting.done():
+                    padmap_trouble = restarting.result()
+                    restarting = None
                 padmap.connect()
             # Keeping up with padmap, once a frame: fold in what it said and
             # keep it listening for a hold. Who may move the cursor is not a
@@ -1392,6 +1402,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 # placeholder now. Only the page on screen is ever asked for.
                 for game in loader.done():
                     art.pop(game.key, None)
+                    shown.pace.busy(time.monotonic())
+                if decoder.arrived():
+                    shown.pace.busy(time.monotonic())
                 for game in state.page:
                     surface_for(game)
                 if browser.view == SHELF and typing is None:
@@ -1420,18 +1433,37 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 else (padmap_trouble or status_text(padmap.status_word)),
                 # `filling`, not the last reading: a hold let go is padmap
                 # going quiet, and the strip has to empty on its own.
-                progress=seating.filling(time.monotonic()) or space.progress(time.monotonic()),
+                #
+                # And only a daemon that does not name its pads gets the single
+                # fill: one that does has every hold in `holds`, and drawing
+                # both put one press in two places, taking turns.
+                progress=seating.joining.anonymous(seating.filling(time.monotonic()))
+                or space.progress(time.monotonic()),
                 joining="keyboard" if space.since is not None else None,
                 holds=seating.joining.now(time.monotonic()),
             )
             drawn = time.perf_counter()
-            pygame.display.flip()
-            shown = time.perf_counter()
+            now = time.monotonic()
+            # Moving on its own clock, or the daemon talking: full rate. Idle
+            # is only ever a screen with nothing on it that changes by itself.
+            if (
+                padmap.heard != heard
+                or seating.open
+                or space.since is not None
+                or preparer is not None
+                # A failed install's ring is a mark that stays, not a motion.
+                or any(not failed for _, failed in installs.rings().values())
+                or seating.filling(now) > 0
+                or seating.joining.now(now)
+            ):
+                shown.pace.busy(now)
+            shown.present()
+            presented = time.perf_counter()
             # The loader only mirrors streamed text; 30fps halves the redundant
             # re-render of a mostly-unchanged tail across a minutes-long build.
-            clock.tick(30 if preparer is not None else 60)
+            shown.rest(cap=30 if preparer is not None else None, woken=padmap.pending)
             ticked = time.perf_counter()
-            said = fps.frame(drawn - painting, shown - drawn, ticked - shown, ticked)
+            said = fps.frame(drawn - painting, presented - drawn, ticked - presented, ticked)
             if said is not None:
                 trace.say("frame", **said)
                 if meter.wanted():
@@ -1465,7 +1497,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # process, which is still how Steam and a bare terminal meet it.
     if chosen is not None and chosen[1] == "play" and config.get("theme.gate_in_window", True):
         try:
-            seat.before_launch(screen, clock, font_at, padmap, chosen[0].platform, chosen[0].title, hush)
+            seat.before_launch(shown, font_at, padmap, chosen[0].platform, chosen[0].title, hush)
             os.environ["GOTG_SEAT_MET"] = "1"
         except Exception as error:  # noqa: BLE001 - a screen must never stop a launch
             trace.say("gate-in-window-failed", why=str(error))
