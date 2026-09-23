@@ -312,6 +312,24 @@ padmap_seat_gate() {
     rm -f "$PADMAP_MARKER"
     PADMAP_MARKER=""
   fi
+
+  # Clones exist now, so SDL's Steam driver has to let go of Valve's ids.
+  #
+  # That driver claims 28de:* whether or not the device behind them is a
+  # hidraw one, and a padmap clone mirrors the pad it stands for -- so with
+  # the hint on, a seated Steam Controller is absent from every enumeration
+  # in the launch. Measured with a uinput pad wearing 28de:1304: listed with
+  # the hint off, gone with it on. Four Swords Adventures bound its first GBA
+  # to the keyboard for this, twice, with padmap saying it had seated the pad.
+  #
+  # The environment (this) outranks the hint gotg-pads sets for itself, and
+  # the environment script defaults rather than assigns, so this survives
+  # into the game. Only when padmap actually published something, though: a
+  # launch with no daemon has no clone to protect and every reason to keep
+  # the hint, which is the one thing that makes a raw puck work at all.
+  if [[ -n "$(padmap_sdl_config 2>/dev/null || true)" ]]; then
+    export SDL_JOYSTICK_HIDAPI=0 SDL_JOYSTICK_HIDAPI_STEAM=0
+  fi
 }
 
 # Launch, with padmap's mappings in the environment.
@@ -437,5 +455,67 @@ padmap_emit() {
   # Only the file this environment reads counts as written; the scratch ones
   # were the price of naming every destination.
   grep -qF "$state/" <<<"$written" || return 1
+  [[ "$emulator" != dolphin ]] || padmap_name_dolphin_devices "$dolphin/GCPadNew.ini"
   log "padmap wrote the $emulator bindings and motion for $attr"
+}
+
+# The clone, under the name the emulator will actually see.
+#
+# Dolphin stores a controller as `SDL/<slot>/<name>` and looks it up by that
+# string. padmap writes the name the *kernel* gave its clone -- `padmap Player
+# 1` -- and SDL replaces it: a clone mirrors the pad behind it, so SDL finds
+# 045e:028e in its own database and calls it "Xbox 360 Controller". Dolphin
+# then has a device id nothing answers to, and the port is silently dead.
+#
+# This is the same failure the GBA ports had, measured then and written up in
+# env/mods/four-swords-split.nix; those are bound from `gotg-pads` and have
+# been right since. The GameCube ports come from `padmap-rs emit` and were
+# still carrying the kernel's name -- Four Swords Adventures with a pad
+# seated, a full GCPadNew.ini, and nothing moving.
+#
+# Matched by GUID, which is the one thing that survives the rename, and
+# enumerated the way a game enumerates -- inside the sandbox, hidapi off --
+# because the slot counts a different set of devices out here.
+padmap_name_dolphin_devices() {
+  local file="$1" pads rows pairs
+  [[ -f "$file" ]] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  pads="$(padmap_published)" || return 0
+  rows="$(padmap_clear_steam_env; padmap_exec "$(pads_bin)" 2>/dev/null)" || return 0
+  jq -e 'type == "array" and length > 0' >/dev/null 2>&1 <<<"$rows" || return 0
+
+  pairs="$(jq -r -n --argjson pub "$pads" --argjson rows "$rows" '
+    $pub[] as $p
+    | $rows[]
+    | select((.guid // "" | ascii_downcase) == ($p.guid // "" | ascii_downcase))
+    | "\($p.player)	 SDL/\(.slot)/\(.name)"
+  ' 2>/dev/null)" || return 0
+  [[ -n "$pairs" ]] || return 0
+
+  local tmp="$file.named"
+  if awk -v pairs="$pairs" '
+    BEGIN {
+      n = split(pairs, lines, "\n")
+      for (i = 1; i <= n; i++) {
+        tab = index(lines[i], "\t")
+        if (tab) device[substr(lines[i], 1, tab - 1)] = substr(lines[i], tab + 2)
+      }
+    }
+    /^\[GCPad[0-9]+\]/ {
+      port = $0
+      gsub(/[^0-9]/, "", port)
+    }
+    # Only a line naming a padmap clone. A port left on the keyboard, or
+    # bound to something else entirely, is a decision somebody made and not
+    # this to undo.
+    /^Device = SDL\// && port in device && $0 ~ /padmap Player/ {
+      print "Device = " device[port]
+      next
+    }
+    { print }
+  ' "$file" >"$tmp" 2>/dev/null; then
+    mv "$tmp" "$file"
+  else
+    rm -f "$tmp"
+  fi
 }

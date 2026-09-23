@@ -225,19 +225,32 @@ let
   ) savesDirs;
 
   # Hints every emulator here needs, merged *under* an environment's own env so
-  # that a platform can still override one.
-  baseEnv = {
-    # The current Steam Controller has no evdev node at all — it is a hidapi
-    # device, driven by SDL3's triton driver. That driver's IsEnabled() falls
-    # back to SDL_HINT_JOYSTICK_HIDAPI when no Steam-specific hint is set, and
-    # the Steam launcher template deliberately sets that to 0, so the puck would
-    # stay a keyboard and mouse inside exactly the launcher people use.
-    #
-    # An explicit hint beats the fallback, which is why this is set here rather
-    # than by deleting the launcher's line: that line is what makes Steam Input
-    # work for whoever is playing today, and it is not ours to regress.
-    SDL_JOYSTICK_HIDAPI_STEAM = "1";
-  };
+  # that a platform can still override one. Empty today; the Steam Controller
+  # hint that used to live here is a default now, below, because something
+  # after it has to be able to turn it off.
+  baseEnv = { };
+
+  # The current Steam Controller has no evdev node at all — it is a hidapi
+  # device, driven by SDL3's triton driver. That driver's IsEnabled() falls
+  # back to SDL_HINT_JOYSTICK_HIDAPI when no Steam-specific hint is set, and
+  # the Steam launcher template deliberately sets that to 0, so the puck would
+  # stay a keyboard and mouse inside exactly the launcher people use.
+  #
+  # An explicit hint beats the fallback, which is why this is set here rather
+  # than by deleting the launcher's line: that line is what makes Steam Input
+  # work for whoever is playing today, and it is not ours to regress.
+  #
+  # A default, though, and this is the half that cost Four Swords Adventures
+  # its player one. The same driver claims Valve's ids wholesale: with the
+  # hint on, an *evdev* device reporting 28de:1304 is not listed at all --
+  # measured, with a uinput pad wearing those ids, present with the hint off
+  # and absent with it on. padmap's clone of a Steam Controller wears exactly
+  # those ids, so the hint that makes a raw puck visible makes the seated one
+  # invisible, and the step that binds Dolphin's GBAs wrote `padmap has
+  # published no pad for player 1; using keyboard`. So `padmap_seat_gate`
+  # turns it off once clones are published, and this line must not overwrite
+  # that: it is the answer for a launch that met no padmap at all.
+  steamHidapi = ''export SDL_JOYSTICK_HIDAPI_STEAM="''${SDL_JOYSTICK_HIDAPI_STEAM:-1}"'';
 
   exports = lib.concatLines (
     lib.mapAttrsToList (k: v: "export ${k}=${render (toString v)}") (baseEnv // env)
@@ -309,6 +322,7 @@ let
         mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
       ''}
       ${seedConfig}
+      ${steamHidapi}
       ${exports}
       ${foreignGl}
       # Full screen belongs to *how a game was started*, not to the game.

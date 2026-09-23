@@ -762,3 +762,90 @@ EOF
   [ "$status" -eq 0 ]
   grep -q "ensure-daemon --fresh --follow [0-9]* identity=xbox360" "$PADMAP_LOG"
 }
+
+@test "a published clone turns SDL's Steam driver off for the rest of the launch" {
+  # SDL3's triton driver claims 28de:* whether the device behind them is
+  # hidraw or not, and padmap's clone of a Steam Controller wears them.
+  # Measured with a uinput pad at 28de:1304: listed with the hint off, absent
+  # with it on. Four Swords Adventures bound its first GBA to the keyboard
+  # for this while padmap was saying it had seated the pad.
+  export SDL_JOYSTICK_HIDAPI_STEAM=1
+  export GOTG_PADMAP_RUNTIME="$TEST_TMP/padmap-rt-steam"
+  mkdir -p "$GOTG_PADMAP_RUNTIME"
+  echo "export SDL_GAMECONTROLLERCONFIG=03000000de2800000413,padmap Player 1,a:b0," \
+    >"$GOTG_PADMAP_RUNTIME/env.sh"
+  GOTG_SEAT_MET=1 padmap_seat_gate gamecube "Four Swords Adventures"
+  [ "$SDL_JOYSTICK_HIDAPI_STEAM" = 0 ]
+  [ "$SDL_JOYSTICK_HIDAPI" = 0 ]
+}
+
+@test "and a launch that met no padmap keeps it, because a raw puck needs it" {
+  # The hint is the only reason a Steam Controller works at all without
+  # padmap: it has no evdev node to fall back to.
+  export SDL_JOYSTICK_HIDAPI_STEAM=1
+  export GOTG_PADMAP_RUNTIME="$TEST_TMP/padmap-rt-nothing"
+  mkdir -p "$GOTG_PADMAP_RUNTIME"
+  GOTG_SEAT_MET=1 padmap_seat_gate gamecube "Four Swords Adventures"
+  [ "$SDL_JOYSTICK_HIDAPI_STEAM" = 1 ]
+}
+
+@test "the dolphin ports name the clone the way SDL will, not the way the kernel does" {
+  # padmap writes `SDL/0/padmap Player 1`, which is what the kernel calls its
+  # clone. SDL renames a clone to the pad it mirrors, so Dolphin looks up a
+  # device id nothing answers to and the port is silently dead -- Four Swords
+  # Adventures with a pad seated, a full GCPadNew.ini and nothing moving.
+  export GOTG_PADMAP_RUNTIME="$TEST_TMP/padmap-rt-dolphin"
+  mkdir -p "$GOTG_PADMAP_RUNTIME"
+  # Quoted the way padmap writes it: the name has a space in it.
+  printf "SDL_GAMECONTROLLERCONFIG='%s'\nexport SDL_GAMECONTROLLERCONFIG\n" \
+    '03000000de2800000413,padmap Player 1,a:b0,' >"$GOTG_PADMAP_RUNTIME/env.sh"
+  export GOTG_PADS="$FAKE_BIN/gotg-pads"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'cat <<JSON\n'
+    printf '[{"guid":"03000000de2800000413","name":"Xbox 360 Controller","slot":0}]\n'
+    printf 'JSON\n'
+  } >"$GOTG_PADS"
+  chmod +x "$GOTG_PADS"
+
+  local ini="$TEST_TMP/GCPadNew.ini"
+  cat >"$ini" <<'EOS'
+[GCPad1]
+Device = SDL/0/padmap Player 1
+Buttons/A = `Button S`
+[GCPad2]
+Device = XInput2/0/Virtual core pointer
+Buttons/A = `X`
+EOS
+
+  padmap_name_dolphin_devices "$ini"
+  grep -qF 'Device = SDL/0/Xbox 360 Controller' "$ini" || {
+    echo "the port still names the kernel's clone: $(grep Device "$ini")" >&2
+    return 1
+  }
+  # The keyboard port is somebody's decision, not this one's to undo.
+  grep -qF 'Device = XInput2/0/Virtual core pointer' "$ini"
+  grep -qF 'Buttons/A = `Button S`' "$ini"
+}
+
+@test "and a port bound to something that is not a clone is left alone" {
+  export GOTG_PADMAP_RUNTIME="$TEST_TMP/padmap-rt-dolphin2"
+  mkdir -p "$GOTG_PADMAP_RUNTIME"
+  # Quoted the way padmap writes it: the name has a space in it.
+  printf "SDL_GAMECONTROLLERCONFIG='%s'\nexport SDL_GAMECONTROLLERCONFIG\n" \
+    '03000000de2800000413,padmap Player 1,a:b0,' >"$GOTG_PADMAP_RUNTIME/env.sh"
+  export GOTG_PADS="$FAKE_BIN/gotg-pads"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'echo %s\n' "'[{\"guid\":\"03000000de2800000413\",\"name\":\"Xbox 360 Controller\",\"slot\":0}]'"
+  } >"$GOTG_PADS"
+  chmod +x "$GOTG_PADS"
+
+  # Two ports, so this says "chose not to" rather than "did nothing": the
+  # clone is renamed in the same pass that leaves the other pad alone.
+  local ini="$TEST_TMP/GCPadNew-raw.ini"
+  printf '[GCPad1]\nDevice = SDL/0/padmap Player 1\n[GCPad2]\nDevice = SDL/1/Some Other Pad\n' >"$ini"
+  padmap_name_dolphin_devices "$ini"
+  grep -qF 'Device = SDL/0/Xbox 360 Controller' "$ini"
+  grep -qF 'Device = SDL/1/Some Other Pad' "$ini"
+}

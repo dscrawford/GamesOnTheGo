@@ -124,12 +124,118 @@
           # So the enumerator runs inside the sandbox, through padmap, exactly
           # as Dolphin will. `GOTG_PADS` is what the resolver looks for, and
           # the session hands its environment to the step.
+          # HIDAPI off, for the same reason `pads_enumerate` turns it off:
+          # gotg-pads sets SDL_HINT_JOYSTICK_HIDAPI_STEAM itself, so a raw
+          # Steam Controller is bindable when padmap is not running. In here
+          # padmap *is* running, and that driver claims Valve's ids and then
+          # hides the evdev *clone* wearing them -- player one simply absent
+          # from the list, which the session's log records as `padmap has
+          # published no pad for player 1; using keyboard`. The environment
+          # outranks the hint the binary sets.
           cat >"$state/splitscreen/gotg-pads" <<'SHIM'
           #!/bin/sh
+          export SDL_JOYSTICK_HIDAPI=0 SDL_JOYSTICK_HIDAPI_STEAM=0
           exec ${gotgPkgs.padmap-rs}/bin/padmap-rs exec -- ${gotgPkgs.gotg-pads}/bin/gotg-pads "$@"
           SHIM
           chmod +x "$state/splitscreen/gotg-pads"
           export GOTG_PADS="$state/splitscreen/gotg-pads"
+
+          # And wait for those clones to be *enumerable* before anything reads
+          # the list.
+          #
+          # `padmap-rs exec` republishes on the way into a launch, so the
+          # clones a game will use are seconds old when this runs -- and a
+          # device node exists before udev has finished with it, so SDL lists
+          # it a moment after padmap made it. padmap's own log has the two
+          # events a fifth of a second apart (`player 1: forwarding input to
+          # the clone`, then player 2) in the same second the GBA bindings
+          # were written, and that launch wrote `padmap has published no pad
+          # for player 2; using keyboard`.
+          #
+          # This is not the Steam Controller failure above -- that one was the
+          # hint, and is fixed by the two lines in the shim. This is the pad
+          # that simply was not there yet.
+          #
+          # So: poll until as many of padmap's pads are listed as padmap says
+          # it has seated, and carry on regardless after a few seconds --
+          # a game that starts with one pad bound is better than one that
+          # never starts.
+          ${pkgs.python3}/bin/python3 - "$GOTG_PADS" <<'WAIT' || true
+          import json, os, subprocess, sys, time
+
+          PREFIX = "padmap Player "
+
+          def crc16(data):
+              crc = 0
+              for byte in data:
+                  crc ^= byte
+                  for _ in range(8):
+                      crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+              return crc & 0xFFFF
+
+          wanted = {crc16(f"{PREFIX}{n}".encode()) for n in range(1, 9)}
+
+          def clones(rows):
+              found = 0
+              for row in rows:
+                  guid = str(row.get("guid") or "")
+                  crc = None
+                  if len(guid) >= 8:
+                      try:
+                          pair = bytes.fromhex(guid[4:8])
+                          crc = pair[0] | (pair[1] << 8)
+                      except ValueError:
+                          crc = None
+                  if crc in wanted or str(row.get("name") or "").startswith(PREFIX):
+                      found += 1
+              return found
+
+          runtime = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+          try:
+              # Only the seats with a device behind them: the keyboard takes a
+              # seat too and has no clone to wait for.
+              seated = json.load(open(f"{runtime}/padmap/assignments.json"))
+              seats = sum(1 for seat in seated if isinstance(seat, dict) and seat.get("path"))
+          except (OSError, ValueError):
+              seats = 0
+          if seats:
+              # Two ways to stop: the pads padmap says it seated are all
+              # listed, or the list has stopped growing. The second matters
+              # because assignments.json outlives the daemon that wrote it --
+              # a file left from last night would otherwise cost every launch
+              # the whole timeout.
+              end = time.monotonic() + 5.0
+              was = -1
+              rows = []
+              while time.monotonic() < end:
+                  try:
+                      rows = json.loads(subprocess.run(
+                          [sys.argv[1]], capture_output=True, text=True, timeout=10).stdout)
+                  except (OSError, ValueError, subprocess.SubprocessError):
+                      rows = []
+                  found = clones(rows)
+                  if found >= seats:
+                      break
+                  if found and found == was:
+                      print(f"gotg: padmap seated {seats} pad(s) and SDL lists {found}; "
+                            "one of the GBAs may come up on the keyboard", file=sys.stderr)
+                      break
+                  was = found
+                  time.sleep(0.25)
+              else:
+                  print(f"gotg: padmap seated {seats} pad(s) and SDL lists none; "
+                        "the GBAs will come up on the keyboard", file=sys.stderr)
+              # What the binder is about to read, said out loud. Every FSA
+              # failure so far has been a pad that padmap had seated and this
+              # list did not have -- SDL's Steam driver hiding a clone, or a
+              # node udev had not finished with -- and each one cost an
+              # evening to work out from the outside. One line, every launch.
+              for row in rows if isinstance(rows, list) else []:
+                  if isinstance(row, dict):
+                      print(f"gotg: sdl sees {row.get('name')!r} "
+                            f"slot {row.get('slot')} guid {str(row.get('guid'))[:12]} "
+                            f"gamepad {bool(row.get('gamepad'))}", file=sys.stderr)
+          WAIT
           ${split}/bin/splitscreen-fsa \
             --players ${toString players} \
             ${lib.concatMapStringsSep " " (n: ''--pad "padmap:${toString n}"'') (lib.range 1 players)} \
