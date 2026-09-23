@@ -324,8 +324,17 @@ env_build_key() {
   printf '%s' "$key"
 }
 
+# Whether a built root was built by this client from this tree -- the one
+# thing env_ensure checks before it rebuilds. Asked by `complete ready` too:
+# a root that is about to be rebuilt is not ready, whatever is on disk.
+env_is_current() {
+  local by
+  by="$(env_root "$1").by"
+  [[ ! -f "$by" || "$(cat "$by")" == "$(env_build_key)" ]]
+}
+
 env_ensure() {
-  local attr="$1" by
+  local attr="$1"
   if ! env_is_built "$attr"; then
     env_build "$attr"
     return
@@ -336,8 +345,7 @@ env_ensure() {
   # the Deck after every `nix profile upgrade`, a checkout after every pull
   # -- until somebody thought to run `gotg sync`. Best effort, like sync:
   # a rebuild that fails leaves what is here, which still runs.
-  by="$(env_root "$attr").by"
-  if [[ -f "$by" && "$(cat "$by")" != "$(env_build_key)" ]]; then
+  if ! env_is_current "$attr"; then
     log "$attr was built by an older gotg; rebuilding it"
     env_refresh "$attr" || warn "could not rebuild $attr — launching the build already here"
   fi

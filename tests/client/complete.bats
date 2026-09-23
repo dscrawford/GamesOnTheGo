@@ -271,6 +271,22 @@ ready_env() {
   [ "$status" -ne 0 ]
 }
 
+@test "an environment an older gotg built is not ready, because launching rebuilds it" {
+  # The picker execs into a launch it believes is ready, and the launch then
+  # rebuilt the environment with nothing on screen: a black Deck in Game Mode
+  # after every update. Not ready means the picker's own loading screen.
+  add_game n64 usa.zelda.z64 "rom" "Zelda"
+  gotg refresh
+  ready_env
+  gotg download usa.zelda
+  gotg complete ready n64/usa.zelda
+  [ "$status" -eq 0 ]
+
+  printf '/nix/store/00000000000000000000000000000000-gotg-0.0.1\n' >"$GOTG_ROOTS_DIR/env-n64.by"
+  gotg complete ready n64/usa.zelda
+  [ "$status" -ne 0 ]
+}
+
 @test "ready resolves a bare id, and the qualified form pins the platform" {
   add_game n64 usa.zelda.z64 "rom" "Zelda"
   gotg refresh
