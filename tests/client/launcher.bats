@@ -829,3 +829,35 @@ SHIM
   order="$(grep -oE "env-(n64|nes|snes)" <<<"$stderr" | head -3 | tr '\n' ' ')"
   [ "$order" = "env-n64 env-nes env-snes " ]
 }
+
+@test "a checkout with uncommitted edits is rebuilt when the edits change" {
+  # The fingerprint of a dirty tree was empty, and empty matched empty: a
+  # root built from last night's uncommitted work was launched all the next
+  # day, through every fix made since, until somebody committed.
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  gotg download usa.zelda
+  rm -rf "$GOTG_ROOTS_DIR/env-n64"
+  stub_nix
+  echo "{ }" >"$GOTG_FLAKE/flake.nix"
+  git -C "$GOTG_FLAKE" init -q
+  git -C "$GOTG_FLAKE" -c user.email=t@t -c user.name=t add flake.nix
+  git -C "$GOTG_FLAKE" -c user.email=t@t -c user.name=t commit -qm one
+  gotg play usa.zelda
+  [ "$(grep -c "build $GOTG_FLAKE#env-n64" "$NIX_LOG")" -eq 1 ]
+
+  # An edit nobody has committed: rebuilt.
+  echo "# one" >>"$GOTG_FLAKE/flake.nix"
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [ "$(grep -c "build $GOTG_FLAKE#env-n64" "$NIX_LOG")" -eq 2 ]
+
+  # The same edits again: nothing to do.
+  gotg play usa.zelda
+  [ "$(grep -c "build $GOTG_FLAKE#env-n64" "$NIX_LOG")" -eq 2 ]
+
+  # Another edit on top, still uncommitted: rebuilt again.
+  echo "# two" >>"$GOTG_FLAKE/flake.nix"
+  gotg play usa.zelda
+  [ "$(grep -c "build $GOTG_FLAKE#env-n64" "$NIX_LOG")" -eq 3 ]
+}

@@ -303,10 +303,23 @@ env_build() {
 # on purpose: knowing it means asking the network, and the client's own
 # store path already changes with every upgrade.
 env_build_key() {
-  local flake key="$GOTG_ROOT"
+  local flake key="$GOTG_ROOT" print
   flake="$(gotg_flake)"
   if flake_is_path "$flake"; then
-    key+="|$(flake_fingerprint "$flake")"
+    print="$(flake_fingerprint "$flake")"
+    if [[ -z "$print" ]]; then
+      # A checkout with edits in it. The fingerprint is empty then -- it
+      # means "build and see" to sync -- and an empty one here was the same
+      # empty string every launch, so a root built from a dirty tree matched
+      # every later dirty tree and was never rebuilt. A day of uncommitted
+      # fixes to Four Swords Adventures launched the environment from the
+      # night before, every time. The edits themselves are the fingerprint:
+      # what a flake of this checkout would build is the commit plus them.
+      print="dirty:$(git -C "$flake" rev-parse HEAD 2>/dev/null):$(
+        git -C "$flake" diff HEAD 2>/dev/null | sha256sum | cut -c1-16
+      )"
+    fi
+    key+="|$print"
   fi
   printf '%s' "$key"
 }
