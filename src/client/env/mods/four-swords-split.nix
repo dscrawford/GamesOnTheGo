@@ -102,9 +102,19 @@
         json.dump(rows, sys.stdout)
       '';
 
+      #
+      # And with Dolphin's error popups off. Inside the nested session a
+      # popup has nowhere to go: SDL hands it to zenity, zenity cannot draw
+      # in Game Mode, and Dolphin raises the next one. On a Deck that was an
+      # alert every 150 ms -- 469 zenity processes in three minutes, each
+      # with its own D-Bus connection -- until the session bus died of "Too
+      # many open files" and took Steam and Game Mode down with it. Off, an
+      # alert goes to Dolphin's log (Logs/dolphin.log, with `[Logs] MASTER`
+      # on) and the game carries on or stops; nothing waits on a dialog
+      # nobody can see.
       dolphin = pkgs.writeShellScript "gotg-fsa-dolphin" ''
         exec ${gotgPkgs.padmap-rs}/bin/padmap-rs exec -- \
-          ${base.emulator}/bin/${base.bin} "$@"
+          ${base.emulator}/bin/${base.bin} -C Dolphin.Interface.UsePanicHandlers=False "$@"
       '';
     in
     {
