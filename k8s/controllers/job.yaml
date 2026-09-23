@@ -29,6 +29,12 @@ spec:
           # and that is the name the nodes' containerd trusts without a
           # certificate. A push from a desktop goes to a node's address.
           image: localhost:30500/gotg-controllers:@TAG@
+          # A tag is not an identity. A node that already had a
+          # `gotg-controllers:0.1.4` from an earlier evening kept it, and the
+          # suite ran a test file that no longer exists in the tree -- a
+          # failure list naming tests nobody could find. Tag by the store
+          # hash (`k8s/controllers/README.md`) and pull anyway.
+          imagePullPolicy: Always
           # Overridable: `args: ["-q", "-k", "top_bar"]` runs one test.
           args: ["-q"]
           securityContext:
