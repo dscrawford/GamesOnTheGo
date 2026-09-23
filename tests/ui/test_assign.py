@@ -125,12 +125,13 @@ def test_it_does_not_ask_again_for_the_same_state():
     assert watch.wanted(True, "idle", 0) is None
 
 
-def test_a_seat_taken_is_worth_asking_again():
-    # Three seats are still free, and the pad that took the first one is not
-    # the only one somebody might pick up.
+def test_a_seat_taken_is_not_a_reason_to_ask_again():
+    # A claim leaves padmap listening, and a `seating` resent ~200 ms after it
+    # dropped every hold in flight: the second person had to hold A again.
     watch = Watch()
     watch.wanted(True, "idle", 0)
-    assert watch.wanted(True, "ready", 1) is not None
+    assert watch.wanted(True, "ready", 1) is None
+    assert watch.wanted(True, "ready", 2) is None
 
 
 def test_nothing_is_asked_while_a_session_is_open():

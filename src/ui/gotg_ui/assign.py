@@ -271,9 +271,12 @@ class Watch:
     in and hold a button" into player one without leaving the grid.
 
     padmap does not acknowledge the command, so there is nothing to read back:
-    it is sent again on each connection and after each change of state, which
-    the daemon takes idempotently. Not every frame, which would be a syscall
-    sixty times a second to tell a daemon what it already knows.
+    it is sent on each connection, after a session, and when a full room has
+    a seat again -- the three times padmap may not be listening. Not after a
+    claim: a claim leaves seating open, and the daemon takes a `seating` as a
+    fresh start that drops every hold in flight. Sent again ~200 ms after each
+    claim, it was the second person's ring emptying just as the first person's
+    seat landed, and "they have to hold A again".
 
     Never closed. The daemon keeps seating open after this client is gone, so
     a pad picked up in the middle of a game takes the next free seat exactly
@@ -282,9 +285,10 @@ class Watch:
     """
 
     slots: int = 4
-    # The (state, seated) it was last asked under. None is "not asked", which
-    # is where a lost connection puts it: a restarted daemon remembers nothing.
-    asked: tuple[str, int] | None = None
+    # Whether padmap has been asked since it last could have stopped
+    # listening. A lost connection clears it: a restarted daemon remembers
+    # nothing.
+    asked: bool = False
     # A daemon too old to know the command. It is never asked again -- and
     # that is all: the pads are not handed back to whoever holds them. A
     # machine whose padmap cannot seat anybody is a machine the keyboard
@@ -308,21 +312,19 @@ class Watch:
         if self.refused:
             return None
         if not connected:
-            self.asked = None
+            self.asked = False
             return None
-        # Inside a session padmap suspends seating, and the assignment screen
-        # is asking for the same holds anyway. Full seats are the same shape of
-        # nothing-to-do. Both forget what was asked rather than keeping it: a
-        # fourth player who unplugs puts the state back to a tuple that was
-        # already sent, and a `wanted` that only compares would then never
-        # mention the seat they freed.
+        # Inside a session padmap suspends seating, and the assignment screen is
+        # asking for the same holds anyway. Full seats are the same shape of
+        # nothing-to-do. Both forget that it was asked: what padmap resumes
+        # after a session is not assumed, and a fourth player who unplugs frees
+        # a seat that should be mentioned.
         if state == "assigning" or seated >= self.slots:
-            self.asked = None
+            self.asked = False
             return None
-        here = (state, seated)
-        if here == self.asked:
+        if self.asked:
             return None
-        self.asked = here
+        self.asked = True
         # The same length the gate asks for: pairing should not be quicker
         # from the grid than it is in front of a launch.
         return {"cmd": "seating", "open": True, "players": self.slots, "hold": PAIR_HOLD}
