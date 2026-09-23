@@ -217,6 +217,13 @@ frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).
   and `gotg-seat` closed seating before the game to get it back; padmap
   throttled that scan, the strict xfail turned into an XPASS, and the close
   is gone -- a pad switched on mid-level can take a seat again.
+- **Readying up is per person, pairing is per pad, and neither is the
+  other.** Everybody seated holds A for three seconds -- one ring each, and
+  the room goes when the last one closes (`ready.py`). Both the pause before
+  a hold counts and the hold itself are per seat: measured across the room,
+  as they were, two people holding A locked each other out for good, because
+  the room was never quiet for either of them. A seated keyboard readies with
+  Enter held, for the same reason it has a seat at all.
 - **How long pairing takes is ours to ask for.** `theme.timeouts.pair_hold`
   (1.5 s) rides on every `seating` as `hold`, and `PADMAP_HOLD_SECONDS` is
   exported for the daemon so padmap's own wizard takes the same length.

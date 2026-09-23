@@ -47,6 +47,24 @@ def seated(players: list | None) -> bool:
     return False
 
 
+def seat_of(players: list | None) -> int | None:
+    """Which player the keyboard is, if padmap has seated it.
+
+    The door needs the number: everybody seated has to ready up, and a
+    keyboard that cannot hold A would hold the room for ever.
+    """
+    for player in players or []:
+        if not isinstance(player, dict) or not isinstance(player.get("player"), int):
+            continue
+        if player.get("keyboard") is True:
+            return player["player"]
+        if str(player.get("name") or "").strip().lower() == KEYBOARD:
+            return player["player"]
+        if str(player.get("icon") or "").strip().lower() == KEYBOARD:
+            return player["player"]
+    return None
+
+
 def drives(players: list | None, connected: bool = True) -> bool:
     """Whether a key press may move this screen.
 

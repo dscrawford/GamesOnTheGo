@@ -288,6 +288,28 @@ class Pads:
         _mapped.discard(instance_id)
         _owners.closed(instance_id)
 
+    def holding(self) -> set[int]:
+        """Which seats have a button down right now.
+
+        Per seat, because a hold is per person: the door used to ask "is
+        anything down anywhere", and with two controllers that is nearly
+        always yes -- one player holding A meant nobody else could start a
+        hold, including the first player after letting go. Two people trying
+        to ready up could lock each other out entirely.
+        """
+        out: set[int] = set()
+        for instance, pad in list(self._open.items()):
+            player = _owners.player(instance)
+            if player is None:
+                continue
+            stick = pad.as_joystick() if hasattr(pad, "as_joystick") else pad
+            try:
+                if any(stick.get_button(i) for i in range(stick.get_numbuttons())):
+                    out.add(player)
+            except pygame.error:
+                continue
+        return out
+
     def any_button_down(self) -> bool:
         """Whether a button is held on any pad padmap published, right now.
 
