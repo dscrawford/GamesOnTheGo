@@ -2237,3 +2237,100 @@ def test_letting_go_loses_the_place_and_says_so(daemon, sdl):
         assert claimed is not None, "the pad that kept holding never took a seat"
         assert claimed["name"] == "E2E Other Pad"
         assert claimed["player"] == 1, "the seat the other pad gave up was not the one taken"
+
+
+def test_two_pads_can_both_ready_up_without_locking_each_other_out(daemon, sdl):
+    """The deadlock, on real pads.
+
+    The door had one hold for the whole room and one pause measured across
+    every pad: while one player held A the room was never quiet, so nobody
+    else's press counted -- and when the first let go the second was still
+    holding, so it still never counted. Neither could ready up.
+    """
+    from gotg_ui.seat import Door
+
+    with FakePad("E2E Xbox Pad") as first, FakePad("E2E Other Pad", 0x2AAA, 0x5BBB, 1) as second:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        assert picker.claim(first, 1), "the first pad took no seat"
+        assert picker.claim(second, 2), "the second pad took no seat"
+        picker.run(1.0)
+
+        door = Door(picker.sticks, time.monotonic(), seconds=1.0)
+        door.seats = {1, 2}
+        _pump(sdl, door, 1.4)                   # both pads quiet, past the pause
+
+        # Both thumbs down, together, which is the case that locked.
+        first.down(BTN_SOUTH)
+        second.down(BTN_SOUTH)
+        end = time.monotonic() + 4.0
+        while time.monotonic() < end and not door.everybody(time.monotonic()):
+            _pump(sdl, door, 0.05)
+        first.up(BTN_SOUTH)
+        second.up(BTN_SOUTH)
+
+        assert door.holds.ready == {1, 2}, (
+            f"two pads held A together and {sorted(door.holds.ready)} readied up"
+        )
+
+
+def test_the_game_waits_for_every_seated_pad(daemon, sdl):
+    """One player ready is not the room ready."""
+    from gotg_ui.seat import Door
+
+    with FakePad("E2E Xbox Pad") as first, FakePad("E2E Other Pad", 0x2AAA, 0x5BBB, 1) as second:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        assert picker.claim(first, 1)
+        assert picker.claim(second, 2)
+        picker.run(1.0)
+
+        door = Door(picker.sticks, time.monotonic(), seconds=1.0)
+        door.seats = {1, 2}
+        _pump(sdl, door, 1.4)
+
+        first.down(BTN_SOUTH)
+        end = time.monotonic() + 3.0
+        while time.monotonic() < end and 1 not in door.holds.ready:
+            _pump(sdl, door, 0.05)
+        first.up(BTN_SOUTH)
+        assert 1 in door.holds.ready, "the first pad never readied up"
+        _pump(sdl, door, 0.5)
+        assert not door.everybody(time.monotonic()), "one player ready started the game"
+        assert door.waiting_on() == {2}
+
+        # And the second finishes the room.
+        _pump(sdl, door, 1.2)
+        second.down(BTN_SOUTH)
+        end = time.monotonic() + 3.0
+        while time.monotonic() < end and not door.everybody(time.monotonic()):
+            _pump(sdl, door, 0.05)
+        second.up(BTN_SOUTH)
+        assert door.everybody(time.monotonic()), f"both held and the room is {sorted(door.holds.ready)}"
+
+
+def test_a_player_who_readied_up_keeps_it_while_the_others_catch_up(daemon, sdl):
+    """Nobody should have to keep holding while somebody else finds their pad."""
+    from gotg_ui.seat import Door
+
+    with FakePad("E2E Xbox Pad") as pad:
+        picker = Picker(_socket(daemon), sdl)
+        picker.run(1.0)
+        assert picker.claim(pad, 1)
+        picker.run(1.0)
+
+        door = Door(picker.sticks, time.monotonic(), seconds=1.0)
+        door.seats = {1, 2}                      # player two is still pairing
+        _pump(sdl, door, 1.4)
+
+        pad.down(BTN_SOUTH)
+        end = time.monotonic() + 3.0
+        while time.monotonic() < end and 1 not in door.holds.ready:
+            _pump(sdl, door, 0.05)
+        pad.up(BTN_SOUTH)
+        assert 1 in door.holds.ready
+
+        _pump(sdl, door, 2.0)                    # a long time doing nothing
+        assert 1 in door.holds.ready, "a player lost their readiness by letting go"
+        assert door.waiting_on() == {2}
+        picker.close()

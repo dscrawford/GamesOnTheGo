@@ -50,3 +50,12 @@ def test_a_seat_that_is_not_the_keyboards_is_not_the_keyboards():
     assert not keys.seated([{"player": 1, "name": "Keyboard Warrior Pad"}])
     assert not keys.seated([{"player": 1, "icon": "keyboard-mouse"}])
     assert keys.seated([{"player": 1, "name": " Keyboard "}])
+
+
+def test_the_keyboards_own_seat_is_findable():
+    """The door needs the number: everybody seated readies up, and a keyboard
+    that could not would hold the room for ever."""
+    assert keys.seat_of(SEATED) == 1
+    assert keys.seat_of([{"player": 3, "keyboard": True}]) == 3
+    assert keys.seat_of(A_PAD) is None
+    assert keys.seat_of([]) is None

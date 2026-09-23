@@ -66,6 +66,7 @@ from .pressing import (
     element_on_axis,
     elements_on_axis,
 )
+from .ready import Ready
 
 WINDOW = tuple(config.get("theme.window", [1280, 800]))
 BACKGROUND = config.colour("theme.colours.background", (18, 18, 20))
@@ -531,6 +532,16 @@ class Door:
     ):
         self.sticks = sticks
         self.hold = GoHold(seconds=seconds, opened=now, held_at_open=sticks.any_button_down())
+        # And one per seat, which is the real one: everybody holds A, and the
+        # game starts when the last of them is ready. One hold for the room
+        # meant two people locked each other out -- see ready.py.
+        self.holds = Ready(seconds=seconds, pause=PAUSE)
+        self.seats: set[int] = set()
+        # Which seat the keyboard holds, if it has one, and whether its own
+        # go key is down. It readies up like everybody else -- Enter held --
+        # because a seat that cannot ready would hold the room for ever.
+        self.keyboard: int | None = None
+        self.typing = False
         # padmap's profile for the seated pad, so a raw input can be named:
         # which control the button under the thumb is. Ringed on the drawing
         # while it is down.
@@ -590,6 +601,14 @@ class Door:
             self.sticks.remove(event.instance_id)
         elif event.type == pygame.QUIT:
             return True
+        elif event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER) \
+                and self.keys_drive and self.keyboard is not None:
+            # The keyboard's own go: held, like everybody else's, rather than
+            # the instant start it used to be.
+            self.typing = True
+            self.holds.pressed(self.keyboard, now)
+        elif event.type == pygame.KEYUP and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            self.typing = False
         elif event.type == pygame.KEYDOWN and not self.keys_drive:
             trace.say("door-key-refused", key=event.key)
             return False
@@ -608,9 +627,12 @@ class Door:
             return True
         elif sdl_pads.button(event) is not None:
             pressed = sdl_pads.button(event)
+            player = sdl_pads.player(event)
+            if pressed in self.GO and player is not None:
+                self.holds.pressed(player, now)
             if pressed in self.GO and self.settled(now):
                 self.hold.pressed(now)
-                self.holder = sdl_pads.player(event) or self.holder
+                self.holder = player or self.holder
             # Y, held, is "walk the buttons again". Tapped it was too easy to
             # mean: a thumb brushing it on the way to A went back to the
             # wizard, which reads exactly like bindings not being remembered.
@@ -720,6 +742,14 @@ class Door:
             return 0.0
         return min(1.0, (now - self.quiet_since) / PAUSE)
 
+    def waiting_on(self) -> set[int]:
+        """The seats that have not readied up yet."""
+        return self.seats - self.holds.ready
+
+    def everybody(self, now: float) -> bool:
+        """Whether every seat in the room has readied up."""
+        return self.holds.all_ready(self.seats)
+
     def tick(self, now: float) -> None:
         """The holds, against what is actually down right now.
 
@@ -731,6 +761,15 @@ class Door:
         the instant A was touched. The pads are asked instead: nothing down,
         nothing counting.
         """
+        # Per seat first: who is holding something, so each player's own
+        # pause and each player's own hold move on their own.
+        holding = self.sticks.holding()
+        if self.typing and self.keyboard is not None:
+            holding = holding | {self.keyboard}
+        just = self.holds.tick(holding, self.seats, now)
+        if just:
+            trace.say("door-ready", players=just, waiting=sorted(self.waiting_on()))
+
         if self.sticks.any_button_down():
             if self.quiet_since is not None:
                 trace.say("door-busy")
@@ -821,6 +860,10 @@ def _wait_for_go(
             gate = apply(gate, message)
             fade.saw(gate.progress, now)
         door.keys_drive = keys.drives(pads.players, pads.connected)
+        # Who is in the room, every frame: somebody can pair at this screen,
+        # and a pad that arrives has to ready up like everybody else.
+        door.seats = {seat.player for seat in gate.seats}
+        door.keyboard = keys.seat_of(pads.players)
         if not pads.connected:
             _said("padmap went away at the door; starting")
             return "go", gate
@@ -850,20 +893,25 @@ def _wait_for_go(
             trace.say("sent", **asked)
             pads.send(asked)
         door.tick(now)
-        if door.rebinding(now) >= 1.0:
-            trace.say("door-rebind")
-            return "rebind", gate
-        if door.done(now):
-            # The ring has closed. One more moment with the check through it,
-            # so the last thing seen is "ready" rather than a screen vanishing.
+        if door.everybody(now):
+            # Everybody has readied up. One more moment with the checks on
+            # screen, so the last thing seen is the room being ready.
             if finished is None:
+                trace.say("door-go", why="everybody", seats=sorted(door.seats))
                 finished = now
             elif now - finished >= READY_SHOWN:
                 return "go", gate
+        if door.rebinding(now) >= 1.0:
+            trace.say("door-rebind")
+            return "rebind", gate
+
         painting = time.perf_counter()
         _draw_go(
             screen, font_at, gate, title, cache,
             fraction=door.progress(now),
+            filling={player: door.holds.progress(player, now) for player in door.seats},
+            done=set(door.holds.ready),
+            waiting=door.waiting_on(),
             pressing=door.lit_by,
             sticks=door.sticks_by,
             holder=door.holder,
@@ -878,7 +926,7 @@ def _wait_for_go(
         _frame(fps, painting, drawn, shown, time.perf_counter())
 
 
-def _footer(gate: Gate, settled: bool) -> str:
+def _footer(gate: Gate, settled: bool, waiting: set[int] | None = None) -> str:
     """The one line under the drawing: what to do next, and only that.
 
     Three moments, and each says its own: nobody paired yet, somebody paired
@@ -888,6 +936,14 @@ def _footer(gate: Gate, settled: bool) -> str:
         return "hold a button on a controller to join   ·   hold space for the keyboard"
     if not settled:
         return "let go of the button   ·   then hold A for three seconds to start"
+    if waiting and gate.seated > 1:
+        # Whose ring is still open, said in words as well: everybody readies
+        # up, and "what are we waiting for" should not need counting rings.
+        who = ", ".join(str(player) for player in sorted(waiting))
+        return (
+            f"waiting for player {who} to hold A   ·   hold Y to change these   ·   "
+            "another player: hold a button"
+        )
     return (
         "hold A for three seconds to start   ·   hold Y to change these   ·   "
         "another player: hold a button"
@@ -901,6 +957,9 @@ def _draw_go(
     title: str,
     cache: dict,
     fraction: float = 0.0,
+    filling: dict[int, float] | None = None,
+    done: set[int] | None = None,
+    waiting: set[int] | None = None,
     pressing: dict[int, set[str]] | None = None,
     sticks: dict[int, dict[str, tuple[float, float]]] | None = None,
     holder: int | None = None,
@@ -931,7 +990,7 @@ def _draw_go(
             sticks=sticks or {},
             heading=f"{title}  —  {names}" if names else title,
             keys="",
-            footer=_footer(gate, settled),
+            footer=_footer(gate, settled, waiting),
         )
     except Exception as error:  # noqa: BLE001 - a drawing must not start a game
         # The drawing is a courtesy; the gate is not. A missing table or
@@ -940,7 +999,7 @@ def _draw_go(
         screen.fill(BACKGROUND)
         heading = font_at(34).render(title, True, LABEL_DIM)
         screen.blit(heading, ((width - heading.get_width()) // 2, int(height * 0.10)))
-        prompt = font_at(48).render(_footer(gate, settled).split("   ·   ")[0], True, LABEL)
+        prompt = font_at(48).render(_footer(gate, settled, waiting).split("   ·   ")[0], True, LABEL)
         screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.40)))
         note = font_at(20).render(f"(no drawing: {error})", True, LABEL_DIM)
         screen.blit(note, ((width - note.get_width()) // 2, int(height * 0.92)))
@@ -949,6 +1008,7 @@ def _draw_go(
     # player holding a button sees themselves appear rather than wondering.
     _draw_seats(
         screen, font_at, gate, int(height * 0.80), fraction, holder, heard or set(), joining, queue,
+        filling or {}, done or set(),
     )
 
 
@@ -969,6 +1029,8 @@ def _draw_seats(
     heard: set[int] | None = None,
     joining: float = 0.0,
     queue: list | None = None,
+    filling: dict[int, float] | None = None,
+    done: set[int] | None = None,
 ) -> None:
     """One controller drawing per seat, left to right, in player colours.
 
@@ -1016,16 +1078,25 @@ def _draw_seats(
         # wherever it happens. This is a green ring closing around the pad
         # already in somebody's hands, and a check through it when it is
         # done: a different thing, said differently.
-        if holder == seat.player and fraction > 0:
-            draw_arc(screen, centre, height * 0.72, SETTLED_GREEN, fraction, 4)
-            if fraction >= 1.0:
+        #
+        # One per player, because everybody readies up: the room goes when
+        # the last ring closes, and whose ring is still open is the whole
+        # answer to "what are we waiting for".
+        own = (filling or {}).get(seat.player, 0.0)
+        if seat.player in (done or set()):
+            own = 1.0
+        if own <= 0 and holder == seat.player and fraction > 0:
+            own = fraction
+        if own > 0:
+            draw_arc(screen, centre, height * 0.72, SETTLED_GREEN, own, 4)
+            if own >= 1.0:
                 # Through the middle, and small enough that the pad is still
                 # recognisable underneath: this says ready, not "gone".
                 draw_tick(screen, centre, int(height * 0.55), SETTLED_GREEN)
 
         # The shoulder tick says "this seat is paired". While the ready check
         # is up it is the same word twice, so it stands down.
-        if not (holder == seat.player and fraction >= 1.0):
+        if not (own >= 1.0):
             corner = (centre[0] + height // 2 - 2, centre[1] + height // 3)
             pygame.draw.aacircle(screen, (16, 22, 18), corner, 9)
             draw_tick(screen, corner, 11, SETTLED_GREEN)
