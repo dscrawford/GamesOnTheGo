@@ -112,7 +112,37 @@
       # alert goes to Dolphin's log (Logs/dolphin.log, with `[Logs] MASTER`
       # on) and the game carries on or stops; nothing waits on a dialog
       # nobody can see.
+      #
+      # That turned out not to be where the alerts came from: with Dolphin's
+      # own log on, it logged no alert at all while zenity was being started
+      # every 150 ms, from 0.1 s after its video backend came up until the
+      # game was stopped. Something else in Dolphin's process asks SDL for a
+      # popup, in a loop, and the question is lost with each zenity that
+      # cannot draw it.
+      #
+      # So Dolphin gets a zenity of its own, first on PATH: it writes down
+      # what it was asked to show and who asked (splitscreen/popups.log, the
+      # first forty), and says no -- without GTK, without D-Bus, without a
+      # connection per question for the session bus to run out of. Paced
+      # like the real one, so a caller that asks again is not turned into a
+      # busy loop by being answered faster.
+      popupWitness = pkgs.writeShellScriptBin "zenity" ''
+        log="''${GOTG_ENV_STATE:-/tmp}/splitscreen/popups.log"
+        if [ ! -f "$log" ] || [ "$(${pkgs.coreutils}/bin/wc -l <"$log")" -lt 40 ]; then
+          {
+            printf '%s pid=%s parent=%s:' "$(${pkgs.coreutils}/bin/date +%T.%N)" "$$" "$PPID"
+            ${pkgs.coreutils}/bin/tr '\0' ' ' <"/proc/$PPID/cmdline" 2>/dev/null | ${pkgs.coreutils}/bin/cut -c1-200
+            printf '  args:'
+            for arg in "$@"; do printf ' [%s]' "$arg"; done
+            printf '\n'
+          } >>"$log" 2>/dev/null
+        fi
+        ${pkgs.coreutils}/bin/sleep 0.15
+        exit 1
+      '';
+
       dolphin = pkgs.writeShellScript "gotg-fsa-dolphin" ''
+        export PATH=${popupWitness}/bin:$PATH
         exec ${gotgPkgs.padmap-rs}/bin/padmap-rs exec -- \
           ${base.emulator}/bin/${base.bin} -C Dolphin.Interface.UsePanicHandlers=False "$@"
       '';
