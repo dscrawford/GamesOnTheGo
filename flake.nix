@@ -108,8 +108,11 @@
           envs = import ./src/client/env {
             inherit pkgs;
             # For the split-screen sessions, which put the game inside padmap's
-            # sandbox themselves -- see mods/four-swords-split.nix.
+            # sandbox themselves -- see mods/four-swords-split.nix. `gotg-pads`
+            # goes with it: that session has to ask what the *game* will see,
+            # which is not what the session sees.
             inherit (padmap.packages.${pkgs.stdenv.hostPlatform.system}) padmap-rs;
+            inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg-pads;
           };
           py = pythonSets.${pkgs.stdenv.hostPlatform.system};
         in

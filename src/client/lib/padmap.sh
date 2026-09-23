@@ -284,29 +284,29 @@ padmap_identity_apply() {
 padmap_seat_gate() {
   local platform="$1" title="${2:-}" seat
   [[ "${GOTG_SEAT_GATE:-1}" != "0" ]] || return 0
-  # Already met, in the picker's own window. The picker runs the gate before
-  # it execs here -- same program, one window, and the seats it handed out
-  # are the ones this launch will play with -- and says so this way rather
-  # than by turning the check off, which is what GOTG_SEAT_GATE=0 means and
-  # is a thing only a test should say.
-  if [[ "${GOTG_SEAT_MET:-0}" == "1" ]]; then
-    log "controllers: the picker met the gate; not asking again"
-    return 0
-  fi
-  if ! seat="$(padmap_seat_bin)" || ! command -v "$seat" >/dev/null 2>&1; then
-    # Said out loud. A check that is quietly not there is indistinguishable
-    # from a check that ran and was happy, and the difference is a game
-    # starting with nothing to play it with.
-    warn "no gotg-seat here; starting without checking for a controller"
-    return 0
-  fi
   # The daemon first, unseated; then the gate, which is where somebody holds
   # a button; then the wait for what that published. The wait used to sit in
   # padmap_ensure, before the gate -- three seconds of waiting for a publish
   # nobody could have caused yet, and a warning that nothing was published
   # printed over a launch that was about to seat somebody.
   padmap_ensure --no-wait
-  "$seat" --platform "$platform" --title "$title" || true
+
+  # The gate itself, unless the picker has already met it in its own window.
+  # Only the *asking* is skipped: the ensure above and the wait below belong
+  # to the launch either way, and skipping them was how Four Swords Adventures
+  # came up with player two on the keyboard -- the bindings were written from
+  # a pad list padmap had not finished publishing.
+  if [[ "${GOTG_SEAT_MET:-0}" == "1" ]]; then
+    log "controllers: the picker met the gate; not asking again"
+  elif ! seat="$(padmap_seat_bin)" || ! command -v "$seat" >/dev/null 2>&1; then
+    # Said out loud. A check that is quietly not there is indistinguishable
+    # from a check that ran and was happy, and the difference is a game
+    # starting with nothing to play it with.
+    warn "no gotg-seat here; starting without checking for a controller"
+  else
+    "$seat" --platform "$platform" --title "$title" || true
+  fi
+
   if [[ -n "$PADMAP_MARKER" ]]; then
     padmap_wait_published "$PADMAP_MARKER"
     rm -f "$PADMAP_MARKER"

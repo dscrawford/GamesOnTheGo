@@ -67,6 +67,16 @@ teardown() { stop_saves_service; }
   grep -q "env PADMAP_NO_AUTOSETUP=1 PADMAP_NO_AUTOATTACH=1 PADMAP_HOLD_SECONDS=1.5" "$PADMAP_LOG"
 }
 
+@test "a gate the picker met still waits for padmap to publish" {
+  # Only the asking is skipped. The daemon is still ensured and the publish
+  # still waited for, because the bindings written after this read padmap's
+  # pad list -- and Four Swords Adventures came up with player two on the
+  # keyboard when that list was read before padmap had finished.
+  export GOTG_SEAT="$FAKE_BIN/gotg-seat"
+  GOTG_SEAT_MET=1 padmap_seat_gate n64 "Donkey Kong 64"
+  grep -q "padmap ensure-daemon" "$PADMAP_LOG"
+}
+
 @test "the gate is not asked for twice when the picker already met it" {
   # The picker runs the gate in its own window before it execs here, so the
   # seats are already taken and the screen has already been seen. Saying so
