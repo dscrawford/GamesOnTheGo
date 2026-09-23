@@ -197,6 +197,16 @@ frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).
 - SDL renames a padmap clone that mirrors a pad it knows (`Xbox 360
   Controller`), so device *names* cannot identify padmap's pads. The GUID's
   bytes 2–3 carry a CRC-16 of the real name; that is what `clones.py` reads.
+- **Dolphin does not use that rename.** Under `padmap-rs exec` it lists a
+  clone as `SDL/0/padmap Player N` (its CI log says so: `Added device:`),
+  while gotg-pads reports the same clone as `Xbox 360 Controller` -- which is
+  also the name of the raw pad padmap has grabbed. Binding Dolphin by
+  gotg-pads' name bound player one to a dead device and nothing moved in
+  Four Swords Adventures. padmap's own `emit` names Dolphin ports right; the
+  FSA mod rewrites gotg-pads' output to Dolphin's names before the GBA binder
+  reads it. To see what Dolphin sees, set `[Logs] CI = True` and
+  `WriteToFile = True` in the environment's `Logger.ini`; the list lands in
+  `data/dolphin-emu/Logs/dolphin.log`.
 - Controllers are keyboards too, **on every screen that reads input**. The
   Steam Controller Puck is four keyboards and four mice in hardware until
   something sends lizard-off over hidraw; a Bluetooth Xbox pad has
