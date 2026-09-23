@@ -44,7 +44,7 @@ nix run github:dscrawford/GamesOnTheGo#gotg-ui
 NixOS or home-manager: add `github:dscrawford/GamesOnTheGo` as a flake input
 and put `.packages.${system}.gotg` and `.gotg-ui` in your package list.
 
-Upgrade: re-run the installer, or `nix profile upgrade gotg gotg-ui`.
+Upgrade: re-run the installer, or `nix profile upgrade gotg gotg-ui --refresh && gotg sync`. The `gotg sync` is not optional: the picker Steam launches is a copy of its own, and only sync refreshes it -- without it Game Mode keeps running the old picker, whatever the profile says.
 
 Uninstall (games and saves stay; `--games` removes them too; Nix stays, and it says how to remove that):
 
