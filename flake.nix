@@ -195,10 +195,10 @@
 
           # Asks the same library the emulators ask, so nothing downstream has
           # to guess which physical controller is which.
-          gotg-pads = pkgs.callPackage ./src/client/gotg-pads { };
+          gotg-pads = pkgs.callPackage ./rust/gotg-pads.nix { };
 
           # The controller's way out of a running game.
-          gotg-killswitch = pkgs.callPackage ./src/client/gotg-killswitch { theme = ./config/theme.yaml; };
+          gotg-killswitch = pkgs.callPackage ./rust/gotg-killswitch.nix { theme = ./config/theme.yaml; };
 
           # What `gotg qa` runs a game inside: headless compositor, recorders,
           # analyzers, and a python that can create uinput pads. Built on
