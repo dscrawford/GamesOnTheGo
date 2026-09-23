@@ -69,10 +69,15 @@ shelf:
 # Seconds, everywhere.
 # Wait for the panel before showing a frame. On: a reveal filling in and a
 # stick dot moving are watched closely, and frames drawn between refreshes are
-# a hold that steps rather than moves. A driver that cannot do it refuses
-# `set_mode` outright, so both windows fall back to a plain one and say so in
-# the trace. `GOTG_UI_FPS=1` prints what SDL actually gave us.
+# a hold that steps rather than moves. The first twenty frames check that the
+# wait actually happens (pace.py) -- pygame's plain window accepted this and
+# ignored it -- and time the frames themselves if it does not.
+# `GOTG_UI_FPS=1` prints what SDL actually gave us.
 vsync: true
+# Present through an SDL renderer, which is what makes the wait above real in
+# a window. Off puts back pygame's own window; so does
+# `GOTG_UI_RENDERER=window`, for comparing the two without editing this.
+renderer: true
 
 timeouts:
   # A unix socket either answers at once or is not there; this is only so a
@@ -84,12 +89,13 @@ timeouts:
   # A daemon that is running but silent, before a launch gives up on it.
   first_state: 3.0
   # Every hold this program times, and they are all the same length on
-  # purpose: three seconds. A second was short enough that arriving at the
-  # door with a thumb on A started the game before the screen had been read,
-  # and one length for all of them means nobody has to learn which is which.
-  # The hold that claims a seat is padmap's, not ours, and is still a quarter
-  # second -- docs/requests/how-long-a-seat-takes-to-claim.md.
-  seat_go_hold: 3.0
+  # purpose -- one length means nobody has to learn which is which. A second
+  # was short enough that arriving at the door with a thumb on A started the
+  # game before the screen had been read; three was long enough to feel like
+  # the program had stopped listening. A second and a half, the same length
+  # `pair_hold` asks padmap for, so pairing and readying up feel like one
+  # gesture repeated.
+  seat_go_hold: 1.5
   # The pause between pairing and being allowed to start: every pad quiet for
   # this long. padmap claims a seat after a quarter second and a thumb takes
   # longer than that to come off, so the press that paired a controller used
@@ -100,7 +106,7 @@ timeouts:
   # one; this is what `seating` asks for instead. 0.05 to 10 seconds -- padmap
   # ignores anything else and keeps its default.
   pair_hold: 1.5
-  seat_rebind_hold: 3.0
-  keyboard_hold: 3.0
+  seat_rebind_hold: 1.5
+  keyboard_hold: 1.5
   service: 10
   ready: 3

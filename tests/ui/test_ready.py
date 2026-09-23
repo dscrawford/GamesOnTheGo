@@ -1,6 +1,6 @@
 """Readying up with more than one controller in the room.
 
-The rule: everybody seated holds A for three seconds, and when the last of
+The rule: everybody seated holds A for the shipped hold, and when the last of
 them is ready the game starts. The first version had one hold for the whole
 room and one pause measured across every pad, which two people could lock
 solid -- these are the shapes of that deadlock, and the ordinary cases either
