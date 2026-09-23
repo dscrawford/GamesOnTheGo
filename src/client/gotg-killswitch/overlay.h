@@ -1,41 +1,55 @@
-// What the player sees while the kill switch is held.
+// The window the bar is drawn in, over whatever game is running.
 //
-// Three seconds is a long time to hold something with no sign that anything is
-// happening — long enough to let go and conclude the feature does not work. So
-// the hold draws itself: a red ring that closes as the three seconds run out,
-// around an X that grows solid as it does. Letting go takes it away.
+// "Over the game" is a different request to every display server this runs
+// under, so there are three ways in and the first that fits is taken:
 //
-// The geometry is separated from the drawing for the usual reason: an arc that
-// sweeps the wrong way or a ring that is full at half a hold are bugs a test
-// can catch, and SDL is not needed to catch them.
+//   gamescope (a Deck in Game Mode)
+//       An X11 window with GAMESCOPE_EXTERNAL_OVERLAY set: gamescope's one
+//       external-overlay slot, which mangoapp uses too. It sits above the game
+//       and below Steam's own overlay (steamcompmgr.hpp: zpos 2 against 3).
+//   a wlroots compositor with layer-shell (sway, Hyprland, KDE)
+//       A layer-shell surface on the overlay layer, which sway stacks above
+//       fullscreen windows (sway/tree/root.c: shell_overlay after fullscreen).
+//       No input and no keyboard, so a click lands on the game.
+//   anything else with X11 (cage, which QA runs games in, has no layer-shell)
+//       An override-redirect window with an empty input shape: wlroots draws
+//       unmanaged X11 windows above fullscreen ones, and nothing clicks it.
+//
+// The window exists only while the bar is on screen. Opened when it starts
+// down, closed when it is back up: a hidden overlay that stays mapped costs a
+// fullscreen game its direct scanout on wlroots, and holds gamescope's slot
+// from mangoapp.
 
 #ifndef GOTG_OVERLAY_H
 #define GOTG_OVERLAY_H
 
 #include <stdbool.h>
-#include <stddef.h>
 
-typedef struct {
-    float x, y;
-} ks_point;
+#include "shapes.h"
 
-// The ring as a triangle strip: one inner and one outer point per step,
-// sweeping clockwise from twelve o'clock through `progress` of a full circle.
-// Returns how many points were written, which is 0 for a progress of 0 and
-// never more than `max`.
-size_t ks_ring(float cx, float cy, float inner, float outer, float progress, ks_point *out, size_t max);
-
-// One stroke of the X, as the four corners of a thick line from (x1,y1) to
-// (x2,y2). Always writes four points.
-void ks_stroke(float x1, float y1, float x2, float y2, float width, ks_point *out);
-
-// The window, or NULL where there is no display to put one on. Everything
-// below tolerates NULL, so a machine with no video is a kill switch that
-// simply does not draw.
 typedef struct overlay overlay;
 
+// The window, or NULL where there is nowhere to put one -- in which case the
+// painter exits and the kill switch carries on without a bar.
 overlay *overlay_open(void);
-void overlay_draw(overlay *window, float progress);
+
+// Which way in was taken, for the log: "gamescope", "layer-shell", "x11".
+const char *overlay_kind(const overlay *window);
+
+// Which SDL renderer draws it, for the same log: "software" is the fallback
+// where no GPU userspace could be loaded.
+const char *overlay_renderer(const overlay *window);
+
+// Whether presenting waits for the panel. Where it does not, the painter
+// paces itself, or it would draw as fast as the driver lets it.
+bool overlay_vsync(const overlay *window);
+
+// The surface, in pixels, and the bar's height on it.
+void overlay_size(const overlay *window, int *width, float *bar_height);
+
+// One frame: cleared to nothing, the mesh drawn, presented.
+void overlay_draw(overlay *window, const gs_mesh *mesh);
+
 void overlay_close(overlay *window);
 
 #endif

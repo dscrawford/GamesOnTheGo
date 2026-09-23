@@ -2,7 +2,6 @@
 // why the logic takes one.
 
 #include "killswitch.h"
-#include "overlay.h"
 #include "procstat.h"
 
 #include <math.h>
@@ -140,69 +139,6 @@ static void test_a_zero_hold_fires_at_once_rather_than_never(void) {
 
 // --- the picture the hold draws ------------------------------------------
 
-static float distance(ks_point point, float cx, float cy) {
-    float dx = point.x - cx, dy = point.y - cy;
-    return sqrtf(dx * dx + dy * dy);
-}
-
-static void test_the_ring_grows_with_the_hold(void) {
-    ks_point points[256];
-    check(ks_ring(100, 100, 40, 50, 0.0f, points, 256) == 0, "nothing held draws no ring");
-    check(ks_ring(100, 100, 40, 50, 0.5f, points, 256) > 0, "a hold under way draws some");
-
-    size_t full = ks_ring(100, 100, 40, 50, 1.0f, points, 256);
-    check(full > 0 && full % 2 == 0, "a finished ring is whole pairs of points");
-    // The last pair is back where the first began: a full circle, not a gap
-    // that would read as "nearly there" at the moment it fires.
-    check(fabsf(points[full - 1].x - points[1].x) < 0.01f, "and closes exactly where it started");
-    check(fabsf(points[full - 1].y - points[1].y) < 0.01f, "in both directions");
-}
-
-static void test_the_ring_is_a_ring(void) {
-    ks_point points[256];
-    size_t count = ks_ring(100, 100, 40, 50, 1.0f, points, 256);
-    bool inside = true, outside = true;
-    for (size_t i = 0; i < count; i += 2) {
-        inside &= fabsf(distance(points[i], 100, 100) - 40) < 0.01f;
-        outside &= fabsf(distance(points[i + 1], 100, 100) - 50) < 0.01f;
-    }
-    check(inside, "every inner point sits on the inner radius");
-    check(outside, "and every outer one on the outer radius");
-}
-
-static void test_the_ring_closes_clockwise_from_the_top(void) {
-    // A countdown reads clockwise from twelve o'clock, and screen coordinates
-    // put y the other way up from the unit circle — which is exactly the sort
-    // of thing that comes out mirrored and nobody notices until it ships.
-    ks_point points[256];
-    ks_ring(100, 100, 40, 50, 0.25f, points, 256);
-    check(fabsf(points[0].x - 100) < 0.01f && points[0].y < 100, "it starts at twelve o'clock");
-
-    size_t count = ks_ring(100, 100, 40, 50, 0.25f, points, 256);
-    ks_point last = points[count - 1];
-    check(last.x > 100 && fabsf(last.y - 100) < 0.5f, "a quarter of the way round is three o'clock");
-}
-
-static void test_the_ring_respects_the_room_it_is_given(void) {
-    ks_point points[8];
-    check(ks_ring(100, 100, 40, 50, 1.0f, points, 8) <= 8, "it never writes past the end of the array");
-    check(ks_ring(100, 100, 40, 50, 1.0f, points, 2) == 0, "and refuses a space too small to draw in");
-}
-
-static void test_a_stroke_is_a_rectangle_along_its_line(void) {
-    ks_point corners[4];
-    ks_stroke(0, 0, 10, 0, 4, corners);
-    check(fabsf(corners[0].y - 2) < 0.01f && fabsf(corners[3].y + 2) < 0.01f, "a stroke is its width across");
-    check(fabsf(corners[0].x) < 0.01f && fabsf(corners[1].x - 10) < 0.01f, "and its line's length along");
-
-    // A zero-length stroke is what a degenerate size would produce; it must be
-    // a point rather than a division by zero.
-    ks_stroke(5, 5, 5, 5, 4, corners);
-    check(corners[0].x == corners[0].x, "a stroke with no length is still a number");
-}
-
-// --- what /proc says -------------------------------------------------------
-
 static void test_the_state_is_read_past_the_process_name(void) {
     // The name is whatever the program was called: it can hold spaces and it
     // can hold a close paren. A parser counting fields from the left reads a
@@ -245,11 +181,6 @@ int main(void) {
     test_a_clock_that_goes_backwards_does_not_fire();
     test_held_ms_reports_the_hold();
     test_a_zero_hold_fires_at_once_rather_than_never();
-    test_the_ring_grows_with_the_hold();
-    test_the_ring_is_a_ring();
-    test_the_ring_closes_clockwise_from_the_top();
-    test_the_ring_respects_the_room_it_is_given();
-    test_a_stroke_is_a_rectangle_along_its_line();
     test_the_state_is_read_past_the_process_name();
     test_the_start_time_is_the_twenty_second_field();
     test_a_live_process_is_told_from_one_that_never_existed();

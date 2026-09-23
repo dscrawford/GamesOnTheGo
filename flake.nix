@@ -198,7 +198,7 @@
           gotg-pads = pkgs.callPackage ./src/client/gotg-pads { };
 
           # The controller's way out of a running game.
-          gotg-killswitch = pkgs.callPackage ./src/client/gotg-killswitch { };
+          gotg-killswitch = pkgs.callPackage ./src/client/gotg-killswitch { theme = ./config/theme.yaml; };
 
           # What `gotg qa` runs a game inside: headless compositor, recorders,
           # analyzers, and a python that can create uinput pads. Built on
@@ -214,7 +214,10 @@
             # The cartridge platforms, which share one ares and so cost one
             # emulator between them, and the Switch — the one disc-era console
             # whose updates and DLC the harness needs to grade. The rest are
-            # deliberately absent: each brings its own large emulator.
+            # deliberately absent: each brings its own large emulator. One
+            # decompiled port, so a native PC build of a game -- its own
+            # window, its own renderer, no emulator -- is gradable too; the
+            # overlay has to draw over all three kinds.
             environments = pkgs.lib.getAttrs [
               "env-gb"
               "env-gbc"
@@ -223,6 +226,7 @@
               "env-snes"
               "env-genesis"
               "env-n64"
+              "env-n64-usa_super_mario_64-pc"
               "env-switch"
             ] envs;
           };

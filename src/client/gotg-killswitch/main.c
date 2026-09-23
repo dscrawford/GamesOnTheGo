@@ -30,11 +30,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <poll.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "bar.h"
+#include "frame.h"
 #include "killswitch.h"
-#include "overlay.h"
+#include "padlink.h"
+#include "painter.h"
+#include "pairing.h"
 #include "procstat.h"
 
 #define DEFAULT_HOLD_MS 3000
@@ -48,14 +53,22 @@
 // core out of a deeper idle state for the length of a session.
 #define DEFAULT_POLL_MS 100
 
-// While the combo is held there is something on screen closing towards the
-// kill, so the loop runs at a frame rate for those three seconds and goes back
-// to idling the moment it is let go.
-#define DRAW_MS 33
-
 // How long the finished ring stays up before the game goes, so the last thing
 // seen is the switch firing rather than the picture vanishing mid-hold.
 #define LINGER_MS 400
+
+// A quarter of a second down, the same back up: quick enough not to be in the
+// way, slow enough to read as something arriving rather than a flash.
+#define SLIDE_SECONDS 0.22
+
+// How often a frame is worked out while something on the bar moves -- the
+// slide, a fill, the spinner, the exit ring. The painter draws only what is
+// new, so a bar standing still (a joined seat's badge) costs nothing.
+#define FRAME_MS 16
+
+// The longest a quiet loop waits between looks at the pads: a hold is three
+// seconds, and a --poll-ms past this would only make the switch slower.
+#define POLL_MS_MAX 1000
 
 // Past halfway is "pulled". A trigger's resting position is not always a clean
 // zero, and nobody holds a trigger at 40% for three seconds by accident.
@@ -219,12 +232,32 @@ static void usage(FILE *where) {
           "Watches every controller SDL can see. When both shoulders (or both\n"
           "triggers) and Start are held together for the hold time, the process\n"
           "is asked to stop, and killed if it will not. Exits on its own when\n"
-          "that process is gone. The hold draws itself over the game unless\n"
-          "--no-overlay says otherwise.\n",
+          "that process is gone.\n"
+          "\n"
+          "A bar comes down over the game while the hold runs, and while a\n"
+          "controller is holding a button to join padmap -- unless --no-overlay\n"
+          "says otherwise.\n",
           where);
 }
 
+// Seconds on SDL's monotonic clock: what the pairing and the bar are timed by.
+static double seconds_now(void) {
+    return (double)SDL_GetTicksNS() / 1e9;
+}
+
+// How long padmap was asked to make a hold take, so a fill carries on at the
+// right rate between readings. Exported by the client for the daemon; the
+// same number here.
+static double pair_hold_seconds(void) {
+    const char *text = getenv("PADMAP_HOLD_SECONDS");
+    double value = text ? strtod(text, NULL) : 0.0;
+    return value > 0.0 && value < 60.0 ? value : 1.5;
+}
+
 int main(int argc, char **argv) {
+    // The painter: this program again, drawing what it is sent. See frame.h.
+    if (argc == 2 && strcmp(argv[1], "--paint") == 0) return gs_paint_main();
+
     uint64_t target = 0, hold_ms = DEFAULT_HOLD_MS, grace_ms = DEFAULT_GRACE_MS, poll_ms = DEFAULT_POLL_MS;
     bool quiet = false, draw = true;
 
@@ -247,6 +280,7 @@ int main(int argc, char **argv) {
         else if (strcmp(arg, "--hold-ms") == 0) slot = &hold_ms;
         else if (strcmp(arg, "--grace-ms") == 0) slot = &grace_ms;
         else if (strcmp(arg, "--poll-ms") == 0) slot = &poll_ms;
+
         if (!slot || i + 1 >= argc || !number(argv[++i], slot)) {
             fprintf(stderr, "gotg-killswitch: bad argument: %s\n", arg);
             usage(stderr);
@@ -260,6 +294,7 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (poll_ms == 0) poll_ms = DEFAULT_POLL_MS;
+    if (poll_ms > POLL_MS_MAX) poll_ms = POLL_MS_MAX;
 
     pid_t pid = (pid_t)target;
     game_started = proc_started(pid);
@@ -312,7 +347,18 @@ int main(int argc, char **argv) {
         SDL_free(ids);
     }
 
-    overlay *drawn = NULL;
+    // Who is joining, from padmap's own socket: one more client beside the
+    // picker. Nothing is asked of the daemon; the overlay only listens.
+    gs_pairing pairing;
+    gs_pairing_init(&pairing, pair_hold_seconds());
+    gs_link link;
+    gs_link_init(&link, getenv("GOTG_OVERLAY_PADMAP_SOCKET"));
+    gs_bar bar;
+    gs_bar_init(&bar, SLIDE_SECONDS);
+    gs_painter painter;
+    gs_painter_init(&painter);
+    const double started = seconds_now();
+    uint64_t next_alive_ms = 0;
     while (!stop) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -321,6 +367,11 @@ int main(int argc, char **argv) {
         }
 
         uint64_t now = SDL_GetTicks();
+        double clock = seconds_now();
+        if (draw) {
+            gs_link_tick(&link, clock);
+            gs_link_pump(&link, &pairing, clock);
+        }
         // The furthest along any one pad is, since the picture is of a hold
         // rather than of a controller.
         float progress = 0.0f;
@@ -346,35 +397,67 @@ int main(int argc, char **argv) {
                 progress = 1.0f;
             }
         }
+        double exit_progress = fire ? 1.0 : progress;
 
-        // Opened on the first hold rather than at startup: a session that
-        // never reaches for the kill switch never has a window made for it,
-        // and a machine with no display is one that simply does not draw.
-        if (draw && progress > 0.0f && !drawn) drawn = overlay_open();
-        if (drawn && progress > 0.0f) {
-            overlay_draw(drawn, fire ? 1.0f : progress);
-        } else if (drawn) {
-            overlay_close(drawn);
-            drawn = NULL;
+        // Down while there is something to show, up when not. The painter
+        // exists only while the bar is anywhere on screen: started as it
+        // starts down, told to go once it is all the way back up, so a
+        // session nobody joins or leaves never has one -- and a machine with
+        // no display is one whose painter exits at once and is asked again
+        // less and less often.
+        gs_bar_want(&bar, draw && (exit_progress > 0.0 || gs_pairing_busy(&pairing, clock)), clock);
+        bool showing = !gs_bar_gone(&bar, clock);
+        bool moving = false;
+        if (showing) {
+            gs_hold holds[GS_HOLDS_MAX];
+            int joined[GS_JOINED_MAX];
+            size_t hold_count = gs_pairing_now(&pairing, clock, holds, GS_HOLDS_MAX);
+            size_t joined_count = gs_pairing_joined(&pairing, clock, joined, GS_JOINED_MAX);
+            moving = gs_bar_moving(&bar, clock) || hold_count > 0 || exit_progress > 0.0;
+            // The clock only turns the joining spinner; with no hold on the
+            // bar it stays at zero, so a still picture is an unchanged frame
+            // and is not sent again.
+            gs_frame frame;
+            gs_frame_pack(&frame, gs_bar_position(&bar, clock), exit_progress,
+                          hold_count > 0 ? clock - started : 0.0, holds, hold_count, joined, joined_count);
+            gs_painter_ensure(&painter, "/proc/self/exe", clock);
+            gs_painter_send(&painter, &frame, clock);
+        } else if (painter.fd >= 0) {
+            gs_painter_release(&painter, clock);
         }
+        gs_painter_tick(&painter, clock);
 
         if (fire) {
             // Let the closed ring be seen. The game is about to vanish, and a
             // picture that vanished with it would leave nothing to have
-            // understood.
-            if (drawn) SDL_Delay(LINGER_MS);
+            // understood. The painter is sent the frame and not waited on.
+            if (showing) SDL_Delay(LINGER_MS);
             stop_game(pid, grace_ms, poll_ms);
-            overlay_close(drawn);
-            close_all();
-            SDL_Quit();
-            return 0;
+            break;
         }
 
-        if (!proc_alive(pid)) break;
-        SDL_Delay((Uint32)(progress > 0.0f ? DRAW_MS : poll_ms));
+        // Is the game still there? At the idle rate, not the frame rate: a
+        // /proc read sixty times a second while a bar is down finds out
+        // nothing sooner that matters.
+        if (now >= next_alive_ms) {
+            next_alive_ms = now + poll_ms;
+            if (!proc_alive(pid)) break;
+        }
+        if (moving) {
+            SDL_Delay(FRAME_MS);
+        } else if (gs_link_fd(&link) >= 0) {
+            // Idle, or a bar standing still: a join has to show the moment
+            // padmap says so, so sleep on its socket rather than for a fixed
+            // tenth of a second.
+            struct pollfd wait = {gs_link_fd(&link), POLLIN, 0};
+            poll(&wait, 1, (int)poll_ms);
+        } else {
+            SDL_Delay((Uint32)poll_ms);
+        }
     }
 
-    overlay_close(drawn);
+    gs_painter_close(&painter);
+    gs_link_close(&link);
     close_all();
     SDL_Quit();
     return 0;

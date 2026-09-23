@@ -77,9 +77,10 @@ nix build .#controllers-image --max-jobs 2 --cores 4                            
   user's game. The suite fails fast if the real socket
   (`$XDG_RUNTIME_DIR/padmap/padmap.sock`) exists; do not override that.
 - **Prefer the cluster.** `k8s/controllers/` runs the same suite in a
-  privileged pod with `/dev/uinput`, which is where it belongs — 44 of 50
-  pass there (one strict xfail); the five that walk padmap's wizard do not
-  yet (see that README). Build and push the image tagged by its store hash,
+  privileged pod with `/dev/uinput`, which is where it belongs — 56 of 71
+  pass there and ten are strict xfails, each naming the padmap request that
+  fixes it (`test_pairing.py`: four people pairing, joins mid-game); the five
+  that walk padmap's wizard do not yet pass (see that README). Build and push the image tagged by its store hash,
   apply the Job, read the logs.
 
 ## Lint & Typecheck
@@ -286,6 +287,19 @@ frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).
   `display.image`, never `convert_alpha()`, which needs a display surface the
   renderer's window does not have. Cover art decodes on a worker
   (`decode.py`): ten covers in one frame was 13.5 ms.
+- **The overlay over a game is the kill switch's painter.** `gotg-killswitch`
+  (launched beside every game) watches the exit chord and padmap's socket;
+  a bar comes down for a pad joining and for the exit hold. Drawing is a
+  separate process -- `gotg-killswitch --paint`, fed ~100-byte frames over a
+  non-blocking pipe -- because a display call that stalls (a round trip, a
+  vsynced present, a connect) in the chord's own loop was a kill switch that
+  did nothing. Three ways over a game: gamescope's `GAMESCOPE_EXTERNAL_OVERLAY`
+  (one slot, shared with mangoapp), layer-shell's overlay layer (sway draws
+  it above fullscreen), and an override-redirect X11 window (cage, which QA
+  uses, has no layer-shell). `gotg qa <id> --overlay-at N` has a pad
+  join (a stand-in padmap socket) and the virtual pad hold the chord short of
+  the kill, N seconds in, and grades the recording for it; headless sway and cage
+  with `grim` check it locally without a window on anybody's screen.
 - When the picker does something on a real machine the tests do not show:
   `GOTG_UI_TRACE=/tmp/gotg-trace.log gotg-ui`, ask the person to press the
   buttons in a numbered order, then read the file (one JSON object per
