@@ -108,6 +108,28 @@
           # and this environment's directories, and a stale one would point a
           # four-player session at whatever was played last.
           mkdir -p "$state/splitscreen"
+
+          # Ask what *Dolphin* will see, not what the session sees.
+          #
+          # `--pad padmap:N` is resolved by a step that runs in the session,
+          # outside the sandbox -- and out there the raw pads are visible
+          # beside padmap's clones. Two things go wrong with that. SDL renames
+          # a clone to the pad it mirrors, so the name written is one two
+          # devices answer to; and the slot, which is what tells those two
+          # apart, counts a different set of pads outside than inside. The
+          # session's own log has both failures in it: `GBA1 <- SDL/0/Xbox 360
+          # Controller` written from outside, and `padmap has published no pad
+          # for player 2` when the list was read too early.
+          #
+          # So the enumerator runs inside the sandbox, through padmap, exactly
+          # as Dolphin will. `GOTG_PADS` is what the resolver looks for, and
+          # the session hands its environment to the step.
+          cat >"$state/splitscreen/gotg-pads" <<'SHIM'
+          #!/bin/sh
+          exec ${gotgPkgs.padmap-rs}/bin/padmap-rs exec -- ${gotgPkgs.gotg-pads}/bin/gotg-pads "$@"
+          SHIM
+          chmod +x "$state/splitscreen/gotg-pads"
+          export GOTG_PADS="$state/splitscreen/gotg-pads"
           ${split}/bin/splitscreen-fsa \
             --players ${toString players} \
             ${lib.concatMapStringsSep " " (n: ''--pad "padmap:${toString n}"'') (lib.range 1 players)} \
