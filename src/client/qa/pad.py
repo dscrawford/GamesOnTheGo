@@ -11,6 +11,12 @@ The input script is deliberately dumb: wait out the boot, mash START to get
 past a title screen, then wiggle the stick and tap A until told to stop. The
 point is not to play the game — it is to move pixels, so a recording that
 stays frozen through this window means the inputs never reached the game.
+
+With --chord-file, both shoulders and Start are held together for
+--chord-seconds once that file appears: the kill switch's chord, for a run
+grading the overlay's exit ring. Held for less than the kill switch's hold,
+so the ring is drawn and nothing is stopped. Nothing else here presses a
+shoulder, so the chord cannot happen by accident.
 """
 
 import argparse
@@ -41,6 +47,7 @@ CAPABILITIES = {
 }
 
 running = True
+chord = None  # (path, seconds) until the chord has been held, then None
 
 
 def stop(_sig, _frame):
@@ -48,10 +55,34 @@ def stop(_sig, _frame):
     running = False
 
 
+def pause(ui, seconds):
+    """Sleep, in slices short enough that the chord starts within a frame or
+    so of its file appearing, whatever the script was in the middle of."""
+    global chord
+    until = time.monotonic() + seconds
+    while running:
+        if chord and pathlib.Path(chord[0]).exists():
+            held = chord[1]
+            chord = None
+            buttons = (e.BTN_TL, e.BTN_TR, e.BTN_START)
+            for button in buttons:
+                ui.write(e.EV_KEY, button, 1)
+            ui.syn()
+            print(f"pad: chord held for {held}s", flush=True)
+            time.sleep(held)
+            for button in buttons:
+                ui.write(e.EV_KEY, button, 0)
+            ui.syn()
+        left = until - time.monotonic()
+        if left <= 0:
+            return
+        time.sleep(min(left, 0.05))
+
+
 def press(ui, button, hold=0.15):
     ui.write(e.EV_KEY, button, 1)
     ui.syn()
-    time.sleep(hold)
+    pause(ui, hold)
     ui.write(e.EV_KEY, button, 0)
     ui.syn()
 
@@ -60,14 +91,19 @@ def stick(ui, x, y, hold=0.4):
     ui.write(e.EV_ABS, e.ABS_X, x)
     ui.write(e.EV_ABS, e.ABS_Y, y)
     ui.syn()
-    time.sleep(hold)
+    pause(ui, hold)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ready-file", required=True)
     ap.add_argument("--boot-wait", type=float, default=15.0)
+    ap.add_argument("--chord-file")
+    ap.add_argument("--chord-seconds", type=float, default=3.0)
     args = ap.parse_args()
+    global chord
+    if args.chord_file:
+        chord = (args.chord_file, args.chord_seconds)
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
@@ -86,15 +122,13 @@ def main():
     print(f"pad: created {where}", flush=True)
     pathlib.Path(args.ready_file).touch()
 
-    deadline = time.monotonic() + args.boot_wait
-    while running and time.monotonic() < deadline:
-        time.sleep(0.2)
+    pause(ui, args.boot_wait)
 
     for _ in range(3):
         if not running:
             break
         press(ui, e.BTN_START)
-        time.sleep(1.5)
+        pause(ui, 1.5)
 
     # A before anything moves the selection. The recomp launchers open on
     # their own "Start game" item, and the loop below moves the stick four
@@ -105,7 +139,7 @@ def main():
         if not running:
             break
         press(ui, e.BTN_SOUTH)
-        time.sleep(1.0)
+        pause(ui, 1.0)
 
     full = 32767
     while running:
@@ -115,7 +149,7 @@ def main():
             stick(ui, x, y)
         if running:
             press(ui, e.BTN_SOUTH)
-            time.sleep(0.3)
+            pause(ui, 0.3)
 
     stick(ui, 0, 0, hold=0)
     ui.close()
