@@ -461,6 +461,7 @@ def at(shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, hu
                         joining=queue.anonymous(fade.now(time.monotonic())),
                         queue=queue.now(time.monotonic()),
                         settled=False,
+                        keyboard=space.progress(time.monotonic()),
                     )
                 else:
                     draw(screen, font_at, gate, title, diagram, fade.now(time.monotonic()))
@@ -926,6 +927,7 @@ def _wait_for_go(
             joining=0.0 if door.sticks.any_button_down() else queue.anonymous(fade.now(now)),
             queue=queue.now(now),
             settled=door.settled(now),
+            keyboard=space.progress(now),
         )
         drawn = time.perf_counter()
         shown.pace.busy(now)
@@ -976,6 +978,7 @@ def _draw_go(
     joining: float = 0.0,
     queue: list | None = None,
     settled: bool = True,
+    keyboard: float = 0.0,
 ) -> None:
     """The gate's one screen: this game's controller, and who is on it.
 
@@ -1017,7 +1020,7 @@ def _draw_go(
     # player holding a button sees themselves appear rather than wondering.
     _draw_seats(
         screen, font_at, gate, int(height * 0.80), fraction, holder, heard or set(), joining, queue,
-        filling or {}, done or set(),
+        filling or {}, done or set(), keyboard,
     )
 
 
@@ -1040,6 +1043,7 @@ def _draw_seats(
     queue: list | None = None,
     filling: dict[int, float] | None = None,
     done: set[int] | None = None,
+    keyboard: float = 0.0,
 ) -> None:
     """One controller drawing per seat, left to right, in player colours.
 
@@ -1062,7 +1066,8 @@ def _draw_seats(
     step = 96
     # Room for the one arriving, so the row does not jump sideways the moment
     # somebody pairs: a seat that is filling in is already taking its place.
-    shown = gate.seated + max(len(queue or []), 1 if joining > 0 else 0)
+    arriving = max(len(queue or []), 1 if joining > 0 else 0)
+    shown = gate.seated + arriving + (1 if keyboard > 0 else 0)
     left = (width - step * max(1, shown)) // 2 + step // 2
     for index, seat in enumerate(gate.seats):
         centre = (left + index * step, middle)
@@ -1128,6 +1133,13 @@ def _draw_seats(
     if not queue and joining > 0:
         centre = (left + gate.seated * step, middle)
         draw_reveal(screen, centre, None, colour_for(gate.seated + 1), joining, height)
+    # The space bar held for the keyboard's seat, after the pads arriving: the
+    # grid draws this hold and this screen did not, so a hold of a second and a
+    # half showed nothing here and was let go before it was done.
+    if keyboard > 0:
+        seat_number = gate.seated + arriving + 1
+        centre = (left + (seat_number - 1) * step, middle)
+        draw_reveal(screen, centre, "keyboard", colour_for(seat_number), keyboard, height)
 
 
 def _hold_the_door(title: str, reason: str) -> int:
