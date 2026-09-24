@@ -361,25 +361,23 @@ KEYBOARD_HOLD = float(config.get("theme.timeouts.keyboard_hold", 1.5))
 
 @dataclass
 class KeyHold:
-    """The space bar, held to seat the keyboard as a player.
+    """The space bar, and whether letting it go was a tap.
 
-    A pad is seated by padmap reading the pad; a keyboard is the compositor's
-    and padmap never sees its keys, so this is the one hold the picker times
-    itself. The clock is passed in, so a test is not a stopwatch.
-
-    Two outcomes from one key. Released early it is the tap it always was --
-    open the menu -- and the caller is told so. Held the whole way it is a
-    seat, said once, and the release after that is nothing.
+    Held, it seats the keyboard as a player -- and padmap does that itself
+    now, reading the space bar wherever the person is, game included
+    (padmap e0092be). The picker used to time the same hold and send
+    `seat_keyboard` too: two fills on the strip for one press, and a second
+    seat padmap refused. What is left here is the other half of one key's two
+    meanings: released early it is the tap it always was -- open the menu --
+    and released after the hold's length it was a seat, and nothing.
     """
 
     seconds: float = KEYBOARD_HOLD
     since: float | None = None
-    said: bool = False
 
     def down(self, now: float) -> None:
         if self.since is None:
             self.since = now
-            self.said = False
 
     def progress(self, now: float) -> float:
         """How far along the hold is, 0 when nothing is held.
@@ -392,15 +390,8 @@ class KeyHold:
         elapsed = now - self.since
         return 1.0 if elapsed >= self.seconds - 1e-3 else max(0.0, elapsed / self.seconds)
 
-    def due(self, now: float) -> dict | None:
-        """The command to send, once, the moment the hold completes."""
-        if self.since is None or self.said or self.progress(now) < 1.0:
-            return None
-        self.said = True
-        return {"cmd": "seat_keyboard"}
-
-    def up(self) -> bool:
+    def up(self, now: float) -> bool:
         """The key released. True when it was a tap and the menu should open."""
-        tap = self.since is not None and not self.said
+        tap = self.since is not None and self.progress(now) < 1.0
         self.since = None
         return tap

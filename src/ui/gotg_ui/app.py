@@ -834,8 +834,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # button is all it takes to become player one. Nothing on screen until
     # somebody does -- see assign.Watch.
     watch = Watch()
-    # The space bar, held, seats the keyboard. Tapped it opens the menu as it
-    # always did -- decided on release, so one key can mean either.
+    # The space bar: tapped it opens the menu as it always did; held, padmap
+    # seats the keyboard and the release is nothing. Decided on release.
     space = KeyHold()
     controller_art: dict = {}
     # The storage screen, and the path being typed to add to it.
@@ -1299,7 +1299,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     # A tap is the menu, as space always was; a hold that
                     # finished has already seated the keyboard and this is
                     # just the key coming back up.
-                    if space.up() and state.game is not None:
+                    if space.up(time.monotonic()) and state.game is not None:
                         menu = Menu(
                             state.game,
                             state.selected,
@@ -1398,10 +1398,6 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             listen = attend(padmap, seating, watch)
             if listen is not None:
                 padmap.send(listen)
-            keyboard = space.due(time.monotonic())
-            if keyboard is not None:
-                trace.say("sent", **keyboard)
-                padmap.send(keyboard)
 
             painting = time.perf_counter()
             # The full-screen views draw into the band below the strip rather
@@ -1479,9 +1475,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 # And only a daemon that does not name its pads gets the single
                 # fill: one that does has every hold in `holds`, and drawing
                 # both put one press in two places, taking turns.
-                progress=seating.joining.anonymous(seating.filling(time.monotonic()))
-                or space.progress(time.monotonic()),
-                joining="keyboard" if space.since is not None else None,
+                progress=seating.joining.anonymous(seating.filling(time.monotonic())),
                 holds=seating.joining.now(time.monotonic()),
             )
             drawn = time.perf_counter()
