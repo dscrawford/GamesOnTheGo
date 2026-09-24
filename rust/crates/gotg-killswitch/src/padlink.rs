@@ -6,6 +6,7 @@
 //! seconds while it is not there, which picks up a daemon that starts (or
 //! restarts) mid-game.
 
+use std::collections::HashMap;
 use std::io::{ErrorKind, Read};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixStream;
@@ -33,13 +34,23 @@ pub struct Link {
     /// Inside a line too long to keep, until its newline.
     skipping: bool,
     next_try: f64,
+    /// Each pad's drawing by its node, looked up once: padmap reads out a
+    /// hold every ~58 ms, and the look-up reads sysfs in the loop that
+    /// watches the exit chord. Forgotten on close, since a node's number is
+    /// another device's once it has gone.
+    icons: HashMap<String, u8>,
+    resolve: fn(&str, &str) -> u8,
 }
+
+/// Nodes remembered at most; more than any room holds, and a bound for a
+/// socket that names a new one on every line.
+const ICONS_KEPT: usize = 64;
 
 impl Link {
     /// `path` None or empty means padmap's own rule --
     /// $XDG_RUNTIME_DIR/padmap/padmap.sock -- and no link at all when there is
     /// no XDG_RUNTIME_DIR. padmap falls back to /tmp then, where any local
-    /// user can put a socket first; the joining rings are not worth listening
+    /// user can put a socket first; the joining picture is not worth listening
     /// to a stranger for.
     pub fn new(path: Option<&str>) -> Self {
         let path = match path.filter(|path| !path.is_empty()) {
@@ -54,6 +65,8 @@ impl Link {
             buffer: Vec::with_capacity(BUFFER),
             skipping: false,
             next_try: 0.0,
+            icons: HashMap::new(),
+            resolve: crate::icons::resolve,
         }
     }
 
@@ -71,6 +84,7 @@ impl Link {
         self.stream = None;
         self.buffer.clear();
         self.skipping = false;
+        self.icons.clear();
     }
 
     /// Connect if not connected and due. Cheap when it is neither.
@@ -124,6 +138,22 @@ impl Link {
     }
 
     fn drain(&mut self, pairing: &mut Pairing, now: f64) -> usize {
+        let (icons, resolve) = (&mut self.icons, self.resolve);
+        let mut icon_of = |node: &str, name: &str| -> u8 {
+            // A keyboard seat names no node, and needs no look-up to name.
+            if node.is_empty() {
+                return resolve(node, name);
+            }
+            if let Some(&icon) = icons.get(node) {
+                return icon;
+            }
+            if icons.len() >= ICONS_KEPT {
+                icons.clear();
+            }
+            let icon = resolve(node, name);
+            icons.insert(node.to_owned(), icon);
+            icon
+        };
         let mut applied = 0;
         let mut start = 0;
         while let Some(at) = self.buffer[start..].iter().position(|&b| b == b'\n') {
@@ -133,7 +163,7 @@ impl Link {
             } else if !line.is_empty()
                 && let Some(event) = events::parse(line)
             {
-                events::apply(&event, pairing, now);
+                events::apply(&event, pairing, now, &mut icon_of);
                 applied += 1;
             }
             start += at + 1;
@@ -372,5 +402,40 @@ mod tests {
         let mut link = Link::with_stream(ours);
         assert_eq!(link.pump(&mut pairing(), 10.0), 0);
         assert!(link.fd().is_some(), "nothing to say is not a closed connection");
+    }
+
+    static RESOLVED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    fn counted(_: &str, _: &str) -> u8 {
+        RESOLVED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        3
+    }
+
+    #[test]
+    fn a_pad_s_drawing_is_looked_up_once_while_it_holds() {
+        // padmap sends a reading every ~58 ms; the device behind a node does
+        // not change between them, and the look-up reads sysfs in the loop
+        // that watches the exit chord.
+        let mut link = Link {
+            resolve: counted,
+            ..Link::new(Some("/nonexistent"))
+        };
+        let mut p = pairing();
+        let line = |frac: f64| {
+            format!("{{\"event\":\"progress\",\"frac\":{frac},\"node\":\"/dev/input/event9\"}}\n")
+        };
+        let before = RESOLVED.load(std::sync::atomic::Ordering::SeqCst);
+        for step in 1..=10 {
+            link.feed(line(f64::from(step) / 20.0).as_bytes(), &mut p, 10.0);
+        }
+        assert_eq!(RESOLVED.load(std::sync::atomic::Ordering::SeqCst) - before, 1);
+        assert_eq!(p.now(10.0)[0].icon, 3);
+        link.close();
+        link.feed(line(0.9).as_bytes(), &mut p, 10.0);
+        assert_eq!(
+            RESOLVED.load(std::sync::atomic::Ordering::SeqCst) - before,
+            2,
+            "a new connection asks again"
+        );
     }
 }

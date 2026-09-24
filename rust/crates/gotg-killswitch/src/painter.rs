@@ -14,8 +14,7 @@ use std::time::Duration;
 
 use crate::frame::{self, Frame};
 use crate::overlay::Overlay;
-use crate::scene::{self, Scene};
-use crate::shapes::Mesh;
+use crate::scene::{self, Drawing, Scene};
 
 /// After a painter that would not start or went by itself: two seconds, then
 /// four, up to half a minute. A machine with no display would otherwise start
@@ -212,7 +211,7 @@ pub fn paint() -> i32 {
         overlay.renderer_name()
     );
 
-    let mut mesh = Mesh::default();
+    let mut drawing = Drawing::default();
     let mut pending = Vec::with_capacity(frame::SIZE * 8);
     loop {
         // Asleep until the kill switch sends something new: it sends only
@@ -236,12 +235,13 @@ pub fn paint() -> i32 {
             position: f64::from(frame.position),
             fractions: frame.hold_fraction(),
             players: frame.hold_player(),
+            hold_icons: frame.hold_icon(),
             joined: frame.joined(),
+            joined_icons: frame.joined_icon(),
             exit_progress: f64::from(frame.exit_progress),
-            clock: f64::from(frame.clock),
         };
-        scene::build(&scene, &mut mesh);
-        overlay.draw(&mesh);
+        scene::build(&scene, &mut drawing);
+        overlay.draw(&drawing);
         // Where presenting does not wait for the panel, a frame's worth, so a
         // flood of frames cannot turn into a spin.
         if !overlay.vsync() {
@@ -258,7 +258,7 @@ mod tests {
     use std::cell::Cell;
 
     fn frame(position: f64) -> Frame {
-        Frame::pack(position, 0.0, 0.0, &[], &[])
+        Frame::pack(position, 0.0, &[], &[])
     }
 
     /// A pipe with these bytes waiting and nothing more yet: it would block
@@ -406,8 +406,8 @@ mod tests {
             ..Hold::default()
         };
         let (old, new) = (
-            Frame::pack(0.2, 0.0, 0.0, &[], &[]),
-            Frame::pack(0.9, 0.0, 1.0, &[hold], &[1]),
+            Frame::pack(0.2, 0.0, &[], &[]),
+            Frame::pack(0.9, 0.0, &[hold], &[(1, 0)]),
         );
         let mut bytes = old.encode().to_vec();
         bytes.extend_from_slice(&new.encode());

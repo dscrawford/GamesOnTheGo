@@ -7,6 +7,7 @@
 pub mod bar;
 pub mod events;
 pub mod frame;
+pub mod icons;
 pub mod killswitch;
 pub mod overlay;
 pub mod padlink;

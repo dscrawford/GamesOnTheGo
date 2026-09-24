@@ -10,6 +10,9 @@ pkgs.rustPlatform.buildRustPackage {
   src = import ../../rust/source.nix { inherit (pkgs) lib; };
   cargoLock.lockFile = ../../rust/Cargo.lock;
   GOTG_THEME = ../../config/theme.yaml;
+  GOTG_ICON_RULES = ../../config/icons.yaml;
+  GOTG_ICON_ART = ../../src/ui/assets/icons;
+  GOTG_CONTROLLER_ART = ../../src/ui/assets/controllers;
   nativeBuildInputs = [
     pkgs.pkg-config
     pkgs.clippy

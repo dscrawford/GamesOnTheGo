@@ -198,7 +198,12 @@
           gotg-pads = pkgs.callPackage ./rust/gotg-pads.nix { };
 
           # The controller's way out of a running game.
-          gotg-killswitch = pkgs.callPackage ./rust/gotg-killswitch.nix { theme = ./config/theme.yaml; };
+          gotg-killswitch = pkgs.callPackage ./rust/gotg-killswitch.nix {
+            theme = ./config/theme.yaml;
+            iconRules = ./config/icons.yaml;
+            iconArt = ./src/ui/assets/icons;
+            controllerArt = ./src/ui/assets/controllers;
+          };
 
           # What `gotg qa` runs a game inside: headless compositor, recorders,
           # analyzers, and a python that can create uinput pads. Built on
