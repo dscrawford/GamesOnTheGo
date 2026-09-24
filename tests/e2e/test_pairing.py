@@ -18,23 +18,22 @@ instead of 1.5. Readings came 48-61 ms apart on that desktop (one 565 ms stall
 while a Steam Controller paired), and claim-to-`state` took 195-255 ms across
 five sessions. The timings below come from those numbers.
 
-Situations, and what each expects of the padmap pinned in flake.nix (d2000c5):
+Situations, and what each expects of the padmap pinned in flake.nix (e0092be;
+the markers below came off as padmap answered them -- bf6606d, 26754a9,
+bc61806, 0bcd1dc):
 
   Several people, one room
   - four pads pressed 0.3 s apart, in the reverse of the order they were
     plugged in, all held: four claims, seats 1-4 in press order, each at its
-    own hold's length. STRICT XFAIL -- request item 1: the first claim wipes
-    the other three holds.
-  - the same four, doing what people do today (let go, press again, in the
-    same order): all four seated, in press order, one clone each. PASSES --
-    the workaround, proved.
-  - four pads pressed in one tick: no seat given twice, no pad seated twice,
-    and the workaround fills the room. PASSES. (One hold each is not asserted
-    here: at this pin how many land depends on the order padmap enumerated
-    the pads, which is not a thing a strict marker can wait on.)
+    own hold's length. STRICT XFAIL -- all four are seated in order now, but a
+    later claim waits behind the previous one's writing and lands ~0.6 s
+    late: a-join-costs-the-same-however-full.md.
+  - the same four, letting go and pressing again: all four seated, in press
+    order, one clone each. PASSES.
+  - four pads pressed in one tick: no seat given twice, no pad seated twice.
+    PASSES.
   - the reported evening, replayed: the second pad's fill keeps climbing
-    through the first claim and takes seat two without a second press.
-    STRICT XFAIL -- request item 1, the bug itself.
+    through the first claim and takes seat two without a second press. PASSES.
   - the reported evening, the way it ended: the second person lets go and
     presses again, and is seated. PASSES.
   - letting go loses your place: the pad that kept holding is seated first,
@@ -42,43 +41,37 @@ Situations, and what each expects of the padmap pinned in flake.nix (d2000c5):
 
   Things that happen mid-hold
   - a `status` (so a `state`) mid-hold resets nothing. PASSES.
-  - `seating` sent again with the same hold -- the picker did this about
-    200 ms after every claim (the trace; assign.Watch no longer does), and a
-    gate opening still does -- resets nothing. STRICT XFAIL --
-    request item 2, fixed upstream in 26754a9, not pinned.
-  - a press made while the last claim is still republishing is not lost.
-    STRICT XFAIL -- item 1's second half: the watched pads are closed and
-    reopened after the republish, and the queued press goes with them.
-  - a controller switched on mid-hold resets nobody's hold. STRICT XFAIL --
-    request item 1's second half: `refresh()` resets the assigner whenever
-    the watched set changes, and a new pad changes it.
+  - `seating` sent again with the same hold resets nothing. PASSES.
+  - a press made while the last claim is still being handled is not lost.
+    STRICT XFAIL -- the watched pads are reopened after a claim and the
+    queued press goes with them: a-press-during-a-claim-is-kept.md.
+  - a controller switched on mid-hold resets nobody's hold. PASSES.
 
   A full room
   - a fifth pad held with four seats taken: seated nowhere, no fifth clone,
     and the four seated players still reach their clones. PASSES.
-  - ...and it is told so (`full`). STRICT XFAIL -- item 3, bc61806, not pinned.
-  - ...and another spare pad's fill is not stopped by it. STRICT XFAIL -- the
-    same item.
+  - ...and it is told so (`full`). PASSES.
+  - ...and another spare pad's fill is not stopped by it. PASSES.
 
   Joining mid-game (the overlay's case: seating stays open, nobody interacts)
   - a pad held mid-game is seated, its clone appears, and its presses reach
     the game inside a frame. PASSES.
   - the players already in the game lose their input for under a second
-    while the join republishes. PASSES.
-  - ...and not at all: their clones stay the same devices. STRICT XFAIL --
-    every claim stops and recreates every clone (start_republisher), at the
-    pin and at padmap HEAD; docs/requests/a-join-keeps-everybody-elses-clone.md.
+    while somebody joins. PASSES.
+  - ...and not at all: their clones stay the same devices. PASSES.
 
   Performance
   - hold to claim is the hold plus little; claim to the new clone, and the
     first seat's claim to `state`, are bounded. PASSES.
-  - the fourth seat's `state` comes no later than the first's. STRICT XFAIL
-    -- every join redoes the whole room before `state` (1.46 s for the
-    fourth seat on the pod); a-join-keeps-everybody-elses-clone.md.
+  - the fourth seat's `state` comes within 100 ms of the first's. STRICT
+    XFAIL -- 206 ms at e0092be, down from 1.19 s:
+    a-join-costs-the-same-however-full.md.
   - four holds at once: each is read often enough that the 0.5 s safety net
     in `joining.NAMED_STALE` is never crossed, starts filling promptly, and
     fills towards its press-order seat. PASSES.
-  - four holds at once cost a seated pad's forwarding nothing. PASSES.
+  - four holds at once cost a seated pad's forwarding nothing. PASSES -- by
+    a margin of about a millisecond on the pod; one run in two measured
+    16.85 ms against the 16.7 ms frame.
 
 A strict xfail here uses `raises=AssertionError`, and the setup inside it
 fails through `pytest.fail` instead: a broken precondition is a real failure,
@@ -182,52 +175,18 @@ REJOIN_WITHIN = 1.0
 
 # --- what is known to be broken at the pin, and where it is asked for ----------
 
-ITEM_1 = pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="a claim clears every other hold in flight at this pin (tick_seating's seating.reset(), and "
-    "refresh() resetting the assigner when the watched set changes); a held button sends no new edge. "
-    "See docs/requests/two-people-pairing-at-once.md item 1",
-)
-ITEM_1_ARRIVAL = pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="a pad appearing changes seating's watched set, and refresh() resets the assigner wholesale; "
-    "see docs/requests/two-people-pairing-at-once.md item 1, second half",
-)
-ITEM_2 = pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="at the pinned padmap (d2000c5) `seating` with the same hold wipes every hold in flight; fixed "
-    "upstream in 26754a9, not yet pinned. docs/requests/two-people-pairing-at-once.md item 2",
-)
-ITEM_3 = pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="at the pinned padmap (d2000c5) a full room resets every hold and says nothing; fixed upstream "
-    "in bc61806 (`full` event, Assigner::forget), not yet pinned. "
-    "docs/requests/two-people-pairing-at-once.md item 3",
-)
 JOIN_COST = pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
-    reason="each claim recreates every clone and rewrites every seated player's config before `state`, so "
-    "a join's cost grows with the room (start_republisher; d2000c5 and HEAD). "
-    "docs/requests/a-join-keeps-everybody-elses-clone.md",
+    reason="a claim's `state` still waits behind writing the room's files, so it grows with the room "
+    "(252-458 ms for seats 1-4 at e0092be) and a staggered claim lands after the previous one's. "
+    "docs/requests/a-join-costs-the-same-however-full.md",
 )
 ITEM_1_REOPEN = pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
-    reason="after a claim padmap republishes, then refresh() closes and reopens every watched pad; a press "
-    "made in between was queued on the closed fd and is gone. docs/requests/two-people-pairing-at-once.md "
-    "item 1, second half",
-)
-REPUBLISH = pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="every claim stops and recreates every clone (start_republisher -> stop_republisher), so a "
-    "game reading player one's device loses it when player two joins; true at the pin and at padmap "
-    "HEAD e7a79e1. docs/requests/a-join-keeps-everybody-elses-clone.md",
+    reason="after a claim padmap reopens the pads it watches; a press made in between is queued on the "
+    "closed fd and gone (e0092be). docs/requests/a-press-during-a-claim-is-kept.md",
 )
 
 
@@ -559,7 +518,7 @@ def _each_seat_once(room: Room, pads: list[FakePad]) -> None:
 # --- several people, one room --------------------------------------------------
 
 
-@ITEM_1
+@JOIN_COST
 def test_four_pads_pressed_apart_take_seats_one_to_four_in_press_order(daemon):
     """The party: four people pick up pads a moment apart and hold A.
 
@@ -607,12 +566,14 @@ def test_four_pads_pressed_apart_are_all_seated_by_pressing_again(daemon):
             )
             for pad in waiting:
                 pad.up(BTN_SOUTH)
+            # Seated at any time, not only by the claim that ended the round:
+            # holds survive a claim now, so a second pad can take its seat
+            # between the round stopping and its thumb coming up.
+            room.settle()
             taken = room.claims(start)
-            waiting = [pad for pad in waiting if pad.name not in {e["name"] for _, e in taken}]
+            waiting = [pad for pad in waiting if room.claim(pad) is None]
             if taken:
                 room.listening(taken[-1])
-            else:
-                room.settle()
 
         assert not waiting, f"{[p.name for p in waiting]} never seated in {rounds} rounds"
         assert [e["name"] for _, e in room.claims()] == [p.name for p in (d, c, b, a)], (
@@ -664,7 +625,6 @@ def test_four_pads_pressed_in_one_tick_never_share_a_seat(daemon):
         print(f"\none tick, four holds: {len(together)} seated by it")
 
 
-@ITEM_1
 def test_a_claim_does_not_cancel_another_hold_in_flight(daemon):
     """The bug, replayed at the reported evening's timing.
 
@@ -806,7 +766,6 @@ def test_a_state_mid_hold_resets_nothing(daemon):
         assert fills == sorted(fills), f"the fill went backwards: {fills}"
 
 
-@ITEM_2
 def test_seating_sent_again_with_the_same_hold_resets_nothing(daemon):
     """The picker sent `seating` again about 200 ms after every claim (the
     trace: `sent seating 1.5` after each one; assign.Watch no longer does),
@@ -820,7 +779,6 @@ def test_seating_sent_again_with_the_same_hold_resets_nothing(daemon):
         assert -EARLY <= late <= CLAIM_SLACK, f"the hold restarted: {late * 1000:+.0f} ms off its length"
 
 
-@ITEM_1_ARRIVAL
 def test_a_controller_switched_on_mid_hold_resets_nobody(daemon):
     """Somebody switches a pad on while somebody else is holding. The long
     hold gives padmap's once-a-second scan time to notice the newcomer well
@@ -912,7 +870,6 @@ def _full_room(daemon, pads: list[FakePad]) -> Room:
     return room
 
 
-@ITEM_3
 def test_a_full_room_says_so(daemon):
     """A fill that reaches the end and then simply stops is a pad that looks
     broken. padmap names the pad in a `full` event, and takes its fill down."""
@@ -932,7 +889,6 @@ def test_a_full_room_says_so(daemon):
         assert full[0].get("name") == spare.name, f"the wrong pad was told: {full[0]}"
 
 
-@ITEM_3
 def test_a_full_room_refuses_one_hold_not_every_hold(daemon):
     """Two spare pads, half a second apart. The first is refused; the second
     goes on filling until it is refused in its own right -- the fifth person
@@ -1071,7 +1027,6 @@ def test_the_players_already_in_the_game_barely_notice_a_join(daemon):
         assert worst <= REJOIN_WITHIN, f"player one's presses stopped for {worst:.2f} s while player two joined"
 
 
-@REPUBLISH
 def test_a_join_leaves_the_players_already_in_the_game_plugged_in(daemon):
     """A game that opened player one's device keeps it when player two joins.
     Plenty of emulators never reopen a controller, and to them a clone made
