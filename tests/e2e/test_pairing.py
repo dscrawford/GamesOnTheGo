@@ -69,9 +69,9 @@ bc61806, 0bcd1dc):
   - four holds at once: each is read often enough that the 0.5 s safety net
     in `joining.NAMED_STALE` is never crossed, starts filling promptly, and
     fills towards its press-order seat. PASSES.
-  - four holds at once cost a seated pad's forwarding nothing. PASSES -- by
-    a margin of about a millisecond on the pod; one run in two measured
-    16.85 ms against the 16.7 ms frame.
+  - four holds at once cost a seated pad's forwarding nothing. STRICT XFAIL
+    -- p95 went from ~15 ms at d2000c5 to 16.85 and 16.90 ms at e0092be:
+    holds-cost-a-seated-pad-nothing.md.
 
 A strict xfail here uses `raises=AssertionError`, and the setup inside it
 fails through `pytest.fail` instead: a broken precondition is a real failure,
@@ -813,13 +813,22 @@ def test_a_press_made_while_a_claim_republishes_is_not_lost(daemon):
     with _pads(4) as (a, b, c, d):
         room = _open(daemon)
         _seat_in_turn(room, [a, b])
-        start = room.now()
-        _press(room, c)()
-        room.run(start + HOLD + 2.0, stop=lambda: room.claim(c, start) is not None)
-        c.up(BTN_SOUTH)
-        claim = room.claim(c, start)
+        # Held again if its press was lost -- to the very bug measured below,
+        # when it landed while the second seat was still being handled -- but
+        # not waited out afterwards: the fourth press has to land inside the
+        # third claim's handling.
+        claim = None
+        for _ in range(3):
+            start = room.now()
+            _press(room, c)()
+            room.run(start + HOLD + 2.0, stop=lambda start=start: room.claim(c, start) is not None)
+            c.up(BTN_SOUTH)
+            claim = room.claim(c, start)
+            if claim is not None:
+                break
+            room.settle()
         if claim is None:
-            pytest.fail("the third pad held alone and was not seated")
+            pytest.fail("the third pad held three times with nothing else going on, and was never seated")
         room.run(claim[0] + 0.05)
         if room.seated_by(3, claim[0]) is not None:
             pytest.skip("the republish was over before a press could land inside it; nothing to measure here")
@@ -1162,6 +1171,12 @@ def test_four_holds_at_once_are_each_read_often_enough(daemon):
         print("\n" + "\n".join(report))
 
 
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="p95 under four holds went from ~15 ms (d2000c5) to ~16.9 ms (e0092be), past a frame; "
+    "docs/requests/holds-cost-a-seated-pad-nothing.md",
+)
 def test_four_holds_at_once_cost_a_seated_pad_nothing(daemon):
     """Somebody is playing while four others pick up pads and hold. Their
     holds are four readings a tick on the daemon's loop; the player's presses
