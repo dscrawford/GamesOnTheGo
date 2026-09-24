@@ -26,7 +26,16 @@ what a launch from Steam or a bare terminal runs. Keep it current:
 
 ```bash
 git push && nix profile upgrade gotg gotg-ui   # the profile follows origin
+gotg sync                                      # and the copies Steam launches
 ```
+
+The upgrade alone is not what Steam runs. Its picker entry starts
+`~/.local/state/gotg/picker` first and the client's `app` root beside it --
+both made by `gotg sync`, both left where they were by `nix profile upgrade`.
+A Deck upgraded that way kept running the day-old picker, and a fix that
+had shipped looked like one that did not work. On a machine where a full
+sync is too long for now, the two roots alone are `nix build <flake>#gotg-ui
+-o ~/.local/state/gotg/picker` and `#gotg -o ~/.local/state/gotg/app`.
 
 ## Build / Run
 
