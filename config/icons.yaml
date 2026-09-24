@@ -59,7 +59,9 @@ rules:
   - "ps4":                playstation
   - "ps5":                playstation
   - "keyboard and mouse": keyboard-mouse
-  - "keyboard":           keyboard
+  # The keyboard's seat is the whole desk -- some games want the mouse too --
+  # and the plain keyboard's silhouette was a featureless rectangle.
+  - "keyboard":           keyboard-mouse
   - "mouse":              mouse
   - "xbox":               xbox
   - "x-box":              xbox

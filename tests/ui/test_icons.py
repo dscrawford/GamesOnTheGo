@@ -76,10 +76,12 @@ def test_an_icon_of_its_own_wins():
     assert path.parent.name == "icons"
 
 
-def test_a_keyboard_is_a_keyboard():
+def test_the_keyboard_seat_is_a_keyboard_and_mouse():
+    # padmap's seat name and the space bar's hold; see config/icons.yaml.
     from gotg_ui.icons import icon_name
 
-    assert icon_name("AT Translated Set 2 keyboard") == "keyboard"
+    assert icon_name("Keyboard") == "keyboard-mouse"
+    assert icon_name("keyboard") == "keyboard-mouse"
     assert icon_name("Logitech USB Keyboard and Mouse") == "keyboard-mouse"
     assert icon_name("Razer Mouse") == "mouse"
 

@@ -27,7 +27,7 @@ them.
 | `wii.svg` | ES-DE `wii_remote_nintendo.svg` | MIT |
 | `switch.svg` | ES-DE `joycon_pair_nintendo.svg` | MIT |
 | `keyboard.svg` | ES-DE `keyboard_generic.svg` | MIT |
-| `keyboard-mouse.svg` | ES-DE `keyboard_and_mouse_generic.svg` | MIT |
+| `keyboard-mouse.svg` | drawn for GOTG, keys and buttons cut out so the silhouette reads | CC0 |
 | `mouse.svg` | ES-DE `mouse_generic.svg` | MIT |
 | `steam.svg` | Drawn here | CC0 |
 | `generic.svg` | ES-DE `gamepad_generic.svg` | MIT |
