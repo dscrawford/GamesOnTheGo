@@ -117,9 +117,11 @@ nixpkgs#rustc nixpkgs#pkg-config nixpkgs#sdl3.dev nixpkgs#wayland.dev`). `ruff f
   (`GOTG_PADMAP`, `GOTG_SEAT`…) so tests can substitute a recorder.
 - Commit subjects are sentences: `fix(ui): leaving the controller screen
   keeps the controller`. Bodies explain the bug that was actually seen.
-- Requests to padmap: one file in `docs/requests/`, mirrored into
-  `~/Documents/padmap/docs/requests/` where they get answered; sync the
-  answer back.
+- Requests to padmap: one file in `docs/requests/`, copied into
+  `~/Documents/padmap/docs/requests/`, where an agent picks it up. A file
+  present is open; padmap answers by deleting it in the commit that does the
+  work (`git -C ~/Documents/padmap log --diff-filter=D -- docs/requests/`).
+  Sync the answer back by deleting GOTG's copy too, and bump the pin to use it.
 
 ## Architecture
 
