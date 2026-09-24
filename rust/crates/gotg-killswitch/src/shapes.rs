@@ -48,9 +48,9 @@ pub struct Vertex {
     pub colour: Colour,
 }
 
-/// Room for a frame of the bar: twelve rings at most, each a few hundred
-/// vertices with its soft edges. One number, so what a test says fits is
-/// what the painter can draw.
+/// Room for a frame of the bar's flat shapes -- background, hairline, the
+/// exit ring, ticks -- with margin to spare. One number, so what a test says
+/// fits is what the painter can draw.
 pub const MESH_VERTICES: usize = 16384;
 pub const MESH_INDICES: usize = MESH_VERTICES * 3;
 
@@ -222,6 +222,90 @@ impl Mesh {
     }
 }
 
+/// The part of a `w` x `h` rectangle at (`left`, `top`) swept clockwise from
+/// twelve o'clock about its centre through `turns` of a turn, as triangles
+/// (three points each) appended to `out`: the shape a drawing is revealed
+/// in, the way the picker reveals a pad as it is held.
+///
+/// A fan from the centre out past the corners, each blade clipped to the
+/// rectangle, so the edge of the sweep is the hand of a clock and the rest
+/// is the rectangle's own sides.
+pub fn wedge(left: f32, top: f32, w: f32, h: f32, turns: f32, out: &mut Vec<[f32; 2]>) {
+    // Written so a NaN from the pipe reveals nothing rather than drawing NaNs.
+    if turns.is_nan() || turns <= 0.0 || w <= 0.0 || h <= 0.0 {
+        return;
+    }
+    let (right, bottom) = (left + w, top + h);
+    if turns >= 1.0 {
+        out.extend_from_slice(&[
+            [left, top],
+            [right, top],
+            [right, bottom],
+            [left, top],
+            [right, bottom],
+            [left, bottom],
+        ]);
+        return;
+    }
+    let (cx, cy) = (left + w / 2.0, top + h / 2.0);
+    let reach = (w * w + h * h).sqrt() / 2.0 + 1.0;
+    let steps = ((turns * 64.0).ceil() as usize).max(1);
+    let point = |step: usize| -> [f32; 2] {
+        let (x, y) = on_circle(cx, cy, reach, turns * step as f32 / steps as f32);
+        [x, y]
+    };
+    for step in 0..steps {
+        let blade = clip(
+            &[[cx, cy], point(step), point(step + 1)],
+            left,
+            top,
+            right,
+            bottom,
+        );
+        for i in 1..blade.len().saturating_sub(1) {
+            out.extend_from_slice(&[blade[0], blade[i], blade[i + 1]]);
+        }
+    }
+}
+
+/// Whether a point is on the kept side of an edge.
+type Inside = fn([f32; 2], f32) -> bool;
+
+/// A convex polygon cut to a rectangle (Sutherland-Hodgman, one side at a time).
+fn clip(polygon: &[[f32; 2]], left: f32, top: f32, right: f32, bottom: f32) -> Vec<[f32; 2]> {
+    // Each side: which points are inside, and where an edge crosses it.
+    let sides: [(Inside, usize, f32); 4] = [
+        (|p, edge| p[0] >= edge, 0, left),
+        (|p, edge| p[0] <= edge, 0, right),
+        (|p, edge| p[1] >= edge, 1, top),
+        (|p, edge| p[1] <= edge, 1, bottom),
+    ];
+    let mut points = polygon.to_vec();
+    for (inside, axis, edge) in sides {
+        let before = std::mem::take(&mut points);
+        for (i, &here) in before.iter().enumerate() {
+            let next = before[(i + 1) % before.len()];
+            let crossing = || {
+                let t = (edge - here[axis]) / (next[axis] - here[axis]);
+                [
+                    here[0] + (next[0] - here[0]) * t,
+                    here[1] + (next[1] - here[1]) * t,
+                ]
+            };
+            match (inside(here, edge), inside(next, edge)) {
+                (true, true) => points.push(next),
+                (true, false) => points.push(crossing()),
+                (false, true) => points.extend([crossing(), next]),
+                (false, false) => {}
+            }
+        }
+        if points.is_empty() {
+            break;
+        }
+    }
+    points
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,5 +396,71 @@ mod tests {
         assert_eq!(std::mem::size_of::<Colour>(), 16);
         assert_eq!(std::mem::size_of::<Vertex>(), 24);
         assert_eq!(std::mem::offset_of!(Vertex, colour), 8);
+    }
+
+    fn area(triangles: &[[f32; 2]]) -> f32 {
+        triangles
+            .chunks_exact(3)
+            .map(|t| {
+                ((t[1][0] - t[0][0]) * (t[2][1] - t[0][1]) - (t[2][0] - t[0][0]) * (t[1][1] - t[0][1])).abs()
+                    / 2.0
+            })
+            .sum()
+    }
+
+    #[test]
+    fn a_sweep_covers_its_share_of_the_drawing() {
+        // A quarter turn from twelve is the top-right quarter of any
+        // rectangle about its centre, whatever its shape; and so on round.
+        for (w, h) in [(40.0, 40.0), (60.0, 28.0)] {
+            for turns in [0.25, 0.5, 0.75, 1.0] {
+                let mut out = Vec::new();
+                wedge(10.0, 20.0, w, h, turns, &mut out);
+                let share = area(&out) / (w * h);
+                assert!(near(share, turns, 1e-3), "{w}x{h} at {turns}: {share}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_sweep_stays_inside_the_drawing_and_starts_at_twelve() {
+        let mut out = Vec::new();
+        wedge(0.0, 0.0, 60.0, 30.0, 0.1, &mut out);
+        assert!(!out.is_empty());
+        assert!(
+            out.iter()
+                .all(|p| (-1e-3..=60.001).contains(&p[0]) && (-1e-3..=30.001).contains(&p[1]))
+        );
+        assert!(
+            out.iter().all(|p| p[0] >= 30.0 - 1e-3),
+            "a tenth of a turn is right of twelve o'clock"
+        );
+    }
+
+    #[test]
+    fn nothing_is_revealed_of_nothing() {
+        let mut out = Vec::new();
+        wedge(0.0, 0.0, 40.0, 40.0, 0.0, &mut out);
+        wedge(0.0, 0.0, 0.0, 40.0, 0.5, &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn a_reveal_that_is_not_a_number_draws_nothing_and_past_one_is_whole() {
+        for turns in [f32::NAN, f32::NEG_INFINITY] {
+            let mut out = Vec::new();
+            wedge(0.0, 0.0, 40.0, 40.0, turns, &mut out);
+            assert!(out.is_empty(), "turns={turns}");
+        }
+        let mut whole = Vec::new();
+        wedge(10.0, 20.0, 60.0, 28.0, 1.0, &mut whole);
+        for turns in [1.5, 100.0, f32::INFINITY] {
+            let mut out = Vec::new();
+            wedge(10.0, 20.0, 60.0, 28.0, turns, &mut out);
+            assert_eq!(out, whole, "turns={turns}");
+        }
+        let mut sliver = Vec::new();
+        wedge(0.0, 0.0, 40.0, 40.0, 1e-6, &mut sliver);
+        assert!(sliver.iter().all(|p| p[0].is_finite() && p[1].is_finite()));
     }
 }

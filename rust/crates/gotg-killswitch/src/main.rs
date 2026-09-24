@@ -410,7 +410,6 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
     let mut link = Link::new(std::env::var("GOTG_OVERLAY_PADMAP_SOCKET").ok().as_deref());
     let mut bar = Bar::new(SLIDE_SECONDS);
     let mut painter = Painter::default();
-    let started = seconds_now();
     let mut next_alive_ms = 0;
     while !STOP.load(Ordering::Relaxed) {
         // SAFETY: SDL is initialised; the event is plain data SDL fills.
@@ -475,10 +474,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
             let holds = pairing.now(clock);
             let joined = pairing.joined(clock);
             moving = bar.moving(clock) || !holds.is_empty() || exit_progress > 0.0;
-            // The clock only turns the joining spinner; with no hold it stays
-            // at zero, so a still picture is an unchanged frame, not resent.
-            let spin = if holds.is_empty() { 0.0 } else { clock - started };
-            let frame = Frame::pack(bar.position(clock), exit_progress, spin, &holds, &joined);
+            let frame = Frame::pack(bar.position(clock), exit_progress, &holds, &joined);
             painter.ensure(clock);
             painter.send(&frame, clock);
         } else if painter.open() {

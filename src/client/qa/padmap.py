@@ -21,17 +21,16 @@ import threading
 import time
 
 NODE = "/dev/input/qa-joiner"
-NAME = "QA Joiner"
 PLAYER = 2
 
 
-def events(hold):
+def events(hold, name="QA Joiner"):
     """The lines padmap sends for one press held to the end, with when."""
     steps = max(int(hold * 30), 1)
     for i in range(1, steps + 1):
         frac = round(i / steps, 3)
-        yield hold * i / steps, {"event": "progress", "frac": frac, "node": NODE, "name": NAME, "player": PLAYER}
-    yield hold, {"event": "claim", "player": PLAYER, "name": NAME, "node": NODE, "icon": "", "configured": True}
+        yield hold * i / steps, {"event": "progress", "frac": frac, "node": NODE, "name": name, "player": PLAYER}
+    yield hold, {"event": "claim", "player": PLAYER, "name": name, "node": NODE, "icon": "", "configured": True}
 
 
 def main():
@@ -39,6 +38,8 @@ def main():
     ap.add_argument("--socket", required=True)
     ap.add_argument("--join-at", type=float, required=True, help="seconds after start")
     ap.add_argument("--hold", type=float, default=1.5)
+    # The pad's name decides which drawing the overlay shows for it.
+    ap.add_argument("--name", default="QA Joiner")
     args = ap.parse_args()
 
     try:
@@ -71,7 +72,7 @@ def main():
                     clients.remove(conn)
 
     begin = started + args.join_at
-    for offset, line in events(args.hold):
+    for offset, line in events(args.hold, args.name):
         time.sleep(max(begin + offset - time.monotonic(), 0.0))
         send(line)
     with lock:

@@ -6,8 +6,13 @@
   wayland,
   mesa,
   runtimeShell,
-  # The picker's palette, which the bar is drawn in: see the crate's build.rs.
+  # What the bar shares with the picker, read at build time (the crate's
+  # build.rs): its palette, which drawing stands for which controller, and
+  # the drawings.
   theme,
+  iconRules,
+  iconArt,
+  controllerArt,
 }:
 
 let
@@ -25,6 +30,9 @@ rustPlatform.buildRustPackage {
   cargoBuildFlags = [ "-p" "gotg-killswitch" ];
   cargoTestFlags = [ "-p" "gotg-killswitch" ];
   GOTG_THEME = theme;
+  GOTG_ICON_RULES = iconRules;
+  GOTG_ICON_ART = iconArt;
+  GOTG_CONTROLLER_ART = controllerArt;
 
   nativeBuildInputs = [ pkg-config ];
   # SDL for the pads and the window; libwayland for layer-shell on SDL's own

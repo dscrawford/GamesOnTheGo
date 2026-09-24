@@ -41,8 +41,11 @@ use x11rb::protocol::xproto::{
 use x11rb::rust_connection::RustConnection;
 use x11rb::wrapper::ConnectionExt as _;
 
-use crate::scene::bar_height;
-use crate::shapes::{Mesh, Vertex};
+use std::collections::HashMap;
+
+use crate::icons;
+use crate::scene::{Drawing, Sprite, bar_height};
+use crate::shapes::{Colour, Mesh, Vertex, wedge};
 
 /// Which way in was taken.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -379,6 +382,12 @@ pub struct Overlay {
     vsync: bool,
     layer: Option<LayerSurface>,
     x11: Option<X11>,
+    /// Each drawing at each height it has been drawn at, as a white
+    /// silhouette and its width: rasterised once, tinted per seat.
+    textures: HashMap<(u8, u32), (*mut SDL_Texture, u32)>,
+    /// Scratch for a reveal's triangles, kept so a frame allocates nothing.
+    swept: Vec<[f32; 2]>,
+    vertices: Vec<SDL_Vertex>,
 }
 
 impl fmt::Debug for Overlay {
@@ -428,6 +437,9 @@ impl Overlay {
                 vsync: false,
                 layer: None,
                 x11: None,
+                textures: HashMap::new(),
+                swept: Vec::new(),
+                vertices: Vec::new(),
             };
             let mut screen = SDL_Rect {
                 x: 0,
@@ -596,37 +608,143 @@ impl Overlay {
         self.layer.as_ref().is_some_and(|layer| layer.state.closed)
     }
 
-    /// One frame: cleared to nothing, the mesh drawn, presented.
-    pub fn draw(&mut self, mesh: &Mesh) {
-        self.follow_the_compositor();
-        if self.closed() {
+    /// Flat shapes, as SDL triangles with their colours.
+    fn draw_mesh(&self, mesh: &Mesh) {
+        if mesh.vertices.is_empty() || mesh.indices.is_empty() {
             return;
         }
         // SAFETY: the renderer is live; the vertex and index slices outlive
         // the call, and their strides and counts are their own.
         unsafe {
+            let stride = std::mem::size_of::<Vertex>() as c_int;
+            let first = mesh.vertices.as_ptr();
+            SDL_RenderGeometryRaw(
+                self.renderer,
+                std::ptr::null_mut(),
+                (&raw const (*first).x).cast::<f32>(),
+                stride,
+                (&raw const (*first).colour).cast::<SDL_FColor>(),
+                stride,
+                std::ptr::null(),
+                0,
+                mesh.vertices.len() as c_int,
+                mesh.indices.as_ptr().cast::<c_void>(),
+                mesh.indices.len() as c_int,
+                std::mem::size_of::<i32>() as c_int,
+            );
+        }
+    }
+
+    /// A drawing as a texture at this height, made the first time it is asked
+    /// for. None where it cannot be drawn: the bar carries on without it.
+    fn texture(&mut self, icon: u8, height: u32) -> Option<(*mut SDL_Texture, u32)> {
+        if let Some(&found) = self.textures.get(&(icon, height)) {
+            return Some(found);
+        }
+        let (width, pixels) =
+            icons::silhouette(icon, height).or_else(|| icons::silhouette(icons::FALLBACK, height))?;
+        // SAFETY: the renderer is live; the pixels are `width` x `height`
+        // RGBA, `width * 4` bytes a row, and outlive the upload.
+        let texture = unsafe {
+            let texture = SDL_CreateTexture(
+                self.renderer,
+                SDL_PIXELFORMAT_RGBA32,
+                SDL_TEXTUREACCESS_STATIC,
+                width as c_int,
+                height as c_int,
+            );
+            if texture.is_null() {
+                return None;
+            }
+            SDL_UpdateTexture(
+                texture,
+                std::ptr::null(),
+                pixels.as_ptr().cast(),
+                (width * 4) as c_int,
+            );
+            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+            texture
+        };
+        self.textures.insert((icon, height), (texture, width));
+        Some((texture, width))
+    }
+
+    /// One pad's drawing: the dim copy where it is not yet revealed, then the
+    /// swept part in its seat's colour.
+    fn draw_sprite(&mut self, sprite: &Sprite) {
+        let height = sprite.height.round().max(1.0) as u32;
+        let Some((texture, width)) = self.texture(sprite.icon, height) else {
+            return;
+        };
+        let (w, h) = (width as f32, height as f32);
+        let (left, top) = ((sprite.cx - w / 2.0).round(), (sprite.cy - h / 2.0).round());
+        let byte = |channel: f32| (channel.clamp(0.0, 1.0) * 255.0).round() as u8;
+        // SAFETY: the renderer and texture are live; the rect and vertices
+        // are locals and scratch owned here, alive for each call.
+        unsafe {
+            if sprite.revealed < 1.0 {
+                let under = sprite.under;
+                SDL_SetTextureColorMod(texture, byte(under.r), byte(under.g), byte(under.b));
+                SDL_SetTextureAlphaMod(texture, byte(under.a));
+                let whole = SDL_FRect {
+                    x: left,
+                    y: top,
+                    w,
+                    h,
+                };
+                SDL_RenderTexture(self.renderer, texture, std::ptr::null(), &whole);
+            }
+            // The vertex colour does the tinting from here.
+            SDL_SetTextureColorMod(texture, 255, 255, 255);
+            SDL_SetTextureAlphaMod(texture, 255);
+        }
+        self.swept.clear();
+        wedge(left, top, w, h, sprite.revealed, &mut self.swept);
+        if self.swept.is_empty() {
+            return;
+        }
+        let Colour { r, g, b, a } = sprite.colour;
+        self.vertices.clear();
+        self.vertices.extend(self.swept.iter().map(|&[x, y]| SDL_Vertex {
+            position: SDL_FPoint { x, y },
+            color: SDL_FColor { r, g, b, a },
+            tex_coord: SDL_FPoint {
+                x: (x - left) / w,
+                y: (y - top) / h,
+            },
+        }));
+        // SAFETY: as above; the vertex slice outlives the call.
+        unsafe {
+            SDL_RenderGeometry(
+                self.renderer,
+                texture,
+                self.vertices.as_ptr(),
+                self.vertices.len() as c_int,
+                std::ptr::null(),
+                0,
+            );
+        }
+    }
+
+    /// One frame: cleared to nothing, the bar, the pads' drawings, what goes
+    /// over them, presented.
+    pub fn draw(&mut self, drawing: &Drawing) {
+        self.follow_the_compositor();
+        if self.closed() {
+            return;
+        }
+        // SAFETY: the renderer is live.
+        unsafe {
             SDL_SetRenderDrawColor(self.renderer, 0, 0, 0, 0);
             SDL_RenderClear(self.renderer);
-            if !mesh.vertices.is_empty() && !mesh.indices.is_empty() {
-                let stride = std::mem::size_of::<Vertex>() as c_int;
-                let first = mesh.vertices.as_ptr();
-                SDL_RenderGeometryRaw(
-                    self.renderer,
-                    std::ptr::null_mut(),
-                    (&raw const (*first).x).cast::<f32>(),
-                    stride,
-                    (&raw const (*first).colour).cast::<SDL_FColor>(),
-                    stride,
-                    std::ptr::null(),
-                    0,
-                    mesh.vertices.len() as c_int,
-                    mesh.indices.as_ptr().cast::<c_void>(),
-                    mesh.indices.len() as c_int,
-                    std::mem::size_of::<i32>() as c_int,
-                );
-            }
-            SDL_RenderPresent(self.renderer);
         }
+        self.draw_mesh(&drawing.under);
+        for sprite in &drawing.sprites {
+            self.draw_sprite(sprite);
+        }
+        self.draw_mesh(&drawing.over);
+        // SAFETY: the renderer is live.
+        unsafe { SDL_RenderPresent(self.renderer) };
         if self.kind == Kind::X11
             && let Some(x11) = &mut self.x11
         {
@@ -639,8 +757,12 @@ impl Drop for Overlay {
     fn drop(&mut self) {
         self.layer = None;
         self.x11 = None;
-        // SAFETY: each is SDL's, destroyed once, renderer before its window.
+        // SAFETY: each is SDL's, destroyed once: textures before their
+        // renderer, the renderer before its window.
         unsafe {
+            for (texture, _) in self.textures.values() {
+                SDL_DestroyTexture(*texture);
+            }
             if !self.renderer.is_null() {
                 SDL_DestroyRenderer(self.renderer);
             }

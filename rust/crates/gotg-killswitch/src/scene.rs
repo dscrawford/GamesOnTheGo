@@ -1,5 +1,5 @@
-//! What one frame of the bar looks like, as a mesh -- no SDL, so a test can
-//! ask where the ring is and whether the bar is on screen at all.
+//! What one frame of the bar looks like -- no SDL, so a test can ask where
+//! the ring is and whether the bar is on screen at all.
 //!
 //! The bar comes down from the top edge for two reasons and shows one at a
 //! time:
@@ -8,10 +8,14 @@
 //!     the hold, an X firming up inside it, and the game stops when it
 //!     closes. This outranks everything; it is the one thing on screen that
 //!     is about to end the session.
-//!   - somebody is joining: one ring per pad holding a button, filling in its
-//!     seat's colour, with a spinner turning inside so a hold that has just
-//!     begun already reads as "working on it". A seat just taken shows as a
-//!     solid disc with a tick for a moment before the bar goes back up.
+//!   - somebody is joining: the pad's own drawing -- the picker's -- revealed
+//!     clockwise in its seat's colour over a dim copy of itself, the way the
+//!     picker's strip draws a hold, so a hold looks like one thing wherever
+//!     it happens. A seat just taken is the whole drawing with a tick, for a
+//!     moment before the bar goes back up.
+//!
+//! Flat shapes are a mesh; a drawing is a [`Sprite`] the painter draws from
+//! a texture. What goes over a drawing (the tick) is a second mesh.
 
 use crate::shapes::{Colour, Mesh};
 use crate::theme;
@@ -37,15 +41,47 @@ pub struct Scene<'a> {
     pub bar_height: f32,
     /// The bar: 0 out of sight, 1 all the way down.
     pub position: f64,
-    /// Pads holding to join, oldest first: how far, and the seat each fills.
+    /// Pads holding to join, oldest first: how far, the seat each fills, and
+    /// the drawing that stands for it.
     pub fractions: &'a [f32],
     pub players: &'a [i32],
-    /// Seats just taken, oldest first.
+    pub hold_icons: &'a [u8],
+    /// Seats just taken, oldest first, and their drawings.
     pub joined: &'a [i32],
+    pub joined_icons: &'a [u8],
     /// 0..1 through the exit hold; 0 when not held.
     pub exit_progress: f64,
-    /// Seconds, for the spinner's turn.
-    pub clock: f64,
+}
+
+/// A controller's drawing, centred at (`cx`, `cy`) and `height` tall: shown
+/// in `colour` clockwise from twelve through `revealed` of a turn, over the
+/// whole of it in `under` where it is not yet.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Sprite {
+    pub icon: u8,
+    pub cx: f32,
+    pub cy: f32,
+    pub height: f32,
+    pub colour: Colour,
+    pub revealed: f32,
+    pub under: Colour,
+}
+
+/// A frame: flat shapes under the drawings, the drawings, and what goes on
+/// top of them. Reused from frame to frame, so drawing allocates nothing.
+#[derive(Debug, Clone, Default)]
+pub struct Drawing {
+    pub under: Mesh,
+    pub sprites: Vec<Sprite>,
+    pub over: Mesh,
+}
+
+impl Drawing {
+    fn clear(&mut self) {
+        self.under.clear();
+        self.sprites.clear();
+        self.over.clear();
+    }
 }
 
 /// The bar's height on a screen this tall: big enough to read from a sofa,
@@ -59,7 +95,8 @@ pub fn bar_height(screen_height: i32) -> f32 {
 /// The colour of a seat: config/theme.yaml's `players`, the picker's four.
 /// A seat past the last wraps, as the picker's does.
 pub fn player_colour(player: i32) -> Colour {
-    let Ok(seat) = usize::try_from(player - 1) else {
+    // `player` crosses the painter's pipe; any i32 is drawable, none panics.
+    let Some(seat) = player.checked_sub(1).and_then(|seat| usize::try_from(seat).ok()) else {
         return Colour::rgb(theme::TEXT_DIM, 1.0);
     };
     Colour::rgb(theme::PLAYERS[seat % theme::PLAYERS.len()], 1.0)
@@ -109,78 +146,79 @@ fn exit_ring(mesh: &mut Mesh, cx: f32, cy: f32, radius: f32, width: f32, progres
     );
 }
 
-#[allow(clippy::too_many_arguments)]
-fn joining_ring(
-    mesh: &mut Mesh,
-    cx: f32,
-    cy: f32,
-    radius: f32,
-    width: f32,
-    fraction: f32,
-    player: i32,
-    clock: f64,
-) {
-    let colour = player_colour(player);
-    mesh.arc(cx, cy, radius, width, 0.0, 1.0, colour.with_alpha(0.22), FEATHER);
-    mesh.arc(cx, cy, radius, width, 0.0, fraction, colour, FEATHER);
-    // The spinner: a short arc turning inside, once every 1.2 s. Its own
-    // clock, not the fill's, so it moves the instant a hold begins.
-    let turn = (clock / 1.2).rem_euclid(1.0) as f32;
-    let ink = Colour::rgb(theme::TEXT, 0.85);
-    mesh.arc(cx, cy, radius * 0.55, width * 0.7, turn, 0.22, ink, FEATHER);
-}
-
-fn joined_badge(mesh: &mut Mesh, cx: f32, cy: f32, radius: f32, width: f32, player: i32) {
-    mesh.disc(cx, cy, radius + width / 2.0, player_colour(player), FEATHER);
-    // A tick through the middle: short stroke down, long stroke up.
-    let unit = radius * 0.5;
+/// The seat just taken's tick, on a disc of its colour at the drawing's
+/// lower right, so the drawing itself stays the pad somebody is holding.
+fn tick(over: &mut Mesh, cx: f32, cy: f32, radius: f32, stroke: f32, colour: Colour) {
+    over.disc(cx, cy, radius, colour, FEATHER);
+    // Short stroke down, long stroke up.
+    let unit = radius * 0.55;
     let ink = BAR.with_alpha(0.95);
     let (x0, y0) = (cx - unit, cy);
     let (x1, y1) = (cx - unit * 0.25, cy + unit * 0.7);
     let (x2, y2) = (cx + unit, cy - unit * 0.75);
-    mesh.line(x0, y0, x1, y1, width, ink, FEATHER);
-    mesh.line(x1, y1, x2, y2, width, ink, FEATHER);
+    over.line(x0, y0, x1, y1, stroke, ink, FEATHER);
+    over.line(x1, y1, x2, y2, stroke, ink, FEATHER);
     // Where the strokes meet, so the corner is a corner and not a notch.
-    mesh.disc(x1, y1, width / 2.0, ink, FEATHER);
+    over.disc(x1, y1, stroke / 2.0, ink, FEATHER);
 }
 
-/// The frame, into `mesh` (cleared first).
-pub fn build(scene: &Scene, mesh: &mut Mesh) {
-    mesh.clear();
+/// The frame, into `drawing` (cleared first).
+pub fn build(scene: &Scene, drawing: &mut Drawing) {
+    drawing.clear();
     if scene.position <= 0.0 {
         return;
     }
     let bar = scene.bar_height;
     let width = scene.width as f32;
     let top = -bar * (1.0 - scene.position as f32);
+    let mesh = &mut drawing.under;
     mesh.rect(0.0, top, width, bar, BAR);
     // A hairline under it, so the bar has an edge over a dark scene.
     mesh.rect(0.0, top + bar - 1.0, width, 1.0, Colour::rgb(theme::TEXT, 0.18));
 
     let cy = top + bar / 2.0;
-    let radius = bar * 0.30;
-    let stroke = bar * 0.085;
     if scene.exit_progress > 0.0 {
-        exit_ring(mesh, width / 2.0, cy, radius, stroke, scene.exit_progress);
+        exit_ring(
+            mesh,
+            width / 2.0,
+            cy,
+            bar * 0.30,
+            bar * 0.085,
+            scene.exit_progress,
+        );
         return;
     }
+    let icon_height = bar * 0.62;
     let count = scene.joined.len() + scene.fractions.len();
     let x = |at| item_x(scene.width, bar, at, count);
-    for (at, &player) in scene.joined.iter().enumerate() {
-        joined_badge(mesh, x(at), cy, radius, stroke, player);
+    let empty = Colour::rgb(theme::EMPTY, 1.0);
+    for (at, (&player, &icon)) in scene.joined.iter().zip(scene.joined_icons).enumerate() {
+        let colour = player_colour(player);
+        let sprite = Sprite {
+            icon,
+            cx: x(at),
+            cy,
+            height: icon_height,
+            colour,
+            revealed: 1.0,
+            under: empty,
+        };
+        drawing.sprites.push(sprite);
+        let (tx, ty) = (x(at) + icon_height * 0.5, cy + icon_height * 0.32);
+        tick(&mut drawing.over, tx, ty, bar * 0.13, bar * 0.045, colour);
     }
     let offset = scene.joined.len();
-    for (i, (&fraction, &player)) in scene.fractions.iter().zip(scene.players).enumerate() {
-        joining_ring(
-            mesh,
-            x(offset + i),
+    let holds = scene.fractions.iter().zip(scene.players).zip(scene.hold_icons);
+    for (i, ((&fraction, &player), &icon)) in holds.enumerate() {
+        drawing.sprites.push(Sprite {
+            icon,
+            cx: x(offset + i),
             cy,
-            radius,
-            stroke,
-            fraction,
-            player,
-            scene.clock,
-        );
+            height: icon_height,
+            colour: player_colour(player),
+            revealed: fraction.clamp(0.0, 1.0),
+            under: empty,
+        });
     }
 }
 
@@ -188,7 +226,6 @@ pub fn build(scene: &Scene, mesh: &mut Mesh) {
 mod tests {
     use super::*;
     use crate::pairing::{HOLDS_MAX, JOINED_MAX};
-    use crate::shapes::MESH_VERTICES;
 
     fn near(a: f32, b: f32, tolerance: f32) -> bool {
         (a - b).abs() <= tolerance
@@ -210,23 +247,25 @@ mod tests {
 
     #[test]
     fn a_bar_out_of_sight_draws_nothing() {
-        let mut mesh = Mesh::default();
+        let mut drawing = Drawing::default();
         build(
             &Scene {
                 position: 0.0,
+                joined: &[1],
+                joined_icons: &[0],
                 ..down(0.5)
             },
-            &mut mesh,
+            &mut drawing,
         );
-        assert!(mesh.vertices.is_empty());
+        assert!(drawing.under.vertices.is_empty() && drawing.sprites.is_empty());
     }
 
     #[test]
     fn the_bar_comes_down_from_the_top_edge() {
-        let mut mesh = Mesh::default();
-        build(&down(0.5), &mut mesh);
+        let mut drawing = Drawing::default();
+        build(&down(0.5), &mut drawing);
         assert!(
-            near(lowest_y(&mesh), 0.0, 0.01),
+            near(lowest_y(&drawing.under), 0.0, 0.01),
             "all the way down, it sits on the top edge"
         );
         build(
@@ -234,29 +273,82 @@ mod tests {
                 position: 0.5,
                 ..down(0.5)
             },
-            &mut mesh,
+            &mut drawing,
         );
         assert!(
-            near(lowest_y(&mesh), -bar_height(800) / 2.0, 0.01),
-            "half way, half is above the screen"
+            near(lowest_y(&drawing.under), -bar_height(800) / 2.0, 0.01),
+            "half way, half above"
         );
     }
 
     #[test]
     fn the_exit_ring_outranks_joining() {
-        let mut mesh = Mesh::default();
+        let mut drawing = Drawing::default();
+        let scene = Scene {
+            fractions: &[0.5],
+            players: &[2],
+            hold_icons: &[3],
+            ..down(0.5)
+        };
+        build(&scene, &mut drawing);
+        assert!(
+            drawing.sprites.is_empty(),
+            "no pad's drawing while the exit is held"
+        );
+        let reach = bar_height(800) * 0.5;
+        assert!(
+            drawing.under.vertices[8..]
+                .iter()
+                .all(|v| (v.x - 640.0).abs() <= reach)
+        );
+    }
+
+    #[test]
+    fn a_hold_is_its_pad_s_drawing_revealed_in_its_seat_s_colour() {
+        let mut drawing = Drawing::default();
+        let scene = Scene {
+            fractions: &[0.4],
+            players: &[2],
+            hold_icons: &[7],
+            ..down(0.0)
+        };
+        build(&scene, &mut drawing);
+        let [sprite] = drawing.sprites[..] else {
+            panic!("one hold, one drawing: {:?}", drawing.sprites)
+        };
+        assert_eq!((sprite.icon, sprite.revealed), (7, 0.4));
+        assert_eq!(sprite.colour, player_colour(2));
+        assert_eq!(
+            sprite.under,
+            Colour::rgb(theme::EMPTY, 1.0),
+            "over the empty seat's dim copy"
+        );
+        assert!(near(sprite.cx, 640.0, 1e-3), "centred");
+        assert!(
+            drawing.over.vertices.is_empty(),
+            "no tick until the seat is taken"
+        );
+    }
+
+    #[test]
+    fn a_seat_just_taken_is_the_whole_drawing_with_a_tick() {
+        let mut drawing = Drawing::default();
         build(
             &Scene {
-                fractions: &[0.5],
-                players: &[2],
-                ..down(0.5)
+                joined: &[1],
+                joined_icons: &[4],
+                ..down(0.0)
             },
-            &mut mesh,
+            &mut drawing,
         );
-        // Past the bar's own eight vertices, everything sits within the
-        // ring's reach of the centre: nothing drawn for the pad joining.
-        let reach = bar_height(800) * 0.5;
-        assert!(mesh.vertices[8..].iter().all(|v| (v.x - 640.0).abs() <= reach));
+        let [sprite] = drawing.sprites[..] else {
+            panic!("one seat, one drawing")
+        };
+        assert_eq!(
+            (sprite.icon, sprite.revealed, sprite.colour),
+            (4, 1.0, player_colour(1))
+        );
+        assert!(!drawing.over.vertices.is_empty(), "and its tick over it");
     }
 
     #[test]
@@ -289,7 +381,7 @@ mod tests {
     }
 
     #[test]
-    fn a_full_scene_stays_centred_and_within_its_room() {
+    fn a_full_scene_draws_every_seat_in_order() {
         let bar = bar_height(800);
         let count = HOLDS_MAX + JOINED_MAX;
         assert!(near(
@@ -300,16 +392,37 @@ mod tests {
         let fractions = [0.3; HOLDS_MAX];
         let players: Vec<i32> = (1..=HOLDS_MAX as i32).collect();
         let joined: Vec<i32> = (1..=JOINED_MAX as i32).collect();
-        let mut mesh = Mesh::default();
+        let (icons, joined_icons) = ([1; HOLDS_MAX], [2; JOINED_MAX]);
         let scene = Scene {
             fractions: &fractions,
             players: &players,
+            hold_icons: &icons,
             joined: &joined,
-            clock: 0.5,
+            joined_icons: &joined_icons,
             ..down(0.0)
         };
-        build(&scene, &mut mesh);
-        // Short of the room, so the last badge was not cut off by running out.
-        assert!(!mesh.vertices.is_empty() && mesh.vertices.len() < MESH_VERTICES);
+        let mut drawing = Drawing::default();
+        build(&scene, &mut drawing);
+        assert_eq!(drawing.sprites.len(), count, "seats first, then holds");
+        assert!(
+            drawing.sprites.windows(2).all(|pair| pair[0].cx < pair[1].cx),
+            "left to right"
+        );
+        assert!(drawing.sprites[..JOINED_MAX].iter().all(|s| s.revealed == 1.0));
+    }
+
+    #[test]
+    fn any_player_number_from_the_pipe_is_drawable() {
+        // A frame's player numbers are not range-checked on the way in.
+        for player in [i32::MIN, -1, 0] {
+            assert_eq!(
+                player_colour(player),
+                Colour::rgb(theme::TEXT_DIM, 1.0),
+                "{player}"
+            );
+        }
+        for player in [i32::MAX, 100] {
+            let _ = player_colour(player);
+        }
     }
 }
