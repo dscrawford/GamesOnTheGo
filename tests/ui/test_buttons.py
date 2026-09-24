@@ -67,3 +67,15 @@ def test_a_dpad_button_points_the_same_way_as_the_hat():
 def test_a_face_button_points_nowhere():
     assert buttons.step_for(buttons.A) is None
     assert buttons.step_for(None) is None
+
+
+def test_only_the_four_directions_repeat():
+    # A hat held on a diagonal is a step the d-pad has no button for; turned
+    # into a repeat it crashed the picker looking one up.
+    from gotg_ui.buttons import cardinal
+
+    assert cardinal((1, 0)) == (1, 0)
+    assert cardinal((0, -1)) == (0, -1)
+    assert cardinal((1, -1)) is None
+    assert cardinal((0, 0)) is None
+    assert cardinal(None) is None

@@ -63,3 +63,13 @@ def hat_step(value: tuple[int, int]) -> tuple[int, int] | None:
     """
     dx, dy = value
     return (dx, -dy) if (dx or dy) else None
+
+
+def cardinal(step: tuple[int, int] | None) -> tuple[int, int] | None:
+    """The step if it is one of the four the d-pad has buttons for.
+
+    A hat can be held on a diagonal, and a diagonal repeated as a d-pad press
+    looked up a button that does not exist -- the picker exited. It steps
+    nowhere instead, as the grid already treats a diagonal.
+    """
+    return step if step in STEPS.values() else None

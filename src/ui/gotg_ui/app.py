@@ -35,6 +35,7 @@ from .installed import installed_games
 from .installs import Installs
 from .layout import grid, shelf, shelf_at, tile_at
 from .menu import Menu
+from .nav import Nav
 from .padmap import DaemonWatch, Padmap, ensure_daemon
 from .padstrip import HEIGHT as STRIP_HEIGHT
 from .padstrip import PANEL, status_text, strip_status
@@ -668,6 +669,28 @@ def draw_prepare(
     screen.blit(label, (margin, height - margin - label.get_height()))
 
 
+def _steered(steer: Nav, event, now: float) -> Nav:
+    """A held direction's start and end, from a pad padmap published. The
+    press itself is the screens' to act on; a stick has no press, so its first
+    step is posted here, as the d-pad press it stands for."""
+    pad = pads.pad_of(event)
+    if pad is None:
+        return steer
+    moved = pads.axis_move(event)
+    if moved is not None:
+        steer, step = steer.stick(pad, *moved, now)
+        if step is not None:
+            pads.repeat_press(pad, step)
+        return steer
+    down = pads.pushed(event)
+    if down is not None:
+        return steer.press(pad, down, now)
+    up = pads.let_go(event)
+    if up is not None:
+        return steer.release(pad, up)
+    return steer
+
+
 def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | None:
     """Draw until somebody chooses an action or quits, and say which.
 
@@ -886,10 +909,23 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     gc.collect()
     gc.freeze()
 
+    # Held directions, from the d-pad or the left stick, as repeated steps.
+    steer = Nav()
+
     try:
         while running:
             state = browser.grid
             heard = padmap.heard
+            # Repeats due now, posted as d-pad presses before this frame's
+            # events are read, so every screen takes them as it takes a press.
+            # A held direction keeps the frames coming, or the repeat would
+            # wait for the idle rate.
+            now = time.monotonic()
+            steer, due = steer.due(now)
+            for pad, step in due:
+                pads.repeat_press(pad, step)
+            if steer.holding():
+                shown.pace.busy(now)
             for event in pygame.event.get():
                 # Anything at all: a key, a button, the pointer, a pad
                 # arriving. The screen draws at full rate for a moment after.
@@ -916,10 +952,14 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     devices.forget()
                     continue
                 if event.type == pygame.JOYDEVICEREMOVED:
+                    steer = steer.forget(event.instance_id)
                     sticks.remove(event.instance_id)
                     hush.refresh()
                     devices.forget()
                     continue
+
+                if not pads.is_repeat(event):
+                    steer = _steered(steer, event, time.monotonic())
 
                 # The keyboard takes a seat like everything else.
                 #
@@ -1233,6 +1273,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     # leaves it where it was.
                     over = hovering(browser, event.pos, screen.get_size())
                     if over is not None:
+                        if over != state.selected:
+                            trace.say("hover", tile=over, was=state.selected, pos=list(event.pos))
                         state.select(over)
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:
@@ -1472,6 +1514,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         "idle {idle_ms} ms   worst {worst_ms} ms".format(**said),
                         file=sys.stderr,
                     )
+        # Whatever repeat a held direction had queued is the grid's, not the
+        # launch gate's that reads the queue next.
+        pads.drop_repeats()
 
     finally:
         # However the loop ends — quit, exec handoff, Ctrl-C, a crash — the
