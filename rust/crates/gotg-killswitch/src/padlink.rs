@@ -438,4 +438,29 @@ mod tests {
             "a new connection asks again"
         );
     }
+
+    #[test]
+    fn a_keyboard_joining_is_drawn_as_the_keyboard() {
+        // padmap names a keyboard's hold and seat but no node: the bar keys it
+        // by name, draws the picker's keyboard drawing filling in, and takes
+        // it down when the seat is claimed.
+        let mut link = Link::new(Some("/nonexistent"));
+        let mut p = pairing();
+        let hold = "{\"event\":\"progress\",\"frac\":0.4,\"name\":\"Keyboard\",\"node\":\"\",\"player\":2}\n";
+        link.feed(hold.as_bytes(), &mut p, 10.0);
+        let holds = p.now(10.0);
+        assert_eq!(holds.len(), 1);
+        assert_eq!(crate::icons::NAMES[usize::from(holds[0].icon)], "keyboard-mouse");
+        let claim =
+            "{\"event\":\"claim\",\"player\":2,\"name\":\"Keyboard\",\"node\":\"\",\"icon\":\"keyboard\"}\n";
+        link.feed(claim.as_bytes(), &mut p, 10.1);
+        assert!(p.now(10.1).is_empty(), "the hold that took the seat is over");
+        let [(player, icon)] = p.joined(10.1)[..] else {
+            panic!("one seat taken")
+        };
+        assert_eq!(
+            (player, crate::icons::NAMES[usize::from(icon)]),
+            (2, "keyboard-mouse")
+        );
+    }
 }
