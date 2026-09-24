@@ -57,7 +57,7 @@ from .gate import (
 from .hush import Hush
 from .joining import Joining
 from .padmap import Padmap, ensure_daemon, session_pid
-from .padstrip import EMPTY_RING, LABEL, LABEL_DIM, PANEL, colour_for
+from .padstrip import ATTENTION, LABEL, LABEL_DIM, PANEL, colour_for
 from .padstrip import READY as SETTLED_GREEN  # gate.READY is a state; this is a colour
 from .pressing import (
     controls_for,
@@ -185,7 +185,7 @@ def draw(
         screen.blit(counted, ((width - counted.get_width()) // 2, top - 30))
 
     if gate.message:
-        said = font_at(24).render(gate.message, True, EMPTY_RING)
+        said = font_at(24).render(gate.message, True, ATTENTION)
         screen.blit(said, ((width - said.get_width()) // 2, int(height * 0.76)))
 
     # Nothing about Esc while the buttons are being walked: it is refused
@@ -1153,7 +1153,7 @@ def _hold_the_door(title: str, reason: str) -> int:
             heading = font_at(34).render(title, True, LABEL_DIM)
             screen.blit(heading, ((width - heading.get_width()) // 2, int(height * 0.10)))
             said, footer = without_controllers(reason, deadline - time.monotonic())
-            prompt = font_at(48).render(said, True, EMPTY_RING)
+            prompt = font_at(48).render(said, True, ATTENTION)
             screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.40)))
             line = font_at(22).render(footer, True, LABEL_DIM)
             screen.blit(line, ((width - line.get_width()) // 2, int(height * 0.92)))
