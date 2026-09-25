@@ -24,7 +24,7 @@ setup() {
   {
     printf '#!%s\n' "$(command -v bash)"
     printf 'printf "danstick %%s\\n" "$*" >>"$DANSTICK_LOG"\n'
-    printf 'printf "env DANSTICK_NO_AUTOSETUP=%%s DANSTICK_NO_AUTOATTACH=%%s DANSTICK_HOLD_SECONDS=%%s\\n" "${DANSTICK_NO_AUTOSETUP-unset}" "${DANSTICK_NO_AUTOATTACH-unset}" "${DANSTICK_HOLD_SECONDS-unset}" >>"$DANSTICK_LOG"\n'
+    printf 'printf "env DANSTICK_NO_AUTOSETUP=%%s DANSTICK_NO_AUTOATTACH=%%s DANSTICK_HOLD_SECONDS=%%s DANSTICK_SLOTS=%%s\\n" "${DANSTICK_NO_AUTOSETUP-unset}" "${DANSTICK_NO_AUTOATTACH-unset}" "${DANSTICK_HOLD_SECONDS-unset}" "${DANSTICK_SLOTS-unset}" >>"$DANSTICK_LOG"\n'
     printf 'exit "${FAKE_DANSTICK_EXIT:-0}"\n'
   } >"$FAKE_BIN/danstick"
   {
@@ -65,6 +65,16 @@ teardown() { stop_saves_service; }
   # And told the two rules before it started: no session of its own, and no
   # seat but by a hold.
   grep -q "env DANSTICK_NO_AUTOSETUP=1 DANSTICK_NO_AUTOATTACH=1 DANSTICK_HOLD_SECONDS=1.5" "$DANSTICK_LOG"
+}
+
+@test "the daemon is started with fixed slots, unless somebody chose otherwise" {
+  # Four controllers from the start, which any pad can take at any point in
+  # any game: the emulators are bound to them before anybody sits down.
+  run danstick_ensure
+  grep -q "DANSTICK_SLOTS=fixed" "$DANSTICK_LOG"
+  : >"$DANSTICK_LOG"
+  DANSTICK_SLOTS=on-demand run danstick_ensure
+  grep -q "DANSTICK_SLOTS=on-demand" "$DANSTICK_LOG"
 }
 
 @test "a gate the picker met still waits for danstick to publish" {
@@ -715,6 +725,17 @@ pads_manifest() {
   [ -z "${DANSTICK_SKIP_DAEMON_CHECK:-}" ]
 }
 
+@test "under fixed slots no identity is applied: the slots are 360 pads already" {
+  # Applying one clears the latch, and a daemon of another identity is
+  # replaced -- every seat taken in the picker gone at the launch.
+  fake_env env-dk64
+  pads_manifest env-dk64 <<<'{"emulator":"ares","identity":"xbox360"}'
+  export DANSTICK_SLOTS=fixed DANSTICK_SKIP_DAEMON_CHECK=1
+  danstick_identity_apply env-dk64
+  [ -z "${DANSTICK_PAD_IDENTITY:-}" ]
+  [ "$DANSTICK_SKIP_DAEMON_CHECK" = 1 ]
+}
+
 @test "applying nothing leaves the latch and the environment alone" {
   fake_env env-plain
   pads_manifest env-plain <<<'{"emulator":"ares"}'
@@ -801,6 +822,14 @@ EOF
   [ "$output" = "--reserve 4" ]
 }
 
+@test "under fixed slots nothing is reserved: every slot is there already" {
+  fake_env env-fsa
+  pads_manifest env-fsa <<<'{"emulator":"dolphin","reserve":4}'
+  DANSTICK_SLOTS=fixed run danstick_reserve env-fsa
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "an environment that asks for no seats reserves none" {
   fake_env env-plain
   pads_manifest env-plain <<<'{"emulator":"dolphin"}'
@@ -827,6 +856,8 @@ EOF
 }
 
 @test "the reservation rides on the exec that launches the game" {
+  # On-demand seats only: under fixed slots there is nothing to reserve.
+  export DANSTICK_SLOTS=on-demand
   fake_env env-fsa
   pads_manifest env-fsa <<<'{"emulator":"dolphin","reserve":2}'
   run bash -c 'source "$GOTG_LIB/common.sh"; source "$GOTG_LIB/env.sh"
