@@ -5,20 +5,39 @@ The tests make real pads through `/dev/uinput` and start real padmap daemons
 against them; on a desktop that means a fake pad can take a seat in a game
 being played, which is exactly what happened once.
 
-## Build and push
+## A run
 
 ```bash
-nix build .#controllers-image --max-jobs 2 --cores 4
-tag=$(basename "$(readlink -f result)" | cut -c1-12)      # the store hash
-skopeo copy --dest-cert-dir=/tmp/regcerts --dest-tls-verify=false \
-  docker-archive:result docker://192.168.0.2:30500/gotg-controllers:$tag
+nix run .#controllers-cluster                        # the whole suite, one pod per node
+nix run .#controllers-cluster -- -k lights_the_label # pytest's arguments, in every pod
+nix run .#controllers-cluster -- --shards 1 -k x     # one pod
+nix run .#controllers-cluster -- --durations         # and rewrite tests/e2e/durations.json
 ```
 
-**Tag by content.** Reusing `0.1.4` cost an evening: a node still had that
-tag from an earlier session, the Job's default `IfNotPresent` kept it, and
-the suite ran a test file that had since been renamed -- a failure list
-naming tests that do not exist. The Job now says `imagePullPolicy: Always`
-as well, which is belt and braces on top of a tag that cannot collide.
+`run.py` builds the image behind one out-link (`~/.cache/gotg/controllers-image`,
+so the last image is the only one held from garbage collection), pushes it
+only if the registry lacks the tag, starts the Job, follows every pod's log
+into `~/.cache/gotg/controllers-runs/<tag>-<time>/share-N.log`, and prints
+each share's verdict, its failures and the slowest tests. The exit status is
+the verdict. `GOTG_E2E_REQUIRE=1` is baked in, so a pod that cannot reach
+`/dev/uinput` fails rather than skipping.
+
+**Split by node.** The Job is Indexed, one pod per node
+(`podAntiAffinity` on `gotg.dcrawford/uinput`), and each pod runs the share
+`tests/e2e/shards.py` gives it: balanced on `durations.json`, longest first.
+The tests cannot share a node -- every fake pad is a real device there, and a
+test's daemon would seat another test's pads -- which is also why k8s/qa
+carries the same label: its virtual pad would join these tests. A share with
+no free node waits, and the run says so. Refresh the timings with
+`--durations` after adding or slowing tests; a test with no timing counts as
+the median.
+
+**Tag by content.** The tag is the image's store hash. Reusing `0.1.4` once
+cost an evening: a node still had that tag from an earlier session and ran a
+test file that had since been renamed. With content tags `IfNotPresent` is
+safe, and the image is built from only what the suite reads (`tests/e2e`,
+`src/ui`, `src/client/data`, `config`), so an edit anywhere else is the same
+image, already pushed, already on every node.
 
 The push goes to a node's address; the Job pulls `localhost:30500`, which is
 the same NodePort registry under the name the nodes' containerd trusts. The
@@ -28,24 +47,6 @@ the cert dir of its own.
 The image carries the suite, `src/ui`, `config/` and padmap — a pod has no
 checkout — and runs `gotg-test-controllers`, the same entry point a desktop
 uses, with `GOTG_DEV_ROOT=/gotg`.
-
-## A run
-
-```bash
-sed "s/@TAG@/$tag/" k8s/controllers/job.yaml | kubectl apply -f -
-kubectl -n default logs -f job/gotg-controllers
-```
-
-The pod's exit status is the verdict. `GOTG_E2E_REQUIRE=1` is baked in, so a
-pod that cannot reach `/dev/uinput` fails rather than skipping.
-
-One test, by editing `args`:
-
-```bash
-sed -e "s/@TAG@/$tag/" \
-    -e 's/args: \["-q"\]/args: ["-q", "-k", "lights_the_label"]/' \
-    k8s/controllers/job.yaml | kubectl apply -f -
-```
 
 ## What is different in a pod
 

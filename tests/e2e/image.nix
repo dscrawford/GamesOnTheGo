@@ -66,9 +66,17 @@ let
       # is a failure. A pod that cannot reach /dev/uinput has to say so, not
       # report a green run with nothing in it.
       export GOTG_E2E_REQUIRE=1
+      # Each test's cost, printed at the end for run.py --durations.
+      export GOTG_E2E_TIMINGS=1
       # The latch padmap's client sets after a successful ensure-daemon. Never
       # inherited into a run: each test starts a daemon of its own.
       unset PADMAP_SKIP_DAEMON_CHECK || true
+      # An Indexed Job split across the nodes (tests/e2e/shards.py): this pod's
+      # share, from the index Kubernetes gave it.
+      if [ -n "''${GOTG_E2E_SHARDS:-}" ] && [ -n "''${JOB_COMPLETION_INDEX:-}" ]; then
+        export GOTG_E2E_SHARD="$JOB_COMPLETION_INDEX/$GOTG_E2E_SHARDS"
+        echo "gotg-controllers: share $GOTG_E2E_SHARD on ''${NODE_NAME:-this node}"
+      fi
       exec gotg-test-controllers "$@"
     '';
   };

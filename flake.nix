@@ -156,6 +156,10 @@
               ]}:$PATH"
               export PYTHONPATH="$root/src/ui''${PYTHONPATH:+:$PYTHONPATH}"
               export SDL_VIDEODRIVER="''${SDL_VIDEODRIVER:-dummy}"
+              # Nothing here plays a sound; without this every test's
+              # pygame.init() probed ALSA, and in a pod logged a screenful of
+              # errors about it.
+              export SDL_AUDIODRIVER="''${SDL_AUDIODRIVER:-dummy}"
               # Each test starts a padmap of its own under its tmp_path. This
               # is the one variable that could point it at the daemon somebody
               # is playing with instead.
@@ -246,7 +250,18 @@
           controllers-image = pkgs.callPackage ./tests/e2e/image.nix {
             controllerTests = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-test-controllers;
             padmap = padmap.packages.${pkgs.stdenv.hostPlatform.system}.padmap;
-            src = ./.;
+            # Only what the suite reads. The whole checkout made every edit --
+            # a doc, the bash client, a crate -- a new image, a new push and a
+            # new tag to run, for tests that had not changed.
+            src = pkgs.lib.fileset.toSource {
+              root = ./.;
+              fileset = pkgs.lib.fileset.unions [
+                ./tests/e2e
+                ./src/ui
+                ./src/client/data
+                ./config
+              ];
+            };
           };
 
           # Donkey Kong 64: Recompiled — not in nixpkgs, though its siblings
@@ -333,6 +348,21 @@
           program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-uninstall}/bin/gotg-uninstall";
         };
         # The controller requirement, on whatever machine is doubting it.
+        # tests/e2e on the cluster, a pod per node: k8s/controllers/run.py.
+        controllers-cluster = {
+          type = "app";
+          program = "${
+            pkgs.writeShellApplication {
+              name = "controllers-cluster";
+              runtimeInputs = [
+                pkgs.kubectl
+                pkgs.skopeo
+                pkgs.python3
+              ];
+              text = ''exec python3 ${./k8s/controllers/run.py} "$@"'';
+            }
+          }/bin/controllers-cluster";
+        };
         test-controllers = {
           type = "app";
           program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-test-controllers}/bin/gotg-test-controllers";

@@ -782,6 +782,12 @@ def test_the_keyboard_takes_a_seat_when_asked(daemon, sdl):
 # What the fake pad can press for each control padmap's wizard may ask for,
 # by the control names the gamecube layout uses. Anything absent is skipped,
 # which is what a person does with a control their pad does not have.
+# The longest the wizard may say nothing before a walk is given up on. A step
+# answers in well under a second; in a pod, where padmap seats the fake pad as
+# already mapped and never asks, the walks sat out their whole 40 s -- five
+# tests, three and a half minutes of every run, to fail the same way.
+WIZARD_QUIET = 10.0
+
 WIZARD_BUTTONS = {
     "a": BTN_SOUTH, "b": 0x131, "x": 0x134, "y": 0x133,
     "leftshoulder": 0x136, "rightshoulder": 0x137, "start": BTN_START,
@@ -880,9 +886,12 @@ def test_the_gate_holds_the_door_until_a_fresh_one_second_hold(daemon, sdl):
             assert daemon.wait_for("claim", seconds=8.0) is not None, "a hold in front of the gate seated nobody"
             mapped = False
             end = time.monotonic() + 40.0
-            while time.monotonic() < end and not mapped:
+            heard = time.monotonic()
+            while time.monotonic() < min(end, heard + WIZARD_QUIET) and not mapped:
                 for event in daemon.drain(0.2):
                     kind = event.get("event")
+                    if kind == "mapping":
+                        heard = time.monotonic()
                     if kind == "mapping" and not event.get("done"):
                         time.sleep(0.4)
                         button = WIZARD_BUTTONS.get(str(event.get("control") or ""))
@@ -1041,8 +1050,11 @@ def test_a_hold_of_y_at_the_door_walks_the_buttons_again(daemon, sdl):
             steps = 0
             mapped = False
             end = time.monotonic() + 40.0
-            while time.monotonic() < end and not mapped:
+            heard = time.monotonic()
+            while time.monotonic() < min(end, heard + WIZARD_QUIET) and not mapped:
                 for event in daemon.drain(0.2):
+                    if event.get("event") == "mapping":
+                        heard = time.monotonic()
                     if event.get("event") == "mapping" and not event.get("done"):
                         steps += 1
                         time.sleep(0.4)
@@ -1278,8 +1290,11 @@ def test_a_pad_can_join_mid_game_without_costing_the_game_its_input(daemon, sdl)
 def _walk_the_wizard(daemon, pad, seconds: float = 40.0) -> bool:
     """Answer every step with the fake pad's own buttons. True when it stored."""
     end = time.monotonic() + seconds
-    while time.monotonic() < end:
+    heard = time.monotonic()
+    while time.monotonic() < min(end, heard + WIZARD_QUIET):
         for event in daemon.drain(0.2):
+            if event.get("event") == "mapping":
+                heard = time.monotonic()
             if event.get("event") == "mapping" and not event.get("done"):
                 time.sleep(0.4)
                 button = WIZARD_BUTTONS.get(str(event.get("control") or ""))
