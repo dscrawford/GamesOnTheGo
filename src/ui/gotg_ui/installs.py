@@ -78,8 +78,10 @@ class Installs:
         is an install with no figures yet -- a build, or the first tick."""
         out: dict[tuple[str, str], tuple[float | None, bool]] = {}
         for key, preparer in self._running.items():
-            progress = preparer.progress
-            out[key] = (progress.fraction if progress is not None else None, False)
+            # The download's figures once it has any; until then the
+            # emulator's build, which now runs beside it.
+            shown = preparer.progress or preparer.stage
+            out[key] = (shown.fraction if shown is not None else None, False)
         for key in self.failed:
             out.setdefault(key, (1.0, True))
         return out

@@ -600,6 +600,30 @@ def draw_storage(screen, font_at, storage: Storage, typing: str | None) -> None:
     screen.blit(label, (margin, height - margin - label.get_height()))
 
 
+def _draw_progress_bar(screen, font_at, y: int, margin: int, fraction: float | None, figures: str, what: str) -> int:
+    """One bar with its figures under it; returns where the next thing goes."""
+    width, height = screen.get_size()
+    bar_h = max(10, height // 45)
+    bar = pygame.Rect(margin, y, width - 2 * margin, bar_h)
+    pygame.draw.rect(screen, TILE, bar, border_radius=bar_h // 2)
+    if fraction is None:
+        # Size unknown: a short segment sweeping back and forth, so the
+        # bar still says "moving" rather than "stuck at zero".
+        sweep = (pygame.time.get_ticks() // 8) % (2 * (bar.width - bar.width // 5))
+        if sweep > bar.width - bar.width // 5:
+            sweep = 2 * (bar.width - bar.width // 5) - sweep
+        fill = pygame.Rect(bar.x + sweep, bar.y, bar.width // 5, bar_h)
+    else:
+        fill = pygame.Rect(bar.x, bar.y, max(bar_h, int(bar.width * fraction)), bar_h)
+    pygame.draw.rect(screen, TILE_SELECTED, fill, border_radius=bar_h // 2)
+    y += bar_h + 8
+    text = font_at(20).render(figures, True, TEXT)
+    screen.blit(text, (margin, y))
+    detail = font_at(16).render(what[:120], True, TEXT_DIM)
+    screen.blit(detail, (width - margin - detail.get_width(), y + 2))
+    return y + text.get_height() + margin // 2
+
+
 def draw_prepare(
     screen,
     font_at,
@@ -608,6 +632,7 @@ def draw_prepare(
     failed: bool,
     progress: prepare.Progress | None = None,
     elapsed: float = 0.0,
+    stage: prepare.Stage | None = None,
 ) -> None:
     """The loader screen: heading, a bar while a download runs, `gotg install`'s
     output verbatim, the way out.
@@ -637,27 +662,11 @@ def draw_prepare(
         screen.blit(clock, (width - margin - clock.get_width(), margin + 6))
 
     y = margin + font_at(30).get_height() + margin // 2
-    if progress is not None and not failed:
-        bar_h = max(10, height // 45)
-        bar = pygame.Rect(margin, y, width - 2 * margin, bar_h)
-        pygame.draw.rect(screen, TILE, bar, border_radius=bar_h // 2)
-        fraction = progress.fraction
-        if fraction is None:
-            # Size unknown: a short segment sweeping back and forth, so the
-            # bar still says "moving" rather than "stuck at zero".
-            sweep = (pygame.time.get_ticks() // 8) % (2 * (bar.width - bar.width // 5))
-            if sweep > bar.width - bar.width // 5:
-                sweep = 2 * (bar.width - bar.width // 5) - sweep
-            fill = pygame.Rect(bar.x + sweep, bar.y, bar.width // 5, bar_h)
-        else:
-            fill = pygame.Rect(bar.x, bar.y, max(bar_h, int(bar.width * fraction)), bar_h)
-        pygame.draw.rect(screen, TILE_SELECTED, fill, border_radius=bar_h // 2)
-        y += bar_h + 8
-        figures = font_at(20).render(progress.describe(), True, TEXT)
-        screen.blit(figures, (margin, y))
-        what = font_at(16).render(progress.what[:120], True, TEXT_DIM)
-        screen.blit(what, (width - margin - what.get_width(), y + 2))
-        y += figures.get_height() + margin // 2
+    # The download and the emulator's build run at once, so each has a bar:
+    # what nix is doing first, since it is the one that used to say nothing.
+    for shown in (stage, progress):
+        if shown is not None and not failed:
+            y = _draw_progress_bar(screen, font_at, y, margin, shown.fraction, shown.describe(), shown.what)
     line_font = font_at(16)
     for line in lines:
         if y > height - margin * 2:
@@ -1412,6 +1421,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 draw_prepare(
                     below, font_at, preparer.game, preparer.tail(28), prepare_failed,
                     progress=preparer.progress if preparer.running else None,
+                    stage=preparer.stage if preparer.running else None,
                     elapsed=preparer.elapsed,
                 )
             elif storage is not None:

@@ -339,3 +339,49 @@ def test_the_loader_keeps_the_latest_progress_and_asks_the_client_for_it(bin_env
     # The bar is the progress; the text stays the narration.
     assert p.tail() == ["fetching Zelda", "checksum ok"]
     assert p.elapsed >= 0
+
+
+# --- what nix is doing -----------------------------------------------------
+#
+# The client turns nix's progress into `stage` lines (src/client/lib/env.sh):
+# a build that printed nothing for a minute now says whether it is evaluating,
+# fetching or compiling, and how far along.
+
+
+def test_a_stage_line_is_parsed_and_not_shown_as_text():
+    got = prepare.parse_stage("stage\tbuild\t1\t3\tares-148")
+    assert got == prepare.Stage(kind="build", done=1, total=3, what="ares-148")
+    assert prepare.parse_stage("stage\tbuild\tone\t3\tx") is None
+    assert prepare.parse_stage("stage\tcook\t1\t3\tx") is None, "only the stages the client says"
+    assert prepare.parse_stage("progress\t1\t2\t3\tx") is None
+
+
+def test_evaluation_has_no_end_so_it_counts_and_sweeps():
+    s = prepare.Stage(kind="eval", done=41, total=0, what="env-n64")
+    assert s.fraction is None
+    assert s.describe() == "evaluating env-n64 · 41 files read"
+
+
+def test_fetching_and_building_say_how_far_along():
+    fetch = prepare.Stage(kind="fetch", done=3, total=12, what="mesa-26.1")
+    assert fetch.fraction == 0.25
+    assert fetch.describe() == "fetching the emulator · 3 of 12"
+    build = prepare.Stage(kind="build", done=0, total=2, what="ares-148")
+    assert build.fraction == 0.0
+    assert build.describe() == "building the emulator · 0 of 2"
+
+
+def test_the_loader_keeps_the_download_and_the_build_apart(bin_env):
+    # They run at once now: one bar must not overwrite the other.
+    bin_env(
+        'printf "stage\\teval\\t1\\t0\\tenv-n64\\n" >&2\n'
+        'printf "progress\\t10\\t100\\t5\\tZelda: a\\n" >&2\n'
+        'printf "stage\\tbuild\\t1\\t2\\tares-148\\n" >&2\n'
+        'printf "progress\\t60\\t100\\t30\\tZelda: a\\n" >&2\n'
+        'echo "compiling ares.cpp"; exit 0'
+    )
+    p = Preparer(game())
+    wait_done(p)
+    assert p.progress == prepare.Progress(done=60, total=100, rate=30, what="Zelda: a")
+    assert p.stage == prepare.Stage(kind="build", done=1, total=2, what="ares-148")
+    assert p.tail() == ["compiling ares.cpp"]
