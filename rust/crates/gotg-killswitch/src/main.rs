@@ -296,6 +296,7 @@ unsafe fn read_pad(pad: *mut SDL_Gamepad) -> Input {
             right: SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)
                 || SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) >= TRIGGER_ON,
             start: SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_START),
+            back: SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_BACK),
         }
     }
 }

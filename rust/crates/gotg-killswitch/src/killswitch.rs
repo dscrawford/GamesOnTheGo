@@ -4,7 +4,7 @@
 //! feature, and the only way to check it without a controller, a game and
 //! three seconds of real time is to feed a made-up clock made-up inputs.
 
-/// One controller, reduced to the three things the chord asks about.
+/// One controller, reduced to the four things the chords ask about.
 ///
 /// Left and right are "that shoulder is down" *or* "that trigger is pulled"
 /// on purpose. Which one a pad reports is a property of the pad, not of the
@@ -16,21 +16,40 @@ pub struct Input {
     pub left: bool,
     pub right: bool,
     pub start: bool,
+    /// Select, Back, Minus, View: the button left of centre.
+    pub back: bool,
+}
+
+/// Which of the two holds a [`Pad`] is timing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Chord {
+    /// Both shoulders and Start: the game stops.
+    Exit,
+    /// Both shoulders and Select: the pad's buttons are walked again in
+    /// padmap, over the game, for this pad alone.
+    Rebind,
 }
 
 impl Input {
-    /// All three at once. Two shoulders is a grip somebody could stumble
-    /// into; two shoulders and Start, held past three seconds, is not --
-    /// which is the entire brief for a control that must never fire by
-    /// accident and must exist on every pad.
-    fn chord(self) -> bool {
-        self.left && self.right && self.start
+    /// Both shoulders and the chord's own button, and not the other one's.
+    /// Two shoulders is a grip somebody could stumble into; two shoulders
+    /// and Start, held past three seconds, is not -- which is the entire
+    /// brief for a control that must never fire by accident and must exist
+    /// on every pad. With Start *and* Select down it is neither: holding
+    /// everything is not a choice between quitting and rebinding.
+    fn chord(self, chord: Chord) -> bool {
+        let (want, other) = match chord {
+            Chord::Exit => (self.start, self.back),
+            Chord::Rebind => (self.back, self.start),
+        };
+        self.left && self.right && want && !other
     }
 }
 
 /// One pad's hold.
 #[derive(Debug, Clone)]
 pub struct Pad {
+    chord: Chord,
     hold_ms: u64,
     since_ms: u64,
     holding: bool,
@@ -39,8 +58,14 @@ pub struct Pad {
 }
 
 impl Pad {
+    /// The exit hold.
     pub fn new(hold_ms: u64) -> Self {
+        Self::timing(Chord::Exit, hold_ms)
+    }
+
+    pub fn timing(chord: Chord, hold_ms: u64) -> Self {
         Self {
+            chord,
             hold_ms,
             since_ms: 0,
             holding: false,
@@ -51,7 +76,7 @@ impl Pad {
     /// One sample. True exactly once per hold, on the first sample at or
     /// past the hold's length.
     pub fn step(&mut self, input: Input, now_ms: u64) -> bool {
-        if !input.chord() {
+        if !input.chord(self.chord) {
             // Letting go of any one of them starts the hold over. A switch
             // that counted cumulative time would fire on a long session of
             // ordinary shoulder-button play.
@@ -98,11 +123,19 @@ mod tests {
         left: false,
         right: false,
         start: false,
+        back: false,
     };
     const CHORD: Input = Input {
         left: true,
         right: true,
         start: true,
+        back: false,
+    };
+    const REBIND: Input = Input {
+        left: true,
+        right: true,
+        start: false,
+        back: true,
     };
 
     /// Holding from t=0, sampled every `step` ms like the real loop: when it
@@ -150,21 +183,25 @@ mod tests {
                 left: true,
                 right: true,
                 start: false,
+                back: false,
             }, // the resting grip
             Input {
                 left: true,
                 right: false,
                 start: true,
+                back: false,
             },
             Input {
                 left: false,
                 right: true,
                 start: true,
+                back: false,
             },
             Input {
                 left: false,
                 right: false,
                 start: true,
+                back: false,
             }, // Start alone pauses half these games
         ];
         for partial in partials {
@@ -220,6 +257,39 @@ mod tests {
         assert_eq!(pad.held_ms(2500), 1500);
         pad.step(NONE, 2600);
         assert_eq!(pad.held_ms(2700), 0);
+    }
+
+    #[test]
+    fn select_in_place_of_start_is_the_rebind_hold_not_the_exit() {
+        let mut exit = Pad::new(3000);
+        let mut rebind = Pad::timing(Chord::Rebind, 3000);
+        let exited = (0..=6000).step_by(50).any(|now| exit.step(REBIND, now));
+        let asked = (0..=6000)
+            .step_by(50)
+            .filter(|&now| rebind.step(REBIND, now))
+            .count();
+        assert!(!exited, "Select is not Start: the game keeps running");
+        assert_eq!(asked, 1, "the rebind fires once, at three seconds");
+        let mut rebind = Pad::timing(Chord::Rebind, 3000);
+        assert!(
+            !(0..=6000).step_by(50).any(|now| rebind.step(CHORD, now)),
+            "and Start is not Select"
+        );
+    }
+
+    #[test]
+    fn holding_start_and_select_together_is_neither() {
+        let everything = Input {
+            start: true,
+            ..REBIND
+        };
+        for chord in [Chord::Exit, Chord::Rebind] {
+            let mut pad = Pad::timing(chord, 3000);
+            assert!(
+                !(0..=6000).step_by(50).any(|now| pad.step(everything, now)),
+                "{chord:?} fired with both buttons down"
+            );
+        }
     }
 
     #[test]
