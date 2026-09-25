@@ -246,6 +246,32 @@ padmap_identity() {
   printf '%s' "$identity"
 }
 
+# How many seats this environment wants to exist before the game starts, as
+# `exec`'s flag, or nothing.
+#
+# Four Swords binds a GBA per player when it launches and never looks again,
+# so a pad paired mid-game had nothing bound to it: the seat was taken, the
+# clone published, and Start did nothing. A reserved seat is a clone that is
+# there from the start and sends nothing until somebody takes it -- the
+# binder finds padmap:3 at launch, and player three's pad drives it later.
+#
+# Reserving needs the 360 identity, which `exec` switches to in place for the
+# length of the game. Refused for Ryujinx for the reason padmap_identity
+# gives.
+padmap_reserve() {
+  local attr="$1" manifest seats emulator
+  manifest="$(env_pads_manifest "$attr")" || return 0
+  [[ -f "$manifest" ]] || return 0
+  seats="$(jq -r '.reserve // ""' "$manifest" 2>/dev/null)" || return 0
+  [[ "$seats" =~ ^[1-9][0-9]*$ ]] || return 0
+  emulator="$(jq -r '.emulator // ""' "$manifest" 2>/dev/null)"
+  if [[ "$emulator" == ryujinx ]]; then
+    warn "not reserving seats for $attr: Ryujinx cannot tell two clones apart under the identity it needs"
+    return 0
+  fi
+  printf -- '--reserve %s' "$seats"
+}
+
 # Hand that identity to the daemon this launch is about to use.
 #
 # Before the daemon is asked after, because the daemon reads the variable
@@ -341,11 +367,19 @@ padmap_seat_gate() {
 #
 # Execs, so the process the kill switch is holding stays the one it was told
 # about: padmap-rs replaces itself with the game.
+#
+# A game that can be joined mid-play has its seats reserved here too (see
+# padmap_reserve): `exec` does it before it builds the bind plan, and gives
+# them back when the game ends -- which means it waits on the game rather
+# than becoming it. The kill switch signals the process group, so that costs
+# it nothing.
 padmap_exec() {
   padmap_ensure
   if command -v "$(padmap_rs_bin)" >/dev/null 2>&1; then
     padmap_no_sandbox_for "${PLAY_ATTR:-}" && export PADMAP_NO_ISOLATE=1
-    exec "$(padmap_rs_bin)" exec -- "$@"
+    local reserve=()
+    [[ -z "${PLAY_ATTR:-}" ]] || read -ra reserve <<<"$(padmap_reserve "$PLAY_ATTR")"
+    exec "$(padmap_rs_bin)" exec ${reserve[@]+"${reserve[@]}"} -- "$@"
   fi
   exec "$@"
 }
