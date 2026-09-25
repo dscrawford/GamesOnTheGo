@@ -155,8 +155,123 @@ fn icons() -> String {
     )
 }
 
+/// Every `anchor-*` circle in a drawing, normalised to its viewBox -- the
+/// same points the picker's build-controllers.py writes -- and the viewBox's
+/// width over its height.
+fn anchors_of(svg: &PathBuf) -> (BTreeMap<String, (f32, f32)>, f32) {
+    let text = fs::read_to_string(svg).unwrap_or_else(|e| panic!("{}: {e}", svg.display()));
+    let doc = roxmltree::Document::parse(&text).unwrap_or_else(|e| panic!("{}: {e}", svg.display()));
+    let root = doc.root_element();
+    let view: Vec<f32> = root
+        .attribute("viewBox")
+        .unwrap_or_else(|| panic!("{}: no viewBox", svg.display()))
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .filter(|part| !part.is_empty())
+        .map(|part| part.parse().expect("a viewBox number"))
+        .collect();
+    let [min_x, min_y, width, height] = view[..] else {
+        panic!("{}: a viewBox is four numbers", svg.display());
+    };
+    let mut anchors = BTreeMap::new();
+    for node in doc.descendants().filter(|n| n.has_tag_name("circle")) {
+        let Some(name) = node.attribute("id").and_then(|id| id.strip_prefix("anchor-")) else {
+            continue;
+        };
+        let at = |attr: &str| -> f32 {
+            node.attribute(attr)
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(|| panic!("{}: anchor-{name} has no {attr}", svg.display()))
+        };
+        anchors.insert(
+            name.to_owned(),
+            ((at("cx") - min_x) / width, (at("cy") - min_y) / height),
+        );
+    }
+    (anchors, width / height)
+}
+
+/// config/controllers/*.yaml, each with its drawing and where every control
+/// it walks sits on that drawing: what the rebind shows over a game.
+fn consoles() -> String {
+    let config = input("GOTG_CONTROLLER_CONFIG", "../../../config/controllers");
+    let art = input("GOTG_CONTROLLER_ART", "../../../src/ui/assets/controllers");
+    let mut files: Vec<PathBuf> = fs::read_dir(&config)
+        .unwrap_or_else(|e| panic!("{}: {e}", config.display()))
+        .map(|entry| entry.expect("a directory entry").path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "yaml"))
+        .collect();
+    files.sort();
+    let mut artworks: Vec<String> = Vec::new();
+    let mut entries = Vec::new();
+    for file in &files {
+        let raw = yaml(file);
+        let name = file
+            .file_stem()
+            .expect("a file name")
+            .to_string_lossy()
+            .into_owned();
+        let text = |key: &str, default: &str| raw[key].as_str().unwrap_or(default).to_owned();
+        let layout = text("layout", "generic");
+        let artwork = text("artwork", "generic");
+        let svg = art.join(format!("{artwork}.svg"));
+        let (anchors, aspect) = anchors_of(&svg);
+        let art_index = artworks.iter().position(|a| *a == artwork).unwrap_or_else(|| {
+            artworks.push(artwork.clone());
+            artworks.len() - 1
+        });
+        let aliases = raw["anchors"].as_hash();
+        let controls: Vec<String> = raw["controls"]
+            .as_hash()
+            .map(|controls| {
+                controls
+                    .iter()
+                    .filter_map(|(id, label)| Some((id.as_str()?, label.as_str().unwrap_or_default())))
+                    .map(|(id, label)| {
+                        // The control's own circle, else the one the config
+                        // points it at (the older drawings use the console's
+                        // letters): schemes.anchor_names, the picker's rule.
+                        let alias = aliases
+                            .and_then(|a| a.get(&Yaml::String(id.to_owned())))
+                            .and_then(Yaml::as_str);
+                        let uv = anchors.get(id).or_else(|| alias.and_then(|a| anchors.get(a)));
+                        let anchor = uv.map_or("None".to_owned(), |(u, v)| format!("Some(({u:?}, {v:?}))"));
+                        format!("Control {{ id: {id:?}, label: {label:?}, anchor: {anchor} }}")
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let platforms: Vec<String> = raw["platforms"]
+            .as_vec()
+            .map(|list| list.iter().filter_map(Yaml::as_str).map(str::to_owned).collect())
+            .unwrap_or_default();
+        entries.push(format!(
+            "Console {{ name: {name:?}, platforms: &{platforms:?}, layout: {layout:?}, artwork: {art_index}, \
+             aspect: {aspect:?}, controls: &[{}] }}",
+            controls.join(", ")
+        ));
+    }
+    format!(
+        "// Generated from {:?} and {:?} by build.rs. Do not edit.\n\
+         pub static ARTWORK: [&[u8]; {n}] = [{svgs}];\n\
+         pub static CONSOLES: &[Console] = &[{consoles}];\n",
+        config,
+        art,
+        n = artworks.len(),
+        svgs = artworks
+            .iter()
+            .map(|a| format!(
+                "include_bytes!({:?})",
+                fs::canonicalize(art.join(format!("{a}.svg"))).expect("a drawing's path")
+            ))
+            .collect::<Vec<_>>()
+            .join(", "),
+        consoles = entries.join(",\n"),
+    )
+}
+
 fn main() {
     let out = PathBuf::from(env::var("OUT_DIR").expect("cargo sets OUT_DIR"));
     fs::write(out.join("theme.rs"), theme()).expect("cannot write theme.rs");
     fs::write(out.join("icons.rs"), icons()).expect("cannot write icons.rs");
+    fs::write(out.join("consoles.rs"), consoles()).expect("cannot write consoles.rs");
 }

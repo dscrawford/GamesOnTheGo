@@ -13,6 +13,9 @@
   iconRules,
   iconArt,
   controllerArt,
+  # config/controllers: each console's layout, drawing and anchors, for the
+  # in-game rebind.
+  controllerConfig,
 }:
 
 let
@@ -33,6 +36,7 @@ rustPlatform.buildRustPackage {
   GOTG_ICON_RULES = iconRules;
   GOTG_ICON_ART = iconArt;
   GOTG_CONTROLLER_ART = controllerArt;
+  GOTG_CONTROLLER_CONFIG = controllerConfig;
 
   nativeBuildInputs = [ pkg-config ];
   # SDL for the pads and the window; libwayland for layer-shell on SDL's own

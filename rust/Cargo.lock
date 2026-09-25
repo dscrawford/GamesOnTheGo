@@ -178,6 +178,7 @@ version = "0.3.0"
 dependencies = [
  "libc",
  "resvg",
+ "roxmltree",
  "sdl3-sys",
  "serde_json",
  "wayland-backend",

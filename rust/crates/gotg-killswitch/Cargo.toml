@@ -27,6 +27,8 @@ resvg = { version = "0.48", default-features = false }
 [build-dependencies]
 # The palette comes from config/theme.yaml, the file the picker reads.
 yaml-rust2 = "0.13"
+# The `anchor-*` circles in the controller drawings: where each button is.
+roxmltree = "0.21"
 
 [lints]
 workspace = true
