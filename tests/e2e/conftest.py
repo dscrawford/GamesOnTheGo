@@ -105,9 +105,11 @@ def daemon(tmp_path):
         yield client
     finally:
         client.close()
+        signalled = []
         if client.pid:
             try:
                 os.kill(client.pid, signal.SIGTERM)
+                signalled.append(client.pid)
             except ProcessLookupError:
                 pass
         # And any daemon a test started under this runtime dir since -- the
@@ -117,11 +119,48 @@ def daemon(tmp_path):
         # from one evening's experiments, were grabbing the user's
         # controllers during his own launch. By runtime dir, never by name:
         # matching argv has killed a user's real daemon from a test before.
-        _reap(home["XDG_RUNTIME_DIR"])
+        signalled += _reap(home["XDG_RUNTIME_DIR"])
+        _wait_gone(signalled)
 
 
-def _reap(runtime_dir: str) -> None:
-    """SIGTERM every padmap-rs whose XDG_RUNTIME_DIR is this test's."""
+def _wait_gone(pids: list[int], seconds: float = 5.0) -> None:
+    """Until those daemons have exited and their clones with them.
+
+    SIGTERM returns at once and the clones go when the daemon does. The next
+    test looked its clone up by name in /proc/bus/input/devices, found this
+    test's `padmap Player 1` still there, opened it, and read ENODEV a moment
+    later -- three tests at once, when padmap began sending `state` before its
+    files and so let the next test get there first.
+    """
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        alive = [pid for pid in pids if _running(pid)]
+        if not alive and not _clones_listed():
+            return
+        time.sleep(0.02)
+
+
+def _running(pid: int) -> bool:
+    # A zombie counts as gone: in a pod the orphaned daemon's parent is PID 1,
+    # this test run, which never reaps it.
+    try:
+        with open(f"/proc/{pid}/stat") as stat:
+            return stat.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except (OSError, IndexError):
+        return False
+
+
+def _clones_listed() -> bool:
+    try:
+        with open("/proc/bus/input/devices") as devices:
+            return any(line.startswith('N: Name="padmap Player ') for line in devices)
+    except OSError:
+        return False
+
+
+def _reap(runtime_dir: str) -> list[int]:
+    """SIGTERM every padmap-rs whose XDG_RUNTIME_DIR is this test's; their pids."""
+    signalled = []
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
             continue
@@ -136,8 +175,10 @@ def _reap(runtime_dir: str) -> None:
         if f"XDG_RUNTIME_DIR={runtime_dir}".encode() in env:
             try:
                 os.kill(int(pid), signal.SIGTERM)
+                signalled.append(int(pid))
             except ProcessLookupError:
                 pass
+    return signalled
 
 
 class Daemon:

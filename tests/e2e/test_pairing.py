@@ -18,16 +18,14 @@ instead of 1.5. Readings came 48-61 ms apart on that desktop (one 565 ms stall
 while a Steam Controller paired), and claim-to-`state` took 195-255 ms across
 five sessions. The timings below come from those numbers.
 
-Situations, and what each expects of the padmap pinned in flake.nix (e0092be;
+Situations, and what each expects of the padmap pinned in flake.nix (ac0a3dc;
 the markers below came off as padmap answered them -- bf6606d, 26754a9,
-bc61806, 0bcd1dc):
+bc61806, 0bcd1dc, 9463268, a03dc32, 18829da, dd7db61):
 
   Several people, one room
   - four pads pressed 0.3 s apart, in the reverse of the order they were
     plugged in, all held: four claims, seats 1-4 in press order, each at its
-    own hold's length. STRICT XFAIL -- all four are seated in order now, but a
-    later claim waits behind the previous one's writing and lands ~0.6 s
-    late: a-join-costs-the-same-however-full.md.
+    own hold's length. PASSES.
   - the same four, letting go and pressing again: all four seated, in press
     order, one clone each. PASSES.
   - four pads pressed in one tick: no seat given twice, no pad seated twice.
@@ -43,8 +41,8 @@ bc61806, 0bcd1dc):
   - a `status` (so a `state`) mid-hold resets nothing. PASSES.
   - `seating` sent again with the same hold resets nothing. PASSES.
   - a press made while the last claim is still being handled is not lost.
-    STRICT XFAIL -- the watched pads are reopened after a claim and the
-    queued press goes with them: a-press-during-a-claim-is-kept.md.
+    PASSES, or skips: since `state` stopped waiting on the files the window is
+    usually over before a press can land in it.
   - a controller switched on mid-hold resets nobody's hold. PASSES.
 
   A full room
@@ -62,16 +60,15 @@ bc61806, 0bcd1dc):
 
   Performance
   - hold to claim is the hold plus little; claim to the new clone, and the
-    first seat's claim to `state`, are bounded. PASSES.
-  - the fourth seat's `state` comes within 100 ms of the first's. STRICT
-    XFAIL -- 206 ms at e0092be, down from 1.19 s:
-    a-join-costs-the-same-however-full.md.
+    first seat's claim to `state`, are bounded. STRICT XFAIL -- seats 2-4
+    claim 113-237 ms after their hold at ac0a3dc: a-claim-comes-at-its-hold.md.
+  - the fourth seat's `state` comes within 100 ms of the first's. PASSES --
+    claim to `state` is ~1 ms for every seat at ac0a3dc, from 1.19 s.
   - four holds at once: each is read often enough that the 0.5 s safety net
     in `joining.NAMED_STALE` is never crossed, starts filling promptly, and
     fills towards its press-order seat. PASSES.
-  - four holds at once cost a seated pad's forwarding nothing. STRICT XFAIL
-    -- p95 went from ~15 ms at d2000c5 to 16.85 and 16.90 ms at e0092be:
-    holds-cost-a-seated-pad-nothing.md.
+  - four holds at once cost a seated pad's forwarding nothing. PASSES --
+    p95 0.20 ms at ac0a3dc, from 16.9 ms at e0092be.
 
 A strict xfail here uses `raises=AssertionError`, and the setup inside it
 fails through `pytest.fail` instead: a broken precondition is a real failure,
@@ -172,23 +169,6 @@ LOAD_SLACK_MS = 2.0
 # joins. At this pin the join tears every clone down and makes it again (~50
 # ms in padmap.log); a second is the point where a player notices.
 REJOIN_WITHIN = 1.0
-
-# --- what is known to be broken at the pin, and where it is asked for ----------
-
-JOIN_COST = pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="a claim's `state` still waits behind writing the room's files, so it grows with the room "
-    "(252-458 ms for seats 1-4 at e0092be) and a staggered claim lands after the previous one's. "
-    "docs/requests/a-join-costs-the-same-however-full.md",
-)
-ITEM_1_REOPEN = pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="after a claim padmap reopens the pads it watches; a press made in between is queued on the "
-    "closed fd and gone (e0092be). docs/requests/a-press-during-a-claim-is-kept.md",
-)
-
 
 # --- the room: the socket read continuously while presses happen on time ------
 
@@ -518,7 +498,6 @@ def _each_seat_once(room: Room, pads: list[FakePad]) -> None:
 # --- several people, one room --------------------------------------------------
 
 
-@JOIN_COST
 def test_four_pads_pressed_apart_take_seats_one_to_four_in_press_order(daemon):
     """The party: four people pick up pads a moment apart and hold A.
 
@@ -801,7 +780,6 @@ def test_a_controller_switched_on_mid_hold_resets_nobody(daemon):
         assert -EARLY <= late <= CLAIM_SLACK, f"the hold restarted: {late * 1000:+.0f} ms off its length"
 
 
-@ITEM_1_REOPEN
 def test_a_press_made_while_a_claim_republishes_is_not_lost(daemon):
     """Somebody is seated; the next person was already reaching for a pad and
     presses the moment the seat lights up. The daemon is still republishing
@@ -1094,6 +1072,12 @@ def _join_one_by_one(room: Room, pads: list[FakePad]) -> tuple[list[float], list
     return late, to_state, to_clone
 
 
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="later seats claim 113-237 ms after their hold at ac0a3dc (the first, 15 ms): the room's work "
+    "moved in front of the claim. docs/requests/a-claim-comes-at-its-hold.md",
+)
 def test_a_hold_claims_at_its_length_and_is_published_promptly(daemon):
     """Four people, one after another, nothing else in flight: each claim is
     the hold plus a little, the new player's clone follows at once, and the
@@ -1111,16 +1095,16 @@ def test_a_hold_claims_at_its_length_and_is_published_promptly(daemon):
         assert max(to_clone) <= PUBLISH_WITHIN, f"a claim's clone took {max(to_clone):.2f} s"
 
 
-@JOIN_COST
 def test_a_join_costs_the_same_however_full_the_room(daemon):
     """The fourth person's seat reaches the screen as fast as the first's.
 
-    On the pod at the pin: 274, 594, 869, 1462 ms from claim to `state`, while
+    At e0092be, on the pod: 274, 594, 869, 1462 ms from claim to `state`, while
     the new player's own clone appeared 1, 75, 165, 230 ms after the claim --
     the whole room's clones made again one by one (the new player's last),
     then every seated player's autoconfig and SDL mapping written, and only
     then `state`. Until it arrives the picker's strip does not show the seat,
-    and seating is not listening to anybody else.
+    and seating is not listening to anybody else. a03dc32 sends `state` first:
+    ~1 ms for every seat.
     """
     with _pads(4) as pads:
         room = _open(daemon)
@@ -1171,12 +1155,6 @@ def test_four_holds_at_once_are_each_read_often_enough(daemon):
         print("\n" + "\n".join(report))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="p95 under four holds went from ~15 ms (d2000c5) to ~16.9 ms (e0092be), past a frame; "
-    "docs/requests/holds-cost-a-seated-pad-nothing.md",
-)
 def test_four_holds_at_once_cost_a_seated_pad_nothing(daemon):
     """Somebody is playing while four others pick up pads and hold. Their
     holds are four readings a tick on the daemon's loop; the player's presses
