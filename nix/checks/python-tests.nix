@@ -27,6 +27,8 @@ pkgs.runCommand "check-python-tests" { nativeBuildInputs = [ venv ]; } ''
   cp ${../../src/client/data/ares-pads.json} src/client/data/ares-pads.json
   cp ${../../pyproject.toml} pyproject.toml
   chmod -R u+w tests src config
-  python -m pytest tests/service tests/indexer tests/ui -q
+  # And how the controller suite is split across the cluster's nodes: pure,
+  # beside a suite that otherwise needs real devices.
+  python -m pytest tests/service tests/indexer tests/ui tests/e2e/test_shards.py -q
   touch $out
 ''

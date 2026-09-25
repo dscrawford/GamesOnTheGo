@@ -70,7 +70,8 @@ nix build .#checks.x86_64-linux.python-tests --max-jobs 2 --cores 4             
 nix build .#checks.x86_64-linux.client-tests --max-jobs 2 --cores 4              # bats, whole suite
 nix run .#test-controllers --max-jobs 2 --cores 4 -- -q                          # controller e2e, real devices
 nix run .#test-controllers --max-jobs 2 --cores 4 -- -q -k "top_bar"             # one e2e test
-nix build .#controllers-image --max-jobs 2 --cores 4                            # the same suite, for k8s/controllers
+nix run .#controllers-cluster                                                    # the same suite on the cluster, a pod per node
+nix run .#controllers-cluster -- -k "top_bar"                                    # one e2e test there
 ```
 
 - The dev venv has **no pygame** on purpose: `tests/ui` tests models only,
@@ -85,12 +86,12 @@ nix build .#controllers-image --max-jobs 2 --cores 4                            
   a real daemon in seating mode seats them: one landed as player two in the
   user's game. The suite fails fast if the real socket
   (`$XDG_RUNTIME_DIR/padmap/padmap.sock`) exists; do not override that.
-- **Prefer the cluster.** `k8s/controllers/` runs the same suite in a
-  privileged pod with `/dev/uinput`, which is where it belongs — 56 of 71
-  pass there and ten are strict xfails, each naming the padmap request that
-  fixes it (`test_pairing.py`: four people pairing, joins mid-game); the five
-  that walk padmap's wizard do not yet pass (see that README). Build and push the image tagged by its store hash,
-  apply the Job, read the logs.
+- **Prefer the cluster.** `nix run .#controllers-cluster` builds the image,
+  pushes it if the registry lacks it, and runs the suite as an Indexed Job,
+  one privileged pod per node, each taking a share balanced on
+  `tests/e2e/durations.json` (`--durations` refreshes it). Strict xfails name
+  the padmap request that fixes them; the five that walk padmap's wizard do
+  not pass in a pod yet (see k8s/controllers/README.md).
 
 ## Lint & Typecheck
 

@@ -4,8 +4,15 @@
 # against them. On a desktop that is a fake pad joining the game the person at
 # the keyboard is playing -- it happened -- so this is where it belongs.
 #
-#   sed 's/@TAG@/0.1.0/' k8s/controllers/job.yaml | kubectl apply -f -
-#   kubectl -n default logs -f job/gotg-controllers
+#   nix run .#controllers-cluster             # build, push, run, collect
+#   nix run .#controllers-cluster -- -k top_bar
+#
+# Or by hand: `sed -e 's/@TAG@/<tag>/' -e 's/@SHARDS@/3/'`, then apply.
+#
+# Split across the nodes, one pod each (tests/e2e/shards.py): the tests cannot
+# share a node -- every fake pad is a real device there, and every daemon a
+# test starts would seat another test's pads -- but three nodes are three
+# /dev/inputs, and a third of the wall-clock.
 #
 # The pod's exit status is the verdict. GOTG_E2E_REQUIRE=1 is set in the
 # image, so a pod that cannot reach /dev/uinput fails rather than skipping.
@@ -15,26 +22,40 @@ metadata:
   name: gotg-controllers
   namespace: default
 spec:
-  backoffLimit: 0
+  completionMode: Indexed
+  completions: @SHARDS@
+  parallelism: @SHARDS@
+  # Per index, so one share failing its tests does not take down the others
+  # mid-run, as a job-wide backoffLimit of 0 would.
+  backoffLimitPerIndex: 0
   ttlSecondsAfterFinished: 86400
   template:
     metadata:
       labels:
         app: gotg-controllers
+        # Anything that makes pads through the node's /dev/uinput. k8s/qa
+        # carries it too: its virtual pad is a device these tests would see.
+        gotg.dcrawford/uinput: "true"
     spec:
       restartPolicy: Never
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  gotg.dcrawford/uinput: "true"
+              topologyKey: kubernetes.io/hostname
       containers:
         - name: tests
           # localhost, as the QA job does: it is a NodePort on every node,
           # and that is the name the nodes' containerd trusts without a
           # certificate. A push from a desktop goes to a node's address.
           image: localhost:30500/gotg-controllers:@TAG@
-          # A tag is not an identity. A node that already had a
-          # `gotg-controllers:0.1.4` from an earlier evening kept it, and the
-          # suite ran a test file that no longer exists in the tree -- a
-          # failure list naming tests nobody could find. Tag by the store
-          # hash (`k8s/controllers/README.md`) and pull anyway.
-          imagePullPolicy: Always
+          # The tag is the image's store hash, so a node that has it has the
+          # right one. It used to be a version, and a node that already had
+          # `gotg-controllers:0.1.4` from an earlier evening kept it and ran a
+          # test file that no longer existed; Always was the guard for that.
+          imagePullPolicy: IfNotPresent
           # Overridable: `args: ["-q", "-k", "top_bar"]` runs one test.
           args: ["-q"]
           securityContext:
@@ -46,6 +67,12 @@ spec:
           env:
             - name: XDG_RUNTIME_DIR
               value: /tmp/xdg
+            - name: GOTG_E2E_SHARDS
+              value: "@SHARDS@"
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
           volumeMounts:
             - name: uinput
               mountPath: /dev/uinput

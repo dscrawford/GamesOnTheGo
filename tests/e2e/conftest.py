@@ -29,6 +29,51 @@ import pytest
 sys.path.insert(0, os.path.dirname(__file__))
 
 import fakepad  # noqa: E402
+import shards  # noqa: E402
+
+# One line at the end of a run with GOTG_E2E_TIMINGS=1 (the image sets it):
+# what each test cost, setup and teardown included, for `durations.json`
+# (k8s/controllers/run.py --durations).
+TIMINGS_PREFIX = "gotg-e2e-durations "
+
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _ours(name: str) -> bool:
+    """Whether a test is this directory's: these hooks see the whole session,
+    and the unit check runs test_shards.py beside tests/ui."""
+    return os.path.exists(os.path.join(HERE, name.partition("::")[0]))
+
+
+def pytest_collection_modifyitems(config, items):
+    """This pod's share of the suite, when the Job split it (shards.py)."""
+    share = shards.parse(os.environ.get("GOTG_E2E_SHARD", ""))
+    if share is None:
+        return
+    index, count = share
+    names = {item: shards.key(item.nodeid) for item in items}
+    mine = set(shards.split((n for n in names.values() if _ours(n)), count, shards.load())[index])
+    kept = [item for item in items if names[item] in mine or not _ours(names[item])]
+    dropped = [item for item in items if item not in kept]
+    if dropped:
+        config.hook.pytest_deselected(items=dropped)
+        items[:] = kept
+
+
+_timings: dict[str, float] = {}
+
+
+def pytest_runtest_logreport(report):
+    name = shards.key(report.nodeid)
+    if _ours(name):
+        _timings[name] = _timings.get(name, 0.0) + report.duration
+
+
+def pytest_terminal_summary(terminalreporter):
+    if _timings and os.environ.get("GOTG_E2E_TIMINGS") == "1":
+        rounded = {nodeid: round(seconds, 2) for nodeid, seconds in sorted(_timings.items())}
+        terminalreporter.write_line(TIMINGS_PREFIX + json.dumps(rounded, separators=(",", ":")))
 
 
 def _cannot(why: str) -> None:

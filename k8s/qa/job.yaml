@@ -17,6 +17,11 @@ spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 86400
   template:
+    metadata:
+      labels:
+        # Makes a pad through the node's /dev/uinput: k8s/controllers will not
+        # share a node with it, since its tests would see this pad.
+        gotg.dcrawford/uinput: "true"
     spec:
       restartPolicy: Never
       # The GPU tier. node3 is where the card is, and asking for one of its
