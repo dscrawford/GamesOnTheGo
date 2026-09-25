@@ -122,3 +122,16 @@ def test_refresh_lets_go_of_what_is_gone(monkeypatch):
     assert opened == ["/dev/input/event21"]
     assert h.refresh("") == []
     assert closed == [101]
+
+
+DECK = pathlib.Path(__file__).parent / "fixtures" / "input-devices-steam-deck-xbox.txt"
+
+
+def test_a_pad_whose_own_node_is_also_kbd_is_not_held():
+    # The Deck, with an Xbox pad over Bluetooth: the kernel gives the pad's
+    # own joystick node a `kbd` handler (it has keys), and it shares a uniq
+    # with itself -- so it was held as its own keyboard. Grabbed, padmap never
+    # heard it held, and nothing anybody pressed on it took a seat.
+    names = {n.name for n in hush.a_controllers(hush.parse(DECK.read_text()))}
+    assert "Xbox Wireless Controller" not in names
+    assert "Valve Software Steam Controller" in names, "the Deck's lizard nodes still are"

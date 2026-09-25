@@ -128,7 +128,9 @@ def a_controllers(nodes: list[Node]) -> list[Node]:
     physes = {n.phys for n in joysticks if n.phys and n.bus != BLUETOOTH}
     out = []
     for node in nodes:
-        if not node.is_keyboard_or_mouse or node.event is None:
+        # A joystick is never its own keyboard: an Xbox pad's node on a Deck
+        # carries `kbd` beside `js1`, and holding it took the pad from padmap.
+        if not node.is_keyboard_or_mouse or node.is_joystick or node.event is None:
             continue
         by_uniq = bool(node.uniq) and node.uniq in uniqs
         by_port = node.bus != BLUETOOTH and bool(node.phys) and node.phys in physes
