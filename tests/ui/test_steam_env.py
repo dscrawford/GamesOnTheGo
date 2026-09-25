@@ -1,9 +1,9 @@
 """What Steam leaves in the picker's environment, taken back out.
 
-On a Deck in Game Mode a Steam Controller paired -- padmap seated it, the
+On a Deck in Game Mode a Steam Controller paired -- danstick seated it, the
 picker drew the seat -- and then nothing it pressed moved anything. Steam
 hands everything it launches SDL_GAMECONTROLLER_IGNORE_DEVICES naming the
-controllers Steam Input handles, and padmap's clone of a Steam Controller
+controllers Steam Input handles, and danstick's clone of a Steam Controller
 wears the Steam Controller's own ids, so the picker's SDL ignored the one
 device it was meant to listen to.
 """
@@ -29,7 +29,7 @@ def test_nothing_is_taken_where_steam_left_nothing():
     assert steam_leftovers({"HOME": "/home/deck"}) == ()
 
 
-def test_the_picker_started_by_steam_sees_padmap_s_clones(monkeypatch):
+def test_the_picker_started_by_steam_sees_danstick_s_clones(monkeypatch):
     # The import is what runs before SDL starts, so it is the import that has
     # to have cleared them.
     import importlib

@@ -1,7 +1,7 @@
 """What the picker decided about controllers, written down as it happens.
 
 `GOTG_UI_TRACE=/path/to/file` and every pad SDL opens, every press it
-delivers and whether it was taken, every padmap event and command, and every
+delivers and whether it was taken, every danstick event and command, and every
 keyboard node held quiet lands there as one JSON object per line. Off unless
 asked for: the picker is a 60 Hz loop and a file write per frame is not free.
 
@@ -42,7 +42,7 @@ def say(kind: str, **fields) -> None:
 # When each pad's hold was last heard from, for `progress_gap`.
 _heard: dict[str, float] = {}
 
-# Longer than this between two readings of one hold is worth a line. padmap
+# Longer than this between two readings of one hold is worth a line. danstick
 # ticks every 20 ms; the screen used to take 50 ms of quiet as a release.
 GAP = 0.04
 
@@ -52,7 +52,7 @@ def progress_gap(event: dict, now: float | None = None) -> None:
 
     Readings are not traced -- fifty a second per pad would drown the rest --
     but the pauses between them are what made a steady press flash back to
-    the red empty seat: padmap sends progress from the loop that also rescans
+    the red empty seat: danstick sends progress from the loop that also rescans
     every input device, and on a machine with many of them a rescan can
     outlast the screen's patience. How long it really goes quiet is a
     property of this machine, not of any test's, so it is measured here.

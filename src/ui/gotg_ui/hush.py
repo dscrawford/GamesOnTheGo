@@ -1,6 +1,6 @@
 """Controllers that are also keyboards, and keeping them quiet.
 
-The joystick rule in `clones.py` holds: a pad padmap has not published cannot
+The joystick rule in `clones.py` holds: a pad danstick has not published cannot
 move the cursor through SDL's joystick or controller events. Then a Steam
 Controller moved it anyway, and so did an Xbox pad over Bluetooth -- because
 neither reached SDL as a joystick. The Steam Controller Puck is, in hardware,
@@ -22,7 +22,7 @@ Which nodes are a controller's is decided from /proc/bus/input/devices, with
 no kernel calls, so it can be tested against a copy of that file -- and the
 copy in the tests is the one this machine produced with both pads attached.
 
-padmap turns lizard mode off itself when it opens a Puck, and that is the
+danstick turns lizard mode off itself when it opens a Puck, and that is the
 better fix for that half; this covers the moment before it has, the machine
 where it has not started, and the Bluetooth pad's extra collections, which
 nobody turns off.
@@ -129,7 +129,7 @@ def a_controllers(nodes: list[Node]) -> list[Node]:
     out = []
     for node in nodes:
         # A joystick is never its own keyboard: an Xbox pad's node on a Deck
-        # carries `kbd` beside `js1`, and holding it took the pad from padmap.
+        # carries `kbd` beside `js1`, and holding it took the pad from danstick.
         if not node.is_keyboard_or_mouse or node.is_joystick or node.event is None:
             continue
         by_uniq = bool(node.uniq) and node.uniq in uniqs

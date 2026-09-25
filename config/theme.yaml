@@ -29,7 +29,7 @@ colours:
   empty_text: [150, 150, 158]
 
   # What still needs somebody to act: the launch gate's message and the
-  # countdown when there is no padmap. Red is kept for these alone.
+  # countdown when there is no danstick. Red is kept for these alone.
   attention: [208, 78, 78]
 
   # A seat that is settled: mapped, published, nothing left to do. Green
@@ -39,7 +39,7 @@ colours:
 
 # Players 1-4. Nintendo's four-player order, which is what the consoles this
 # runs use on their own port lights. A fifth player wraps rather than failing:
-# padmap will seat as many as are asked for, and a pad with no colour is worse
+# danstick will seat as many as are asked for, and a pad with no colour is worse
 # than two pads sharing one.
 players:
   - [96, 176, 255]   # 1 blue
@@ -87,10 +87,10 @@ renderer: true
 timeouts:
   # A unix socket either answers at once or is not there; this is only so a
   # stale socket file cannot hang a frame.
-  padmap_connect: 0.25
+  danstick_connect: 0.25
   # Long enough for a cold daemon start, short enough that somebody in front
   # of a television is not staring at nothing.
-  padmap_daemon: 10
+  danstick_daemon: 10
   # A daemon that is running but silent, before a launch gives up on it.
   first_state: 3.0
   # Every hold this program times, and they are all the same length on
@@ -98,17 +98,17 @@ timeouts:
   # was short enough that arriving at the door with a thumb on A started the
   # game before the screen had been read; three was long enough to feel like
   # the program had stopped listening. A second and a half, the same length
-  # `pair_hold` asks padmap for, so pairing and readying up feel like one
+  # `pair_hold` asks danstick for, so pairing and readying up feel like one
   # gesture repeated.
   seat_go_hold: 1.5
   # The pause between pairing and being allowed to start: every pad quiet for
-  # this long. padmap claims a seat after a quarter second and a thumb takes
+  # this long. danstick claims a seat after a quarter second and a thumb takes
   # longer than that to come off, so the press that paired a controller used
   # to run straight into the hold that starts the game.
   seat_pause: 1.0
-  # How long a button is held to claim a seat. padmap's own default is a
+  # How long a button is held to claim a seat. danstick's own default is a
   # quarter second, which is short enough that picking a controller up claims
-  # one; this is what `seating` asks for instead. 0.05 to 10 seconds -- padmap
+  # one; this is what `seating` asks for instead. 0.05 to 10 seconds -- danstick
   # ignores anything else and keeps its default.
   pair_hold: 1.5
   seat_rebind_hold: 1.5

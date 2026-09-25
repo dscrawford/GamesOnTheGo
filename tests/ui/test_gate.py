@@ -1,7 +1,7 @@
 """The launch-time controller check.
 
 Every launch begins the same way: whatever the daemon remembers is forgotten,
-padmap is told to listen, and the person about to play holds a button. No
+danstick is told to listen, and the person about to play holds a button. No
 session: a session fixes its pads when it opens, and a controller switched on
 while the gate was up could not take a seat. What must *not* appear after the
 hold is the wizard: a pad that already knows this console's buttons is asked
@@ -31,7 +31,7 @@ from gotg_ui.gate import (
 
 
 def state_event(players, state=None):
-    """padmap's state. "assigning" is how it says a session is open."""
+    """danstick's state. "assigning" is how it says a session is open."""
     if state is None:
         state = "ready" if players else "idle"
     return {"event": "state", "state": state, "slots": 4, "players": players}
@@ -40,7 +40,7 @@ def state_event(players, state=None):
 def seated(player=1, name="Xbox Wireless Controller", mappings=(), configured=None):
     """A player as the daemon reports one.
 
-    `configured` defaults to whether there is a capture, which is what padmap
+    `configured` defaults to whether there is a capture, which is what danstick
     does: it is "mapped, not merely known".
     """
     return {
@@ -54,7 +54,7 @@ def seated(player=1, name="Xbox Wireless Controller", mappings=(), configured=No
 # --- which console's buttons -------------------------------------------------
 
 
-def test_a_platform_padmap_has_a_layout_for_uses_it():
+def test_a_platform_danstick_has_a_layout_for_uses_it():
     assert layout_for("n64") == "n64"
     assert layout_for("gamecube") == "gamecube"
 
@@ -72,7 +72,7 @@ def test_a_platform_with_no_layout_falls_back_rather_than_borrowing_one():
     assert layout_for("gb") == "generic"
 
 
-def test_the_scope_is_padmaps_own_spelling():
+def test_the_scope_is_dansticks_own_spelling():
     assert console_scope("gamecube") == "console:gamecube"
 
 
@@ -81,7 +81,7 @@ def test_the_scope_is_padmaps_own_spelling():
 
 def test_a_daemon_that_remembers_seats_is_told_to_forget_them_first():
     # A seat is taken in front of the screen about to be used, not remembered
-    # from last night. Whatever padmap restored is not this launch's.
+    # from last night. Whatever danstick restored is not this launch's.
     gate = Gate(platform="gamecube")
     gate = apply(gate, state_event([seated(mappings=["console:gamecube"])]))
     gate, command = decide(gate)
@@ -90,7 +90,7 @@ def test_a_daemon_that_remembers_seats_is_told_to_forget_them_first():
     assert gate.awaiting == "unseat"
 
 
-def test_the_state_after_unseating_answers_it_and_padmap_is_told_to_listen():
+def test_the_state_after_unseating_answers_it_and_danstick_is_told_to_listen():
     gate = Gate(platform="gamecube")
     gate = apply(gate, state_event([seated()]))
     gate, _ = decide(gate)
@@ -99,7 +99,7 @@ def test_the_state_after_unseating_answers_it_and_padmap_is_told_to_listen():
     gate, command = decide(gate)
     assert command == {"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD}
     assert gate.state == SEATING
-    # Once. padmap does not acknowledge it, and a daemon told every frame is
+    # Once. danstick does not acknowledge it, and a daemon told every frame is
     # a daemon told sixty times a second.
     gate, command = decide(gate)
     assert command is None
@@ -179,7 +179,7 @@ def test_a_mapped_controller_is_asked_nothing_more():
 def test_a_pad_mapped_for_another_console_is_not_asked_about_again():
     """Bound once is bound for everything.
 
-    padmap falls back to its universal capture when a console has none of its
+    danstick falls back to its universal capture when a console has none of its
     own, so a pad mapped on GameCube already works on an N64 game. Asking again
     on each new platform was a wizard in front of a controller that was fine.
     """
@@ -191,7 +191,7 @@ def test_a_pad_mapped_for_another_console_is_not_asked_about_again():
 
 
 def test_a_pad_that_bound_itself_is_left_alone():
-    # padmap reads the kernel's BTN_ codes, so a standard controller arrives
+    # danstick reads the kernel's BTN_ codes, so a standard controller arrives
     # correctly bound and has no capture of its own to show for it. That is a
     # working pad, and the gate must not open a wizard in front of it.
     gate = Gate(platform="gamecube", unseated=True, listening=True)
@@ -202,7 +202,7 @@ def test_a_pad_that_bound_itself_is_left_alone():
 
 
 def test_a_pad_with_nothing_at_all_is_still_asked_about():
-    # The case the gate exists for: seated, and padmap does not know where its
+    # The case the gate exists for: seated, and danstick does not know where its
     # buttons are.
     gate = Gate(platform="gamecube", listening=True, unseated=True)
     gate = apply(gate, state_event([seated(mappings=[], configured=False)]))
@@ -250,7 +250,7 @@ def test_asking_happens_once_however_many_state_events_arrive():
 def test_the_whole_sequence_for_a_machine_with_nothing_set_up():
     """listen, hold a button, bind the buttons, done. In that order.
 
-    No session and no accept: padmap seats a held pad in seating mode and
+    No session and no accept: danstick seats a held pad in seating mode and
     publishes it there and then, `map` needs no session, and the second that
     starts the game is the runner's door.
     """
@@ -261,7 +261,7 @@ def test_the_whole_sequence_for_a_machine_with_nothing_set_up():
     assert gate.state == SEATING
 
     gate, command = decide(gate)
-    assert command is None          # padmap is reading the pads; nothing to send
+    assert command is None          # danstick is reading the pads; nothing to send
 
     gate = apply(gate, {"event": "claim", "player": 1, "name": "GOTG test pad"})
     gate = apply(gate, state_event([seated(name="GOTG test pad")]))
@@ -344,7 +344,7 @@ def test_seats_are_read_in_player_order():
 
 def test_a_malformed_player_is_ignored_rather_than_raising():
     # The daemon is the authority and may grow fields; a front-end that died
-    # on one would break on every padmap release.
+    # on one would break on every danstick release.
     assert seats_from([{"name": "no player number"}, seated(player=2)]) == (
         Seat(player=2, name="Xbox Wireless Controller"),
     )
@@ -360,11 +360,11 @@ def test_an_error_is_shown_rather_than_thrown():
     assert gate.message == "no joypads found"
 
 
-# --- when padmap says no -----------------------------------------------------
+# --- when danstick says no -----------------------------------------------------
 
 
 def test_a_refused_bind_is_not_asked_for_again():
-    """padmap refuses `map` without an open session, and would refuse it the
+    """danstick refuses `map` without an open session, and would refuse it the
     same way for ever. Resending it every frame is a screen that never moves
     and a socket that never stops."""
     gate = Gate(platform="gamecube", session=True, awaiting="map")
@@ -403,16 +403,16 @@ def test_one_command_is_in_flight_at_a_time():
 # --- the window when there is nothing to ask ---------------------------------
 
 
-def test_the_window_without_padmap_says_why_and_how_long():
+def test_the_window_without_danstick_says_why_and_how_long():
     # Under Steam a line on stderr is a line in a log nobody reads. The
     # window is what somebody sees, and it counts down so nobody is stuck.
     from gotg_ui.gate import without_controllers
 
-    said, footer = without_controllers("padmap is not installed", 7.2)
-    assert said == "padmap is not installed"
+    said, footer = without_controllers("danstick is not installed", 7.2)
+    assert said == "danstick is not installed"
     assert "8 s" in footer and "Enter" in footer
     said, footer = without_controllers("", 0.0)
-    assert said == "padmap is not running"
+    assert said == "danstick is not running"
     assert "0 s" in footer
 
 
@@ -437,7 +437,7 @@ def test_a_button_already_down_when_the_door_opens_does_not_count():
 
 
 def test_a_button_the_pad_says_is_down_at_open_counts_for_nothing_until_it_comes_up():
-    # padmap forwards a Steam Controller's state, so its clone shows A down
+    # danstick forwards a Steam Controller's state, so its clone shows A down
     # from its first frame, and SDL may report that press late or never.
     # The pad was asked; the answer outranks the quiet.
     hold = GoHold(seconds=1.0, opened=100.0, held_at_open=True)
@@ -464,7 +464,7 @@ def test_nothing_held_at_open_means_a_press_after_the_quiet_counts():
 
 
 def test_a_press_in_the_first_second_is_the_old_hold_arriving_late():
-    # padmap forwards the state it held back during the wizard when the
+    # danstick forwards the state it held back during the wizard when the
     # wizard ends, about a tenth of a second after the door has opened.
     hold = GoHold(seconds=1.0, opened=100.0)
     hold.pressed(100.3)
@@ -546,13 +546,13 @@ def test_and_a_pad_that_really_is_unmapped_is_still_asked():
     assert gate.state == MAPPING
 
 
-def test_a_claim_carries_padmaps_own_word_for_bound():
+def test_a_claim_carries_dansticks_own_word_for_bound():
     gate = apply(Gate(platform="gamecube"), {"event": "claim", "player": 1, "name": "pad", "configured": True})
     assert gate.seats[0].configured
 
 
 def test_a_hold_let_go_empties_the_drawing():
-    """padmap says nothing when a button is released.
+    """danstick says nothing when a button is released.
 
     It sends `progress` about every 20 ms while one is held and no zero at
     the end, so a hold abandoned four-fifths of the way through left
@@ -575,7 +575,7 @@ def test_a_hold_let_go_empties_the_drawing():
 
 
 def test_a_repeated_reading_is_still_the_daemon_talking():
-    # padmap repeats the same fraction while a thumb sits still. That is a
+    # danstick repeats the same fraction while a thumb sits still. That is a
     # live hold, not a stale one.
     fade = gate_mod.Fade(hold=1.5)
     fade.saw(0.5, 10.0)
@@ -594,26 +594,26 @@ def test_a_claim_takes_the_reveal_off_the_screen():
 
 
 def test_seating_asks_for_a_hold_long_enough_to_be_deliberate():
-    """padmap's own default claims a seat in a quarter second.
+    """danstick's own default claims a seat in a quarter second.
 
     Short enough that picking a controller up, or resting a thumb on one while
     reading the screen, took a seat nobody meant to take. The length is on the
     command, so an older daemon ignores the field and behaves as it always
-    did: `docs/requests/how-long-a-seat-takes-to-claim.md`, landed in padmap
+    did: `docs/requests/how-long-a-seat-takes-to-claim.md`, landed in danstick
     as 98fd757.
     """
     gate, command = decide(Gate(platform="n64"))
     assert command is not None and command["cmd"] == "seating"
     assert command["hold"] == PAIR_HOLD
-    # padmap refuses nothing here, but it clamps to 0.05..10 and falls back to
+    # danstick refuses nothing here, but it clamps to 0.05..10 and falls back to
     # its own quarter second outside that -- so a number outside the range
     # would quietly be the thing this exists to avoid.
-    assert 0.05 <= PAIR_HOLD <= 10.0, f"padmap would ignore a hold of {PAIR_HOLD}s"
-    assert PAIR_HOLD > 0.25, "the point is that it is longer than padmap's default"
+    assert 0.05 <= PAIR_HOLD <= 10.0, f"danstick would ignore a hold of {PAIR_HOLD}s"
+    assert PAIR_HOLD > 0.25, "the point is that it is longer than danstick's default"
 
 
 def test_the_fill_keeps_moving_between_readings():
-    """padmap sends a reading every 20 ms and the screen draws every 16.
+    """danstick sends a reading every 20 ms and the screen draws every 16.
 
     A fill that only moved when a reading arrived stepped, and a second and a
     half of hold is eighty steps to watch. Between readings it carries on at
@@ -649,7 +649,7 @@ def test_a_seat_taken_in_the_picker_carries_into_the_launch():
     """Pair a controller on the grid, pick a game, and be asked to pair it
     again: that was the gate forgetting seats it had no business forgetting.
 
-    padmap names a session by the pid its daemon follows, and the picker's pid
+    danstick names a session by the pid its daemon follows, and the picker's pid
     survives the execvp into the launch -- so a daemon following *this* pid is
     holding seats somebody took a moment ago, in front of this screen.
     """

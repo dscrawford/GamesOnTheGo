@@ -12,7 +12,7 @@ from gotg_ui.padstrip import PLAYER_COLOURS, colour_for, name_for, next_seat, se
 
 
 def player(n: int, name: str = "", **extra) -> dict:
-    return {"player": n, "name": name or f"padmap Player {n}", **extra}
+    return {"player": n, "name": name or f"danstick Player {n}", **extra}
 
 
 def test_nobody_connected_is_no_seats_at_all():
@@ -60,10 +60,10 @@ def test_an_empty_seat_writes_nothing():
     assert name_for(None) == ""
 
 
-def test_padmap_s_own_name_is_not_what_gets_drawn():
-    # "padmap Player 2" beside a badge already saying 2, in player two's
+def test_danstick_s_own_name_is_not_what_gets_drawn():
+    # "danstick Player 2" beside a badge already saying 2, in player two's
     # colour, is the same fact three times and the controller not once.
-    assert name_for(player(2, "padmap Player 2", model="N64 adapter")) == "N64 adapter"
+    assert name_for(player(2, "danstick Player 2", model="N64 adapter")) == "N64 adapter"
 
 
 def test_a_pad_with_a_real_name_keeps_it():
@@ -72,21 +72,21 @@ def test_a_pad_with_a_real_name_keeps_it():
 
 def test_a_nameless_pad_still_reads_as_something():
     assert name_for({"player": 1}) == "pad"
-    assert name_for(player(1, "padmap Player 1")) == "pad"
+    assert name_for(player(1, "danstick Player 1")) == "pad"
 
 
 def test_the_status_is_in_words_somebody_can_act_on():
     assert status_text("assigning") == "hold a button on each controller"
-    assert status_text("offline") == "padmap not running"
+    assert status_text("offline") == "danstick not running"
     # An unknown state is shown rather than swallowed: a daemon that grew a
     # state this does not know about should not draw an empty corner.
     assert status_text("recalibrating") == "recalibrating"
 
 
-def test_an_idle_padmap_with_nobody_seated_says_how_to_start():
-    # "padmap ready" is true and useless there: the question in front of
+def test_an_idle_danstick_with_nobody_seated_says_how_to_start():
+    # "danstick ready" is true and useless there: the question in front of
     # somebody is how to make it do anything, not what it is doing. And what
-    # it takes is the hold padmap is already listening for, not a key on a
+    # it takes is the hold danstick is already listening for, not a key on a
     # keyboard nobody carried to the sofa.
     from gotg_ui.padstrip import strip_status
 
@@ -97,7 +97,7 @@ def test_an_idle_padmap_with_nobody_seated_says_how_to_start():
 def test_once_somebody_is_seated_it_goes_back_to_saying_what_is_true():
     from gotg_ui.padstrip import strip_status
 
-    assert strip_status("idle", 2) == "padmap ready"
+    assert strip_status("idle", 2) == "danstick ready"
     assert strip_status("assigning", 0) == "hold a button on each controller"
 
 

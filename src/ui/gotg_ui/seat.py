@@ -8,7 +8,7 @@ been mapped for this console, the buttons are walked.
 Never silent. It used to be: with no daemon to ask it printed a line to
 stderr and returned, which under Steam is a line in a log nobody reads, and
 the game came up with nothing to play it with and no word why. Now the
-window opens either way. With padmap gone it says so and counts down,
+window opens either way. With danstick gone it says so and counts down,
 because a screen no controller can dismiss must not be a trap -- the
 keyboard skips it at once, and eight seconds skip it for everybody else.
 
@@ -38,6 +38,7 @@ from . import pads as sdl_pads
 from .bindings import console_for, pad_controls
 from .controllers import Diagram, assets_dir, draw_arc, draw_reveal, draw_tick, icon_surface
 from .controllers import draw as draw_diagram
+from .danstick import Danstick, ensure_daemon, session_pid
 from .gate import (
     CHECKING,
     MAPPING,
@@ -55,7 +56,6 @@ from .gate import (
 )
 from .hush import Hush
 from .joining import Joining
-from .padmap import Padmap, ensure_daemon, session_pid
 from .padstrip import ATTENTION, LABEL, LABEL_DIM, PANEL, colour_for
 from .padstrip import READY as SETTLED_GREEN  # gate.READY is a state; this is a colour
 from .pressing import (
@@ -75,15 +75,15 @@ BACKGROUND = config.colour("theme.colours.background", (18, 18, 20))
 # on a socket that is there and silent.
 FIRST_STATE_TIMEOUT = float(config.get("theme.timeouts.first_state", 3.0))
 
-# How long the window stays when there is no padmap to ask, before the game
+# How long the window stays when there is no danstick to ask, before the game
 # starts anyway. Long enough to read; short enough that a television with no
 # keyboard in the room is not stuck on it. The environment wins, for tests.
 COUNTDOWN = float(os.environ.get("GOTG_SEAT_COUNTDOWN") or config.get("theme.timeouts.seat_countdown", 8.0))
 
-# The hold that starts the game, once padmap has accepted the seats. A second
+# The hold that starts the game, once danstick has accepted the seats. A second
 # and a half, on a press that began on this screen: the hold that took the
-# seat ran straight into padmap's confirm, and one press seated somebody and
-# started the game before they had let go. The daemon's accept is padmap's
+# seat ran straight into danstick's confirm, and one press seated somebody and
+# started the game before they had let go. The daemon's accept is danstick's
 # business; this hold is ours, read from the clone it just published, and it
 # is the same length as the one that paired them.
 GO_HOLD = float(os.environ.get("GOTG_SEAT_GO_HOLD") or config.get("theme.timeouts.seat_go_hold", 1.5))
@@ -99,7 +99,7 @@ PRESS_SHOWN = 0.45
 READY_SHOWN = 0.3
 
 # The pause between pairing and being able to start. The hold that claims a
-# seat is padmap's quarter second, and a thumb does not come off a button that
+# seat is danstick's quarter second, and a thumb does not come off a button that
 # fast: the same press ran straight into the go hold, so the game started
 # while somebody was still looking at the screen they had just reached. Now
 # there are three moments and the middle one is doing nothing -- pair, let go,
@@ -126,7 +126,7 @@ def draw(
     """The gate, whatever it is waiting for.
 
     `progress` is the reveal's fraction as the clock sees it (`gate.Fade`),
-    rather than the last reading padmap sent: a hold let go says nothing, and
+    rather than the last reading danstick sent: a hold let go says nothing, and
     the drawing has to fall back to nothing by itself.
     """
     width, height = screen.get_size()
@@ -225,14 +225,14 @@ def _said(why: str) -> None:
 def run(platform: str, title: str) -> int:
     """Ask what needs asking, then get out of the way. Always returns 0."""
     # The same session name the picker used, when there was one: this pid is
-    # the picker's after its execvp, and padmap leaves a daemon following it
+    # the picker's after its execvp, and danstick leaves a daemon following it
     # alone. A launch with no picker -- Steam -- starts one of its own, clean.
     # The same two rules the picker sets for the daemon it starts: no
     # session opened by the daemon itself, and no seat but by a hold.
-    os.environ.setdefault("PADMAP_NO_AUTOSETUP", "1")
-    os.environ.setdefault("PADMAP_NO_AUTOATTACH", "1")
+    os.environ.setdefault("DANSTICK_NO_AUTOSETUP", "1")
+    os.environ.setdefault("DANSTICK_NO_AUTOATTACH", "1")
     trouble = ensure_daemon(fresh=True, follow=os.getpid())
-    pads = Padmap()
+    pads = Danstick()
     if trouble is not None or not pads.connect():
         # No daemon, no questions to ask -- but a window all the same, or a
         # game starts with nothing to play it with and no word why.
@@ -257,9 +257,9 @@ def run(platform: str, title: str) -> int:
             break
         time.sleep(0.02)
     if not pads.state:
-        print("gotg-seat: padmap said nothing; starting anyway", file=sys.stderr)
+        print("gotg-seat: danstick said nothing; starting anyway", file=sys.stderr)
         pads.close()
-        return _hold_the_door(title, "padmap said nothing")
+        return _hold_the_door(title, "danstick said nothing")
 
     gate, command = decide(gate)
     if gate.done:
@@ -289,7 +289,7 @@ def run(platform: str, title: str) -> int:
     return 0
 
 
-def before_launch(shown: display.Display, font_at, pads: Padmap, platform: str, title: str, hush=None) -> str:
+def before_launch(shown: display.Display, font_at, pads: Danstick, platform: str, title: str, hush=None) -> str:
     """The gate, run by the picker in the window it already has.
 
     It used to be a second process with a second window: the picker closed
@@ -314,7 +314,7 @@ def before_launch(shown: display.Display, font_at, pads: Padmap, platform: str, 
     return at(shown, font_at, pads, gate, title, hush)
 
 
-def at(shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, hush=None) -> str:
+def at(shown: display.Display, font_at, pads: Danstick, gate: Gate, title: str, hush=None) -> str:
     """The gate itself, in a window somebody else opened.
 
     Split out for the picker, which has a window already. It used to exec
@@ -335,7 +335,7 @@ def at(shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, hu
         print(f"gotg-seat: no controller drawing: {error}", file=sys.stderr)
         diagram = None
 
-    # The space bar, held, seats the keyboard. padmap never sees its keys --
+    # The space bar, held, seats the keyboard. danstick never sees its keys --
     # the keyboard is the compositor's -- so this hold is timed here and the
     # daemon is told the answer, exactly as the picker does it.
     # Where a frame's time goes, for the screen a reveal is watched on.
@@ -358,7 +358,7 @@ def at(shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, hu
         trace.say("gate-hush", held=sorted(mine.held))
     hush = hush if hush is not None else mine
 
-    # The reveal's own clock. padmap stops sending `progress` when a button is
+    # The reveal's own clock. danstick stops sending `progress` when a button is
     # let go rather than sending a zero, so this is what makes the drawing
     # empty again -- see gate.Fade.
     fade = Fade()
@@ -371,12 +371,12 @@ def at(shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, hu
     # Seating stays open into the game, which is what it was for.
     #
     # It used to be closed here, because it cost about a hundred milliseconds
-    # a press: padmap rescanned every input device on every 20 ms tick while
+    # a press: danstick rescanned every input device on every 20 ms tick while
     # seating was open, one scan took ~100 ms, and the forwarding waited
     # behind it. Melee felt like treacle and it was that. The gate closed
     # seating and gave up mid-game joining for it --
     # docs/requests/seating-costs-the-game-its-input.md asked for the scan to
-    # be throttled, and padmap has done it. The e2e's strict xfail turned into
+    # be throttled, and danstick has done it. The e2e's strict xfail turned into
     # an XPASS, which is the day this note said to take the close out: a pad
     # switched on in the middle of a level can take a seat again, and the
     # latency tests hold the other half to under a frame.
@@ -392,7 +392,7 @@ def at(shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, hu
                     # to be able to hand it out again or a keyboard player
                     # arrives at a gate that answers nothing.
                     if event.type in (pygame.KEYDOWN, pygame.KEYUP, pygame.TEXTINPUT):
-                        # padmap reads the space bar itself and seats the
+                        # danstick reads the space bar itself and seats the
                         # keyboard (its hold arrives as `progress`, drawn in
                         # the queue); here it is only not a stray key.
                         if getattr(event, "key", None) == pygame.K_SPACE or getattr(event, "text", None) == " ":
@@ -401,7 +401,7 @@ def at(shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, hu
                             trace.say("key-refused", key=getattr(event, "key", None))
                             continue
                     if event.type in (pygame.JOYDEVICEADDED, pygame.JOYDEVICEREMOVED):
-                        # padmap publishing a clone is a device arriving, and
+                        # danstick publishing a clone is a device arriving, and
                         # its keyboard siblings arrive with it.
                         hush.refresh()
                         devices.forget()
@@ -411,7 +411,7 @@ def at(shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, hu
                         if event.key in (pygame.K_ESCAPE, pygame.K_b) and gate.wizard:
                             # Not while the buttons are being walked. Leaving
                             # half way through leaves a pad half bound, and
-                            # every way out of that screen belongs to padmap:
+                            # every way out of that screen belongs to danstick:
                             # S skips a control, and a long hold finishes.
                             trace.say("gate-key-ignored", key=event.key, state=gate.state)
                         elif event.key in (pygame.K_ESCAPE, pygame.K_b):
@@ -437,7 +437,7 @@ def at(shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, hu
                         # queue on one flashed their controller back to empty.
                         queue.seated(message.get("players"))
                 if not pads.connected:
-                    _said("padmap went away while the gate was up; starting anyway")
+                    _said("danstick went away while the gate was up; starting anyway")
                     break
                 gate, command = decide(gate)
                 if command is not None:
@@ -478,7 +478,7 @@ def at(shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, hu
                     continue
             if verdict == "map":
                 # Somebody joined at the door. Back through the loop, which
-                # asks padmap to walk that pad's buttons and then comes here
+                # asks danstick to walk that pad's buttons and then comes here
                 # again with both of them seated.
                 gate = replace(gate, state=CHECKING)
                 continue
@@ -492,9 +492,9 @@ def at(shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, hu
 class Door:
     """The go screen's decision, one event at a time, so a test can drive it.
 
-    Opened over the pads SDL has now -- the clones padmap just published --
+    Opened over the pads SDL has now -- the clones danstick just published --
     and asks them what is down. A button already held is the hold that
-    finished the wizard and rode through padmap's confirm; it does not
+    finished the wizard and rode through danstick's confirm; it does not
     count, and nothing does until it has come up.
     """
 
@@ -526,7 +526,7 @@ class Door:
         # because a seat that cannot ready would hold the room for ever.
         self.keyboard: int | None = None
         self.typing = False
-        # padmap's profile for the seated pad, so a raw input can be named:
+        # danstick's profile for the seated pad, so a raw input can be named:
         # which control the button under the thumb is. Ringed on the drawing
         # while it is down.
         self.buttons = buttons or {}
@@ -535,7 +535,7 @@ class Door:
         # naming player two's press from player one's profile named the wrong
         # control on the drawing.
         self.buttons_by = buttons_by or {}
-        # padmap's control id -> what this console's drawing calls it. Without
+        # danstick's control id -> what this console's drawing calls it. Without
         # it a press answered `leftshoulder` and every label was called `L`,
         # so nothing ever lit: `bindings.pad_controls`.
         self.names = names or {}
@@ -640,7 +640,7 @@ class Door:
         # One vocabulary per pad, chosen by whether SDL maps it -- not by
         # what kind of event this is. A pad SDL maps says which control it is
         # itself, in the standard layout the binding tables are written
-        # against; a pad it does not map can only be named by padmap's
+        # against; a pad it does not map can only be named by danstick's
         # capture. Choosing per event ran both for an axis, and one trigger
         # lit two labels: a GameCube pad's right trigger read as R *and* Z.
         known = sdl_pads.mapped(event)
@@ -674,7 +674,7 @@ class Door:
 
         released = sdl_pads.raw_release(event)
         if released is not None and seat is not None and not known:
-            # A pad SDL does not map: padmap's capture is the only thing that
+            # A pad SDL does not map: danstick's capture is the only thing that
             # can name its buttons, and the release has to be named the same
             # way `lit_by` holds them.
             self._let_go(seat, self._named(controls_on(self._table(seat), "button", released)))
@@ -703,7 +703,7 @@ class Door:
         return self.buttons_by.get(seat or 0) or self.buttons
 
     def _named(self, controls: list[str]) -> list[str]:
-        """padmap's control ids, as the drawing's labels."""
+        """danstick's control ids, as the drawing's labels."""
         return [self.names.get(name, name) for name in controls]
 
     def _one(self, element: str) -> str:
@@ -713,7 +713,7 @@ class Door:
     def settled(self, now: float) -> bool:
         """Whether the pause is over and a press may start the game.
 
-        Every pad quiet for PAUSE seconds. The claim hold is padmap's quarter
+        Every pad quiet for PAUSE seconds. The claim hold is danstick's quarter
         second and a thumb stays down longer than that, so without this the
         press that paired a controller was still down when the door opened and
         went on to start the game.
@@ -737,7 +737,7 @@ class Door:
     def tick(self, now: float) -> None:
         """The holds, against what is actually down right now.
 
-        Events are not enough. A release can go missing -- padmap republishes
+        Events are not enough. A release can go missing -- danstick republishes
         a clone and the button that was down on the old one never comes up on
         the new, and a Steam Controller forwards state rather than events --
         and a hold that kept its start time then "finished" three seconds
@@ -801,11 +801,11 @@ class Door:
 
 
 def _wait_for_go(
-    shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, cache: dict | None = None, hush=None
+    shown: display.Display, font_at, pads: Danstick, gate: Gate, title: str, cache: dict | None = None, hush=None
 ) -> tuple[str, Gate]:
     """Seated and mapped; the game starts on a three-second hold of A.
 
-    padmap is polled here, which it was not: a second player holding a button
+    danstick is polled here, which it was not: a second player holding a button
     was claimed by the daemon and nothing on this screen knew, so the seat
     that had just been taken was invisible and the pad that took it did
     nothing. Now the seats are redrawn as they arrive, and a pad that arrives
@@ -817,11 +817,11 @@ def _wait_for_go(
     screen = shown.surface
     first = gate.seats[0] if gate.seats else None
     profile = profiles.for_pad(first.name) if first else None
-    # One profile per seat, by the name padmap gave it: whose press it is
+    # One profile per seat, by the name danstick gave it: whose press it is
     # decides which table names the control.
     by_seat = {
         # This console's capture, falling back to the universal one, which is
-        # what padmap itself falls back to: the top-level table is the
+        # what danstick itself falls back to: the top-level table is the
         # universal capture alone, and a pad bound for N64 has controls there
         # that it does not have here.
         seat.player: profiles.bindings(profiles.for_pad(seat.name), gate.scope)
@@ -858,7 +858,7 @@ def _wait_for_go(
         door.seats = {seat.player for seat in gate.seats}
         door.keyboard = keys.seat_of(pads.players)
         if not pads.connected:
-            _said("padmap went away at the door; starting")
+            _said("danstick went away at the door; starting")
             return "go", gate
         # A pad seated at this screen that has never been mapped for this
         # console: back to the wizard, and back here after it.
@@ -1067,7 +1067,7 @@ def _draw_seats(
             icon.set_alpha(255)
 
         # Readying up is not pairing, so it does not look like it. Pairing is
-        # the controller filling in -- padmap's own hold, drawn as a reveal
+        # the controller filling in -- danstick's own hold, drawn as a reveal
         # wherever it happens. This is a green ring closing around the pad
         # already in somebody's hands, and a check through it when it is
         # done: a different thing, said differently.
@@ -1115,7 +1115,7 @@ def _draw_seats(
 
 
 def _hold_the_door(title: str, reason: str) -> int:
-    """The window when there is no padmap to ask. Counts down, then starts."""
+    """The window when there is no danstick to ask. Counts down, then starts."""
     pygame.init()
     shown = display.open(WINDOW, fullscreen=config.fullscreen())
     screen = shown.surface
@@ -1151,7 +1151,7 @@ def _hold_the_door(title: str, reason: str) -> int:
     return 0
 
 
-def _leave(pads: Padmap, gate: Gate) -> Gate:
+def _leave(pads: Danstick, gate: Gate) -> Gate:
     """Back out of whatever is open, and let the game start.
 
     Seating is left open -- it is the picker's and the game's as much as the

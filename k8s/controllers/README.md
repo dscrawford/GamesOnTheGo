@@ -1,7 +1,7 @@
 # Running the controller suite on the cluster
 
 `tests/e2e` in a pod, so it stops running on the machine somebody is using.
-The tests make real pads through `/dev/uinput` and start real padmap daemons
+The tests make real pads through `/dev/uinput` and start real danstick daemons
 against them; on a desktop that means a fake pad can take a seat in a game
 being played, which is exactly what happened once.
 
@@ -44,7 +44,7 @@ the same NodePort registry under the name the nodes' containerd trusts. The
 desktop's `/etc/docker/certs.d` holds a client key only root can read, hence
 the cert dir of its own.
 
-The image carries the suite, `src/ui`, `config/` and padmap — a pod has no
+The image carries the suite, `src/ui`, `config/` and danstick — a pod has no
 checkout — and runs `gotg-test-controllers`, the same entry point a desktop
 uses, with `GOTG_DEV_ROOT=/gotg`.
 
@@ -58,8 +58,8 @@ uses, with `GOTG_DEV_ROOT=/gotg`.
   unprivileged container whatever the node's permissions say. Same trade the
   QA job takes, on the same private cluster.
 - **The wizard tests do not pass here yet.** Five of the fifty —
-  everything that walks padmap's capture wizard through a gate subprocess —
-  fail with "the wizard never finished", and padmap's states show `ready`
+  everything that walks danstick's capture wizard through a gate subprocess —
+  fail with "the wizard never finished", and danstick's states show `ready`
   without a mapping run: in a pod it seats the fake pad as already configured,
   so the gate never asks. The other forty-four pass, including the whole
   controller requirement and the press-to-light-a-label set. Chasing that

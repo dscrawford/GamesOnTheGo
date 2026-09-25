@@ -164,7 +164,7 @@ def anchors_for(
         # a wall of text nobody read to find that out.
         #
         # The consoles with no ares table are the exception: there `name` is
-        # padmap's control id and `description` is the human word for it.
+        # danstick's control id and `description` is the human word for it.
         label = name if with_binding else description or name
         out.append(Anchor(input=name, x=left + uv[0] * width, y=top + uv[1] * height, label=label))
     return out
@@ -206,7 +206,7 @@ def resolve(platform: str) -> Shown:
         # Dolphin's two it means never, because Dolphin writes its own
         # configuration and publishes no console at all. Telling somebody with
         # a GameCube game to play it once and come back is an instruction that
-        # cannot work, so padmap's control set is used instead: it is the same
+        # cannot work, so danstick's control set is used instead: it is the same
         # one the launch wizard walks, which is where these get bound.
         scheme = for_platform(platform)
         console = scheme.label or scheme.name
@@ -315,7 +315,7 @@ def draw(
     # reads that way in the hand.
     #
     # Read off the *artwork*, not off the bindings. A stick's position is a
-    # reading rather than a binding: padmap's clone forwards the axes whether
+    # reading rather than a binding: danstick's clone forwards the axes whether
     # or not its capture ever asked about them, and for a while its GameCube,
     # Switch and Wii U layouts did not ask at all. So the ring is drawn
     # wherever the drawing has a stick, and a console that binds those
@@ -394,7 +394,7 @@ def draw(
     screen.blit(said, ((width - said.get_width()) // 2, int(height * 0.93)))
 
     # Said, because a cursor that moves is not obviously a cursor that can be
-    # moved. Nothing about adding a second input: padmap holds one binding per
+    # moved. Nothing about adding a second input: danstick holds one binding per
     # control, so offering it would be offering something with nowhere to go.
     hint = words(font_at(20), keys if keys is not None else "d-pad or arrows to move around the pad", TEXT_DIM)
     screen.blit(hint, ((width - hint.get_width()) // 2, int(height * 0.055)))
@@ -857,7 +857,7 @@ def draw_assign(screen, font_at, view) -> None:
     prompt = font_at(30).render(view.prompt, True, TEXT)
     screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.20)))
 
-    # The way out a controller can reach. padmap holds every pad for the length
+    # The way out a controller can reach. danstick holds every pad for the length
     # of a session, so this screen answers no button -- except a longer hold on
     # a pad that already has a seat, which the daemon takes as "accept" itself.
     if view.keep_hint:
@@ -887,7 +887,7 @@ def draw_assign(screen, font_at, view) -> None:
         # what is missing is a controller, and that is what it looks like.
         #
         # A hold fills that pad in, clockwise from twelve, the way the strip
-        # does: padmap's progress on the seat it would claim next, and its
+        # does: danstick's progress on the seat it would claim next, and its
         # confirm -- the longer hold that accepts -- as the seated pad filling
         # in again over a dark silhouette, so the two are not one thing twice.
         below = (centre[0], middle + 62)

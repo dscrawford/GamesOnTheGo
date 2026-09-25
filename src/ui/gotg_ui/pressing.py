@@ -1,6 +1,6 @@
-"""Which control a raw input is, on a pad padmap has profiled.
+"""Which control a raw input is, on a pad danstick has profiled.
 
-padmap's profile for a controller says, per control, what the pad does when
+danstick's profile for a controller says, per control, what the pad does when
 that control is used: button 3, hat 0 up, axis 2 positive. This is the same
 table read the other way -- an input arriving from the pad, which control it
 is -- so a screen can ring the button somebody is pressing while they look

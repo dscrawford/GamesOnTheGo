@@ -36,7 +36,7 @@ another. Values written down once cannot drift like that.
 
 Paths that describe where another program puts its files:
 `manifest.json`, `env-<platform>/share/gotg/pads.json`, `ui/art`,
-`$XDG_RUNTIME_DIR/padmap/padmap.sock`. They are not preferences — they are the
+`$XDG_RUNTIME_DIR/danstick/danstick.sock`. They are not preferences — they are the
 layout of something else's output, and a copy of it in a YAML file is a second
 thing to keep in step, wrong only at runtime and only on the machine where it
 matters. They stay next to the code that reads them, derived from

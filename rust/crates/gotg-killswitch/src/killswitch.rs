@@ -26,7 +26,7 @@ pub enum Chord {
     /// Both shoulders and Start: the game stops.
     Exit,
     /// Both shoulders and Select: the pad's buttons are walked again in
-    /// padmap, over the game, for this pad alone.
+    /// danstick, over the game, for this pad alone.
     Rebind,
 }
 

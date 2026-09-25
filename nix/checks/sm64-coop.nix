@@ -52,13 +52,13 @@ let
 
       # Every copy is sandboxed to its own player's pad, or to none: a copy
       # that saw everyone's pads let one controller drive two players. With
-      # padmap seating only player one, player one gets its clone and the
-      # rest get nothing; with no padmap, copy one sees the room and the rest
+      # danstick seating only player one, player one gets its clone and the
+      # rest get nothing; with no danstick, copy one sees the room and the rest
       # get nothing.
       sys="$TMPDIR/sys-${toString players}"
       mkdir -p "$sys/event7/device" "$sys/event9/device"
       printf 'Some Physical Pad\n' >"$sys/event7/device/name"
-      printf 'padmap Player 1\n' >"$sys/event9/device/name"
+      printf 'danstick Player 1\n' >"$sys/event9/device/name"
       ( set -euo pipefail
         export state GOTG_USER_CONFIG="$TMPDIR/no-config" GOTG_INPUT_SYS="$sys"
         source "$TMPDIR/gen-${toString players}.sh" )
@@ -73,7 +73,7 @@ let
         source "$TMPDIR/gen-${toString players}.sh" )
       jq -e '.instances[0].isolate_input == false and ([.instances[1:][] | .isolate_input == true] | all)' \
         "$state/splitscreen/session.json" >/dev/null ||
-        { echo "${name}: without padmap, copy one should see the room and the rest nothing" >&2; exit 1; }
+        { echo "${name}: without danstick, copy one should see the room and the rest nothing" >&2; exit 1; }
     '';
   # Every variant is the same port, compiled once. A directory per environment
   # would be the same five-minute build four times over, and nothing about a

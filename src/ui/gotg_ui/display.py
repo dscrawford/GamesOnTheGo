@@ -88,7 +88,7 @@ class Display:
 
     def rest(self, cap: float | None = None, woken=None) -> None:
         """Sleep until the next frame should start. An idle screen's long rest
-        ends the moment SDL has an event or `woken` says padmap spoke."""
+        ends the moment SDL has an event or `woken` says danstick spoke."""
         now = time.monotonic()
         if self.window is not None and now >= self._asked_monitor:
             # Once a second: a window dragged to another panel is paced for

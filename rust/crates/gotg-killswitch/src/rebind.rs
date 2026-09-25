@@ -1,20 +1,20 @@
 //! Rebinding a controller in the middle of a game: both shoulders and Select,
-//! held for three seconds, and padmap walks that pad's buttons again.
+//! held for three seconds, and danstick walks that pad's buttons again.
 //!
-//! The binding is padmap's, not the game's: the emulator reads a clone whose
-//! buttons padmap decides, so remapping there changes every game at once and
-//! touches no emulator's settings. padmap runs the wizard with no session --
+//! The binding is danstick's, not the game's: the emulator reads a clone whose
+//! buttons danstick decides, so remapping there changes every game at once and
+//! touches no emulator's settings. danstick runs the wizard with no session --
 //! it grabs only this seat's pad and holds its clone back, so the game sees
 //! nothing while the buttons are walked, and everybody else keeps playing.
 //!
 //! This is the decision half, with no socket and no clock of its own: what
-//! to ask padmap, and what the bar should show while it answers.
+//! to ask danstick, and what the bar should show while it answers.
 
 use serde_json::json;
 
 use crate::events::Event;
 
-/// How long padmap has to begin the walk before the bar gives up on it: a
+/// How long danstick has to begin the walk before the bar gives up on it: a
 /// daemon too old to know `map` with no session answers with an error, but
 /// one that is not there answers nothing at all.
 pub const ASK_SECONDS: f64 = 4.0;
@@ -35,14 +35,14 @@ enum Phase {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct View {
     pub player: i32,
-    /// padmap's control id being asked for; empty until the first step.
+    /// danstick's control id being asked for; empty until the first step.
     pub control: String,
     /// 0-based step, and how many there are.
     pub index: i32,
     pub total: i32,
     /// 0..1 through the long hold that finishes early.
     pub finish: f64,
-    /// Some once it has ended: whether padmap kept the new buttons.
+    /// Some once it has ended: whether danstick kept the new buttons.
     pub stored: Option<bool>,
 }
 
@@ -58,7 +58,7 @@ impl Default for Rebind {
 }
 
 impl Rebind {
-    /// The chord fired on `player`'s pad: the line to send padmap, or None
+    /// The chord fired on `player`'s pad: the line to send danstick, or None
     /// while another rebind is on screen -- one at a time, as the bar has
     /// room for one controller.
     pub fn start(&mut self, player: i32, layout: &str, scope: &str, now: f64) -> Option<String> {
@@ -70,7 +70,7 @@ impl Rebind {
         Some(json!({"cmd": "map", "player": player, "layout": layout, "scope": scope}).to_string())
     }
 
-    /// The command never reached padmap: over at once, as a walk nothing was
+    /// The command never reached danstick: over at once, as a walk nothing was
     /// kept from, rather than an empty panel waiting out `ASK_SECONDS`.
     pub fn unsent(&mut self, now: f64) {
         if let Phase::Asked { player, .. } = self.phase {
@@ -93,7 +93,7 @@ impl Rebind {
         }
     }
 
-    /// One padmap event. Only this rebind's player's, and only while one is
+    /// One danstick event. Only this rebind's player's, and only while one is
     /// on: somebody else's wizard at the picker is not ours to draw.
     pub fn apply(&mut self, event: &Event, now: f64) {
         let Some(ours) = self.player() else { return };
@@ -134,7 +134,7 @@ impl Rebind {
                     view.finish = frac.clamp(0.0, 1.0);
                 }
             }
-            // A refusal while asking is this rebind's: padmap too old, or the
+            // A refusal while asking is this rebind's: danstick too old, or the
             // seat gone. Once walking, an error is somebody else's command.
             Event::Error { .. } if matches!(self.phase, Phase::Asked { .. }) => {
                 self.end(current, false, now);
@@ -202,7 +202,7 @@ mod tests {
     }
 
     #[test]
-    fn the_chord_asks_padmap_to_walk_that_seats_buttons() {
+    fn the_chord_asks_danstick_to_walk_that_seats_buttons() {
         let mut rebind = Rebind::default();
         let line = rebind.start(2, "n64", "console:n64", 10.0).expect("a command");
         let sent: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -282,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn a_padmap_that_never_answers_or_refuses_does_not_hold_the_bar_down() {
+    fn a_danstick_that_never_answers_or_refuses_does_not_hold_the_bar_down() {
         let mut silent = Rebind::default();
         silent.start(1, "n64", "console:n64", 0.0);
         assert!(silent.view(ASK_SECONDS - 0.1).is_some());

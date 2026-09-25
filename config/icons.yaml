@@ -12,7 +12,7 @@
 #
 # Some pads no name can tell apart. `ids` is tried first, by exact
 # vendor:product in lowercase hex, read from /proc/bus/input/devices for the
-# node padmap seated (`gotg_ui/devices.py`).
+# node danstick seated (`gotg_ui/devices.py`).
 
 fallback: generic
 

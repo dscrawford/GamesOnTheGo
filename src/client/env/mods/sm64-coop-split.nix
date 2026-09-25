@@ -79,7 +79,7 @@ in
       emulator = split;
       bin = "splitscreen-session";
       # A nested sway with a gamescope per copy, which is why this
-      # cannot run inside padmap's user namespace. See ownsSession in
+      # cannot run inside danstick's user namespace. See ownsSession in
       # env/lib.nix for what that breaks and why nothing is lost.
       ownsSession = true;
       # --workdir as well as the session: without it the frame keeps its logs
@@ -118,7 +118,7 @@ in
             # copy sees only its player's pad (coop-seats.nix), so the number
             # coopdx wants -- SDL's device index -- is always the first. It used
             # to be the player's place in `gotg controllers order`, which under
-            # padmap counted the physical pad and its clone both.
+            # danstick counted the physical pad and its clone both.
             gotg_seat="$(${seat} "$gotg_n")"
             # Written into each player's own config because it is a *setting*,
             # not a flag: coopdx takes the controller number and the

@@ -75,7 +75,7 @@ KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinpu
 EOF
 ```
 
-The first puts the picker in Steam; the second lets padmap publish
+The first puts the picker in Steam; the second lets danstick publish
 controllers through `/dev/uinput` (on NixOS: `hardware.uinput.enable = true;`
 instead). The installer itself also works here:
 
@@ -120,7 +120,7 @@ curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawfo
 | install Nix | SteamOS 3.5+ ships `/nix` already, bind-mounted to the home partition and kept across updates; the installer just takes ownership and runs the single-user install. Elsewhere it uses the official multi-user installer. |
 | turn on flakes | GOTG is a flake and they are still behind a flag |
 | `nix profile add` / `upgrade` | `gotg` and `gotg-ui`, from `github:dscrawford/GamesOnTheGo`; upgraded in place when already there |
-| a udev rule | padmap publishes each controller as a new device through `/dev/uinput`, and cannot open it without permission. The rule tags it `uaccess`, which gives it to whoever is logged in at the seat. |
+| a udev rule | danstick publishes each controller as a new device through `/dev/uinput`, and cannot open it without permission. The rule tags it `uaccess`, which gives it to whoever is logged in at the seat. |
 | a Steam shortcut | so Game Mode can launch the picker ([the gotchas](steam.md)). Steam only takes a new entry while closed, so with Steam open the installer asks, closes it, adds GOTG, and starts it again; declined, the entry is queued and `gotg steam picker` with Steam closed applies it |
 
 ## After a SteamOS update

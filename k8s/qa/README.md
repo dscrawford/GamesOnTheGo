@@ -48,7 +48,7 @@ captures, the frames and `verdict.json` stay on the state volume under
 
 `--overlay-at N` in the Job's `args` drives gotg-killswitch's bar over the game
 N seconds in, with the inputs a room would give it -- a pad joining through a
-stand-in padmap socket, then the virtual pad holding L+R+Start short of the
+stand-in danstick socket, then the virtual pad holding L+R+Start short of the
 kill -- and grades the recording for it (`overlay` in `verdict.json`).
 Put N past the game's own boot: a game that compiles itself on first run (the
 Super Mario 64 port does, for minutes) is a black screen with a bar on it

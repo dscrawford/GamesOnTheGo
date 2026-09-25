@@ -372,7 +372,7 @@ teardown() {
   # Steam hands what it starts a list of controllers to ignore and preloads
   # its overlay. The per-game Steam launcher has always undone both, but the
   # picker launches games through `gotg play` directly -- so a game started
-  # from the picker, from Steam, kept Steam's ignore list, and padmap's clone
+  # from the picker, from Steam, kept Steam's ignore list, and danstick's clone
   # of the Steam Controller was ignored right along with the real one.
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh

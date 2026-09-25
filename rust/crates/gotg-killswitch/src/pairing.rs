@@ -3,11 +3,11 @@
 //! The picker draws this in its seat strip (gotg_ui/joining.py); a game had no
 //! way to say it at all, so a controller picked up mid-level took a seat with
 //! nothing on screen to show the hold was counting. The overlay draws it now,
-//! from the same padmap events and by the same rules, which were measured
+//! from the same danstick events and by the same rules, which were measured
 //! before they were written down:
 //!
 //!   - A named reading's release is said out loud (`frac: 0`), so silence is
-//!     only a safety net for it. padmap sends progress from the loop that
+//!     only a safety net for it. danstick sends progress from the loop that
 //!     also rescans every device, and on a desktop with many of them readings
 //!     arrive ~58 ms apart: taking 50 ms of quiet as a release dropped a
 //!     steady press between every reading.
@@ -64,7 +64,7 @@ struct Joined {
 pub struct Pairing {
     holds: Vec<Hold>,
     joined: Vec<Joined>,
-    /// The length padmap was asked for, to carry fills between readings.
+    /// The length danstick was asked for, to carry fills between readings.
     hold_seconds: f64,
 }
 
@@ -117,7 +117,7 @@ impl Pairing {
                 }
             }
             _ => {
-                // A new hold, or the same pad starting again: padmap's
+                // A new hold, or the same pad starting again: danstick's
                 // fraction only climbs within one press, so a smaller one is a
                 // different press, and it goes to the back however small the gap.
                 let fresh = Hold {

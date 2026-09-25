@@ -1,7 +1,7 @@
 """The trace line that says how long a hold's readings went quiet.
 
-The flash back to the red empty seat was a pause in padmap's readings longer
-than the screen's patience, and how long padmap pauses depends on how many
+The flash back to the red empty seat was a pause in danstick's readings longer
+than the screen's patience, and how long danstick pauses depends on how many
 input devices the machine has -- a pod has almost none and never paused past
 25 ms. So the machine that shows the bug has to be the one that measures it.
 """

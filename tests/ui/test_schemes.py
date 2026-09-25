@@ -5,11 +5,11 @@ and a platform nobody claims all have to be survivable, because the picker is
 what tells you a controller is wrong and it cannot be the thing that breaks.
 
 The second is agreement, and it is the reason these files are worth having.
-Three descriptions of a GameCube pad exist -- padmap's layout, our config, and
+Three descriptions of a GameCube pad exist -- danstick's layout, our config, and
 the circles on the drawing -- and a screen that walks one while labelling
 another points at the wrong button and says nothing about it. So the config is
-checked against the artwork here, and against padmap's own layouts wherever
-padmap is checked out beside this.
+checked against the artwork here, and against danstick's own layouts wherever
+danstick is checked out beside this.
 """
 
 import pathlib
@@ -116,12 +116,12 @@ def test_the_gamecube_drawing_marks_every_control():
     assert set(scheme.controls) <= anchors_of("gamecube")
 
 
-def test_the_drawings_mark_the_sticks_padmap_never_asks_about():
+def test_the_drawings_mark_the_sticks_danstick_never_asks_about():
     """A stick is a reading, not a binding.
 
-    padmap's gamecube, switch and wiiu layouts have no `leftstick_*` in them,
+    danstick's gamecube, switch and wiiu layouts have no `leftstick_*` in them,
     so its capture never asks for the main stick and the scheme cannot list
-    it -- `test_the_controls_are_padmaps_own` holds those two together. The
+    it -- `test_the_controls_are_dansticks_own` holds those two together. The
     clone forwards the axes regardless, so the ring on the drawing shows
     where the stick is whether or not anything ever bound it. That needs the
     artwork to mark it: docs/requests/the-analog-stick.md.
@@ -133,32 +133,21 @@ def test_the_drawings_mark_the_sticks_padmap_never_asks_about():
             assert f"rightstick_{way}" in drawn, f"{artwork}.svg has no right stick to point at"
 
 
-# --- agreement with padmap ---------------------------------------------------
+# --- agreement with danstick ---------------------------------------------------
 
-# padmap is danstick now (github.com/dscrawford/danstick); either checkout will do.
-PADMAP_LAYOUTS = next(
-    (
-        path
-        for path in (
-            pathlib.Path.home() / "Documents/danstick/rust/crates/danstick-core/data/layouts",
-            pathlib.Path.home() / "Documents/padmap/rust/crates/padmap-core/data/layouts",
-        )
-        if path.is_dir()
-    ),
-    pathlib.Path("/nonexistent"),
-)
+DANSTICK_LAYOUTS = pathlib.Path.home() / "Documents/danstick/rust/crates/danstick-core/data/layouts"
 
 
-@pytest.mark.skipif(not PADMAP_LAYOUTS.is_dir(), reason="padmap is not checked out beside this")
+@pytest.mark.skipif(not DANSTICK_LAYOUTS.is_dir(), reason="danstick is not checked out beside this")
 @pytest.mark.parametrize("name", sorted(p.stem for p in CONFIG.glob("*.yaml")))
-def test_the_controls_are_padmaps_own(name):
-    """The capture walks padmap's layout and the screen labels these. A control
+def test_the_controls_are_dansticks_own(name):
+    """The capture walks danstick's layout and the screen labels these. A control
     in one and not the other is a step with no label, or a label for a button
     the capture never asks for."""
     import json
 
     scheme = all_schemes()[name]
-    layout = json.loads((PADMAP_LAYOUTS / f"{scheme.layout}.json").read_text())
+    layout = json.loads((DANSTICK_LAYOUTS / f"{scheme.layout}.json").read_text())
     assert set(scheme.controls) == {c["canonical"] for c in layout["controls"]}
     for control in layout["controls"]:
         assert scheme.controls[control["canonical"]] == control["label"]

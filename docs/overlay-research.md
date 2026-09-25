@@ -109,7 +109,7 @@ the layer-shell route works in SteamOS Game Mode -- nobody reported trying it.
 ## Tested 2026-09-25: the layer-shell route crashes gamescope
 
 Run inside `gamescope --backend headless` (nixpkgs 3.16.25) with the stand-in
-padmap from src/client/qa and `xeyes` as the game:
+danstick from src/client/qa and `xeyes` as the game:
 
 - **A layer surface on `GAMESCOPE_WAYLAND_DISPLAY` is taken as the external
   overlay -- and gamescope segfaults once it is destroyed**, which our painter

@@ -1,18 +1,18 @@
 """The controller requirement, against a real daemon and real devices.
 
-Two things may drive this picker: the keyboard, and a controller padmap has
-published. Nothing else -- and a pad becomes one of padmap's by being picked
+Two things may drive this picker: the keyboard, and a controller danstick has
+published. Nothing else -- and a pad becomes one of danstick's by being picked
 up and held, from wherever the picker happens to be, never from a screen
 somebody had to find first.
 
-Every test here runs the picker's own modules -- `gotg_ui.padmap`,
-`assign.attend`, `gotg_ui.pads` -- against a padmap daemon of its own and
+Every test here runs the picker's own modules -- `gotg_ui.danstick`,
+`assign.attend`, `gotg_ui.pads` -- against a danstick daemon of its own and
 controllers made out of /dev/uinput. Nothing is mocked, deliberately: every
 bug this suite was written after lived in the gap between what the code
 believed about SDL and what SDL does. A mock would have agreed with the code
 and shipped the bug.
 
-Run them with `nix run .#test-controllers`, which brings padmap and a pygame.
+Run them with `nix run .#test-controllers`, which brings danstick and a pygame.
 GOTG_E2E_REQUIRE=1 turns "cannot run here" into a failure.
 """
 
@@ -25,15 +25,15 @@ from fakepad import ABS_X, BTN_SOUTH, BTN_START, FakePad, event_node, kernel_nam
 
 from gotg_ui import pads
 from gotg_ui.assign import Session, Watch, attend
-from gotg_ui.padmap import Padmap
+from gotg_ui.danstick import Danstick
 from gotg_ui.padstrip import next_seat, seats, strip_status
 
 # Long enough for a daemon scan (1s), a hold (0.25s) and a republish, with the
 # slack a loaded machine needs. Tests wait for a condition, not for this.
 PATIENCE = 12.0
 
-# Long enough to claim a seat, whatever the picker asks padmap for. It used to
-# be a flat 0.7 s, which was comfortably past padmap's own quarter second --
+# Long enough to claim a seat, whatever the picker asks danstick for. It used to
+# be a flat 0.7 s, which was comfortably past danstick's own quarter second --
 # and then the picker started asking for a second and a half, and every test
 # that seated a pad stopped seating one. A hold is as long as the thing being
 # tested says it is.
@@ -46,15 +46,15 @@ class Picker:
     """The picker's controller half, one frame at a time.
 
     The same three calls the event loop makes, in the same order: attend to
-    padmap, apply what it said, then read the pads. What is not here is the
+    danstick, apply what it said, then read the pads. What is not here is the
     grid, the art and the window -- none of which has an opinion about who may
     press a button.
     """
 
     def __init__(self, socket_path, sdl):
         self.sdl = sdl
-        self.padmap = Padmap(socket_path)
-        assert self.padmap.connect(), "the picker could not reach the test daemon"
+        self.danstick = Danstick(socket_path)
+        assert self.danstick.connect(), "the picker could not reach the test daemon"
         self.seating = Session()
         self.watch = Watch()
         self.sticks = pads.init()
@@ -63,14 +63,14 @@ class Picker:
         self.progress_seen = 0.0
 
     def frame(self) -> None:
-        listen = attend(self.padmap, self.seating, self.watch)
+        listen = attend(self.danstick, self.seating, self.watch)
         if listen is not None:
             self.sent.append(listen)
-            self.padmap.send(listen)
+            self.danstick.send(listen)
         self.progress_seen = max(self.progress_seen, self.seating.view.progress)
 
         for event in self.sdl.event.get():
-            # Exactly what app.py does with a pad arriving or leaving: padmap
+            # Exactly what app.py does with a pad arriving or leaving: danstick
             # publishing a clone is a device this program has never opened.
             if event.type == self.sdl.JOYDEVICEADDED:
                 self.sticks.add(event.device_index)
@@ -100,7 +100,7 @@ class Picker:
 
     @property
     def players(self) -> list[dict]:
-        return self.padmap.players
+        return self.danstick.players
 
     def seated(self, player: int) -> bool:
         return any(p.get("player") == player for p in self.players)
@@ -128,7 +128,7 @@ class Picker:
         return False
 
     def close(self) -> None:
-        self.padmap.close()
+        self.danstick.close()
 
 
 # --- the requirement --------------------------------------------------------
@@ -142,11 +142,11 @@ def test_the_picker_opens_with_no_controllers(daemon, sdl):
 
         assert picker.players == [], "a pad was seated without anybody holding anything"
         assert seats(picker.players) == []
-        assert strip_status(picker.padmap.status_word, 0) == "hold a button on a controller, or space"
+        assert strip_status(picker.danstick.status_word, 0) == "hold a button on a controller, or space"
         picker.close()
 
 
-def test_a_pad_padmap_has_not_published_cannot_move_the_picker(daemon, sdl):
+def test_a_pad_danstick_has_not_published_cannot_move_the_picker(daemon, sdl):
     """The requirement, stated as its failure: an unclaimed pad moves nothing.
 
     The pad is real, connected, and SDL is delivering its presses -- this is
@@ -177,7 +177,7 @@ def test_holding_a_button_claims_player_one_from_wherever_the_picker_is(daemon, 
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
         assert picker.sent and picker.sent[0]["cmd"] == "seating", (
-            "the picker never asked padmap to listen for a hold"
+            "the picker never asked danstick to listen for a hold"
         )
 
         # Patiently: while seating is open the daemon spends its loop
@@ -186,13 +186,13 @@ def test_holding_a_button_claims_player_one_from_wherever_the_picker_is(daemon, 
         assert picker.claim(pad, 1), "holding a button seated nobody"
 
         assert picker.progress_seen > 0, "nothing filled the ring while the button was held"
-        assert "padmap Player 1" in kernel_names(), "padmap seated a player but published no pad"
+        assert "danstick Player 1" in kernel_names(), "danstick seated a player but published no pad"
         assert next_seat(picker.players) == 2
         picker.close()
 
 
 def test_and_that_controller_then_drives_the_picker(daemon, sdl):
-    """The other half: once padmap has published it, its presses are the picker's."""
+    """The other half: once danstick has published it, its presses are the picker's."""
     with FakePad("E2E Xbox Pad") as pad:
         picker = Picker(_socket(daemon), sdl)
         picker.run(1.0)
@@ -226,8 +226,8 @@ def test_a_second_controller_becomes_player_two(daemon, sdl):
         numbered = sorted(p["player"] for p in picker.players)
         assert numbered == [1, 2]
         nodes = {p["player"]: p.get("node") for p in picker.players}
-        assert nodes[1] != nodes[2], "two seats, one controller -- padmap seated the same pad twice"
-        assert {"padmap Player 1", "padmap Player 2"} <= set(kernel_names())
+        assert nodes[1] != nodes[2], "two seats, one controller -- danstick seated the same pad twice"
+        assert {"danstick Player 1", "danstick Player 2"} <= set(kernel_names())
         picker.close()
 
 
@@ -250,13 +250,13 @@ def test_the_picker_never_opens_a_session_of_its_own(daemon, sdl):
         picker.close()
 
 
-def test_with_no_padmap_at_all_a_pad_still_cannot_move_the_picker(sdl):
+def test_with_no_danstick_at_all_a_pad_still_cannot_move_the_picker(sdl):
     """The bug as it was seen: the picker opened, no daemon anywhere, and an
-    Xbox pad that padmap had never heard of moved the cursor.
+    Xbox pad that danstick had never heard of moved the cursor.
 
     No `daemon` fixture on purpose. Nothing is running, nothing is on the
     socket, and the pad is refused anyway -- because the rule is about the
-    pad, not about padmap's state.
+    pad, not about danstick's state.
     """
     with FakePad("E2E Xbox Pad") as pad:
         sticks = pads.init()
@@ -278,7 +278,7 @@ def test_with_no_padmap_at_all_a_pad_still_cannot_move_the_picker(sdl):
                     sticks.add(event.device_index)
                 elif event.type in (sdl.CONTROLLERBUTTONDOWN, sdl.JOYBUTTONDOWN):
                     saw = True
-                    assert pads.button(event) is None, "a pad padmap never published drove the picker"
+                    assert pads.button(event) is None, "a pad danstick never published drove the picker"
                 elif event.type == sdl.JOYHATMOTION:
                     assert pads.direction(event) is None
         assert saw, "SDL never delivered the press, so nothing was proven"
@@ -288,7 +288,7 @@ def test_the_keyboard_is_never_filtered(sdl):
     """Two things drive the picker, and the other one is the keyboard.
 
     The filter is only ever asked about pads: a key is not a pad event and
-    cannot be swallowed by it, whatever padmap is doing.
+    cannot be swallowed by it, whatever danstick is doing.
     """
     key = sdl.event.Event(sdl.KEYDOWN, {"key": sdl.K_a, "unicode": "a", "mod": 0})
     assert pads.button(key) is None
@@ -318,7 +318,7 @@ def test_pairing_happens_on_the_menu_and_shows_in_the_top_bar(daemon, sdl):
 
         assert not picker.seating.open, "the controller screen opened on its own"
         assert seats(picker.players) == []
-        assert strip_status(picker.padmap.status_word, 0) == "hold a button on a controller, or space"
+        assert strip_status(picker.danstick.status_word, 0) == "hold a button on a controller, or space"
 
         pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1)), "holding a button seated nobody"
@@ -326,7 +326,7 @@ def test_pairing_happens_on_the_menu_and_shows_in_the_top_bar(daemon, sdl):
 
         assert not picker.seating.open, "the hold dragged the picker onto the controller screen"
         assert [player for player, _ in seats(picker.players)] == [1], "the top bar shows no seat"
-        assert strip_status(picker.padmap.status_word, 1) == "controllers assigned"
+        assert strip_status(picker.danstick.status_word, 1) == "controllers assigned"
         assert next_seat(picker.players) == 2, "the top bar should be ready for player two"
         picker.close()
 
@@ -334,7 +334,7 @@ def test_pairing_happens_on_the_menu_and_shows_in_the_top_bar(daemon, sdl):
 def test_a_controller_can_still_join_after_the_picker_has_left_for_a_game(daemon, sdl):
     """Any time: the grid, a game, anything. The picker is gone and a hold still seats you.
 
-    The picker is the client that asked padmap to listen; a game has no
+    The picker is the client that asked danstick to listen; a game has no
     client at all. So the picker disconnects, the observer disconnects, and a
     pad is held with nobody on the socket.
     """
@@ -358,23 +358,23 @@ def test_a_controller_can_still_join_after_the_picker_has_left_for_a_game(daemon
         finally:
             later.close()
         assert numbered == [1, 2], f"a pad held mid-game took no seat: {numbered}"
-        assert "padmap Player 2" in kernel_names()
+        assert "danstick Player 2" in kernel_names()
 
 
 # --- every session starts unseated ------------------------------------------
 
 
-def test_a_new_session_opens_with_nobody_seated_whatever_padmap_remembers(daemon, sdl, monkeypatch):
+def test_a_new_session_opens_with_nobody_seated_whatever_danstick_remembers(daemon, sdl, monkeypatch):
     """Open the picker: nobody is seated until somebody holds a button.
 
     The daemon the fixture started remembers a seat. The picker's own
     `ensure_daemon` -- fresh, following this pid -- replaces it with one that
-    does not, which is what padmap built for docs/requests/session-daemon.md.
+    does not, which is what danstick built for docs/requests/session-daemon.md.
     """
     import os
     import signal
 
-    from gotg_ui.padmap import ensure_daemon
+    from gotg_ui.danstick import ensure_daemon
 
     with FakePad("E2E Xbox Pad") as pad:
         earlier = Picker(_socket(daemon), sdl)
@@ -389,7 +389,7 @@ def test_a_new_session_opens_with_nobody_seated_whatever_padmap_remembers(daemon
         # Set rather than deleted, so monkeypatch has something to restore:
         # ensure_daemon writes "1" here on success, and a delenv of an absent
         # key would leave that for every test after this one.
-        monkeypatch.setenv("PADMAP_SKIP_DAEMON_CHECK", "0")
+        monkeypatch.setenv("DANSTICK_SKIP_DAEMON_CHECK", "0")
         assert ensure_daemon(fresh=True, follow=os.getpid()) is None
         for _ in range(40):
             if os.path.exists(daemon.path):
@@ -402,7 +402,7 @@ def test_a_new_session_opens_with_nobody_seated_whatever_padmap_remembers(daemon
             assert picker.players == [], (
                 f"the session opened with seats already taken: {picker.players}"
             )
-            assert picker.padmap.state.get("following") == os.getpid(), (
+            assert picker.danstick.state.get("following") == os.getpid(), (
                 "the daemon is not following the picker"
             )
             # And the seat is still there for the taking: the same pad, held
@@ -410,7 +410,7 @@ def test_a_new_session_opens_with_nobody_seated_whatever_padmap_remembers(daemon
             pad.hold(BTN_SOUTH, PAIR)
             assert picker.until(lambda p: p.seated(1)), "the fresh daemon seated nobody"
         finally:
-            fresh_pid = picker.padmap.state.get("pid")
+            fresh_pid = picker.danstick.state.get("pid")
             picker.close()
             if isinstance(fresh_pid, int):
                 try:
@@ -434,7 +434,7 @@ def test_a_game_launch_begins_with_a_hold_whatever_was_seated(daemon, sdl):
         assert picker.until(lambda p: p.seated(1))
         picker.close()          # execvp into the game; the gate is next
 
-        client = Padmap(_socket(daemon))
+        client = Danstick(_socket(daemon))
         assert client.connect()
         # As seat.py does: the first state before the first decision, or a
         # gate that has heard nothing asks for a hold with somebody seated.
@@ -474,9 +474,9 @@ def test_a_game_launch_begins_with_a_hold_whatever_was_seated(daemon, sdl):
             # is global: a daemon the previous test is still tearing down
             # may hold one too for a moment.
             end = time.monotonic() + 4.0
-            while time.monotonic() < end and "padmap Player 1" in kernel_names():
+            while time.monotonic() < end and "danstick Player 1" in kernel_names():
                 step(0.2)
-            assert "padmap Player 1" not in kernel_names(), "the old seat's clone is still published"
+            assert "danstick Player 1" not in kernel_names(), "the old seat's clone is still published"
 
             pad.hold(BTN_SOUTH, PAIR)
             step(2.0)
@@ -574,16 +574,16 @@ def _seat_process(daemon, extra: dict, root: str):
     import sys
 
     env = {**os.environ, **daemon.env}
-    # The latch padmap's own client sets after a successful ensure-daemon.
+    # The latch danstick's own client sets after a successful ensure-daemon.
     # An earlier test in this process may have left it in os.environ -- a
     # monkeypatched delenv of a key that was absent records nothing to
     # restore -- and a gate that inherits it never starts its own daemon.
-    env.pop("PADMAP_SKIP_DAEMON_CHECK", None)
+    env.pop("DANSTICK_SKIP_DAEMON_CHECK", None)
     env.update(extra)
     env.setdefault("SDL_VIDEODRIVER", "dummy")
     env.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
     env.setdefault("GOTG_CONFIG", os.path.join(root, "config"))
-    env.setdefault("PADMAP_NO_AUTOSETUP", "1")
+    env.setdefault("DANSTICK_NO_AUTOSETUP", "1")
     # The shipped hold is a second and a half. Most of these tests are about
     # what a hold *means*, not how long it is, and paying the full length a
     # press across the suite bought nothing -- so they ask for one second, and
@@ -618,9 +618,9 @@ def test_a_launch_from_the_grid_meets_the_gate_first_which_forgets_the_seat(daem
         picker.close()
         daemon.drain(0.5)
 
-        # PADMAP_SKIP_DAEMON_CHECK is what the picker exports before it execvps,
+        # DANSTICK_SKIP_DAEMON_CHECK is what the picker exports before it execvps,
         # so the launcher does not ask for a daemon it already has.
-        seat = _seat_process(daemon, {"PADMAP_SKIP_DAEMON_CHECK": "1"}, _root())
+        seat = _seat_process(daemon, {"DANSTICK_SKIP_DAEMON_CHECK": "1"}, _root())
         try:
             removed = daemon.wait_for("controller", seconds=8.0)
             while removed is not None and removed.get("reason") != "unseated":
@@ -682,13 +682,13 @@ def test_a_launch_from_steam_meets_the_gate_first_on_a_daemon_of_its_own(daemon,
                     later.close()
                     later = None
             if state is None:
-                log = os.path.join(daemon.env["XDG_RUNTIME_DIR"], "padmap", "padmap.log")
+                log = os.path.join(daemon.env["XDG_RUNTIME_DIR"], "danstick", "danstick.log")
                 tail = open(log).read()[-1500:] if os.path.exists(log) else "(no daemon log)"
                 seat.send_signal(signal.SIGTERM)
                 _, err = seat.communicate(timeout=5)
                 raise AssertionError(
                     f"no daemon following the gate (pid {seat.pid}) ever appeared\n"
-                    f"--- gotg-seat stderr ---\n{err}\n--- padmap.log ---\n{tail}"
+                    f"--- gotg-seat stderr ---\n{err}\n--- danstick.log ---\n{tail}"
                 )
             assert state.get("players") == [], "the Steam route started with yesterday's seat"
             time.sleep(1.0)                 # the gate's seating command lands
@@ -709,21 +709,21 @@ def test_a_launch_from_steam_meets_the_gate_first_on_a_daemon_of_its_own(daemon,
         assert not os.path.exists(daemon.path), "the gate's daemon outlived the gate"
 
 
-def test_with_no_padmap_the_gate_still_opens_a_window_before_the_game(tmp_path):
+def test_with_no_danstick_the_gate_still_opens_a_window_before_the_game(tmp_path):
     """Never silent. The window says why and counts down; the game is not
     started behind somebody's back with nothing to play it with."""
     import os
     import subprocess
     import sys
 
-    # Every directory with a padmap in it, not just the first: the runner puts
+    # Every directory with a danstick in it, not just the first: the runner puts
     # the pinned one on PATH and the dev shell has its own, and once the pin
     # moved those were two store paths. Stripping one left the other, the gate
-    # found padmap after all, and sat waiting for a hold nobody was there to
+    # found danstick after all, and sat waiting for a hold nobody was there to
     # give -- a test that had been passing for the wrong reason all along.
     without = [
         d for d in os.environ.get("PATH", "").split(":")
-        if not os.access(os.path.join(d, "padmap"), os.X_OK)
+        if not os.access(os.path.join(d, "danstick"), os.X_OK)
     ]
     env = {
         **os.environ,
@@ -734,7 +734,7 @@ def test_with_no_padmap_the_gate_still_opens_a_window_before_the_game(tmp_path):
         "GOTG_CONFIG": os.path.join(_root(), "config"),
         "GOTG_SEAT_COUNTDOWN": "2",
     }
-    env.pop("PADMAP_SKIP_DAEMON_CHECK", None)
+    env.pop("DANSTICK_SKIP_DAEMON_CHECK", None)
     (tmp_path / "run").mkdir()
     started = time.monotonic()
     done = subprocess.run(
@@ -744,19 +744,19 @@ def test_with_no_padmap_the_gate_still_opens_a_window_before_the_game(tmp_path):
     took = time.monotonic() - started
     assert done.returncode == 0, done.stderr
     assert took >= 1.5, f"the gate skipped itself in {took:.2f}s -- no window, no countdown"
-    assert "padmap" in done.stderr
+    assert "danstick" in done.stderr
 
 
 # --- the keyboard as a player -------------------------------------------------
 
 
 def test_the_keyboard_takes_a_seat_when_asked(daemon, sdl):
-    """Space held on the grid ends in this command, and padmap answers with a
+    """Space held on the grid ends in this command, and danstick answers with a
     seat named Keyboard, icon keyboard, in the next free slot.
 
     The hold itself is timed by the picker and tested in tests/ui; this is
     the daemon's half. It was a strict xfail against
-    docs/requests/keyboard-as-a-player.md until padmap answered it, which is
+    docs/requests/keyboard-as-a-player.md until danstick answered it, which is
     how the marker came off: the suite failed for passing.
     """
     with FakePad("E2E Xbox Pad") as pad:
@@ -765,25 +765,25 @@ def test_the_keyboard_takes_a_seat_when_asked(daemon, sdl):
         pad.hold(BTN_SOUTH, PAIR)
         assert picker.until(lambda p: p.seated(1))
 
-        picker.padmap.seat_keyboard()
+        picker.danstick.seat_keyboard()
         seated = picker.until(
-            # "Keyboard and Mouse", icon keyboard-mouse since padmap afe321d;
+            # "Keyboard and Mouse", icon keyboard-mouse since danstick afe321d;
             # `keyboard` is the flag that does not change with the name.
             lambda p: any(pl.get("player") == 2 and pl.get("keyboard") for pl in p.players),
             seconds=4.0,
         )
-        assert seated, f"padmap seated no keyboard: {picker.players}"
+        assert seated, f"danstick seated no keyboard: {picker.players}"
         picker.close()
 
 
 # --- the game waits to be told ---------------------------------------------------
 
 
-# What the fake pad can press for each control padmap's wizard may ask for,
+# What the fake pad can press for each control danstick's wizard may ask for,
 # by the control names the gamecube layout uses. Anything absent is skipped,
 # which is what a person does with a control their pad does not have.
 # The longest the wizard may say nothing before a walk is given up on. A step
-# answers in well under a second; in a pod, where padmap seats the fake pad as
+# answers in well under a second; in a pod, where danstick seats the fake pad as
 # already mapped and never asks, the walks sat out their whole 40 s -- five
 # tests, three and a half minutes of every run, to fail the same way.
 WIZARD_QUIET = 10.0
@@ -802,7 +802,7 @@ def test_the_gate_reaches_ready_with_no_session_and_sends_no_accept(daemon, sdl)
     from gotg_ui.gate import READY, Gate, apply, decide
 
     with FakePad("E2E Xbox Pad") as pad:
-        client = Padmap(_socket(daemon))
+        client = Danstick(_socket(daemon))
         assert client.connect()
         for _ in range(100):
             for _event in client.poll():
@@ -832,7 +832,7 @@ def test_the_gate_reaches_ready_with_no_session_and_sends_no_accept(daemon, sdl)
                     gate = apply(gate, event)
                     if event.get("event") == "mapping" and not event.get("done"):
                         # A beat between the step and the answer, as a person
-                        # leaves one. padmap debounces each pad: a press 170 ms
+                        # leaves one. danstick debounces each pad: a press 170 ms
                         # after the last release was not a press to it.
                         time.sleep(0.4)
                         control = str(event.get("control") or "")
@@ -867,14 +867,14 @@ def test_the_gate_reaches_ready_with_no_session_and_sends_no_accept(daemon, sdl)
 
 def test_the_gate_holds_the_door_until_a_fresh_one_second_hold(daemon, sdl):
     """The gate as the launcher runs it, against the daemon: the seat hold that
-    runs straight into padmap's confirm must not also start the game. After
+    runs straight into danstick's confirm must not also start the game. After
     `accepted` the process stays; it goes only when the pad lets go and holds
     again for a second.
     """
     import signal
 
     with FakePad("E2E Xbox Pad") as pad:
-        seat = _seat_process(daemon, {"PADMAP_SKIP_DAEMON_CHECK": "1"}, _root())
+        seat = _seat_process(daemon, {"DANSTICK_SKIP_DAEMON_CHECK": "1"}, _root())
         try:
             # The gate listens; one press seats the pad. Answer the wizard,
             # and the moment it closes press again and *do not let go*: the
@@ -932,7 +932,7 @@ def test_the_gate_holds_the_door_until_a_fresh_one_second_hold(daemon, sdl):
 
 def test_the_door_ignores_a_button_that_is_down_when_it_opens(daemon, sdl):
     """A real clone that already shows A pressed when the door opens -- as a
-    Steam Controller's does, since padmap forwards its state -- must count
+    Steam Controller's does, since danstick forwards its state -- must count
     for nothing until it comes up. Driven in-process, event by event."""
     from gotg_ui.seat import PAUSE, Door
 
@@ -1004,7 +1004,7 @@ def test_a_controller_switched_on_while_the_gate_is_up_takes_a_seat(daemon, sdl)
     import signal
 
     with FakePad("E2E Xbox Pad") as first:
-        seat = _seat_process(daemon, {"PADMAP_SKIP_DAEMON_CHECK": "1"}, _root())
+        seat = _seat_process(daemon, {"DANSTICK_SKIP_DAEMON_CHECK": "1"}, _root())
         try:
             assert daemon.wait_for("state", seconds=8.0) is not None
             time.sleep(1.0)
@@ -1014,7 +1014,7 @@ def test_a_controller_switched_on_while_the_gate_is_up_takes_a_seat(daemon, sdl)
 
             # Only now does the second controller exist.
             with FakePad("E2E Other Pad", 0x2AAA, 0x5BBB, 1) as second:
-                time.sleep(1.5)                 # padmap's scan finds it
+                time.sleep(1.5)                 # danstick's scan finds it
                 claimed = None
                 for _ in range(3):
                     second.hold(BTN_SOUTH, PAIR)
@@ -1041,7 +1041,7 @@ def test_a_hold_of_y_at_the_door_walks_the_buttons_again(daemon, sdl):
     import signal
 
     with FakePad("E2E Xbox Pad") as pad:
-        seat = _seat_process(daemon, {"PADMAP_SKIP_DAEMON_CHECK": "1"}, _root())
+        seat = _seat_process(daemon, {"DANSTICK_SKIP_DAEMON_CHECK": "1"}, _root())
         try:
             assert daemon.wait_for("state", seconds=8.0) is not None
             time.sleep(1.0)
@@ -1069,7 +1069,7 @@ def test_a_hold_of_y_at_the_door_walks_the_buttons_again(daemon, sdl):
 
             # The door is up. A tap of Y does nothing at all now, and a hold
             # of it asks for the walk again. Which raw button SDL calls Y
-            # depends on whether padmap's mapping file existed when the gate
+            # depends on whether danstick's mapping file existed when the gate
             # started (raw 2, the walk above) or SDL fell back to its Xbox
             # layout (raw 3); a person would press the one labelled Y. Both.
             time.sleep(1.5)
@@ -1094,7 +1094,7 @@ def test_a_hold_of_y_at_the_door_walks_the_buttons_again(daemon, sdl):
 # --- how fast a press reaches the game -----------------------------------------
 #
 # Melee felt like treacle: a jagged stick and buttons that answered late. It
-# was not the port and not the pad -- padmap rescans every input device on
+# was not the port and not the pad -- danstick rescans every input device on
 # every 20 ms tick while seating is open, one scan costs about 100 ms here (a
 # udev walk plus a liveness probe of every hidraw node), and the forwarding
 # waited behind it. These are the numbers, taken through a real clone, so it
@@ -1114,7 +1114,7 @@ def _clone_node(player: int = 1) -> str | None:
         for line in devices:
             if line.startswith('N: Name="'):
                 block = line.split('"')[1]
-            elif line.startswith("H: Handlers=") and block == f"padmap Player {player}":
+            elif line.startswith("H: Handlers=") and block == f"danstick Player {player}":
                 for handler in line.split("=", 1)[1].split():
                     if handler.startswith("event"):
                         return f"/dev/input/{handler}"
@@ -1162,7 +1162,7 @@ def _tap_latencies(pad: FakePad, fd: int, taps: int = 80) -> list[float]:
 
 
 def _seat_and_open_clone(daemon, sdl, pad: FakePad):
-    """Seat the pad by a hold, then open the clone padmap published for it."""
+    """Seat the pad by a hold, then open the clone danstick published for it."""
     import os
 
     picker = Picker(_socket(daemon), sdl)
@@ -1174,7 +1174,7 @@ def _seat_and_open_clone(daemon, sdl, pad: FakePad):
     while time.monotonic() < end and node is None:
         node = _clone_node()
         time.sleep(0.2)
-    assert node, "padmap seated the pad but published no clone"
+    assert node, "danstick seated the pad but published no clone"
     time.sleep(0.5)
     return picker, os.open(node, os.O_RDONLY | os.O_NONBLOCK)
 
@@ -1187,7 +1187,7 @@ def test_a_press_reaches_the_game_inside_a_frame(daemon, sdl):
         picker, fd = _seat_and_open_clone(daemon, sdl, pad)
         try:
             # What gotg-seat sends as it hands over to the game.
-            picker.padmap.send({"cmd": "seating", "open": False})
+            picker.danstick.send({"cmd": "seating", "open": False})
             time.sleep(1.0)
             latencies = _tap_latencies(pad, fd)
             assert len(latencies) > 60, f"only {len(latencies)} presses arrived at all"
@@ -1214,12 +1214,12 @@ def test_the_stick_loses_nothing_on_the_way_through(daemon, sdl):
     with FakePad("PERF Pad") as pad:
         picker, fd = _seat_and_open_clone(daemon, sdl, pad)
         try:
-            picker.padmap.send({"cmd": "seating", "open": False})
+            picker.danstick.send({"cmd": "seating", "open": False})
             time.sleep(1.0)
             def drain_all() -> list[int]:
                 """Everything waiting, not one bufferful: a reader that falls
                 behind loses events to the kernel's own queue, and that is the
-                reader's fault rather than padmap's."""
+                reader's fault rather than danstick's."""
                 got: list[int] = []
                 while select.select([fd], [], [], 0)[0]:
                     batch = _drain(fd)
@@ -1262,7 +1262,7 @@ def test_a_pad_can_join_mid_game_without_costing_the_game_its_input(daemon, sdl)
 
     Seating open is what lets a second player join in the middle of a level.
     It also costs about 100 ms a press, so the gate closes it before the game
-    starts. When padmap's scan is cheap this passes, and the close in
+    starts. When danstick's scan is cheap this passes, and the close in
     seat.py -- and this marker -- can go.
     """
     import os
@@ -1270,7 +1270,7 @@ def test_a_pad_can_join_mid_game_without_costing_the_game_its_input(daemon, sdl)
     with FakePad("PERF Pad") as pad:
         picker, fd = _seat_and_open_clone(daemon, sdl, pad)
         try:
-            picker.padmap.send({"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD})
+            picker.danstick.send({"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD})
             time.sleep(1.0)
             latencies = _tap_latencies(pad, fd)
             assert len(latencies) > 60, f"only {len(latencies)} presses arrived at all"
@@ -1311,13 +1311,13 @@ def test_a_pad_that_has_been_mapped_is_never_asked_again(daemon, sdl):
     """The bindings are remembered, across a fresh daemon and a new launch.
 
     Reported as "after binding one controller it goes to the binding screen".
-    padmap stores the capture and reports it back -- this is the gate keeping
+    danstick stores the capture and reports it back -- this is the gate keeping
     its side of that: seated, mapped, straight to the door, no `map` sent.
     """
     import signal
 
     with FakePad("E2E Xbox Pad") as pad:
-        seat = _seat_process(daemon, {"PADMAP_SKIP_DAEMON_CHECK": "1"}, _root())
+        seat = _seat_process(daemon, {"DANSTICK_SKIP_DAEMON_CHECK": "1"}, _root())
         try:
             assert daemon.wait_for("state", seconds=8.0) is not None
             time.sleep(1.0)
@@ -1332,7 +1332,7 @@ def test_a_pad_that_has_been_mapped_is_never_asked_again(daemon, sdl):
 
         # The next launch: the same pad, the same console, nothing asked.
         daemon.seen.clear()
-        again = _seat_process(daemon, {"PADMAP_SKIP_DAEMON_CHECK": "1"}, _root())
+        again = _seat_process(daemon, {"DANSTICK_SKIP_DAEMON_CHECK": "1"}, _root())
         try:
             assert daemon.wait_for("state", seconds=8.0) is not None
             time.sleep(1.0)
@@ -1366,7 +1366,7 @@ def test_a_stray_press_at_the_door_neither_starts_the_game_nor_rebinds(daemon, s
     import signal
 
     with FakePad("E2E Xbox Pad") as pad:
-        seat = _seat_process(daemon, {"PADMAP_SKIP_DAEMON_CHECK": "1"}, _root())
+        seat = _seat_process(daemon, {"DANSTICK_SKIP_DAEMON_CHECK": "1"}, _root())
         try:
             assert daemon.wait_for("state", seconds=8.0) is not None
             time.sleep(1.0)
@@ -1397,11 +1397,11 @@ def test_a_stray_press_at_the_door_neither_starts_the_game_nor_rebinds(daemon, s
 
 def test_a_second_controller_joins_at_the_door_and_is_asked_for_its_buttons(daemon, sdl):
     """Reported as: no sign the second pad had control. The door never polled
-    padmap, so a claim arrived and nothing on the screen knew."""
+    danstick, so a claim arrived and nothing on the screen knew."""
     import signal
 
     with FakePad("E2E Xbox Pad") as first:
-        seat = _seat_process(daemon, {"PADMAP_SKIP_DAEMON_CHECK": "1"}, _root())
+        seat = _seat_process(daemon, {"DANSTICK_SKIP_DAEMON_CHECK": "1"}, _root())
         try:
             assert daemon.wait_for("state", seconds=8.0) is not None
             time.sleep(1.0)
@@ -1411,7 +1411,7 @@ def test_a_second_controller_joins_at_the_door_and_is_asked_for_its_buttons(daem
             time.sleep(1.5)                      # the door is up
 
             with FakePad("E2E Other Pad", 0x2AAA, 0x5BBB, 1) as second:
-                time.sleep(1.5)                  # padmap's scan finds it
+                time.sleep(1.5)                  # danstick's scan finds it
                 # Patiently. With seating open the daemon spends its loop
                 # rescanning every device -- one scan is ~100 ms against a
                 # 20 ms tick -- and a hold can be missed outright, which is
@@ -1428,7 +1428,7 @@ def test_a_second_controller_joins_at_the_door_and_is_asked_for_its_buttons(daem
                     "a controller held at the door took no seat"
                 )
                 # And the gate noticed: a pad with no idea what a GameCube is
-                # gets asked, which only happens if the door polls padmap.
+                # gets asked, which only happens if the door polls danstick.
                 step = daemon.wait_for("mapping", seconds=8.0)
                 assert step is not None, "the door never noticed the second pad"
                 assert seat.poll() is None
@@ -1442,14 +1442,14 @@ def test_a_second_controller_joins_at_the_door_and_is_asked_for_its_buttons(daem
 # What the door draws while somebody presses a button: a circle in that
 # player's colour beside the label for the control they are pressing. It was
 # drawn and it never appeared, because the two halves were speaking different
-# languages -- padmap's profile answers `leftshoulder` and every label on an
+# languages -- danstick's profile answers `leftshoulder` and every label on an
 # N64 drawing is called `L` -- and nothing in the suite compared the two. So
 # this presses every control of a console on a real pad, through a real
 # daemon's clone, and asks the door which label it would light.
 
 # The fake pad declares BTN_SOUTH, EAST, NORTH, WEST, TL, TR, SELECT, START,
 # which SDL numbers 0..7 in that order, and ABS_X/ABS_Y as axes 0 and 1. A
-# padmap profile is written against those numbers, exactly as padmap's own
+# danstick profile is written against those numbers, exactly as danstick's own
 # capture would record them.
 E2E_PROFILE_BUTTONS = {
     "a": {"kind": "button", "index": 0, "value": 0},
@@ -1480,13 +1480,13 @@ N64_CONTROLS = [
 
 
 def _profile(directory, name: str, buttons: dict | None = None) -> None:
-    """A padmap device profile, written where the picker reads them."""
+    """A danstick device profile, written where the picker reads them."""
     import json
     import os
 
     os.makedirs(directory, exist_ok=True)
     with open(os.path.join(directory, f"{name.replace(' ', '_')}.json"), "w") as out:
-        # Both places padmap writes them: the top-level table, which is what
+        # Both places danstick writes them: the top-level table, which is what
         # the door reads, and the universal scope beside it.
         json.dump(
             {
@@ -1509,7 +1509,7 @@ def _door(sdl, sticks, tmp_path, monkeypatch, seats_named: dict[int, str]):
     devices = str(tmp_path / "devices")
     for name in set(seats_named.values()):
         _profile(devices, name)
-    monkeypatch.setenv("PADMAP_DEVICES", devices)
+    monkeypatch.setenv("DANSTICK_DEVICES", devices)
     # The ares table, from the checkout: `pad_controls` is the translation
     # under test and it is read off that file.
     monkeypatch.setenv("GOTG_DATA", str(pathlib.Path(__file__).parents[2] / "src" / "client" / "data"))
@@ -1687,7 +1687,7 @@ def test_the_go_is_the_shipped_hold_and_not_a_tap(daemon, sdl):
     which is how somebody gets there -- started the game before the screen
     had been read. Three seconds fixed that and read as the program having
     stopped listening, so every hold is a second and a half now, the same
-    length pairing asks padmap for. Measured through a real clone rather
+    length pairing asks danstick for. Measured through a real clone rather
     than read off the config, because the config is the half that was
     already right.
     """
@@ -1717,14 +1717,14 @@ def test_the_go_is_the_shipped_hold_and_not_a_tap(daemon, sdl):
         picker.close()
 
 
-def test_a_press_lights_its_label_with_no_padmap_profile_at_all(daemon, sdl, tmp_path, monkeypatch):
+def test_a_press_lights_its_label_with_no_danstick_profile_at_all(daemon, sdl, tmp_path, monkeypatch):
     """Half the labels lit nothing, and this is why.
 
-    padmap's capture holds the controls one console asked for: the Steam
+    danstick's capture holds the controls one console asked for: the Steam
     Controller's N64 capture has no `x` and its universal one has no
     `lefttrigger`, and the door was reading one table for both. A pad SDL maps
     says which control it is itself, in the layout the binding tables are
-    written against -- so the dots no longer depend on what padmap happened to
+    written against -- so the dots no longer depend on what danstick happened to
     capture, and a pad with no profile whatsoever still lights its labels.
     """
     import pathlib
@@ -1732,7 +1732,7 @@ def test_a_press_lights_its_label_with_no_padmap_profile_at_all(daemon, sdl, tmp
     from gotg_ui.bindings import pad_controls
     from gotg_ui.seat import Door
 
-    monkeypatch.setenv("PADMAP_DEVICES", str(tmp_path / "empty"))
+    monkeypatch.setenv("DANSTICK_DEVICES", str(tmp_path / "empty"))
     monkeypatch.setenv("GOTG_DATA", str(pathlib.Path(__file__).parents[2] / "src" / "client" / "data"))
 
     with FakePad("E2E Xbox Pad") as pad:
@@ -1763,7 +1763,7 @@ def test_a_press_lights_its_label_with_no_padmap_profile_at_all(daemon, sdl, tmp
 def test_a_hold_whose_release_was_missed_does_not_start_the_game(daemon, sdl):
     """The gate opening "basically instantly".
 
-    A release can go missing: padmap republishes a clone and the button that
+    A release can go missing: danstick republishes a clone and the button that
     was down on the old one never comes up on the new, and a Steam Controller
     forwards state rather than events. The hold kept its start time and
     finished three seconds later with nobody holding anything -- which lands
@@ -1813,7 +1813,7 @@ def test_a_hold_whose_release_was_missed_does_not_start_the_game(daemon, sdl):
 def test_the_hold_that_pairs_a_controller_cannot_also_start_the_game(daemon, sdl):
     """Pair, pause, ready -- and the pause is not optional.
 
-    padmap claims a seat after a quarter second, and a thumb does not come off
+    danstick claims a seat after a quarter second, and a thumb does not come off
     a button that fast. The same press went on into the go hold, so the game
     started while somebody was still reading the screen they had just reached.
     Nothing counts as a go until every pad has been quiet for the pause, and
@@ -1844,7 +1844,7 @@ def test_the_hold_that_pairs_a_controller_cannot_also_start_the_game(daemon, sdl
             assert not door.done(now), "the hold that paired the pad also started the game"
             # And while the clone still reports that button down, the pause
             # has not even begun. (A clone published *after* a press began
-            # cannot report it: padmap forwards what happens next. A Steam
+            # cannot report it: danstick forwards what happens next. A Steam
             # Controller does forward its state, which is the case
             # `test_the_door_ignores_a_button_that_is_down_when_it_opens`
             # covers with a real held button.)
@@ -1908,7 +1908,7 @@ def test_the_gate_holds_a_controllers_keyboard_so_it_cannot_start_the_game():
                 f"the gate did not hold {node}; it could still type into the door"
             )
             # And the pad itself is untouched: grabbing that would take the
-            # presses away from padmap, which is the thing reading them.
+            # presses away from danstick, which is the thing reading them.
             joystick = event_node("E2E Xbox Pad")
             assert joystick and joystick.rsplit("/", 1)[-1] not in held
         finally:
@@ -1919,7 +1919,7 @@ def test_one_input_lights_one_label_even_when_the_profile_disagrees(daemon, sdl,
     """A GameCube pad's right trigger lit R *and* Z at once.
 
     Two vocabularies name a press -- SDL's standard layout for a pad it maps,
-    padmap's capture for one it does not -- and the choice was being made per
+    danstick's capture for one it does not -- and the choice was being made per
     *event* rather than per pad: a button took the first, an axis took both.
     A profile binding something else to the same axis then lit a second label
     that nobody had pressed.
@@ -1940,7 +1940,7 @@ def test_one_input_lights_one_label_even_when_the_profile_disagrees(daemon, sdl,
         **E2E_PROFILE_BUTTONS,
         "lefttrigger": {"kind": "axis", "index": 0, "value": -1},
     })
-    monkeypatch.setenv("PADMAP_DEVICES", devices)
+    monkeypatch.setenv("DANSTICK_DEVICES", devices)
     monkeypatch.setenv("GOTG_DATA", str(pathlib.Path(__file__).parents[2] / "src" / "client" / "data"))
 
     with FakePad("E2E Xbox Pad") as pad:
@@ -1976,10 +1976,10 @@ def test_one_input_lights_one_label_even_when_the_profile_disagrees(daemon, sdl,
 
 
 def test_a_seat_takes_the_hold_the_picker_asked_for(daemon, sdl):
-    """A quarter second was padmap's, and it was too quick.
+    """A quarter second was danstick's, and it was too quick.
 
     Picking a controller up, or resting a thumb on one while reading the
-    screen, claimed a seat nobody meant to claim. padmap now takes the length
+    screen, claimed a seat nobody meant to claim. danstick now takes the length
     on the `seating` command (98fd757); this is that asked for and measured
     through the daemon, because a field a daemon ignores looks exactly like a
     field that works.
@@ -1992,7 +1992,7 @@ def test_a_seat_takes_the_hold_the_picker_asked_for(daemon, sdl):
         daemon.send({"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD})
         daemon.drain(1.0)
 
-        # Well past padmap's own default, and well short of what was asked for.
+        # Well past danstick's own default, and well short of what was asked for.
         pad.hold(BTN_SOUTH, 0.6)
         assert daemon.wait_for("claim", seconds=1.5) is None, (
             "a hold shorter than the one asked for still took a seat"
@@ -2054,12 +2054,12 @@ def test_a_stick_reads_as_a_position_not_as_four_labels(daemon, sdl):
         picker.close()
 
 
-def test_the_keyboard_drives_nothing_until_padmap_seats_it(daemon, sdl):
-    """The keyboard goes through padmap now, like everything else.
+def test_the_keyboard_drives_nothing_until_danstick_seats_it(daemon, sdl):
+    """The keyboard goes through danstick now, like everything else.
 
     Enter and Esc at the door mean "start the game"; an unseated keyboard is
     any device in the room that types, and most controllers are one. So the
-    door hears no key at all until padmap reports a keyboard seat -- and the
+    door hears no key at all until danstick reports a keyboard seat -- and the
     space bar, which is how the keyboard asks for one, is heard always.
     """
     from gotg_ui import keys as keys_rule
@@ -2072,7 +2072,7 @@ def test_the_keyboard_drives_nothing_until_padmap_seats_it(daemon, sdl):
         assert picker.until(lambda p: p.seated(1)), "the pad took no seat"
         picker.run(1.2)
 
-        assert not keys_rule.drives(picker.players, picker.padmap.connected), (
+        assert not keys_rule.drives(picker.players, picker.danstick.connected), (
             "a pad seat is not a keyboard seat"
         )
 
@@ -2083,11 +2083,11 @@ def test_the_keyboard_drives_nothing_until_padmap_seats_it(daemon, sdl):
         escape = sdl.event.Event(sdl.KEYDOWN, key=sdl.K_ESCAPE, mod=0, unicode="", scancode=41)
         assert not door.handle(escape, time.monotonic()), "an unseated keyboard left the gate"
 
-        # padmap seats it, the rule turns over, and the same key is the way out.
-        picker.padmap.seat_keyboard()
+        # danstick seats it, the rule turns over, and the same key is the way out.
+        picker.danstick.seat_keyboard()
         assert picker.until(
-            lambda p: keys_rule.drives(p.players, p.padmap.connected), seconds=6.0
-        ), f"padmap seated no keyboard: {picker.players}"
+            lambda p: keys_rule.drives(p.players, p.danstick.connected), seconds=6.0
+        ), f"danstick seated no keyboard: {picker.players}"
 
         door.keys_drive = True
         assert door.handle(enter, time.monotonic()), "a seated keyboard could not start the game"
@@ -2147,7 +2147,7 @@ def test_a_ring_at_the_same_fraction_is_not_redrawn_every_frame(sdl):
 # One person pairing is a fraction. Two is a queue: both fills have to be on
 # screen, and the seats have to go out in the order the buttons went down --
 # not in the order the pads were plugged in, which is what the daemon used to
-# do and what nobody on a sofa can see. padmap names the pad on every
+# do and what nobody on a sofa can see. danstick names the pad on every
 # `progress` now (`frac`, `name`, `node`, `player`) and says `frac: 0` when
 # one lets go; these are that, end to end, with two real pads.
 
@@ -2169,7 +2169,7 @@ def test_two_pads_holding_at_once_are_two_fills(daemon, sdl):
 
     Anonymous readings -- one `frac` per pad per tick with no pad on it --
     arrive as a single fill jumping between two values, which is what this
-    looked like before padmap named them.
+    looked like before danstick named them.
     """
     with FakePad("E2E Xbox Pad") as first, FakePad("E2E Other Pad", 0x2AAA, 0x5BBB, 1) as second:
         daemon.send({"cmd": "seating", "open": True, "players": 4, "hold": 1.5})
@@ -2226,7 +2226,7 @@ def _progress_arrivals(daemon, seconds: float) -> list[tuple[float, dict]]:
 def test_a_hold_is_drawn_for_every_frame_it_is_held(daemon, sdl):
     """The flash between the red empty seat and the controller filling in.
 
-    padmap sends progress from the same loop that rescans every device once a
+    danstick sends progress from the same loop that rescans every device once a
     second, and a rescan is longer than the fifty milliseconds the screen used
     to take silence as a release. So a steady press was drawn as released for
     a frame or three, once a second. Held here through at least two rescans,
@@ -2249,7 +2249,7 @@ def test_a_hold_is_drawn_for_every_frame_it_is_held(daemon, sdl):
     assert len(named) > 20, f"too few readings to judge: {len(named)}"
     gaps = [b[0] - a[0] for a, b in zip(named, named[1:], strict=False)]
     worst = max(gaps)
-    # Said on every run, pass or fail: how long padmap really goes quiet
+    # Said on every run, pass or fail: how long danstick really goes quiet
     # mid-hold on this machine is the number the staleness rule rests on.
     print(
         f"\nprogress gaps over {len(gaps)} readings: worst {worst * 1000:.0f} ms, "
@@ -2279,7 +2279,7 @@ def test_the_seat_goes_to_whoever_pressed_first(daemon, sdl):
     """Not to whichever pad was plugged in first, which is what the daemon
     used to do when two holds finished in the same tick.
 
-    It was a strict xfail until padmap bf6606d: the first claim's
+    It was a strict xfail until danstick bf6606d: the first claim's
     `seating.reset()` cleared the other pad's hold, and a button already down
     sends no new edge to restart it.
     """

@@ -1,11 +1,11 @@
 # Gamepad.
 #
-# padmap has no NES layout, so the capture walks a generic pad and the
+# danstick has no NES layout, so the capture walks a generic pad and the
 # six controls an NES pad does not have are skipped.
 
 label: Gamepad
 
-# The padmap layout the capture walks; `controls` is its control set.
+# The danstick layout the capture walks; `controls` is its control set.
 layout: generic
 # assets/controllers/<artwork>.svg
 artwork: nes
@@ -15,7 +15,7 @@ ares: [Famicom]
 # The GOTG platforms played with this controller.
 platforms: [nes]
 
-# padmap's control id -> what the button says.
+# danstick's control id -> what the button says.
 controls:
   a: A (bottom face)
   b: B (right face)
@@ -33,7 +33,7 @@ controls:
   righttrigger: Right trigger
 
 # Where the drawing marks it, when the circle is not named after the
-# control. These drawings predate padmap and use the console's letters.
+# control. These drawings predate danstick and use the console's letters.
 anchors:
   a: A
   b: B

@@ -77,7 +77,7 @@ def test_an_icon_of_its_own_wins():
 
 
 def test_the_keyboard_seat_is_a_keyboard_and_mouse():
-    # padmap's seat name and the space bar's hold; see config/icons.yaml.
+    # danstick's seat name and the space bar's hold; see config/icons.yaml.
     from gotg_ui.icons import icon_name
 
     assert icon_name("Keyboard") == "keyboard-mouse"

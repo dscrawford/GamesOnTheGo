@@ -2,17 +2,17 @@
 
 One file per controller, not per platform: a Wii game is played with a GameCube
 pad here, and duplicating sixteen controls into a second file is two places to
-fix a typo. Each file says which platforms it covers, which padmap layout the
+fix a typo. Each file says which platforms it covers, which danstick layout the
 capture walks, which drawing stands for it, and what every control is called.
 
 The point of it being a file is that adding a console is a data edit. Nothing
 in this directory knows that a GameCube has a Z button or that a SNES calls its
-bottom face button B; if padmap grows a layout, or somebody draws a Switch Pro
+bottom face button B; if danstick grows a layout, or somebody draws a Switch Pro
 pad, the change is a `.yaml` and nothing else.
 
-The control names mirror padmap's own layouts, because the capture walks them
+The control names mirror danstick's own layouts, because the capture walks them
 and the screen labels them and those two disagreeing is a step that points at
-the wrong button. `tests/ui/test_schemes.py` checks them against padmap's data.
+the wrong button. `tests/ui/test_schemes.py` checks them against danstick's data.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ class Scheme:
     platforms: tuple[str, ...] = ()
     controls: dict[str, str] = field(default_factory=dict)
     # control -> the anchor in the artwork that marks it, where the drawing
-    # does not name its circles after padmap's controls.
+    # does not name its circles after danstick's controls.
     anchors: dict[str, str] = field(default_factory=dict)
     # What shape each stick's gate is on the real controller, by stick:
     # `{"left": "octagon", "right": "circle"}`. An N64's stick and a

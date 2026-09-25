@@ -23,7 +23,7 @@ if [ -f "$GOTG_QA_DIR/machine.env" ]; then
   . "$GOTG_QA_DIR/machine.env"
 fi
 # The overlay, asked for with --overlay-at N, driven the way a room drives
-# it: at N a pad holds to join on a stand-in padmap socket (qa/padmap.py) and
+# it: at N a pad holds to join on a stand-in danstick socket (qa/danstick.py) and
 # takes seat two at N+1.5, its badge up until N+3; at N+3 the virtual pad
 # holds both shoulders and Start (qa/pad.py, told by the chord file) for three
 # seconds of a four-second hold, so the exit ring is on screen from about N+3
@@ -33,15 +33,15 @@ fi
 helpers=()
 if [ -n "${GOTG_QA_OVERLAY_AT:-}" ]; then
   at="$GOTG_QA_OVERLAY_AT"
-  socket="$GOTG_QA_DIR/padmap.sock"
-  gotg-qa-python "$(dirname "$0")/padmap.py" --socket "$socket" --join-at "$at" \
-    >"$GOTG_QA_DIR/padmap.log" 2>&1 &
+  socket="$GOTG_QA_DIR/danstick.sock"
+  gotg-qa-python "$(dirname "$0")/danstick.py" --socket "$socket" --join-at "$at" \
+    >"$GOTG_QA_DIR/danstick.log" 2>&1 &
   helpers+=($!)
   for _ in $(seq 1 50); do
     [ -S "$socket" ] && break
     sleep 0.1
   done
-  GOTG_OVERLAY_PADMAP_SOCKET="$socket" PADMAP_HOLD_SECONDS=1.5 \
+  GOTG_OVERLAY_DANSTICK_SOCKET="$socket" DANSTICK_HOLD_SECONDS=1.5 \
     "$GOTG_QA_KILLSWITCH" --pid "$$" --hold-ms 4000 >"$GOTG_QA_DIR/overlay.log" 2>&1 &
   (sleep "$((at + 3))" && touch "$GOTG_QA_DIR/chord") &
   helpers+=($!)
@@ -52,7 +52,7 @@ timeout -k 5 "$GOTG_QA_DURATION" "$@" || status=$?
 # Before touching the recorder: the verdict needs this file even if the
 # teardown below goes badly.
 printf '%s\n' "$status" >"$GOTG_QA_DIR/status"
-# The stand-in padmap waits forever, and nothing else would stop it.
+# The stand-in danstick waits forever, and nothing else would stop it.
 [ "${#helpers[@]}" -eq 0 ] || kill "${helpers[@]}" 2>/dev/null || true
 
 # SIGINT is wf-recorder's clean stop — it finalizes the container on it. But

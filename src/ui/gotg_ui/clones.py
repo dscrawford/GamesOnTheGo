@@ -1,28 +1,28 @@
-"""Which pads are padmap's, and which are the machine's own.
+"""Which pads are danstick's, and which are the machine's own.
 
-padmap grabs a physical pad and republishes it through uinput as "padmap
+danstick grabs a physical pad and republishes it through uinput as "danstick
 Player N", so while it is running both exist: the original, silent under
 EVIOCGRAB, and the clone that is the one with a seat. Three things spoil that
-silence -- a grab that failed, the 2026 Steam Controller, which padmap cannot
-grab at all, and padmap's own seating mode, which listens for a hold while
+silence -- a grab that failed, the 2026 Steam Controller, which danstick cannot
+grab at all, and danstick's own seating mode, which listens for a hold while
 grabbing nothing. In each of them a raw pad's presses arrive here as well, and
 a picker that acts on them is taking orders from a controller nobody has
 assigned.
 
-So: the clone or nothing. A pad moves the cursor once padmap has published it,
+So: the clone or nothing. A pad moves the cursor once danstick has published it,
 and until then the only thing a press on it does is claim a seat -- which
-padmap reads from the device itself, not from anything this program sees.
+danstick reads from the device itself, not from anything this program sees.
 
-The names are padmap's, from `padmap-core/src/emit.rs` and
-`padmap-input/src/pad.rs`, and the name test is the same as its
-`is_padmap_clone`. Not by vendor and product: a clone mirrors its source's ids
-by default, and 1209:0001 is padmap's only under PADMAP_PAD_IDENTITY=padmap,
+The names are danstick's, from `danstick-core/src/emit.rs` and
+`danstick-input/src/pad.rs`, and the name test is the same as its
+`is_danstick_clone`. Not by vendor and product: a clone mirrors its source's ids
+by default, and 1209:0001 is danstick's only under DANSTICK_PAD_IDENTITY=danstick,
 which is not how this machine runs it.
 
 The name alone is not enough either, which cost this feature a day. SDL looks
 a device's vendor and product up in its own database and answers with *that*
 name: a clone of an Xbox pad mirrors 045e:028e, so SDL calls it "Xbox 360
-Controller" and the kernel's "padmap Player 3" never reaches a front-end. The
+Controller" and the kernel's "danstick Player 3" never reaches a front-end. The
 GUID is what survives -- SDL takes a CRC of the real name before it renames
 anything, and puts it in bytes 2 and 3. So: the name when it is there, and the
 CRC underneath it when SDL has papered over it. Measured on a live daemon, and
@@ -34,13 +34,13 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
-# "padmap Player 1". The prefix is padmap's VIRTUAL_PREFIX, and the phys one
+# "danstick Player 1". The prefix is danstick's VIRTUAL_PREFIX, and the phys one
 # its VIRTUAL_PHYS_PREFIX -- set best-effort, since UI_SET_PHYS can fail and
-# padmap then builds the device without one.
-VIRTUAL_PREFIX = "padmap Player "
-VIRTUAL_PHYS_PREFIX = "padmap/"
+# danstick then builds the device without one.
+VIRTUAL_PREFIX = "danstick Player "
+VIRTUAL_PHYS_PREFIX = "danstick/"
 
-# How many seats to recognise a clone for. padmap will seat as many as it is
+# How many seats to recognise a clone for. danstick will seat as many as it is
 # asked for; this is the range of names whose CRC is worth knowing, and four
 # players is what the picker asks for with room to spare.
 SEATS = 8
@@ -81,17 +81,17 @@ def name_crc(guid: str | None) -> int | None:
 
 
 def is_clone(name: str | None, phys: str | None = "", guid: str | None = "") -> bool:
-    """Whether this is a pad padmap published, rather than one it grabbed."""
+    """Whether this is a pad danstick published, rather than one it grabbed."""
     if str(phys or "").startswith(VIRTUAL_PHYS_PREFIX) or str(name or "").startswith(VIRTUAL_PREFIX):
         return True
     return name_crc(guid) in CLONE_CRCS
 
 
 def player_of(name: str | None, phys: str | None = "", guid: str | None = "") -> int | None:
-    """Which seat this pad is, or None if it is not one of padmap's.
+    """Which seat this pad is, or None if it is not one of danstick's.
 
     Three ways of asking the same question, in the order they survive: the
-    kernel name padmap gave the clone, the phys it set beside it, and the CRC
+    kernel name danstick gave the clone, the phys it set beside it, and the CRC
     SDL took of that name before renaming the device out from under it.
     """
     text = str(name or "")
@@ -108,13 +108,13 @@ def player_of(name: str | None, phys: str | None = "", guid: str | None = "") ->
 
 
 def drives(name: str | None, phys: str | None = "", guid: str | None = "") -> bool:
-    """Whether this pad may move the picker's cursor: only if padmap published it.
+    """Whether this pad may move the picker's cursor: only if danstick published it.
 
     No other case. There used to be two -- no daemon on the machine, and a
     daemon too old to seat anybody -- on the theory that a picker nothing
     could drive was worse than one anything could. It was not: a shell that
-    had not reloaded since padmap joined its PATH looked exactly like "no
-    padmap here", and an unassigned Xbox pad drove the library, which is the
+    had not reloaded since danstick joined its PATH looked exactly like "no
+    danstick here", and an unassigned Xbox pad drove the library, which is the
     one thing this exists to stop. The keyboard always works; that is the
     fallback.
 
@@ -128,14 +128,14 @@ def drives(name: str | None, phys: str | None = "", guid: str | None = "") -> bo
 
 @dataclass
 class Owners:
-    """Which of the pads SDL has open are padmap's, by instance id.
+    """Which of the pads SDL has open are danstick's, by instance id.
 
     No pygame here on purpose. `pads.py` holds the half that needs a screen --
     opening a device, and digging the instance id out of an event -- and this
     is the half worth testing: what was opened, what it was called, and whether
     it may move anything.
 
-    An id this has never been told about is not padmap's. That is the safe
+    An id this has never been told about is not danstick's. That is the safe
     answer and the common one: it is what a pad that failed to open looks like,
     and what an event from a device that was unplugged and forgotten looks
     like.
@@ -150,7 +150,7 @@ class Owners:
 
     def closed(self, instance: int) -> None:
         """Forgotten outright rather than left behind: the kernel reuses an
-        instance id, and a stale "padmap Player 2" against a number now
+        instance id, and a stale "danstick Player 2" against a number now
         belonging to somebody's raw pad is the whole rule inverted."""
         self.names.pop(instance, None)
         self.guids.pop(instance, None)

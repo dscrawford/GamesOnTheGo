@@ -49,7 +49,7 @@ GAP = int(config.get("theme.strip.gap", 10))
 
 def colour_for(player: int) -> tuple[int, int, int]:
     """The colour of a seat. Players past the fourth wrap rather than fail:
-    padmap will seat as many as are asked for, and a fifth pad with no colour
+    danstick will seat as many as are asked for, and a fifth pad with no colour
     is worse than a fifth pad sharing one."""
     return PLAYER_COLOURS[(player - 1) % len(PLAYER_COLOURS)]
 
@@ -62,7 +62,7 @@ def seats(players: list[dict], slots: int = 4) -> list[tuple[int, dict]]:
     into the second place would tell somebody they are player two when every
     emulator on the machine thinks otherwise.
 
-    `slots` is accepted and ignored. It is what padmap was asked for, which
+    `slots` is accepted and ignored. It is what danstick was asked for, which
     stopped mattering when the empty seats stopped being drawn -- kept in the
     signature so the caller does not have to know that.
     """
@@ -81,7 +81,7 @@ def name_for(seat: dict | None) -> str:
     beside it is the same fact twice in a row of four -- which reads as three
     words of noise across the top of every screen.
 
-    padmap names its clones "padmap Player N", which is true and says nothing
+    danstick names its clones "danstick Player N", which is true and says nothing
     either: beside a badge that already says 2 in player two's colour, the
     useful half is the controller it stands for.
     """
@@ -90,7 +90,7 @@ def name_for(seat: dict | None) -> str:
     name = str(seat.get("name") or "").strip()
     if not name:
         return "pad"
-    prefix = "padmap Player "
+    prefix = "danstick Player "
     if name.startswith(prefix) and name[len(prefix):].strip().isdigit():
         return str(seat.get("model") or "pad")
     return name
@@ -99,9 +99,9 @@ def name_for(seat: dict | None) -> str:
 def strip_status(status: str, seated: int) -> str:
     """What the right-hand end of the strip says.
 
-    "padmap ready" is true and useless when no seat is taken: the question in
-    front of somebody then is not what padmap is doing, it is how to make it do
-    anything. And the answer is the hold padmap is already listening for while
+    "danstick ready" is true and useless when no seat is taken: the question in
+    front of somebody then is not what danstick is doing, it is how to make it do
+    anything. And the answer is the hold danstick is already listening for while
     the picker is up -- not the key that opens the assignment screen, which is
     the long way round and is on a keyboard nobody took to the sofa.
     """
@@ -114,11 +114,11 @@ def strip_status(status: str, seated: int) -> str:
 
 
 def status_text(status: str) -> str:
-    """padmap's state, in words that mean something to whoever is reading it
+    """danstick's state, in words that mean something to whoever is reading it
     rather than the daemon's own vocabulary."""
     return {
-        "offline": "padmap not running",
-        "idle": "padmap ready",
+        "offline": "danstick not running",
+        "idle": "danstick ready",
         "assigning": "hold a button on each controller",
         "ready": "controllers assigned",
     }.get(status, status)
@@ -129,7 +129,7 @@ def next_seat(players: list[dict], slots: int = 4) -> int | None:
 
     The lowest free number rather than the one after the last: a player two
     who unplugged leaves a gap, and the next person to pick a pad up is two
-    again -- which is what padmap seats them as, and what the ring above the
+    again -- which is what danstick seats them as, and what the ring above the
     grid has to agree with.
     """
     taken = {player for player, _ in seats(players, slots)}

@@ -2,7 +2,7 @@
 
 label: Wii U Pro
 
-# The padmap layout the capture walks; `controls` is its control set.
+# The danstick layout the capture walks; `controls` is its control set.
 layout: wiiu
 # assets/controllers/<artwork>.svg
 artwork: generic
@@ -10,7 +10,7 @@ players: 4
 # The GOTG platforms played with this controller.
 platforms: [wiiu]
 
-# padmap's control id -> what the button says.
+# danstick's control id -> what the button says.
 controls:
   a: B (bottom)
   b: A (right)
@@ -36,7 +36,7 @@ controls:
   rightstick_right: Right stick right
 
 # Where the drawing marks it, when the circle is not named after the
-# control. These drawings predate padmap and use the console's letters.
+# control. These drawings predate danstick and use the console's letters.
 anchors:
   a: B
   b: A

@@ -1,14 +1,14 @@
 # The controller suite as a container, for Jobs on the cluster.
 #
 # These tests make real kernel devices through /dev/uinput and run a real
-# padmap daemon against them, which is why they were run on the desktop --
+# danstick daemon against them, which is why they were run on the desktop --
 # and why they kept getting in the way of the person using it: a fake pad is
 # a real pad, and a daemon in seating mode seats it. One evening one landed as
 # player two in a game somebody was playing.
 #
 # A privileged pod has the same /dev/uinput and none of the collateral. The
 # image carries the suite itself (a pod has no checkout), the picker's `src/ui`
-# it tests, `config/` it reads, and padmap; `gotg-test-controllers` is the same
+# it tests, `config/` it reads, and danstick; `gotg-test-controllers` is the same
 # entry point a desktop uses, pointed at /gotg instead of a git tree.
 {
   lib,
@@ -17,7 +17,7 @@
   writeShellApplication,
   runCommand,
   controllerTests,
-  padmap,
+  danstick,
   bash,
   coreutils,
   gnugrep,
@@ -40,7 +40,7 @@ let
     name = "gotg-controllers-entrypoint";
     runtimeInputs = [
       controllerTests
-      padmap
+      danstick
       coreutils
       gnugrep
       procps
@@ -68,9 +68,9 @@ let
       export GOTG_E2E_REQUIRE=1
       # Each test's cost, printed at the end for run.py --durations.
       export GOTG_E2E_TIMINGS=1
-      # The latch padmap's client sets after a successful ensure-daemon. Never
+      # The latch danstick's client sets after a successful ensure-daemon. Never
       # inherited into a run: each test starts a daemon of its own.
-      unset PADMAP_SKIP_DAEMON_CHECK || true
+      unset DANSTICK_SKIP_DAEMON_CHECK || true
       # An Indexed Job split across the nodes (tests/e2e/shards.py): this pod's
       # share, from the index Kubernetes gave it.
       if [ -n "''${GOTG_E2E_SHARDS:-}" ] && [ -n "''${JOB_COMPLETION_INDEX:-}" ]; then
@@ -89,7 +89,7 @@ dockerTools.buildLayeredImage {
     paths = [
       entrypoint
       controllerTests
-      padmap
+      danstick
       bash
       coreutils
       gnugrep

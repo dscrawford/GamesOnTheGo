@@ -1,6 +1,6 @@
-"""What each control is actually bound to, read off padmap's own profile.
+"""What each control is actually bound to, read off danstick's own profile.
 
-padmap keeps one file per controller under `~/.local/share/padmap/devices/`,
+danstick keeps one file per controller under `~/.local/share/danstick/devices/`,
 holding what it measured and what it captured: a `mappings` table keyed by
 scope — `""` for the universal one, `console:gamecube` for a console — and
 inside each, one binding per control.
@@ -10,7 +10,7 @@ daemon reports which *scopes* a pad has a capture under, not what is in them.
 Reading the file it wrote is the difference between a screen that can say
 "Z is the left trigger" and one that can only say the pad has been mapped.
 
-One binding per control is padmap's model, so that is what this reports. A
+One binding per control is danstick's model, so that is what this reports. A
 second input on the same button — the thing a left-handed player or a broken
 shoulder wants — has nowhere to live yet; see docs/requests/.
 """
@@ -21,24 +21,24 @@ import json
 import os
 import pathlib
 
-# SDL's hat bits, which is how padmap stores a d-pad direction.
+# SDL's hat bits, which is how danstick stores a d-pad direction.
 HAT = {1: "up", 2: "right", 4: "down", 8: "left"}
 
 UNIVERSAL = ""
 
 
 def devices_dir() -> pathlib.Path:
-    """Where padmap keeps them. Its own rule, followed rather than guessed:
+    """Where danstick keeps them. Its own rule, followed rather than guessed:
     XDG_DATA_HOME, then the default beneath it."""
-    base = os.environ.get("PADMAP_DEVICES")
+    base = os.environ.get("DANSTICK_DEVICES")
     if base:
         return pathlib.Path(base)
     data = os.environ.get("XDG_DATA_HOME") or (pathlib.Path.home() / ".local" / "share")
-    return pathlib.Path(data) / "padmap" / "devices"
+    return pathlib.Path(data) / "danstick" / "devices"
 
 
 def load(directory: pathlib.Path | None = None) -> list[dict]:
-    """Every profile padmap has written, newest first.
+    """Every profile danstick has written, newest first.
 
     Newest first because the interesting one is almost always the pad somebody
     has just been using, and a machine accumulates these.
@@ -65,7 +65,7 @@ def for_pad(name: str, directory: pathlib.Path | None = None) -> dict | None:
     """The profile for a controller, by the name it reports.
 
     By name because that is what the daemon's `state` carries for a seated pad.
-    padmap keys its own files by signature -- vendor, product and name -- which
+    danstick keys its own files by signature -- vendor, product and name -- which
     a front end has no other way to know.
     """
     wanted = (name or "").strip().lower()
@@ -81,7 +81,7 @@ def bindings(profile: dict | None, scope: str) -> dict[str, dict]:
     """The bindings for one scope, falling back to the universal capture.
 
     A pad mapped for GameCube and played on an N64 game is not unmapped: the
-    universal capture is what padmap itself falls back to, so a screen that
+    universal capture is what danstick itself falls back to, so a screen that
     showed nothing there would be disagreeing with the thing it is describing.
     """
     if not profile:

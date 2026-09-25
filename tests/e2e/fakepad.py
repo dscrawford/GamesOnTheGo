@@ -7,7 +7,7 @@ have to run in a dev shell, on a Steam Deck over ssh, and anywhere somebody is
 trying to work out why their pad does nothing.
 
 The identity matters more than it looks. A pad wearing Microsoft's 045e:028e
-is the case that broke the picker: padmap's clone mirrors its source's vendor
+is the case that broke the picker: danstick's clone mirrors its source's vendor
 and product, so SDL finds that pair in its own database and calls *both* of
 them "Xbox 360 Controller". Any test that only ever makes up its own ids would
 have passed through the whole bug.
@@ -23,7 +23,7 @@ import time
 EV_SYN, EV_KEY, EV_ABS = 0x00, 0x01, 0x03
 SYN_REPORT = 0
 
-# The face buttons, by the kernel's names. padmap counts anything at or above
+# The face buttons, by the kernel's names. danstick counts anything at or above
 # BTN_FIRST (0x100) as a button somebody could claim a seat with.
 BTN_SOUTH, BTN_EAST, BTN_NORTH, BTN_WEST = 0x130, 0x131, 0x133, 0x134
 BTN_TL, BTN_TR, BTN_SELECT, BTN_START = 0x136, 0x137, 0x13A, 0x13B
@@ -50,7 +50,7 @@ UI_SET_PHYS = _iow(108, 8)   # _IOW('U', 108, char*): sized as the pointer, whic
 KEY_ENTER, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT = 28, 103, 108, 105, 106
 REL_X, REL_Y = 0x00, 0x01
 
-# What padmap and SDL both look for before calling something a joypad: buttons
+# What danstick and SDL both look for before calling something a joypad: buttons
 # in the gamepad range, and a pair of absolute axes.
 BUTTONS = (BTN_SOUTH, BTN_EAST, BTN_NORTH, BTN_WEST, BTN_TL, BTN_TR, BTN_SELECT, BTN_START)
 
@@ -112,7 +112,7 @@ class FakePad:
         if phys:
             fcntl.ioctl(self._fd, UI_SET_PHYS, phys.encode() + b"\0")
         fcntl.ioctl(self._fd, UI_DEV_CREATE)
-        # udev has to see it, padmap has to scan for it, and SDL has to be told
+        # udev has to see it, danstick has to scan for it, and SDL has to be told
         # about it. A tenth of a second is not enough on a loaded machine.
         time.sleep(0.5)
 
@@ -136,7 +136,7 @@ class FakePad:
         self.up(button)
 
     def hold(self, button: int = BTN_SOUTH, seconds: float = 0.6) -> None:
-        """Long enough to claim a seat. padmap's HOLD_SECONDS is 0.25."""
+        """Long enough to claim a seat. danstick's HOLD_SECONDS is 0.25."""
         self.down(button)
         time.sleep(seconds)
         self.up(button)

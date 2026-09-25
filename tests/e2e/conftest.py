@@ -1,10 +1,10 @@
 """What the controller tests need: a daemon of their own, and SDL.
 
-Every one of these runs against a real padmap daemon and real kernel devices,
+Every one of these runs against a real danstick daemon and real kernel devices,
 because every bug this suite exists for lived in the gap between what the code
 believed about SDL and what SDL does. The daemon is a private one -- its own
 runtime, config, data and state directories under tmp_path -- so a test never
-touches the padmap somebody is playing with, and never inherits its
+touches the danstick somebody is playing with, and never inherits its
 assignments.
 
 The tests skip when the machine cannot run them, and `GOTG_E2E_REQUIRE=1`
@@ -95,17 +95,17 @@ def _somebody_is_playing() -> str:
     """
     if os.environ.get("GOTG_E2E_BESIDE_A_PLAYER") == "1":
         return ""
-    real = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "padmap", "padmap.sock")
+    real = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "danstick", "danstick.sock")
     if os.path.exists(real):
-        return f"a padmap daemon is up at {real}: somebody is playing, and the fake pads would join their game"
+        return f"a danstick daemon is up at {real}: somebody is playing, and the fake pads would join their game"
     return ""
 
 
 @pytest.fixture
 def daemon(tmp_path):
-    """A padmap of this test's own, and a client connected to it."""
-    if shutil.which("padmap") is None:
-        _cannot("padmap is not on PATH")
+    """A danstick of this test's own, and a client connected to it."""
+    if shutil.which("danstick") is None:
+        _cannot("danstick is not on PATH")
     playing = _somebody_is_playing()
     if playing:
         pytest.fail(playing)
@@ -118,12 +118,12 @@ def daemon(tmp_path):
         "XDG_CONFIG_HOME": str(tmp_path / "config"),
         "XDG_DATA_HOME": str(tmp_path / "data"),
         "XDG_STATE_HOME": str(tmp_path / "state"),
-        # The two things that would make the test about padmap's own opinions
+        # The two things that would make the test about danstick's own opinions
         # rather than the picker's: a session opened for an unmapped pad, and a
         # seat handed out from a stored mapping. Both off, so every seat in
         # here was claimed by a hold.
-        "PADMAP_NO_AUTOSETUP": "1",
-        "PADMAP_NO_AUTOATTACH": "1",
+        "DANSTICK_NO_AUTOSETUP": "1",
+        "DANSTICK_NO_AUTOATTACH": "1",
     }
     for key, value in home.items():
         if key.startswith("XDG"):
@@ -131,18 +131,18 @@ def daemon(tmp_path):
     env = {**os.environ, **home}
 
     started = subprocess.run(
-        ["padmap", "ensure-daemon"], env=env, capture_output=True, text=True, timeout=60
+        ["danstick", "ensure-daemon"], env=env, capture_output=True, text=True, timeout=60
     )
     if started.returncode != 0:
-        _cannot(f"padmap would not start: {(started.stderr or started.stdout).strip()[-200:]}")
+        _cannot(f"danstick would not start: {(started.stderr or started.stdout).strip()[-200:]}")
 
-    path = os.path.join(home["XDG_RUNTIME_DIR"], "padmap", "padmap.sock")
+    path = os.path.join(home["XDG_RUNTIME_DIR"], "danstick", "danstick.sock")
     for _ in range(80):
         if os.path.exists(path):
             break
         time.sleep(0.25)
     else:
-        _cannot("padmap started but never bound its socket")
+        _cannot("danstick started but never bound its socket")
 
     client = Daemon(path)
     client.env = home
@@ -173,8 +173,8 @@ def _wait_gone(pids: list[int], seconds: float = 5.0) -> None:
 
     SIGTERM returns at once and the clones go when the daemon does. The next
     test looked its clone up by name in /proc/bus/input/devices, found this
-    test's `padmap Player 1` still there, opened it, and read ENODEV a moment
-    later -- three tests at once, when padmap began sending `state` before its
+    test's `danstick Player 1` still there, opened it, and read ENODEV a moment
+    later -- three tests at once, when danstick began sending `state` before its
     files and so let the next test get there first.
     """
     end = time.monotonic() + seconds
@@ -198,20 +198,20 @@ def _running(pid: int) -> bool:
 def _clones_listed() -> bool:
     try:
         with open("/proc/bus/input/devices") as devices:
-            return any(line.startswith('N: Name="padmap Player ') for line in devices)
+            return any(line.startswith('N: Name="danstick Player ') for line in devices)
     except OSError:
         return False
 
 
 def _reap(runtime_dir: str) -> list[int]:
-    """SIGTERM every padmap-rs whose XDG_RUNTIME_DIR is this test's; their pids."""
+    """SIGTERM every danstick-rs whose XDG_RUNTIME_DIR is this test's; their pids."""
     signalled = []
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
             continue
         try:
             with open(f"/proc/{pid}/comm") as comm:
-                if "padmap-rs" not in comm.read():
+                if "danstick-rs" not in comm.read():
                     continue
             with open(f"/proc/{pid}/environ", "rb") as environ:
                 env = environ.read().split(b"\0")
@@ -229,7 +229,7 @@ def _reap(runtime_dir: str) -> list[int]:
 class Daemon:
     """The socket half, with the waiting a test needs on top.
 
-    Deliberately not gotg_ui.padmap.Padmap: that is one of the things under
+    Deliberately not gotg_ui.danstick.Danstick: that is one of the things under
     test, and a test that drove it could not tell a broken client from a
     broken daemon.
     """

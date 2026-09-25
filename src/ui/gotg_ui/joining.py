@@ -5,7 +5,7 @@ the screen has to show both of them -- each pad filling in on its own, in the
 order the buttons went down, because that is the order the seats go out in
 and somebody watching has to be able to see they are second.
 
-padmap sends `{"event": "progress", "frac": 0.42}` per pad per tick and, at
+danstick sends `{"event": "progress", "frac": 0.42}` per pad per tick and, at
 the time of writing, without saying which pad: two holds arrive as one
 fraction jumping between two values. `docs/requests/two-people-pairing-at-once.md`
 asks for the pad's name on it. This reads either -- a named reading is its own
@@ -25,10 +25,10 @@ from dataclasses import dataclass, field
 # comes up -- so three frames of it, the same rule `gate.Fade` follows.
 STALE = 0.05
 
-# And for a named one, a safety net rather than a signal. padmap names the pad
+# And for a named one, a safety net rather than a signal. danstick names the pad
 # on every reading now and says `frac: 0` for that pad when it is let go, so a
 # release is never inferred from silence. Inferring it anyway was the flash:
-# padmap sends progress from the same loop that rescans every device once a
+# danstick sends progress from the same loop that rescans every device once a
 # second, a rescan outlasts fifty milliseconds, and the hold was dropped
 # mid-press -- the red empty seat for a frame or three, then the controller
 # again, once a second, for as long as somebody held on. This long only
@@ -87,7 +87,7 @@ class Joining:
             return
         if found is None or frac < found.fraction - 1e-6:
             # A new hold, or the same pad starting again after letting go.
-            # Any decrease at all: padmap's fraction is elapsed over the hold
+            # Any decrease at all: danstick's fraction is elapsed over the hold
             # length, so it only ever climbs within one press -- a smaller
             # number is a different press, and that press is at the back of
             # the queue however small the gap was.
@@ -145,7 +145,7 @@ class Joining:
         """A `state` says who is in a seat; their hold is over, nobody else's.
 
         This used to be `clear()`, and it is the whole of "the controllers
-        flash back to empty". padmap restates the world while a button is
+        flash back to empty". danstick restates the world while a button is
         still down -- a pad arriving, a republish, its own tick -- and wiping
         the queue on every one of those threw away a fill that was half way
         up. The next `progress` twenty milliseconds later built it again from
@@ -171,7 +171,7 @@ class Joining:
                 # By identity wherever there is one. The seat number on a
                 # reading is the seat the hold is *filling towards*, and it
                 # goes stale the moment somebody else's claim lands: between
-                # that claim and padmap recomputing, the second person's
+                # that claim and danstick recomputing, the second person's
                 # reading still names seat one. Dropping on that number would
                 # blink the fill of the very person this queue exists for.
                 gone = key in nodes or key in names or (hold.name and hold.name in names)

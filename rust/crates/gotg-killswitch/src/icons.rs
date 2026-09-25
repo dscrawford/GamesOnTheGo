@@ -36,11 +36,11 @@ pub fn icon_for(name: &str, ids: Option<&str>) -> u8 {
         .map_or(FALLBACK, |&(_, icon)| icon)
 }
 
-/// `28de:1205` for the node padmap names, read from sysfs under `root`: an
+/// `28de:1205` for the node danstick names, read from sysfs under `root`: an
 /// evdev node's `id/vendor` and `id/product`, or a hidraw node's `HID_ID`
 /// (a Deck and a Steam Controller have no joystick evdev node at all).
 pub fn ids_for(node: &str, root: &Path) -> Option<String> {
-    // The name comes off padmap's socket: only a device node's own name is
+    // The name comes off danstick's socket: only a device node's own name is
     // joined onto sysfs, never a `..` or anything else that is not one.
     let key = node.rsplit('/').next().filter(|key| {
         let digits = key.strip_prefix("event").or_else(|| key.strip_prefix("hidraw"));
@@ -66,7 +66,7 @@ pub fn ids_for(node: &str, root: &Path) -> Option<String> {
     Some(format!("{}:{}", read("vendor")?, read("product")?))
 }
 
-/// The drawing for a pad padmap names, as the running machine describes it.
+/// The drawing for a pad danstick names, as the running machine describes it.
 pub fn resolve(node: &str, name: &str) -> u8 {
     let ids = if node.is_empty() {
         None
@@ -181,7 +181,7 @@ mod tests {
         assert_eq!(
             ids_for("hidraw4", &root).as_deref(),
             Some("28de:1205"),
-            "padmap's bare form too"
+            "danstick's bare form too"
         );
         assert_eq!(
             ids_for("/dev/input/event77", &root),

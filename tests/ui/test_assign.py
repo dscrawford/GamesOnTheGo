@@ -1,6 +1,6 @@
 """Taking a seat, as a sequence of events.
 
-padmap holds the pads for the length of a session, so nothing here is driven
+danstick holds the pads for the length of a session, so nothing here is driven
 by a button press this program can see: every change on screen arrives as an
 event from the daemon. These pin what a given sequence leaves on screen.
 """
@@ -76,7 +76,7 @@ def test_an_error_is_shown_rather_than_swallowed():
 
 def test_an_event_nobody_knows_changes_nothing():
     # The daemon is the authority and is free to grow events; a front-end that
-    # rejected them would break on every padmap release.
+    # rejected them would break on every danstick release.
     before = Assignment(state="assigning", pads=2)
     assert apply(before, {"event": "something-new", "x": 1}) == before
 
@@ -92,7 +92,7 @@ def test_a_state_event_rebuilds_the_seats():
     assert view.state == "ready"
 
 
-def test_the_session_sends_padmap_s_words():
+def test_the_session_sends_danstick_s_words():
     session = Session(slots=3)
     assert session.begin() == {"cmd": "begin", "players": 3}
     assert session.open
@@ -101,7 +101,7 @@ def test_the_session_sends_padmap_s_words():
     assert not session.open
 
 
-def test_the_session_closes_itself_when_padmap_accepts():
+def test_the_session_closes_itself_when_danstick_accepts():
     session = Session()
     session.begin()
     session.handle({"event": "accepted", "players": []})
@@ -109,16 +109,16 @@ def test_the_session_closes_itself_when_padmap_accepts():
     assert session.view.finished
 
 
-# --- keeping padmap listening, while the picker is up -----------------------
+# --- keeping danstick listening, while the picker is up -----------------------
 
 
-def test_it_asks_padmap_to_listen_as_soon_as_there_is_a_connection():
+def test_it_asks_danstick_to_listen_as_soon_as_there_is_a_connection():
     watch = Watch()
     assert watch.wanted(True, "idle", 0) == {"cmd": "seating", "open": True, "players": 4, "hold": PAIR_HOLD}
 
 
 def test_it_does_not_ask_again_for_the_same_state():
-    # padmap does not acknowledge `seating`, so the only thing stopping this
+    # danstick does not acknowledge `seating`, so the only thing stopping this
     # from being a syscall a frame is not sending it twice for one state.
     watch = Watch()
     watch.wanted(True, "idle", 0)
@@ -126,7 +126,7 @@ def test_it_does_not_ask_again_for_the_same_state():
 
 
 def test_a_seat_taken_is_not_a_reason_to_ask_again():
-    # A claim leaves padmap listening, and a `seating` resent ~200 ms after it
+    # A claim leaves danstick listening, and a `seating` resent ~200 ms after it
     # dropped every hold in flight: the second person had to hold A again.
     watch = Watch()
     watch.wanted(True, "idle", 0)
@@ -135,7 +135,7 @@ def test_a_seat_taken_is_not_a_reason_to_ask_again():
 
 
 def test_nothing_is_asked_while_a_session_is_open():
-    # padmap suspends seating inside a session, and the assignment screen is
+    # danstick suspends seating inside a session, and the assignment screen is
     # already asking for the same holds.
     assert Watch().wanted(True, "assigning", 0) is None
 
@@ -158,7 +158,7 @@ def test_a_reconnected_daemon_is_asked_again():
 
 
 def test_there_is_no_way_to_close_it():
-    # A second player usually turns up in the middle of a game, and padmap
+    # A second player usually turns up in the middle of a game, and danstick
     # keeps listening after the picker is gone. Nothing here may tell it to
     # stop.
     assert not hasattr(Watch(), "closed")
@@ -192,7 +192,7 @@ def test_a_seat_freed_after_the_last_one_filled_is_asked_about_again():
 
 
 def test_a_session_that_opens_and_closes_is_asked_about_again():
-    # padmap suspends seating for the length of a session, so the picker says
+    # danstick suspends seating for the length of a session, so the picker says
     # it again on the way out rather than assuming what it resumed.
     watch = Watch()
     watch.wanted(True, "idle", 0)
@@ -204,7 +204,7 @@ def test_a_session_that_opens_and_closes_is_asked_about_again():
 
 
 def test_leaving_with_a_seat_claimed_keeps_it():
-    # B used to cancel, and cancelling is padmap discarding every claim --
+    # B used to cancel, and cancelling is danstick discarding every claim --
     # which, with the picker driven by published pads alone, discards the only
     # thing that could have pressed B a second time.
     session = Session()
@@ -230,7 +230,7 @@ def test_leaving_twice_does_not_accept_an_empty_session():
 
 
 def test_a_seated_pad_is_told_it_can_hold_to_start():
-    # The one way out of this screen that a pad can reach: padmap takes a
+    # The one way out of this screen that a pad can reach: danstick takes a
     # longer hold on an already-claimed pad as "accept", and nothing said so.
     view = Assignment(state="assigning", pads=1)
     assert not view.keep_hint
@@ -239,7 +239,7 @@ def test_a_seated_pad_is_told_it_can_hold_to_start():
 
 
 def test_a_session_the_picker_did_not_start_still_opens_the_screen():
-    # padmap opens one by itself for a pad it has never seen mapped. For the
+    # danstick opens one by itself for a pad it has never seen mapped. For the
     # length of it every pad is grabbed, so the picker answers no button --
     # and the grid sat there looking broken with nothing saying why.
     session = Session()
@@ -259,7 +259,7 @@ def test_and_it_closes_again_when_the_session_does():
 
 
 class FakeDaemon:
-    """padmap as the picker sees it: a queue of events and three readings."""
+    """danstick as the picker sees it: a queue of events and three readings."""
 
     def __init__(self, events=(), connected=True, state="idle", players=()):
         self.events = list(events)
@@ -272,7 +272,7 @@ class FakeDaemon:
         return iter(out)
 
 
-def test_padmap_is_told_to_listen_for_a_hold_without_being_asked():
+def test_danstick_is_told_to_listen_for_a_hold_without_being_asked():
     # The requirement: controllers pair from wherever the picker is, so the
     # command goes out on its own rather than waiting for a screen.
     command = attend(FakeDaemon(), Session(), Watch())
@@ -304,8 +304,8 @@ def test_a_hold_in_flight_reaches_the_ring():
 
 
 def test_a_daemon_too_old_to_listen_is_not_asked_again_and_hands_nothing_back():
-    # It used to hand the raw pads back. It does not: a padmap that cannot
-    # seat anybody is a picker the keyboard drives until padmap is fixed.
+    # It used to hand the raw pads back. It does not: a danstick that cannot
+    # seat anybody is a picker the keyboard drives until danstick is fixed.
     daemon = FakeDaemon(events=[{"event": "error", "message": 'unknown command "seating"'}])
     watch = Watch()
     assert attend(daemon, Session(), watch) is None
@@ -323,7 +323,7 @@ def test_a_tap_on_space_is_still_the_menu():
 
 
 def test_space_held_the_whole_way_is_a_seat_and_not_a_tap():
-    # padmap reads the space bar and seats the keyboard itself (EVENTS.md,
+    # danstick reads the space bar and seats the keyboard itself (EVENTS.md,
     # "A held space bar does the same thing, from anywhere"); the picker only
     # has to not open the menu when the key comes back up.
     hold = KeyHold(seconds=0.6)
@@ -331,9 +331,9 @@ def test_space_held_the_whole_way_is_a_seat_and_not_a_tap():
     assert hold.up(10.6) is False, "held its length: the keyboard's seat"
 
 
-def test_nothing_asks_padmap_for_the_seat_any_more():
+def test_nothing_asks_danstick_for_the_seat_any_more():
     # Two things timing one hold was two fills on the strip and a second
-    # seat_keyboard padmap refused.
+    # seat_keyboard danstick refused.
     assert not hasattr(KeyHold, "due")
 
 

@@ -5,7 +5,7 @@
 
 label: Genesis
 
-# The padmap layout the capture walks; `controls` is its control set.
+# The danstick layout the capture walks; `controls` is its control set.
 layout: genesis
 # assets/controllers/<artwork>.svg
 artwork: megadrive
@@ -15,7 +15,7 @@ ares: [MegaDrive]
 # The GOTG platforms played with this controller.
 platforms: [genesis]
 
-# padmap's control id -> what the button says.
+# danstick's control id -> what the button says.
 controls:
   x: A (bottom left)
   a: B (bottom middle)
@@ -31,7 +31,7 @@ controls:
   back: Mode
 
 # Where the drawing marks it, when the circle is not named after the
-# control. These drawings predate padmap and use the console's letters.
+# control. These drawings predate danstick and use the console's letters.
 anchors:
   x: A
   a: B

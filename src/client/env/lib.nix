@@ -42,7 +42,7 @@
   # This environment brings up a compositor of its own -- the split-screen
   # sessions do, a nested sway with a gamescope per copy inside it.
   #
-  # It is here because such a session cannot run inside padmap's sandbox. That
+  # It is here because such a session cannot run inside danstick's sandbox. That
   # sandbox is a user namespace, and in one of those every file owned by root
   # reads as `nobody`, /tmp/.X11-unix included. wlroots refuses to put an X
   # socket in a directory that is "not owned by root or us", so Xwayland never
@@ -106,9 +106,9 @@
   # name as well, since its one settings file keeps a section per console;
   # dolphin keeps a file per pad and needs nothing beyond knowing it is dolphin.
   padEmulator ? (if padConsole != null then "ares" else null),
-  # What padmap's clones should look like to this environment's program.
+  # What danstick's clones should look like to this environment's program.
   #
-  # Null is padmap's default, "mirror": the clone carries the physical pad's
+  # Null is danstick's default, "mirror": the clone carries the physical pad's
   # vendor and product, which is right nearly everywhere -- an emulator that
   # was told which controller to bind wants to see that controller.
   #
@@ -118,13 +118,13 @@
   # Controller is in nobody's. Set it where a port has been seen to need it,
   # not by default -- under it every clone shares one GUID, which Ryujinx
   # cannot tell apart (it blanks the name CRC to make its device id), so
-  # padmap.sh refuses it for that emulator rather than seating four players
+  # danstick.sh refuses it for that emulator rather than seating four players
   # on top of each other.
   padIdentity ? null,
-  # How many seats padmap should hold open for the length of the game, for an
+  # How many seats danstick should hold open for the length of the game, for an
   # environment that binds its players once at launch and can still be joined
   # mid-play (Four Swords). Every seat up to it exists from the start, empty
-  # until somebody takes it; `padmap-rs exec --reserve`, from padmap.sh.
+  # until somebody takes it; `danstick-rs exec --reserve`, from danstick.sh.
   padReserve ? null,
   # Whether `gotg configure` can open this emulator's own settings screen.
   #
@@ -249,12 +249,12 @@ let
   # its player one. The same driver claims Valve's ids wholesale: with the
   # hint on, an *evdev* device reporting 28de:1304 is not listed at all --
   # measured, with a uinput pad wearing those ids, present with the hint off
-  # and absent with it on. padmap's clone of a Steam Controller wears exactly
+  # and absent with it on. danstick's clone of a Steam Controller wears exactly
   # those ids, so the hint that makes a raw puck visible makes the seated one
-  # invisible, and the step that binds Dolphin's GBAs wrote `padmap has
-  # published no pad for player 1; using keyboard`. So `padmap_seat_gate`
+  # invisible, and the step that binds Dolphin's GBAs wrote `danstick has
+  # published no pad for player 1; using keyboard`. So `danstick_seat_gate`
   # turns it off once clones are published, and this line must not overwrite
-  # that: it is the answer for a launch that met no padmap at all.
+  # that: it is the answer for a launch that met no danstick at all.
   steamHidapi = ''export SDL_JOYSTICK_HIDAPI_STEAM="''${SDL_JOYSTICK_HIDAPI_STEAM:-1}"'';
 
   exports = lib.concatLines (

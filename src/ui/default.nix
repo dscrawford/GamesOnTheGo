@@ -12,7 +12,7 @@
   resvg,
   mesa,
   gotg,
-  padmap,
+  danstick,
   # Everything under config/: the controller descriptions, the theme, the icon
   # rules. From the repository root rather than src/ui, because what a pad
   # covers and what colour player two is are not the picker's private business
@@ -94,7 +94,7 @@ stdenvNoCC.mkDerivation {
       --set GOTG_CONFIG "$out/share/gotg-ui/config" \
       --prefix PATH : ${lib.makeBinPath [
         gotg
-        padmap
+        danstick
       ]}
 
     # The launch-time controller check, as its own command. The client runs it
@@ -109,7 +109,7 @@ stdenvNoCC.mkDerivation {
       --set GOTG_UI_ENV "${gotg}/share/gotg/env" \
       --set GOTG_UI_ASSETS "$out/share/gotg-ui/assets" \
       --set GOTG_CONFIG "$out/share/gotg-ui/config" \
-      --prefix PATH : ${lib.makeBinPath [ padmap ]}
+      --prefix PATH : ${lib.makeBinPath [ danstick ]}
 
     runHook postInstall
   '';

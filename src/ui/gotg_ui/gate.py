@@ -14,7 +14,7 @@ No session. It used to open one -- `begin`, which grabs every pad -- and a
 session's pad list is fixed the moment it opens: a controller switched on
 while the gate was up could not take a seat, and the second player in the
 room was told to wait for a launch that was already waiting for them.
-padmap's seating mode rescans as it goes, grabs nothing, and seats a held
+danstick's seating mode rescans as it goes, grabs nothing, and seats a held
 pad the same way; `map` no longer needs a session either. So: unseat, listen,
 hold, map, and the door in seat.py for the second that starts the game.
 
@@ -42,7 +42,7 @@ def scheme_for(platform: str) -> schemes.Scheme:
 
 
 def layout_for(platform: str) -> str:
-    """The padmap layout to capture against, never None.
+    """The danstick layout to capture against, never None.
 
     Keyed by platform rather than by layout, because several controllers share
     one: an NES pad, a Game Boy and a GBA are all captured against the generic
@@ -67,7 +67,7 @@ def anchor_names(control: str, platform: str = "") -> tuple[str, ...]:
 
 
 def console_scope(layout: str) -> str:
-    """padmap's scope string for "every game on this console"."""
+    """danstick's scope string for "every game on this console"."""
     return f"console:{layout}"
 
 
@@ -77,13 +77,13 @@ class Seat:
 
     player: int
     name: str = ""
-    # The device node padmap seated, as it named it (`/dev/input/event9`).
+    # The device node danstick seated, as it named it (`/dev/input/event9`).
     # Carried so a drawing can be chosen by what the device *is* -- a Deck and
     # a Steam Controller share a name and differ only by product id. See
     # devices.py.
     node: str = ""
     mappings: tuple[str, ...] = ()
-    # padmap's own word for it: mapped, not merely known. True for a pad it
+    # danstick's own word for it: mapped, not merely known. True for a pad it
     # bound from the kernel's BTN_ codes as well as one somebody captured by
     # hand, which is the whole point -- a standard controller arrives working.
     configured: bool = False
@@ -91,7 +91,7 @@ class Seat:
     def mapped(self, scope: str) -> bool:
         """Whether this pad can play this console.
 
-        Any capture, not a capture for this scope. padmap falls back to the
+        Any capture, not a capture for this scope. danstick falls back to the
         universal mapping when a console has none of its own, so a pad bound
         once is bound for everything -- and a gate that demanded
         `console:<this one>` asked again on every new platform for a pad that
@@ -114,16 +114,16 @@ class Gate:
     total: int = 0
     conflict: str = ""
     message: str = ""
-    # padmap has a session open -- somebody else's `begin`. Noted, not used:
+    # danstick has a session open -- somebody else's `begin`. Noted, not used:
     # this gate opens none, and a claim arrives the same way either way.
     assigning: bool = False
-    # Seating has been asked for. padmap does not acknowledge it, so it is
+    # Seating has been asked for. danstick does not acknowledge it, so it is
     # sent once and believed; a refusal names the command and is remembered.
     listening: bool = False
     # The command sent and not yet answered. One at a time, so a state event
     # arriving mid-flow cannot send the same command twice.
     awaiting: str = ""
-    # Commands padmap has refused. Not retried, because the same command would
+    # Commands danstick has refused. Not retried, because the same command would
     # be refused the same way for ever.
     refused: tuple[str, ...] = ()
     # What the wizard has bound so far, control -> binding, from its last
@@ -139,7 +139,7 @@ class Gate:
     # of this screen, and forgetting those would be a gate nobody gets past.
     unseated: bool = False
     # Which pid the daemon says it follows, and which pid this session is.
-    # padmap treats the pair as a session name, so a daemon following *this*
+    # danstick treats the pair as a session name, so a daemon following *this*
     # session is holding seats somebody took a moment ago in the picker --
     # they carry into the launch and asking for them again is asking twice.
     # Anything else (a daemon left over from another evening, a launch with
@@ -147,10 +147,10 @@ class Gate:
     following: int | None = None
     session: int | None = None
     # A hold on a pad that has no seat yet, as far round as it has got:
-    # padmap's `progress`, which is the seating screen's whole answer to "is
+    # danstick's `progress`, which is the seating screen's whole answer to "is
     # it registering my button?"
     progress: float = 0.0
-    # padmap's `confirm`, when a session somebody else opened is being
+    # danstick's `confirm`, when a session somebody else opened is being
     # accepted by a hold. Drawn if it comes; nothing here waits for it.
     confirm: float = 0.0
     # A claim has landed and the state that follows it has not. A claim says
@@ -212,7 +212,7 @@ class Gate:
         return "checking controllers"
 
 
-# How long a `progress` reading is believed after it arrives. padmap sends
+# How long a `progress` reading is believed after it arrives. danstick sends
 # them about every 20 ms while a button is held and says *nothing at all* when
 # it is let go -- so a hold abandoned four-fifths of the way through left
 # four-fifths of a controller painted on the screen until something else
@@ -221,7 +221,7 @@ class Gate:
 PROGRESS_STALE = 0.05
 
 # How long a hold has to be to claim a seat, asked for on every `seating`.
-# padmap's own default is 0.25 s, which claimed a seat for anybody picking a
+# danstick's own default is 0.25 s, which claimed a seat for anybody picking a
 # controller up or resting a thumb on it while reading the screen. Sent rather
 # than assumed: an older daemon ignores the field and keeps its quarter
 # second, which is the behaviour this had before.
@@ -233,7 +233,7 @@ class Fade:
     """The reveal's fraction, which has to fall back to nothing by itself --
     and keep moving between the readings that feed it.
 
-    padmap sends `progress` about every 20 ms, and the screen draws every 16:
+    danstick sends `progress` about every 20 ms, and the screen draws every 16:
     a fill that only moved when a reading arrived stepped, visibly, and it
     got worse the longer the hold -- at a second and a half there are eighty
     steps to see. So between readings it advances on its own clock at the
@@ -250,7 +250,7 @@ class Fade:
     value: float = 0.0
     at: float = 0.0
     # How long the hold behind this fill is, so the fraction can be carried
-    # forward between readings. The length the picker asks padmap for.
+    # forward between readings. The length the picker asks danstick for.
     hold: float = PAIR_HOLD
 
     def saw(self, value: float, now: float) -> None:
@@ -259,7 +259,7 @@ class Fade:
             self.value = value
             self.at = now
         elif value > 0:
-            # The same fraction again is still the daemon talking: padmap
+            # The same fraction again is still the daemon talking: danstick
             # repeats the reading while a button stays where it is.
             self.at = now
 
@@ -332,13 +332,13 @@ def decide(gate: Gate) -> tuple[Gate, dict | None]:
         }
 
     if gate.seated == 0:
-        # Waiting on a hold. Nothing to send: padmap is reading the pads.
+        # Waiting on a hold. Nothing to send: danstick is reading the pads.
         return replace(gate, state=SEATING), None
 
     seat = gate.unmapped
     if seat is None or "map" in gate.refused:
         # Seated and mapped. Nothing starts here: the runner's door waits for
-        # a fresh hold of a full second on the clone padmap has published.
+        # a fresh hold of a full second on the clone danstick has published.
         return replace(gate, state=READY), None
     return replace(gate, state=MAPPING, awaiting="map"), {
         "cmd": "map",
@@ -349,11 +349,11 @@ def decide(gate: Gate) -> tuple[Gate, dict | None]:
 
 
 def apply(gate: Gate, event: dict) -> Gate:
-    """One padmap event, folded in. Anything unknown leaves it unchanged."""
+    """One danstick event, folded in. Anything unknown leaves it unchanged."""
     kind = event.get("event")
 
     if kind == "state":
-        # "assigning" is padmap saying a session is open -- not this gate's,
+        # "assigning" is danstick saying a session is open -- not this gate's,
         # which opens none, but a claim arrives the same way in either.
         assigning = event.get("state") == "assigning"
         seats = seats_from(event.get("players"))
@@ -387,7 +387,7 @@ def apply(gate: Gate, event: dict) -> Gate:
         if not isinstance(player, int):
             return gate
         others = tuple(s for s in gate.seats if s.player != player)
-        # `configured` is padmap's own word for "this pad is bound" and the
+        # `configured` is danstick's own word for "this pad is bound" and the
         # claim carries it; the mappings do not travel with a claim, so the
         # state that follows is waited for before anything is asked.
         seat = Seat(
@@ -453,13 +453,13 @@ def apply(gate: Gate, event: dict) -> Gate:
         refused = gate.refused
         if gate.awaiting and gate.awaiting not in refused:
             refused = (*refused, gate.awaiting)
-        # seating is sent without an awaiting, since padmap never answers it
+        # seating is sent without an awaiting, since danstick never answers it
         # -- except to refuse it by name, which is the one answer it gives.
         if str(event.get("message") or "") == 'unknown command "seating"' and "seating" not in refused:
             refused = (*refused, "seating")
         return replace(
             gate,
-            message=str(event.get("message") or "padmap said no"),
+            message=str(event.get("message") or "danstick said no"),
             awaiting="",
             refused=refused,
             # A refusal to bind is the end of the asking. A refusal to unseat
@@ -490,22 +490,22 @@ def rebind(gate: Gate) -> tuple[Gate, dict | None]:
 
 
 def without_controllers(reason: str, seconds_left: float) -> tuple[str, str]:
-    """What the launch window says when padmap cannot be asked: why, and how long.
+    """What the launch window says when danstick cannot be asked: why, and how long.
 
     Here rather than in seat.py because seat.py imports pygame, and these are
-    words. The reason is padmap's own sentence, so "padmap is not installed"
-    and "padmap would not start: no permission for uinput" arrive as they are.
+    words. The reason is danstick's own sentence, so "danstick is not installed"
+    and "danstick would not start: no permission for uinput" arrive as they are.
     """
     left = max(0, int(seconds_left + 0.999))
     return (
-        reason or "padmap is not running",
+        reason or "danstick is not running",
         f"starting without controllers in {left} s — Enter starts now, Esc too",
     )
 
 
 # A press this soon after the door opens is the old hold, whatever the pad's
 # state said. Two ways it arrives late: SDL reports a button already down
-# within a frame of opening, and padmap forwards the state it held back
+# within a frame of opening, and danstick forwards the state it held back
 # during the wizard when the wizard ends -- measured at 120 ms after the
 # capture closed, which is after the door has opened. A full second covers
 # both with room; a person who presses within a second of the screen
@@ -517,8 +517,8 @@ ARM_QUIET = 1.0
 class GoHold:
     """The second that starts the game, counted only from a fresh press.
 
-    One hold ran through everything: it finished the wizard, it was padmap's
-    confirm, and it was still down when the clone appeared -- padmap
+    One hold ran through everything: it finished the wizard, it was danstick's
+    confirm, and it was still down when the clone appeared -- danstick
     forwards a Steam Controller's button *state*, so the clone showed A
     pressed from its first frame, and the door counted it. The door now
     asks the pads what is down when it opens; if anything is, it is armed

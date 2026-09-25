@@ -362,7 +362,7 @@ usage: gotg qa <id> [variant] [--duration N] [--boot-wait N] [--bless] [--machin
     --duration N   seconds to run the game for (default 60)
     --boot-wait N  seconds before the pad starts pressing (default 15)
     --bless        store this run's reference frame as the golden image
-    --overlay-at N N seconds in, a pad joins through a stand-in padmap and
+    --overlay-at N N seconds in, a pad joins through a stand-in danstick and
                    the virtual pad holds L+R+Start short of stopping the
                    game; grade whether gotg-killswitch's bar was drawn over it
     --machine M    pretend to be that machine: desktop (default), deck,
@@ -465,7 +465,7 @@ EOF
   export GOTG_NO_DIALOG=1
   # And no controller gate. Nobody is in front of this to hold a button, and
   # the gate waits for one until somebody does -- which on a machine with a
-  # padmap daemon and an unmapped pad is a run that never starts and never
+  # danstick daemon and an unmapped pad is a run that never starts and never
   # says why. QA brings its own virtual pad a few lines below; the question
   # the gate asks is already answered.
   export GOTG_SEAT_GATE=0

@@ -1,6 +1,6 @@
 """Pairing, with a room full of people: several controllers held at once, measured.
 
-The connection API is padmap's seating mode: `{"cmd": "seating", "open": true,
+The connection API is danstick's seating mode: `{"cmd": "seating", "open": true,
 "players": 4, "hold": 1.5}`, then a hold of any button on any unseated pad
 claims the next seat. The daemon says `progress` per pad per tick (`frac`,
 `name`, `node`, `player` -- the seat that hold is filling towards; `frac: 0`
@@ -10,7 +10,7 @@ from the sofa lives in the daemon: "if someone claims a controller, it cancels
 another controller and they have to hold A again."
 
 The evening it was reported is in a trace (session 249121, /tmp/gotg-trace.log
-and padmap.log of 2026-09-23): the Xbox pad went down at ~2.02 s, the Steam
+and danstick.log of 2026-09-23): the Xbox pad went down at ~2.02 s, the Steam
 Controller 1.22 s later; the Xbox pad claimed seat one at 3.567 s with the
 Steam Controller's fill at 0.227, and the next reading for it came 965 ms
 later at 0.047 -- a second press. Its seat came 2.75 s after its first press
@@ -18,8 +18,8 @@ instead of 1.5. Readings came 48-61 ms apart on that desktop (one 565 ms stall
 while a Steam Controller paired), and claim-to-`state` took 195-255 ms across
 five sessions. The timings below come from those numbers.
 
-Situations, and what each expects of the padmap pinned in flake.nix (871a4f7;
-the markers below came off as padmap answered them -- bf6606d, 26754a9,
+Situations, and what each expects of the danstick pinned in flake.nix (871a4f7;
+the markers below came off as danstick answered them -- bf6606d, 26754a9,
 bc61806, 0bcd1dc, 9463268, a03dc32, 18829da, dd7db61, 4ff56ba):
 
   Several people, one room
@@ -72,7 +72,7 @@ bc61806, 0bcd1dc, 9463268, a03dc32, 18829da, dd7db61, 4ff56ba):
 
 A strict xfail here uses `raises=AssertionError`, and the setup inside it
 fails through `pytest.fail` instead: a broken precondition is a real failure,
-never mistaken for the known bug. The day padmap fixes one, it XPASSes, the
+never mistaken for the known bug. The day danstick fixes one, it XPASSes, the
 suite fails, and the marker comes off.
 
 Never on a machine somebody is playing on -- see conftest. Run on the cluster
@@ -103,7 +103,7 @@ from gotg_ui.joining import NAMED_STALE
 # configured length reaches the daemon.
 HOLD = 1.5
 
-# How far apart the staggered presses are: well over padmap's 20 ms tick, so
+# How far apart the staggered presses are: well over danstick's 20 ms tick, so
 # press order is unambiguous, and short enough that all four are mid-hold
 # when the first claims.
 STAGGER = 0.3
@@ -123,13 +123,13 @@ CLAIM_SLACK = 0.4
 CLAIM_SLACK_TYPICAL = 0.15
 
 # A claim is never early: the hold asked for is the hold taken. Allowance for
-# the few milliseconds between writing the press and padmap reading it,
+# the few milliseconds between writing the press and danstick reading it,
 # which pushes the claim later, never earlier -- this is clock granularity.
 EARLY = 0.02
 
 # Claim to `state`, and claim to the clone's node. The trace: 195-255 ms to
 # `state` (the republish writes profiles and SDL mappings first), and the
-# clone 2 ms after the claim line in padmap.log. Four times the worst seen,
+# clone 2 ms after the claim line in danstick.log. Four times the worst seen,
 # for a slow pod.
 PUBLISH_WITHIN = 1.0
 
@@ -167,7 +167,7 @@ LOAD_SLACK_MS = 2.0
 
 # The longest a seated player's presses may stop arriving while somebody else
 # joins. At this pin the join tears every clone down and makes it again (~50
-# ms in padmap.log); a second is the point where a player notices.
+# ms in danstick.log); a second is the point where a player notices.
 REJOIN_WITHIN = 1.0
 
 # --- the room: the socket read continuously while presses happen on time ------
@@ -235,7 +235,7 @@ class Room:
         return None
 
     def listening(self, claim: tuple[float, dict]) -> None:
-        """Until padmap is reading the unseated pads again after this claim.
+        """Until danstick is reading the unseated pads again after this claim.
 
         The claim's `state` goes out just before seating reopens its pads, in
         the same tick; a tenth of a second past it is past the reopen.
@@ -256,7 +256,7 @@ class Room:
         except BlockingIOError:
             return
         if not chunk:
-            pytest.fail("padmap closed the socket mid-test -- did the daemon die?")
+            pytest.fail("danstick closed the socket mid-test -- did the daemon die?")
         stamp = self.now()
         self.daemon.buffer += chunk
         while b"\n" in self.daemon.buffer:
@@ -317,7 +317,7 @@ def _press(room: Room, pad: FakePad) -> Callable[[], None]:
 def _pads(count: int, first: str = "A") -> Iterator[list[FakePad]]:
     """`count` pads, each with ids of its own, named so events can say which.
 
-    Plugged in A, B, C... -- the order padmap enumerates them in, give or
+    Plugged in A, B, C... -- the order danstick enumerates them in, give or
     take, which the tests press against on purpose.
     """
     with contextlib.ExitStack() as stack:
@@ -331,7 +331,7 @@ def _pads(count: int, first: str = "A") -> Iterator[list[FakePad]]:
 def _open(daemon, hold: float = HOLD, players: int = 4) -> Room:
     """Seating open, as the picker and the gate open it, and every pad watched.
 
-    A second is padmap's scan interval: pads made just before this are all
+    A second is danstick's scan interval: pads made just before this are all
     being read before anybody presses.
     """
     daemon.send({"cmd": "seating", "open": True, "players": players, "hold": hold})
@@ -360,7 +360,7 @@ def _seat_alone(room: Room, pad: FakePad, tries: int = 3) -> tuple[float, float,
 
 
 def _awake(room: Room, *pads: FakePad, within: float = 4.0) -> None:
-    """Tap each pad until padmap reads it, so a hold that follows is timed from
+    """Tap each pad until danstick reads it, so a hold that follows is timed from
     its press. A tap is far shorter than any hold and claims nothing.
 
     `Room.listening` is not enough on its own: after a claim's `state` the
@@ -386,7 +386,7 @@ def _awake(room: Room, *pads: FakePad, within: float = 4.0) -> None:
 
 def _refused_at(room: Room, pad: FakePad, since: float) -> float:
     """When this pad's hold ran out in a full room: its reading of 1.0, which
-    padmap sends on the tick the hold completes, refused or not."""
+    danstick sends on the tick the hold completes, refused or not."""
     done = [at for at, f, _ in room.readings(pad, since) if f >= 0.999]
     if not done:
         pytest.fail(f"{pad.name}'s hold never ran to the end -- no refusal happened to measure")
@@ -398,11 +398,11 @@ def _seat_in_turn(room: Room, pads: list[FakePad]) -> None:
         _seat_alone(room, pad)
 
 
-# --- the kernel side: padmap's clones -----------------------------------------
+# --- the kernel side: danstick's clones -----------------------------------------
 
 
 def _clone_info(player: int) -> tuple[str, str] | None:
-    """(/dev/input/eventN, sysfs path) of `padmap Player N`, or None.
+    """(/dev/input/eventN, sysfs path) of `danstick Player N`, or None.
 
     The sysfs path (…/inputM) is the device's identity: M is never reused
     soon, where eventN is, so a clone torn down and made again is told apart
@@ -415,7 +415,7 @@ def _clone_info(player: int) -> tuple[str, str] | None:
                 name, sysfs = line.split('"')[1], ""
             elif line.startswith("S: Sysfs="):
                 sysfs = line.split("=", 1)[1].strip()
-            elif line.startswith("H: Handlers=") and name == f"padmap Player {player}":
+            elif line.startswith("H: Handlers=") and name == f"danstick Player {player}":
                 for handler in line.split("=", 1)[1].split():
                     if handler.startswith("event"):
                         return f"/dev/input/{handler}", sysfs
@@ -489,10 +489,10 @@ def _each_seat_once(room: Room, pads: list[FakePad]) -> None:
     assert len(set(nodes)) == len(nodes), f"one pad in two seats: {seated}"
     present = kernel_names()
     for player in players:
-        assert present.count(f"padmap Player {player}") == 1, (
-            f"player {player} has {present.count(f'padmap Player {player}')} clones"
+        assert present.count(f"danstick Player {player}") == 1, (
+            f"player {player} has {present.count(f'danstick Player {player}')} clones"
         )
-    assert f"padmap Player {len(pads) + 1}" not in present
+    assert f"danstick Player {len(pads) + 1}" not in present
 
 
 # --- several people, one room --------------------------------------------------
@@ -529,7 +529,7 @@ def test_four_pads_pressed_apart_take_seats_one_to_four_in_press_order(daemon):
 def test_four_pads_pressed_apart_are_all_seated_by_pressing_again(daemon):
     """What people do today, and it has to keep working: whoever's fill died
     lets go and presses again, in the order they were in. Everybody is
-    seated, in that order, once. With padmap fixed each round seats more
+    seated, in that order, once. With danstick fixed each round seats more
     than one; the assertions do not care how many rounds it took."""
     with _pads(4) as (a, b, c, d):
         waiting = [d, c, b, a]
@@ -640,11 +640,11 @@ def test_a_claim_does_not_cancel_another_hold_in_flight(daemon):
 
 
 def test_letting_go_and_pressing_again_seats_the_second_pad(daemon):
-    """How the reported evening ended, and the workaround until padmap is fixed.
+    """How the reported evening ended, and the workaround until danstick is fixed.
 
     The first pad claims; the second person, 0.8 s into a fill that went
     nowhere, lets go and presses again 0.1 s later -- the trace's 965 ms gap.
-    They are seated second. With padmap fixed the fill would have finished
+    They are seated second. With danstick fixed the fill would have finished
     on its own; letting go before it does is still a release, so this passes
     either way.
     """
@@ -695,7 +695,7 @@ def test_letting_go_loses_your_place(daemon):
             ],
             stop=lambda: room.claim(second) is not None,
         )
-        # Straight away: with padmap fixed the first pad would claim half a
+        # Straight away: with danstick fixed the first pad would claim half a
         # second from now on its own, and this test is about the order.
         first.up(BTN_SOUTH)
         second.up(BTN_SOUTH)
@@ -733,7 +733,7 @@ def _held_while(daemon, pad: FakePad, poke: dict) -> tuple[Room, float, tuple[fl
 
 
 def test_a_state_mid_hold_resets_nothing(daemon):
-    """padmap restates the world while buttons are down -- a pad arriving, a
+    """danstick restates the world while buttons are down -- a pad arriving, a
     republish, a client asking. A `state` is news, not a reset."""
     with _pads(1) as (pad,):
         room, start, claim = _held_while(daemon, pad, {"cmd": "status"})
@@ -760,7 +760,7 @@ def test_seating_sent_again_with_the_same_hold_resets_nothing(daemon):
 
 def test_a_controller_switched_on_mid_hold_resets_nobody(daemon):
     """Somebody switches a pad on while somebody else is holding. The long
-    hold gives padmap's once-a-second scan time to notice the newcomer well
+    hold gives danstick's once-a-second scan time to notice the newcomer well
     before the first hold is due."""
     with _pads(1) as (pad,), contextlib.ExitStack() as later:
         room = _open(daemon, hold=4.0)
@@ -840,7 +840,7 @@ def test_a_full_room_seats_nobody_else_and_keeps_playing(daemon):
 
         assert room.claim(spare) is None, f"a fifth pad was seated in a room of four: {room.claim(spare)}"
         assert sorted(p.get("player") for p in room.players()) == [1, 2, 3, 4]
-        assert "padmap Player 5" not in kernel_names()
+        assert "danstick Player 5" not in kernel_names()
         for player, pad in enumerate(seated, 1):
             clone = _clone_info(player)
             assert clone, f"player {player} has no clone after the fifth pad's hold"
@@ -859,7 +859,7 @@ def _full_room(daemon, pads: list[FakePad]) -> Room:
 
 def test_a_full_room_says_so(daemon):
     """A fill that reaches the end and then simply stops is a pad that looks
-    broken. padmap names the pad in a `full` event, and takes its fill down."""
+    broken. danstick names the pad in a `full` event, and takes its fill down."""
     with _pads(5) as pads:
         room = _full_room(daemon, pads)
         spare = pads[4]
@@ -947,7 +947,7 @@ def _tap_through(
 ) -> tuple[list[float], float | None]:
     """Press and release `pad` every `every` seconds for `seconds`, reading
     whichever clone is player `player` right now -- reopening it when it is
-    made again. (arrival times, when `padmap Player <newcomer>` appeared)."""
+    made again. (arrival times, when `danstick Player <newcomer>` appeared)."""
     arrived: list[float] = []
     appeared = None
     fd, identity = None, None
@@ -1162,7 +1162,7 @@ def test_four_holds_at_once_cost_a_seated_pad_nothing(daemon):
             pytest.fail("the player was seated and has no clone")
         # A long hold now, so the four fill for the whole measurement and none
         # claims -- a claim republishes, which is a different test. Ten
-        # seconds is padmap's longest (HOLD_RANGE); anything longer is quietly
+        # seconds is danstick's longest (HOLD_RANGE); anything longer is quietly
         # taken as its 0.25 s default, which is how this once measured a
         # republish tearing the player's clone down instead.
         daemon.send({"cmd": "seating", "open": True, "players": 4, "hold": 10.0})

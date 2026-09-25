@@ -38,9 +38,9 @@ pads_ryujinx_configure() {
   # would otherwise arrive with motion off and turn it on again, which reads in
   # the log as something flapping.
   local changed=0
-  # padmap's writer binds its seated pads and points each at its DSU server
-  # for motion; the SDL-sensor path below is for a pad that is not padmap's.
-  padmap_emit "$attr" && changed=1
+  # danstick's writer binds its seated pads and points each at its DSU server
+  # for motion; the SDL-sensor path below is for a pad that is not danstick's.
+  danstick_emit "$attr" && changed=1
   pads_ryujinx_motion "$attr" && changed=1
   if ((changed)); then
     pads_ryujinx_keep "$attr"

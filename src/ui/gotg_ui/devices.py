@@ -9,12 +9,12 @@ can never fire on real hardware. Only the product id separates them: 0x1205 is
 a Deck, 0x1102 and 0x1142 the wired and wireless Steam Controllers, 0x1304 the
 Puck.
 
-padmap names the device node of every seat it hands out (`players[].node`),
+danstick names the device node of every seat it hands out (`players[].node`),
 and that is the hook. `/proc/bus/input/devices` carries `Vendor` and `Product`
 beside every node, and `hush.parse` already reads that file for the grabs, so
 this is one dictionary on top of it. A clone under the default `mirror`
 identity copies its source's vendor and product, so the answer is the same
-whether the node named is the pad itself or padmap's republished copy of it --
+whether the node named is the pad itself or danstick's republished copy of it --
 under `xbox360` (the decompiled ports only, never the picker) it would be
 Microsoft's, which is what that identity is for.
 
@@ -37,8 +37,8 @@ from .hush import DEVICES, parse
 CACHE_SECONDS = 1.0
 
 # Where a hidraw node's ids are written. A Steam Controller and a Deck have no
-# joystick evdev node at all -- the pad is hidraw-only, and padmap reads it
-# there (padmap's docs/HIDRAW.md) -- so a seat on one names `/dev/hidrawN`,
+# joystick evdev node at all -- the pad is hidraw-only, and danstick reads it
+# there (danstick's docs/HIDRAW.md) -- so a seat on one names `/dev/hidrawN`,
 # which /proc/bus/input/devices has never heard of. sysfs has: one `uevent`
 # per node carrying `HID_ID=<bus>:<vendor>:<product>`, all eight digits wide.
 HIDRAW = "/sys/class/hidraw"
@@ -48,10 +48,10 @@ _read_at: float = 0.0
 
 
 def node_key(node: str | None) -> str:
-    """`event9` out of whatever form of it padmap sent.
+    """`event9` out of whatever form of it danstick sent.
 
-    padmap says `/dev/input/event9`; the file says `event9`; a keyboard seat
-    says nothing at all, and so does a seat padmap published before it had a
+    danstick says `/dev/input/event9`; the file says `event9`; a keyboard seat
+    says nothing at all, and so does a seat danstick published before it had a
     node to name.
     """
     text = str(node or "").strip()

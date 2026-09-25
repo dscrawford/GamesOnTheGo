@@ -70,7 +70,7 @@ def test_the_phones_media_keys_on_the_same_radio_are_not_a_controllers():
 
 
 def test_the_joysticks_themselves_are_not_held():
-    # Those are SDL's to read, and padmap's to grab. Holding one here would
+    # Those are SDL's to read, and danstick's to grab. Holding one here would
     # take it from both.
     names = {n.name for n in held()}
     assert "Xbox Wireless Controller" not in names
@@ -130,7 +130,7 @@ DECK = pathlib.Path(__file__).parent / "fixtures" / "input-devices-steam-deck-xb
 def test_a_pad_whose_own_node_is_also_kbd_is_not_held():
     # The Deck, with an Xbox pad over Bluetooth: the kernel gives the pad's
     # own joystick node a `kbd` handler (it has keys), and it shares a uniq
-    # with itself -- so it was held as its own keyboard. Grabbed, padmap never
+    # with itself -- so it was held as its own keyboard. Grabbed, danstick never
     # heard it held, and nothing anybody pressed on it took a seat.
     names = {n.name for n in hush.a_controllers(hush.parse(DECK.read_text()))}
     assert "Xbox Wireless Controller" not in names
