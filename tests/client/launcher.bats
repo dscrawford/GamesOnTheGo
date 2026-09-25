@@ -441,6 +441,54 @@ teardown() {
   [ "$out" = "$TEST_TMP/home/Documents/GOTG" ]
 }
 
+@test "with no checkout, environments come from the source this client was built from" {
+  # Not GitHub's head: a Deck given a build from a copy of a checkout built
+  # the client from that copy and every emulator environment from GitHub --
+  # a client speaking danstick, environments still naming padmap.
+  load_client_libs
+  mkdir -p "$TEST_TMP/own"
+  : >"$TEST_TMP/own/flake.nix"
+  local out
+  out="$(HOME="$TEST_TMP/nohome" GOTG_FLAKE="" GOTG_OWN_FLAKE="$TEST_TMP/own" gotg_flake)"
+  [ "$out" = "$TEST_TMP/own" ]
+}
+
+@test "a checkout or a flake somebody named still wins over the client's own source" {
+  load_client_libs
+  mkdir -p "$TEST_TMP/home/Documents/GOTG" "$TEST_TMP/own"
+  : >"$TEST_TMP/home/Documents/GOTG/flake.nix"
+  : >"$TEST_TMP/own/flake.nix"
+  [ "$(HOME="$TEST_TMP/home" GOTG_FLAKE="" GOTG_OWN_FLAKE="$TEST_TMP/own" gotg_flake)" = "$TEST_TMP/home/Documents/GOTG" ]
+  [ "$(HOME="$TEST_TMP/nohome" GOTG_FLAKE="github:me/fork" GOTG_OWN_FLAKE="$TEST_TMP/own" gotg_flake)" = "github:me/fork" ]
+}
+
+@test "updates still come from GitHub, not from the client's own source" {
+  # The own source is what this client is; sync is how a newer one arrives.
+  load_client_libs
+  mkdir -p "$TEST_TMP/own"
+  : >"$TEST_TMP/own/flake.nix"
+  local out
+  out="$(HOME="$TEST_TMP/nohome" GOTG_FLAKE="" GOTG_OWN_FLAKE="$TEST_TMP/own" gotg_update_flake)"
+  [[ "$out" == github:* ]]
+}
+
+@test "sync builds the environments from the flake it built the client from" {
+  stub_nix
+  fake_env env-n64
+  mkdir -p "$TEST_TMP/own"
+  : >"$TEST_TMP/own/flake.nix"
+  export GOTG_OWN_FLAKE="$TEST_TMP/own"
+  gotg sync
+  [ "$status" -eq 0 ]
+  grep -q "build $GOTG_FLAKE#env-n64" "$NIX_LOG"
+  ! grep -q "build $TEST_TMP/own#" "$NIX_LOG"
+}
+
+@test "a source in the store is its own fingerprint" {
+  load_client_libs
+  [ "$(flake_fingerprint /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source)" = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source" ]
+}
+
 @test "a url flake goes to nix without a local flake.nix check" {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh

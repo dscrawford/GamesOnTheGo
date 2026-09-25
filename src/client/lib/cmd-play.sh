@@ -222,7 +222,7 @@ cmd_sync() {
   # which runs a sync after every upgrade, it is a window nobody asked for.
   export GOTG_NO_DIALOG=1
   [[ "${1:-}" != "--force" && "${1:-}" != "-f" ]] || force=1
-  flake="$(gotg_flake)"
+  flake="$(gotg_update_flake)"
   # A URL ref answers from nix's fetch cache for up to an hour; sync exists
   # to pick up what just changed, so it pays for a fresh look at the head.
   local -a refresh=()
@@ -308,7 +308,9 @@ cmd_sync() {
       # One slot at a time, so the cap is a cap rather than a suggestion.
       while (($(jobs -rp | wc -l) >= jobs)); do wait -n; done
       (
-        if (GOTG_BUILD_QUIET=1 env_build "$name") 2>"$GOTG_STATE_DIR/sync-$name.log"; then
+        # From the flake the new client was just built from, not the running
+        # client's own source: the environments go with the client they are for.
+        if (GOTG_BUILD_QUIET=1 GOTG_FLAKE="$flake" env_build "$name") 2>"$GOTG_STATE_DIR/sync-$name.log"; then
           printf 'built\n' >"$GOTG_STATE_DIR/sync-$name.result"
         else
           printf 'failed\n' >"$GOTG_STATE_DIR/sync-$name.result"

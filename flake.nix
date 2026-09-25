@@ -119,6 +119,8 @@
         envs
         // rec {
           gotg = pkgs.callPackage ./src/client {
+            # This very source, for the environments it builds at run time.
+            ownFlake = self.outPath;
             inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg-pads gotg-killswitch;
             inherit (danstick.packages.${pkgs.stdenv.hostPlatform.system}) danstick danstick-rs;
           };
