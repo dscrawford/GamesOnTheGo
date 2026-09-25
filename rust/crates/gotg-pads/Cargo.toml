@@ -1,0 +1,14 @@
+[package]
+name = "gotg-pads"
+description = "Report the controllers SDL can see, as JSON"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+sdl3-sys = { workspace = true }
+serde_json = { workspace = true, features = ["preserve_order"] }
+
+[lints]
+workspace = true

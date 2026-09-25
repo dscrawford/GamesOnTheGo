@@ -28,3 +28,6 @@ ruvector.db
 
 # Built by src/ui/build-controllers.py at build time.
 src/ui/assets/built/
+
+# The Rust workspace's build output.
+/rust/target/

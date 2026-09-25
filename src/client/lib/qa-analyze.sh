@@ -119,6 +119,85 @@ qa_phash() {
   awk '{print $1}' <<<"$out"
 }
 
+# Whether the overlay's bar is in `after` and was not in `before`: a JSON
+# object with `pass`.
+#
+# Read where gotg-killswitch draws it (scene.c: the bar is 8.5% of the
+# screen's height, 48 to 128 px, the exit ring in its middle) as one
+# signature: a band down the left of the bar that is near-black, and a middle
+# that is mostly near-black with red in it -- the ring and its X, part way
+# closed while the virtual pad holds the chord. A red ring on a dark bar, in the frame itself. It has to be
+# there once the chord is held and not before, so a game whose top edge is
+# dark, or red, cannot pass on its own; comparing the red *gained* instead
+# failed on a stand-in game that was red all over. What it cannot tell apart:
+# a game's own dark band with a red HUD element that appears exactly between
+# the two frames sampled. The overlay log says which process drew, for a run
+# where that matters.
+qa_overlay_signature() {
+  local frame="$1" size w h bar band middle
+  size="$(magick identify -format '%w %h' "$frame" 2>/dev/null)" || {
+    printf '{"present": false}\n'
+    return 0
+  }
+  read -r w h <<<"$size"
+  bar=$(((h * 85 + 500) / 1000))
+  ((bar >= 48)) || bar=48
+  ((bar <= 128)) || bar=128
+  band="$((w / 4))x$((bar - 8))+8+4"
+  middle="$((bar * 2))x${bar}+$((w / 2 - bar))+0"
+  local dark red middle_dark
+  dark="$(qa_region_mean "$frame" "$band" 'max(r,max(g,b))')"
+  red="$(qa_region_mean "$frame" "$middle" '(r>0.55)*(g<0.35)*(b<0.35)')"
+  middle_dark="$(qa_region_mean "$frame" "$middle" 'max(r,max(g,b))<0.3')"
+  jq -n --argjson dark "${dark:-1}" --argjson red "${red:-0}" --argjson middle_dark "${middle_dark:-0}" \
+    '{present: ($dark <= 0.35 and $red >= 0.02 and $middle_dark >= 0.5),
+      bar_band: $dark, ring_red: $red, middle_dark: $middle_dark}'
+}
+
+# The mean of an fx expression over one crop of a frame; empty if it cannot
+# be read.
+qa_region_mean() {
+  magick "$1" -crop "$2" +repage -fx "$3" -format '%[fx:mean]' info: 2>/dev/null
+}
+
+qa_overlay_check() {
+  qa_overlay_judge "$(qa_overlay_signature "$1")" "$(qa_overlay_signature "$2")"
+}
+
+# Two signatures, before and after, to a verdict.
+qa_overlay_judge() {
+  jq -n --argjson before "$1" --argjson after "$2" \
+    '{pass: ($after.present and ($before.present | not)), before: $before, after: $after}'
+}
+
+# The overlay axis of a run that asked for it (`gotg qa --overlay-at N`): the
+# exit ring is on screen from about N+3 to N+6 (qa/session.sh has the
+# timeline), counted from a session start a moment after the recording's --
+# so two frames from inside that window are tried, against one from before
+# anybody joined.
+qa_overlay_verdict() {
+  local rundir="$1" at offset frame_at before result='{"pass": false, "why": "no frame from inside the overlay"}'
+  at="$(jq -r '.overlay_at // empty' "$rundir/run.json" 2>/dev/null)"
+  # Checked before it meets arithmetic: bash evaluates a variable's text in
+  # $(( )), and this file could come from a run directory made elsewhere.
+  if [[ ! "$at" =~ ^[0-9]+$ ]]; then
+    printf '{"pass": false, "why": "overlay_at is not a number of seconds"}\n'
+    return 0
+  fi
+  if ! qa_frame "$rundir/video.mkv" "$((10#$at > 1 ? 10#$at - 1 : 0))" "$rundir/overlay-before.png" 2>/dev/null; then
+    printf '%s\n' "$result"
+    return 0
+  fi
+  before="$(qa_overlay_signature "$rundir/overlay-before.png")"
+  for offset in 4.8 5.4; do
+    frame_at="$(awk -v a="$at" -v o="$offset" 'BEGIN { print a + o }')"
+    qa_frame "$rundir/video.mkv" "$frame_at" "$rundir/overlay.png" 2>/dev/null || continue
+    result="$(qa_overlay_judge "$before" "$(qa_overlay_signature "$rundir/overlay.png")")"
+    [[ "$(jq -r .pass <<<"$result")" != true ]] || break
+  done
+  printf '%s\n' "$result"
+}
+
 # Grade a run directory — audio.wav, video.mkv, status, optionally golden.png
 # — into verdict.json. Exit 0 only if every axis passed.
 #
@@ -157,10 +236,14 @@ qa_verdict() {
       '{pass: ($d <= $max), distance: $d}')"
   fi
 
+  local overlay='{"pass": null}'
+  [[ "$(jq -r '.overlay_at // empty' "$rundir/run.json" 2>/dev/null)" == "" ]] ||
+    overlay="$(qa_overlay_verdict "$rundir")"
+
   jq -n \
     --argjson boots "$boots" --argjson status "$status" \
     --argjson audio "$audio" --argjson video "$video" \
-    --argjson graphics "$graphics" \
+    --argjson graphics "$graphics" --argjson overlay "$overlay" \
     --argjson rms_min "${GOTG_QA_RMS_MIN:--45}" \
     --argjson silence_max "${GOTG_QA_SILENCE_MAX:-15}" \
     --argjson black_frac_max "${GOTG_QA_BLACK_FRAC_MAX:-0.25}" \
@@ -185,7 +268,8 @@ qa_verdict() {
                           pass: ($captured and $black_frac <= $black_frac_max)}),
         controller: {pass: ($captured and $freeze_frac <= $freeze_frac_max),
                      freeze_in_window: $video.freeze_in_window, freeze_frac: $freeze_frac},
-        graphics: $graphics
+        graphics: $graphics,
+        overlay: $overlay
       }
     } | .pass = ([.checks[].pass] | all(. != false))' \
     >"$rundir/verdict.json.checks"

@@ -30,7 +30,7 @@ setup() {
   {
     printf '#!%s\n' "$(command -v bash)"
     printf 'printf "padmap-rs %%s\\n" "$*" >>"$PADMAP_LOG"\n'
-    printf 'shift 2\n'
+    printf 'while [ "$#" -gt 0 ] && [ "$1" != -- ]; do shift; done; shift\n'
     printf 'exec "$@"\n'
   } >"$FAKE_BIN/padmap-rs"
   export SEAT_LOG="$TEST_TMP/seat.log"
@@ -787,4 +787,60 @@ EOF
   mkdir -p "$GOTG_PADMAP_RUNTIME"
   GOTG_SEAT_MET=1 padmap_seat_gate gamecube "Four Swords Adventures"
   [ "$SDL_JOYSTICK_HIDAPI_STEAM" = 1 ]
+}
+
+# --- seats held open for a game that binds its players once ------------------
+
+@test "an environment that binds its players at launch reserves their seats" {
+  # Four Swords binds a GBA per player when it starts; a pad paired mid-game
+  # had no binding and Start did nothing.
+  fake_env env-fsa
+  pads_manifest env-fsa <<<'{"emulator":"dolphin","reserve":4}'
+  run padmap_reserve env-fsa
+  [ "$status" -eq 0 ]
+  [ "$output" = "--reserve 4" ]
+}
+
+@test "an environment that asks for no seats reserves none" {
+  fake_env env-plain
+  pads_manifest env-plain <<<'{"emulator":"dolphin"}'
+  run padmap_reserve env-plain
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a reservation that is not a number of seats is ignored" {
+  fake_env env-odd
+  pads_manifest env-odd <<<'{"emulator":"dolphin","reserve":"all; rm -rf /"}'
+  run padmap_reserve env-odd
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "Ryujinx never reserves: it needs the identity Ryujinx cannot use" {
+  fake_env env-switch
+  pads_manifest env-switch <<<'{"emulator":"ryujinx","reserve":4}'
+  run --separate-stderr padmap_reserve env-switch
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *"not reserving seats"* ]]
+}
+
+@test "the reservation rides on the exec that launches the game" {
+  fake_env env-fsa
+  pads_manifest env-fsa <<<'{"emulator":"dolphin","reserve":2}'
+  run bash -c 'source "$GOTG_LIB/common.sh"; source "$GOTG_LIB/env.sh"
+    source "$GOTG_LIB/padmap.sh"; PLAY_ATTR=env-fsa padmap_exec echo played'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"played"* ]]
+  grep -q "padmap-rs exec --reserve 2 -- echo played" "$PADMAP_LOG"
+}
+
+@test "an ordinary game is exec'd with no reservation" {
+  fake_env env-plain
+  pads_manifest env-plain <<<'{"emulator":"dolphin"}'
+  run bash -c 'source "$GOTG_LIB/common.sh"; source "$GOTG_LIB/env.sh"
+    source "$GOTG_LIB/padmap.sh"; PLAY_ATTR=env-plain padmap_exec echo played'
+  [ "$status" -eq 0 ]
+  grep -q "padmap-rs exec -- echo played" "$PADMAP_LOG"
 }

@@ -35,7 +35,6 @@ import pygame  # noqa: E402 - the line above only works ahead of the import
 
 from . import devices, display, keys, meter, profiles, trace
 from . import pads as sdl_pads
-from .assign import KeyHold
 from .bindings import console_for, pad_controls
 from .controllers import Diagram, assets_dir, draw_arc, draw_reveal, draw_tick, icon_surface
 from .controllers import draw as draw_diagram
@@ -57,7 +56,7 @@ from .gate import (
 from .hush import Hush
 from .joining import Joining
 from .padmap import Padmap, ensure_daemon, session_pid
-from .padstrip import EMPTY_RING, LABEL, LABEL_DIM, PANEL, colour_for
+from .padstrip import ATTENTION, LABEL, LABEL_DIM, PANEL, colour_for
 from .padstrip import READY as SETTLED_GREEN  # gate.READY is a state; this is a colour
 from .pressing import (
     controls_for,
@@ -185,7 +184,7 @@ def draw(
         screen.blit(counted, ((width - counted.get_width()) // 2, top - 30))
 
     if gate.message:
-        said = font_at(24).render(gate.message, True, EMPTY_RING)
+        said = font_at(24).render(gate.message, True, ATTENTION)
         screen.blit(said, ((width - said.get_width()) // 2, int(height * 0.76)))
 
     # Nothing about Esc while the buttons are being walked: it is refused
@@ -339,7 +338,6 @@ def at(shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, hu
     # The space bar, held, seats the keyboard. padmap never sees its keys --
     # the keyboard is the compositor's -- so this hold is timed here and the
     # daemon is told the answer, exactly as the picker does it.
-    space = KeyHold()
     # Where a frame's time goes, for the screen a reveal is watched on.
     fps = meter.Meter()
 
@@ -394,11 +392,10 @@ def at(shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, hu
                     # to be able to hand it out again or a keyboard player
                     # arrives at a gate that answers nothing.
                     if event.type in (pygame.KEYDOWN, pygame.KEYUP, pygame.TEXTINPUT):
-                        if getattr(event, "key", None) == pygame.K_SPACE:
-                            if event.type == pygame.KEYDOWN:
-                                space.down(time.monotonic())
-                            else:
-                                space.up()
+                        # padmap reads the space bar itself and seats the
+                        # keyboard (its hold arrives as `progress`, drawn in
+                        # the queue); here it is only not a stray key.
+                        if getattr(event, "key", None) == pygame.K_SPACE or getattr(event, "text", None) == " ":
                             continue
                         if not keys.drives(pads.players, pads.connected):
                             trace.say("key-refused", key=getattr(event, "key", None))
@@ -445,10 +442,6 @@ def at(shown: display.Display, font_at, pads: Padmap, gate: Gate, title: str, hu
                 gate, command = decide(gate)
                 if command is not None:
                     pads.send(command)
-                asked = space.due(time.monotonic())
-                if asked is not None:
-                    trace.say("sent", **asked)
-                    pads.send(asked)
 
                 painting = time.perf_counter()
                 if gate.state in (CHECKING, SEATING, READY):
@@ -846,7 +839,6 @@ def _wait_for_go(
     # has to be drawn filling in like anywhere else -- by name, so it is not
     # confused with the seats already here. See joining.py.
     queue = Joining(hold_seconds=PAIR_HOLD)
-    space = KeyHold()
     fps = meter.Meter()
     finished: float | None = None
     cache = cache if cache is not None else {}
@@ -879,20 +871,12 @@ def _wait_for_go(
             if getattr(event, "key", None) == pygame.K_SPACE and event.type in (
                 pygame.KEYDOWN, pygame.KEYUP
             ):
-                if event.type == pygame.KEYDOWN:
-                    space.down(now)
-                else:
-                    space.up()
                 continue
             if hush is not None and event.type in (pygame.JOYDEVICEADDED, pygame.JOYDEVICEREMOVED):
                 hush.refresh()
             if door.handle(event, now):
                 trace.say("door-go", why="key-or-quit")
                 return "go", gate
-        asked = space.due(now)
-        if asked is not None:
-            trace.say("sent", **asked)
-            pads.send(asked)
         door.tick(now)
         if door.everybody(now):
             # Everybody has readied up. One more moment with the checks on
@@ -1153,7 +1137,7 @@ def _hold_the_door(title: str, reason: str) -> int:
             heading = font_at(34).render(title, True, LABEL_DIM)
             screen.blit(heading, ((width - heading.get_width()) // 2, int(height * 0.10)))
             said, footer = without_controllers(reason, deadline - time.monotonic())
-            prompt = font_at(48).render(said, True, EMPTY_RING)
+            prompt = font_at(48).render(said, True, ATTENTION)
             screen.blit(prompt, ((width - prompt.get_width()) // 2, int(height * 0.40)))
             line = font_at(22).render(footer, True, LABEL_DIM)
             screen.blit(line, ((width - line.get_width()) // 2, int(height * 0.92)))

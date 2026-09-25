@@ -1,0 +1,32 @@
+[package]
+name = "gotg-killswitch"
+description = "Stops a running game when both shoulders and Start are held, and draws the overlay bar over it"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+sdl3-sys = { workspace = true }
+serde_json = { workspace = true }
+libc = "0.2"
+# Layer-shell on SDL's own surface: libwayland's objects, driven from Rust.
+wayland-client = "0.31"
+wayland-backend = { version = "0.3", features = ["client_system"] }
+wayland-sys = { version = "0.31", features = ["client"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+# gamescope's overlay atom, an empty input shape and keeping on top, over
+# a connection of our own to the same X server.
+x11rb = { version = "0.14", features = ["shape"] }
+# The picker's controller drawings, rasterised at whatever size the bar is.
+# No text or system fonts: the drawings have none, and fontdb would scan the
+# machine's fonts at start.
+resvg = { version = "0.48", default-features = false }
+
+[build-dependencies]
+# The palette comes from config/theme.yaml, the file the picker reads.
+yaml-rust2 = "0.13"
+
+[lints]
+workspace = true
