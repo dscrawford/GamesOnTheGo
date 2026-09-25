@@ -18,9 +18,9 @@ instead of 1.5. Readings came 48-61 ms apart on that desktop (one 565 ms stall
 while a Steam Controller paired), and claim-to-`state` took 195-255 ms across
 five sessions. The timings below come from those numbers.
 
-Situations, and what each expects of the padmap pinned in flake.nix (ac0a3dc;
+Situations, and what each expects of the padmap pinned in flake.nix (871a4f7;
 the markers below came off as padmap answered them -- bf6606d, 26754a9,
-bc61806, 0bcd1dc, 9463268, a03dc32, 18829da, dd7db61):
+bc61806, 0bcd1dc, 9463268, a03dc32, 18829da, dd7db61, 4ff56ba):
 
   Several people, one room
   - four pads pressed 0.3 s apart, in the reverse of the order they were
@@ -60,8 +60,8 @@ bc61806, 0bcd1dc, 9463268, a03dc32, 18829da, dd7db61):
 
   Performance
   - hold to claim is the hold plus little; claim to the new clone, and the
-    first seat's claim to `state`, are bounded. STRICT XFAIL -- seats 2-4
-    claim 113-237 ms after their hold at ac0a3dc: a-claim-comes-at-its-hold.md.
+    first seat's claim to `state`, are bounded. PASSES (4ff56ba; seats 2-4
+    claimed 113-237 ms late at ac0a3dc).
   - the fourth seat's `state` comes within 100 ms of the first's. PASSES --
     claim to `state` is ~1 ms for every seat at ac0a3dc, from 1.19 s.
   - four holds at once: each is read often enough that the 0.5 s safety net
@@ -1072,12 +1072,6 @@ def _join_one_by_one(room: Room, pads: list[FakePad]) -> tuple[list[float], list
     return late, to_state, to_clone
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="later seats claim 113-237 ms after their hold at ac0a3dc (the first, 15 ms): the room's work "
-    "moved in front of the claim. docs/requests/a-claim-comes-at-its-hold.md",
-)
 def test_a_hold_claims_at_its_length_and_is_published_promptly(daemon):
     """Four people, one after another, nothing else in flight: each claim is
     the hold plus a little, the new player's clone follows at once, and the
