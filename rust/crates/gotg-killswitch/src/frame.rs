@@ -16,8 +16,26 @@ use crate::pairing::{HOLDS_MAX, Hold, JOINED_MAX};
 /// "GOSV", so a torn or foreign read is refused.
 pub const MAGIC: u32 = 0x5653_4f47;
 
-/// Bytes on the pipe: five words, then the five arrays, a word per entry.
-pub const SIZE: usize = 4 * (5 + HOLDS_MAX * 3 + JOINED_MAX * 2);
+/// Bytes on the pipe: five words, the five arrays a word per entry, then
+/// the rebind's seven words.
+pub const SIZE: usize = 4 * (5 + HOLDS_MAX * 3 + JOINED_MAX * 2 + REBIND_WORDS);
+
+const REBIND_WORDS: usize = 7;
+
+/// A rebind as the bar draws it: which seat, on which console's drawing,
+/// which control (an index into that console's, -1 before the first step),
+/// how far through, the early-finish hold, and how it ended.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rebinding {
+    pub player: i32,
+    pub console: u32,
+    pub control: i32,
+    pub index: i32,
+    pub total: i32,
+    pub finish: f32,
+    /// 0 still walking, 1 kept, 2 given up on.
+    pub ended: u32,
+}
 
 /// One frame, in fixed arrays as it crosses the pipe: nothing to allocate
 /// per frame at either end, and no way to hold more than a frame can say.
@@ -34,6 +52,8 @@ pub struct Frame {
     joined: [i32; JOINED_MAX],
     joined_icon: [u8; JOINED_MAX],
     joined_count: usize,
+    /// On the wire as player 0 when there is none.
+    pub rebind: Option<Rebinding>,
 }
 
 impl Frame {
@@ -57,6 +77,11 @@ impl Frame {
             frame.joined_icon[i] = icon;
         }
         frame
+    }
+
+    /// This frame, with a rebind on it.
+    pub fn with_rebind(self, rebind: Option<Rebinding>) -> Self {
+        Self { rebind, ..self }
     }
 
     /// How far each joining pad is, oldest press first.
@@ -108,6 +133,22 @@ impl Frame {
         self.joined_icon
             .iter()
             .for_each(|&value| put(u32::from(value).to_ne_bytes()));
+        let rebind = self.rebind.unwrap_or(Rebinding {
+            player: 0,
+            console: 0,
+            control: -1,
+            index: 0,
+            total: 0,
+            finish: 0.0,
+            ended: 0,
+        });
+        put(rebind.player.to_ne_bytes());
+        put(rebind.console.to_ne_bytes());
+        put(rebind.control.to_ne_bytes());
+        put(rebind.index.to_ne_bytes());
+        put(rebind.total.to_ne_bytes());
+        put(rebind.finish.to_ne_bytes());
+        put(rebind.ended.to_ne_bytes());
         out
     }
 
@@ -125,7 +166,18 @@ impl Frame {
         }
         let holds = 5;
         let joined = holds + 3 * HOLDS_MAX;
+        let rebind = joined + 2 * JOINED_MAX;
+        let player = i32::from_ne_bytes(word(rebind));
         Some(Self {
+            rebind: (player > 0).then(|| Rebinding {
+                player,
+                console: u32::from_ne_bytes(word(rebind + 1)),
+                control: i32::from_ne_bytes(word(rebind + 2)),
+                index: i32::from_ne_bytes(word(rebind + 3)),
+                total: i32::from_ne_bytes(word(rebind + 4)),
+                finish: f32::from_ne_bytes(word(rebind + 5)),
+                ended: u32::from_ne_bytes(word(rebind + 6)),
+            }),
             position: f32::from_ne_bytes(word(1)),
             exit_progress: f32::from_ne_bytes(word(2)),
             hold_fraction: std::array::from_fn(|i| f32::from_ne_bytes(word(holds + i))),
@@ -165,6 +217,29 @@ mod tests {
         assert_eq!(frame.hold_fraction(), [0.25, 0.5]);
         assert_eq!(frame.hold_icon(), [5, 9], "each with its pad's drawing");
         assert_eq!((frame.joined(), frame.joined_icon()), (&[1][..], &[4][..]));
+    }
+
+    #[test]
+    fn a_rebind_crosses_the_pipe_and_its_absence_does_too() {
+        let rebinding = Rebinding {
+            player: 2,
+            console: 5,
+            control: 3,
+            index: 3,
+            total: 14,
+            finish: 0.25,
+            ended: 0,
+        };
+        let frame = Frame {
+            rebind: Some(rebinding),
+            ..Frame::pack(1.0, 0.0, &[], &[])
+        };
+        assert_eq!(
+            Frame::decode(&frame.encode()).and_then(|f| f.rebind),
+            Some(rebinding)
+        );
+        let none = Frame::pack(1.0, 0.0, &[], &[]);
+        assert_eq!(Frame::decode(&none.encode()).map(|f| f.rebind), Some(None));
     }
 
     #[test]

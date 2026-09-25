@@ -22,12 +22,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gotg_killswitch::bar::Bar;
-use gotg_killswitch::frame::Frame;
-use gotg_killswitch::killswitch::{Input, Pad};
+use gotg_killswitch::clones;
+use gotg_killswitch::consoles::{self, CONSOLES};
+use gotg_killswitch::frame::{Frame, Rebinding};
+use gotg_killswitch::killswitch::{Chord, Input, Pad};
 use gotg_killswitch::padlink::Link;
 use gotg_killswitch::painter::{self, Painter};
 use gotg_killswitch::pairing::Pairing;
 use gotg_killswitch::procstat;
+use gotg_killswitch::rebind::{Rebind, View};
 use sdl3_sys::everything::*;
 
 const DEFAULT_HOLD_MS: u64 = 3000;
@@ -60,12 +63,17 @@ extern "C" fn on_signal(_: libc::c_int) {
 }
 
 const USAGE: &str =
-    "usage: gotg-killswitch --pid <pid> [--hold-ms N] [--grace-ms N] [--poll-ms N] [--quiet] [--no-overlay]
+    "usage: gotg-killswitch --pid <pid> [--platform P] [--hold-ms N] [--grace-ms N] [--poll-ms N]
+                       [--quiet] [--no-overlay]
 
 Watches every controller SDL can see. When both shoulders (or both
 triggers) and Start are held together for the hold time, the process
 is asked to stop, and killed if it will not. Exits on its own when
 that process is gone.
+
+Both shoulders and Select, held as long, walk that controller's
+buttons again in padmap, over the game, with the console's controller
+drawn for --platform (the generic pad without one).
 
 A bar comes down over the game while the hold runs, and while a
 controller is holding a button to join padmap -- unless --no-overlay
@@ -80,6 +88,9 @@ struct Options {
     poll_ms: u64,
     quiet: bool,
     draw: bool,
+    /// The game's platform, for which controller the rebind draws and which
+    /// padmap layout it walks.
+    platform: String,
 }
 
 /// Digits only. A leading minus is refused rather than wrapped: "--hold-ms
@@ -101,6 +112,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         poll_ms: DEFAULT_POLL_MS,
         quiet: false,
         draw: true,
+        platform: String::new(),
     };
     let mut target = 0u64;
     let mut args = args.iter();
@@ -112,6 +124,18 @@ fn parse(args: &[String]) -> Result<Options, String> {
             }
             "--no-overlay" => {
                 options.draw = false;
+                continue;
+            }
+            "--platform" => {
+                options.platform = args
+                    .next()
+                    .filter(|p| {
+                        !p.is_empty()
+                            && p.bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                    })
+                    .ok_or_else(|| format!("bad argument: {arg}"))?
+                    .clone();
                 continue;
             }
             "--pid" => &mut target,
@@ -225,6 +249,10 @@ struct Watched {
     id: SDL_JoystickID,
     pad: *mut SDL_Gamepad,
     state: Pad,
+    /// The rebind chord's hold, beside the exit's.
+    rebind: Pad,
+    /// The seat this pad is padmap's clone for; None for a raw pad.
+    player: Option<i32>,
     /// Whether this hold has been mentioned in the log.
     announced: bool,
 }
@@ -255,10 +283,14 @@ impl Pads {
                 if name.is_empty() { "a controller" } else { &name }
             );
         }
+        // SAFETY: SDL is initialised; the id came from SDL.
+        let guid = unsafe { SDL_GetGamepadGUIDForID(id) };
         self.0.push(Watched {
             id,
             pad,
             state: Pad::new(hold_ms),
+            rebind: Pad::timing(Chord::Rebind, hold_ms),
+            player: clones::player_of_guid(&guid.data),
             announced: false,
         });
     }
@@ -411,6 +443,9 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
     let mut link = Link::new(std::env::var("GOTG_OVERLAY_PADMAP_SOCKET").ok().as_deref());
     let mut bar = Bar::new(SLIDE_SECONDS);
     let mut painter = Painter::default();
+    let mut rebind = Rebind::default();
+    let console_index = consoles::for_platform(&options.platform);
+    let console = &CONSOLES[console_index];
     let mut next_alive_ms = 0;
     while !STOP.load(Ordering::Relaxed) {
         // SAFETY: SDL is initialised; the event is plain data SDL fills.
@@ -430,7 +465,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         let clock = seconds_now();
         if options.draw {
             link.tick(clock);
-            link.pump(&mut pairing, clock);
+            link.pump(&mut pairing, &mut rebind, clock);
         }
         // The furthest along any one pad is, since the picture is of a hold
         // rather than of a controller.
@@ -440,6 +475,16 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
             // SAFETY: every watched pad is open.
             let input = unsafe { read_pad(watched.pad) };
             fire |= watched.state.step(input, now);
+            if watched.rebind.step(input, now) && options.draw {
+                ask_for_rebind(
+                    watched.player,
+                    console,
+                    &mut rebind,
+                    &mut link,
+                    clock,
+                    options.quiet,
+                );
+            }
             // One line when a hold starts, so the log of a session that ended
             // this way says why.
             if !options.quiet && watched.state.holding() && !watched.announced {
@@ -465,8 +510,9 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         // nobody joins or leaves never has one -- and a machine with no
         // display is one whose painter exits at once and is asked again less
         // and less often.
+        let rebinding = rebind.view(clock);
         bar.want(
-            options.draw && (exit_progress > 0.0 || pairing.busy(clock)),
+            options.draw && (exit_progress > 0.0 || pairing.busy(clock) || rebinding.is_some()),
             clock,
         );
         let showing = !bar.gone(clock);
@@ -475,7 +521,8 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
             let holds = pairing.now(clock);
             let joined = pairing.joined(clock);
             moving = bar.moving(clock) || !holds.is_empty() || exit_progress > 0.0;
-            let frame = Frame::pack(bar.position(clock), exit_progress, &holds, &joined);
+            let frame = Frame::pack(bar.position(clock), exit_progress, &holds, &joined)
+                .with_rebind(rebinding.map(|view| drawn(&view, console, console_index)));
             painter.ensure(clock);
             painter.send(&frame, clock);
         } else if painter.open() {
@@ -516,6 +563,59 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         }
     }
     painter.close();
+}
+
+/// The rebind chord fired on a pad: ask padmap to walk that seat's buttons.
+fn ask_for_rebind(
+    player: Option<i32>,
+    console: &consoles::Console,
+    rebind: &mut Rebind,
+    link: &mut Link,
+    clock: f64,
+    quiet: bool,
+) {
+    let Some(player) = player else {
+        // A raw pad: padmap has published no clone for it, so there is no
+        // seat of padmap's to rebind. Seat it first, then rebind it.
+        if !quiet {
+            eprintln!("gotg-killswitch: rebind held on a pad padmap has not seated; nothing to rebind");
+        }
+        return;
+    };
+    let Some(line) = rebind.start(player, console.layout, &console.scope(), clock) else {
+        return;
+    };
+    if link.send(&line) {
+        if !quiet {
+            eprintln!(
+                "gotg-killswitch: rebinding player {player} ({} layout)",
+                console.layout
+            );
+        }
+    } else {
+        eprintln!("gotg-killswitch: padmap is not listening; cannot rebind player {player}");
+        rebind.unsent(clock);
+    }
+}
+
+/// A rebind as the painter draws it.
+fn drawn(view: &View, console: &consoles::Console, console_index: usize) -> Rebinding {
+    Rebinding {
+        player: view.player,
+        console: console_index as u32,
+        control: console
+            .control(&view.control)
+            .and_then(|at| i32::try_from(at).ok())
+            .unwrap_or(-1),
+        index: view.index,
+        total: view.total,
+        finish: view.finish as f32,
+        ended: match view.stored {
+            None => 0,
+            Some(true) => 1,
+            Some(false) => 2,
+        },
+    }
 }
 
 #[cfg(test)]
@@ -576,6 +676,18 @@ mod tests {
     #[test]
     fn a_device_name_cannot_write_escapes() {
         assert_eq!(printable(b"Pad\x1b[2J\xff"), "Pad?[2J?");
+    }
+
+    #[test]
+    fn the_platform_is_read_and_nothing_odd_gets_through() {
+        let platform = |p: &str| parse(&args(&["--pid", "7", "--platform", p])).map(|o| o.platform);
+        assert_eq!(platform("n64").as_deref(), Ok("n64"));
+        assert!(platform("../etc").is_err());
+        assert!(platform("").is_err());
+        assert_eq!(
+            parse(&args(&["--pid", "7"])).map(|o| o.platform).as_deref(),
+            Ok("")
+        );
     }
 
     #[test]

@@ -203,7 +203,7 @@ pub fn paint() -> i32 {
             return 1;
         }
     };
-    let (width, bar) = overlay.size();
+    let (width, bar, _) = overlay.size();
     // What QA reads to find the bar in a recording: the size it actually drew.
     eprintln!(
         "gotg-killswitch: overlay up ({}, {}) width={width} bar={bar:.0}",
@@ -228,8 +228,10 @@ pub fn paint() -> i32 {
             break;
         }
         let Some(frame) = latest else { continue };
-        let (width, bar_height) = overlay.size();
+        let (width, bar_height, panel_height) = overlay.size();
         let scene = Scene {
+            panel_height,
+            rebind: frame.rebind,
             width,
             bar_height,
             position: f64::from(frame.position),

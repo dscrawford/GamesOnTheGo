@@ -43,8 +43,9 @@ use x11rb::wrapper::ConnectionExt as _;
 
 use std::collections::HashMap;
 
+use crate::consoles;
 use crate::icons;
-use crate::scene::{Drawing, Sprite, bar_height};
+use crate::scene::{Drawing, Sprite, bar_height, panel_height};
 use crate::shapes::{Colour, Mesh, Vertex, wedge};
 
 /// Which way in was taken.
@@ -382,9 +383,10 @@ pub struct Overlay {
     vsync: bool,
     layer: Option<LayerSurface>,
     x11: Option<X11>,
-    /// Each drawing at each height it has been drawn at, as a white
-    /// silhouette and its width: rasterised once, tinted per seat.
-    textures: HashMap<(u8, u32), (*mut SDL_Texture, u32)>,
+    /// Each drawing at each height it has been drawn at, and its width:
+    /// rasterised once. A pad's is a white silhouette, tinted per seat; a
+    /// console's (the rebind's, `true`) is in its own colours.
+    textures: HashMap<(u8, u32, bool), (*mut SDL_Texture, u32)>,
     /// Scratch for a reveal's triangles, kept so a frame allocates nothing.
     swept: Vec<[f32; 2]>,
     vertices: Vec<SDL_Vertex>,
@@ -450,6 +452,10 @@ impl Overlay {
             SDL_GetDisplayBounds(SDL_GetPrimaryDisplay(), &mut screen);
             overlay.screen_height = screen.h;
             let bar = bar_height(screen.h) as i64;
+            // The window is as tall as a rebind's panel, not the bar: the
+            // panel has to have somewhere to come down into. What is not
+            // drawn on is clear, and takes no input.
+            let panel = panel_height(screen.h) as i64;
 
             let props = SDL_CreateProperties();
             SDL_SetStringProperty(
@@ -474,14 +480,14 @@ impl Overlay {
                 );
                 SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, true);
                 SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, i64::from(screen.w));
-                SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, bar);
+                SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, panel);
             } else {
                 // gamescope paints its overlay at the screen's size and
                 // origin, as mangoapp's is; elsewhere the window is the bar's strip.
                 let height = if kind == Kind::Gamescope {
                     i64::from(screen.h)
                 } else {
-                    bar
+                    panel
                 };
                 SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, i64::from(screen.x));
                 SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, i64::from(screen.y));
@@ -538,7 +544,7 @@ impl Overlay {
                     if display.is_null() || surface.is_null() {
                         return Err(fail("SDL gave no Wayland surface".into()));
                     }
-                    let layer = LayerSurface::new(display, surface, bar as u32).map_err(fail)?;
+                    let layer = LayerSurface::new(display, surface, panel as u32).map_err(fail)?;
                     overlay.layer = Some(layer);
                     overlay.follow_the_compositor();
                 }
@@ -583,24 +589,28 @@ impl Overlay {
         let Some(width) = self.layer.as_mut().and_then(LayerSurface::pump) else {
             return;
         };
-        let bar = bar_height(self.screen_height) as c_int;
+        let panel = panel_height(self.screen_height) as c_int;
         // SAFETY: the window is live.
-        unsafe { SDL_SetWindowSize(self.window, width as c_int, bar) };
+        unsafe { SDL_SetWindowSize(self.window, width as c_int, panel) };
     }
 
-    /// The surface, in pixels, and the bar's height on it. On layer-shell the
-    /// surface is the bar, so its height in pixels is the bar's however the
-    /// output is scaled -- read live, since the compositor decides it.
-    pub fn size(&self) -> (i32, f32) {
+    /// The surface's width in pixels, and the bar's and a rebind's panel's
+    /// heights on it. On layer-shell the surface is the panel, so both come
+    /// from its height in pixels however the output is scaled -- read live,
+    /// since the compositor decides it.
+    pub fn size(&self) -> (i32, f32, f32) {
         let (mut width, mut height): (c_int, c_int) = (0, 0);
         // SAFETY: the renderer is live and the pointers are to locals.
         unsafe { SDL_GetRenderOutputSize(self.renderer, &mut width, &mut height) };
-        let bar = if self.kind == Kind::LayerShell {
-            height as f32
+        let logical_bar = bar_height(self.screen_height);
+        let logical_panel = panel_height(self.screen_height);
+        if self.kind == Kind::LayerShell {
+            let scale = height as f32 / logical_panel;
+            (width, logical_bar * scale, height as f32)
         } else {
-            self.bar_height
-        };
-        (width, bar)
+            let scale = self.bar_height / logical_bar;
+            (width, self.bar_height, logical_panel * scale)
+        }
     }
 
     /// Whether the compositor has taken the surface away.
@@ -637,12 +647,15 @@ impl Overlay {
 
     /// A drawing as a texture at this height, made the first time it is asked
     /// for. None where it cannot be drawn: the bar carries on without it.
-    fn texture(&mut self, icon: u8, height: u32) -> Option<(*mut SDL_Texture, u32)> {
-        if let Some(&found) = self.textures.get(&(icon, height)) {
+    fn texture(&mut self, icon: u8, height: u32, picture: bool) -> Option<(*mut SDL_Texture, u32)> {
+        if let Some(&found) = self.textures.get(&(icon, height, picture)) {
             return Some(found);
         }
-        let (width, pixels) =
-            icons::silhouette(icon, height).or_else(|| icons::silhouette(icons::FALLBACK, height))?;
+        let (width, pixels) = if picture {
+            consoles::picture(usize::from(icon), height)?
+        } else {
+            icons::silhouette(icon, height).or_else(|| icons::silhouette(icons::FALLBACK, height))?
+        };
         // SAFETY: the renderer is live; the pixels are `width` x `height`
         // RGBA, `width * 4` bytes a row, and outlive the upload.
         let texture = unsafe {
@@ -665,7 +678,7 @@ impl Overlay {
             SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
             texture
         };
-        self.textures.insert((icon, height), (texture, width));
+        self.textures.insert((icon, height, picture), (texture, width));
         Some((texture, width))
     }
 
@@ -673,7 +686,7 @@ impl Overlay {
     /// swept part in its seat's colour.
     fn draw_sprite(&mut self, sprite: &Sprite) {
         let height = sprite.height.round().max(1.0) as u32;
-        let Some((texture, width)) = self.texture(sprite.icon, height) else {
+        let Some((texture, width)) = self.texture(sprite.icon, height, sprite.picture) else {
             return;
         };
         let (w, h) = (width as f32, height as f32);
