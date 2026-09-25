@@ -70,6 +70,21 @@ impl Rebind {
         Some(json!({"cmd": "map", "player": player, "layout": layout, "scope": scope}).to_string())
     }
 
+    /// The command never reached padmap: over at once, as a walk nothing was
+    /// kept from, rather than an empty panel waiting out `ASK_SECONDS`.
+    pub fn unsent(&mut self, now: f64) {
+        if let Phase::Asked { player, .. } = self.phase {
+            self.end(
+                View {
+                    player,
+                    ..View::default()
+                },
+                false,
+                now,
+            );
+        }
+    }
+
     fn player(&self) -> Option<i32> {
         match &self.phase {
             Phase::Idle => None,
@@ -282,6 +297,15 @@ mod tests {
         );
         assert_eq!(refused.view(0.4).and_then(|v| v.stored), Some(false));
         assert_eq!(refused.view(0.3 + LINGER_SECONDS), None);
+    }
+
+    #[test]
+    fn a_command_that_never_left_ends_the_rebind_at_once() {
+        let mut rebind = Rebind::default();
+        rebind.start(1, "n64", "console:n64", 0.0);
+        rebind.unsent(0.0);
+        assert_eq!(rebind.view(0.1).and_then(|v| v.stored), Some(false));
+        assert_eq!(rebind.view(LINGER_SECONDS), None);
     }
 
     #[test]

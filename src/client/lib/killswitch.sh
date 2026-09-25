@@ -37,7 +37,7 @@ killswitch_bin() {
 # is given is the pid the emulator will have — the same process, after exec,
 # which is also its process group's leader under both Steam and a terminal.
 killswitch_start() {
-  local pid="$1" bin hold
+  local pid="$1" platform="${2:-}" bin hold
   [[ "${GOTG_KILLSWITCH:-1}" != "0" ]] || return 0
   hold="$(killswitch_hold_ms)"
 
@@ -58,6 +58,10 @@ killswitch_start() {
   local -a picture=()
   [[ "${GOTG_KILLSWITCH_OVERLAY:-1}" != "0" ]] || picture=(--no-overlay)
 
-  "$bin" --pid "$pid" --hold-ms "$hold" "${picture[@]}" &
+  # Which controller the rebind chord draws, and which padmap layout it walks.
+  local -a console=()
+  [[ ! "$platform" =~ ^[A-Za-z0-9_-]+$ ]] || console=(--platform "$platform")
+
+  "$bin" --pid "$pid" --hold-ms "$hold" ${console[@]+"${console[@]}"} ${picture[@]+"${picture[@]}"} &
   log "${C_DIM}hold L + R and Start for $((hold / 1000))s to stop the game${C_RESET}"
 }

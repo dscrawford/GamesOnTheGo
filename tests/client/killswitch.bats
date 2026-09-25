@@ -79,6 +79,13 @@ wait_for_watcher() {
   [ "$pid" -gt 0 ]
 }
 
+@test "the watcher is told the game's platform, for the controller a rebind draws" {
+  fake_watcher
+  gotg play usa.zelda
+  wait_for_watcher
+  [[ "$(cat "$WATCHER_LOG")" == *"--platform n64"* ]]
+}
+
 @test "it holds the combo for three seconds by default" {
   fake_watcher
   gotg play usa.zelda
