@@ -37,7 +37,37 @@ pub enum Event {
     State {
         seated: Vec<Seat>,
     },
+    /// A step of the mapping wizard, or its end (`done`).
+    Mapping {
+        player: i32,
+        control: String,
+        index: i32,
+        total: i32,
+        done: bool,
+        stored: bool,
+    },
+    /// The long hold that ends a mapping run early, keeping what is bound.
+    Finish {
+        player: i32,
+        frac: f64,
+    },
+    /// padmap refused a command.
+    Error {
+        message: String,
+    },
     Other,
+}
+
+/// A small count off a line: anything else is 0.
+fn count(object: &Map<String, Value>, field: &str) -> i32 {
+    match object.get(field).and_then(Value::as_f64) {
+        Some(value) if (0.0..=1000.0).contains(&value) => value as i32,
+        _ => 0,
+    }
+}
+
+fn flag(object: &Map<String, Value>, field: &str) -> bool {
+    object.get(field).and_then(Value::as_bool).unwrap_or(false)
 }
 
 fn text(object: &Map<String, Value>, field: &str) -> String {
@@ -95,6 +125,21 @@ pub fn parse(line: &[u8]) -> Option<Event> {
                 })
                 .unwrap_or_default(),
         },
+        Some("mapping") => Event::Mapping {
+            player: player_of(&root),
+            control: text(&root, "control"),
+            index: count(&root, "index"),
+            total: count(&root, "total"),
+            done: flag(&root, "done"),
+            stored: flag(&root, "stored"),
+        },
+        Some("finish") => Event::Finish {
+            player: player_of(&root),
+            frac: root.get("frac").and_then(Value::as_f64).unwrap_or(0.0),
+        },
+        Some("error") => Event::Error {
+            message: text(&root, "message"),
+        },
         _ => Event::Other,
     };
     Some(event)
@@ -120,7 +165,8 @@ pub fn apply(event: &Event, pairing: &mut Pairing, now: f64, icon_of: &mut dyn F
                 pairing.seated(&seat.node, &seat.name, seat.player);
             }
         }
-        Event::Other => {}
+        // The rebind's, not the joining picture's: see `rebind`.
+        Event::Mapping { .. } | Event::Finish { .. } | Event::Error { .. } | Event::Other => {}
     }
 }
 
@@ -212,6 +258,50 @@ mod tests {
         assert_eq!(
             parsed(r#"{"event":"state","players":"nope"}"#),
             Some(Event::State { seated: vec![] })
+        );
+    }
+
+    #[test]
+    fn the_wizards_steps_its_finish_and_a_refusal_are_read() {
+        assert_eq!(
+            parsed(r#"{"event":"mapping","player":2,"control":"a","label":"A","index":3,"total":14}"#),
+            Some(Event::Mapping {
+                player: 2,
+                control: "a".into(),
+                index: 3,
+                total: 14,
+                done: false,
+                stored: false,
+            })
+        );
+        assert!(matches!(
+            parsed(r#"{"event":"mapping","player":2,"done":true,"stored":true}"#),
+            Some(Event::Mapping {
+                done: true,
+                stored: true,
+                ..
+            })
+        ));
+        assert_eq!(
+            parsed(r#"{"event":"finish","player":2,"frac":0.5}"#),
+            Some(Event::Finish { player: 2, frac: 0.5 })
+        );
+        assert_eq!(
+            parsed(r#"{"event":"error","message":"no such player"}"#),
+            Some(Event::Error {
+                message: "no such player".into()
+            })
+        );
+        assert!(
+            matches!(
+                parsed(r#"{"event":"mapping","index":-4,"total":"many"}"#),
+                Some(Event::Mapping {
+                    index: 0,
+                    total: 0,
+                    ..
+                })
+            ),
+            "odd counts are 0, not a crash"
         );
     }
 

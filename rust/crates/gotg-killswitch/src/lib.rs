@@ -5,6 +5,7 @@
 //! the binary's loop.
 
 pub mod bar;
+pub mod clones;
 pub mod events;
 pub mod frame;
 pub mod icons;
@@ -14,6 +15,7 @@ pub mod padlink;
 pub mod painter;
 pub mod pairing;
 pub mod procstat;
+pub mod rebind;
 pub mod scene;
 pub mod shapes;
 
