@@ -255,6 +255,71 @@ _env_build_zenity() {
   return "$status"
 }
 
+# nix's progress, as the lines the picker draws.
+#
+# A build run for the picker printed nothing while nix evaluated, fetched and
+# compiled: the loader showed a clock, and a minute of evaluation looked the
+# same as a hang. `--log-format internal-json` has nix say what it is doing;
+# this turns that into
+#
+#     stage <eval|fetch|build> <done> <total> <what>
+#
+# (tab-separated; eval counts files, with no total) and passes a build's own
+# output and nix's errors through as text, so a failure still reads on the
+# TV. A figure is said once, not once per event: nix repeats itself.
+# shellcheck disable=SC2016 # a jq program: its $ are jq's
+_NIX_STAGES='
+def store_name: tostring | sub("^/nix/store/[a-z0-9]+-"; "") | sub("\\.drv$"; "");
+def quoted: (try (capture("\u0027(?<q>[^\u0027]+)\u0027").q) catch "");
+def plain: gsub("\u001b\\[[0-9;]*[A-Za-z]"; "");
+foreach inputs as $raw (
+  {kinds: {}, eval: 0, what: "", last: null, out: null};
+  .out = null
+  | if ($raw | startswith("@nix ")) then
+      (try ($raw[5:] | fromjson) catch null) as $e
+      | if ($e | type) != "object" then .
+        elif $e.action == "msg" then
+          if ($e.msg // "" | startswith("evaluating file")) then
+            .eval += 1
+            | if (.eval % 40) == 1 then .out = "stage\teval\t\(.eval)\t0\t\(.what)" else . end
+          elif ($e.level // 9) <= 1 then .out = ($e.msg | plain)
+          else . end
+        elif $e.action == "start" then
+          if $e.type == 104 then .kinds[$e.id | tostring] = "build"
+          elif $e.type == 103 then .kinds[$e.id | tostring] = "fetch"
+          elif $e.type == 105 then .what = ($e.text // "" | quoted | store_name)
+          elif $e.type == 108 then .what = ($e.fields[0] // "" | store_name)
+          elif $e.type == 0 and ($e.text // "" | startswith("evaluating derivation")) then
+            .what = ($e.text | quoted | split("#") | last)
+            | .out = "stage\teval\t\(.eval)\t0\t\(.what)"
+          else . end
+        elif $e.action == "result" and $e.type == 105 and .kinds[$e.id | tostring] != null then
+          .out = "stage\t\(.kinds[$e.id | tostring])\t\($e.fields[0])\t\($e.fields[1])\t\(.what)"
+        elif $e.action == "result" and $e.type == 101 then .out = ($e.fields[0] // "" | tostring | plain)
+        else . end
+    else .out = ($raw | plain) end
+  | if .out != null and .out == .last then .out = null
+    elif .out != null then .last = .out
+    else . end;
+  .out | select(. != null)
+)'
+
+nix_stages() { jq -Rrn --unbuffered "$_NIX_STAGES"; }
+
+# A nix command, drawn for the picker when it asked (GOTG_PROGRESS_LINES=1)
+# and left exactly as nix prints it anywhere else. nix's own status is what
+# returns, whatever the caller's pipefail: the filter always succeeds.
+_nix_drawn() {
+  if [[ "${GOTG_PROGRESS_LINES:-}" == "1" ]]; then
+    local -a status
+    "$(nix_bin)" "$@" --log-format internal-json -v 2>&1 >/dev/null | nix_stages >&2
+    status=("${PIPESTATUS[@]}")
+    return "${status[0]}"
+  else
+    "$(nix_bin)" "$@"
+  fi
+}
+
 _env_build_failed() {
   local attr="$1" ref="$2"
   die "could not build $attr from $ref.
@@ -264,9 +329,10 @@ _env_build_failed() {
      A launch through Steam leaves its output in $GOTG_LOG_DIR."
 }
 
-# Build an environment and keep it alive with a GC root.
-env_build() {
-  local attr="$1" flake ref root
+# The flake reference an environment is built from, after checking a local
+# flake is there to build it.
+env_ref() {
+  local attr="$1" flake
   flake="$(gotg_flake)"
   if flake_is_path "$flake"; then
     [[ -f "$flake/flake.nix" ]] ||
@@ -274,27 +340,59 @@ env_build() {
      Point at your checkout with GOTG_FLAKE or the 'flake' key in $GOTG_CONFIG_FILE,
      or unset both to build straight from the repo over SSH."
   fi
+  printf '%s#%s' "$flake" "$attr"
+}
 
-  ref="$flake#$attr"
+# A branch ref answers from nix's fetch cache for up to an hour, so a rebuild
+# meant to pick up a change could quietly rebuild the old head.
+_env_refresh_flag() {
+  flake_is_path "$(gotg_flake)" || printf -- '--refresh'
+}
+
+# Evaluate an environment without building it: seconds, where the build can
+# be minutes, and the part that fails when a definition is broken. The
+# picker's install asks this first so a broken environment still stops it
+# before a download that can run to tens of gigabytes.
+env_evaluate() {
+  local attr="$1" ref
+  ref="$(env_ref "$attr")"
+  local -a refresh=()
+  read -ra refresh <<<"$(_env_refresh_flag)"
+  _nix_drawn path-info --derivation "$ref" ${refresh[@]+"${refresh[@]}"}
+}
+
+# Build an environment and keep it alive with a GC root.
+env_build() {
+  local attr="$1" ref root
+  ref="$(env_ref "$attr")"
   root="$(env_root "$attr")"
   mkdir -p "$GOTG_ROOTS_DIR"
 
-  # A branch ref answers from nix's fetch cache for up to an hour, so a
-  # rebuild meant to pick up a change could quietly rebuild the old head.
   local -a refresh=()
-  flake_is_path "$flake" || refresh=(--refresh)
+  read -ra refresh <<<"$(_env_refresh_flag)"
 
   [[ -n "${GOTG_BUILD_QUIET:-}" ]] ||
     log "building $attr from $ref — the first launch on a platform compiles its emulator"
   if ! is_tty && has_display && have_zenity; then
-    _env_build_zenity "$ref" "$root" "$attr" "${refresh[@]}" || _env_build_failed "$attr" "$ref"
+    _env_build_zenity "$ref" "$root" "$attr" ${refresh[@]+"${refresh[@]}"} || _env_build_failed "$attr" "$ref"
   else
-    "$(nix_bin)" build "$ref" -o "$root" "${refresh[@]}" || _env_build_failed "$attr" "$ref"
+    _nix_drawn build "$ref" -o "$root" ${refresh[@]+"${refresh[@]}"} || _env_build_failed "$attr" "$ref"
   fi
 
   env_is_built "$attr" ||
     die "built $attr but $(env_bin "$attr") is missing — check src/client/env for that platform"
   printf '%s\n' "$(env_build_key)" >"$root.by"
+}
+
+# The environment build `gotg install` started beside the download, if any:
+# waited for by whatever needs the built root (a recipe, the launcher).
+GOTG_ENV_BUILD_PID=""
+
+env_build_wait() {
+  [[ -n "$GOTG_ENV_BUILD_PID" ]] || return 0
+  local pid="$GOTG_ENV_BUILD_PID"
+  GOTG_ENV_BUILD_PID=""
+  wait "$pid" || die "the game is downloaded, but its emulator did not build (above)"
 }
 
 # What a root is built by: this client, and -- from a clean checkout, where
