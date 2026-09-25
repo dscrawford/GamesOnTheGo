@@ -106,6 +106,31 @@ recording, as it already does for sway and cage. Unverified here: that gamescope
 layer-shell honours our anchor and height (it paints overlays unscaled), and that
 the layer-shell route works in SteamOS Game Mode -- nobody reported trying it.
 
+## Tested 2026-09-25: the layer-shell route crashes gamescope
+
+Run inside `gamescope --backend headless` (nixpkgs 3.16.25) with the stand-in
+padmap from src/client/qa and `xeyes` as the game:
+
+- **A layer surface on `GAMESCOPE_WAYLAND_DISPLAY` is taken as the external
+  overlay -- and gamescope segfaults once it is destroyed**, which our painter
+  does every time the bar goes up and at the end of every game. Core:
+  `paint_window` -> `get_window_last_done_commit` on a freed window.
+  `g_steamcompmgr_xdg_focus.externalOverlayWindow` is set in
+  `steamcompmgr_xdg_determine_and_apply_focus` and never cleared when the
+  surface goes, in 3.16.25 and in master `ad2763da` alike. On a Deck that is
+  Game Mode itself going down. **Recommendation 1 above is withdrawn.**
+- The headless backend paints no external overlay at all: our X11 window on the
+  root display (mapped, full screen, `GAMESCOPE_EXTERNAL_OVERLAY=1`, checked
+  with xprop) and a hand-tagged `xeyes` both leave `gamescopectl screenshot`
+  byte-identical across all four screenshot types. So headless gamescope cannot
+  grade the overlay; that check has to happen on the Deck. (The screenshot's
+  default type, 1, is base plane only; type 3 is the full composition.)
+
+What stands for Game Mode: the X11 window with the atom, **on xwayland 0**
+(Steam's display) rather than the game's -- to be found at run time (Steam's
+own `DISPLAY`, from /proc) and verified on a Deck -- with the performance
+overlay off. The gamescope use-after-free is worth reporting upstream.
+
 ## Gaps
 
 Nothing was tested live. Not found: whether a stock Deck keeps mangoapp in the slot
