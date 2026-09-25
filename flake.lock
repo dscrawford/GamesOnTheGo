@@ -42,17 +42,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1790301723,
-        "narHash": "sha256-ZXT2gwXm99mknwAEofvzNfzWEytMEcrE8GDSRD1Zmsc=",
+        "lastModified": 1790315106,
+        "narHash": "sha256-jOz8B45oOydZ1PWiS6cvcSNkrutaczzmB2jWaTbxNgs=",
         "ref": "main",
-        "rev": "871a4f75916a6d87121d7c08ae846ddde02350f4",
-        "revCount": 204,
+        "rev": "b81d476a395354f18fdb5ae30b8e1e721f4b4038",
+        "revCount": 207,
         "type": "git",
         "url": "ssh://git@github.com/dscrawford/padmap"
       },
       "original": {
         "ref": "main",
-        "rev": "871a4f75916a6d87121d7c08ae846ddde02350f4",
+        "rev": "b81d476a395354f18fdb5ae30b8e1e721f4b4038",
         "type": "git",
         "url": "ssh://git@github.com/dscrawford/padmap"
       }
