@@ -66,6 +66,19 @@ def test_progress_lines_become_the_ring(bin_env):
     settle(installs)
 
 
+def test_the_emulator_build_moves_the_ring_before_any_download_does(bin_env):
+    # Building beside the download now: with only nix's figures so far, the
+    # tile shows how far the build is rather than a ring that says nothing.
+    bin_env('printf "stage\\tbuild\\t1\\t4\\tares\\n" >&2; sleep 0.3; exit 0')
+    installs = Installs()
+    installs.start(game())
+    deadline = time.monotonic() + 5
+    while installs.rings()[game().key][0] is None and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert installs.rings() == {game().key: (0.25, False)}
+    settle(installs)
+
+
 def test_a_build_with_no_figures_is_a_ring_with_no_fraction(bin_env):
     bin_env("sleep 0.3; exit 0")
     installs = Installs()

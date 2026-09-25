@@ -108,6 +108,49 @@ def parse_progress(line: str) -> Progress | None:
         return None
 
 
+# What nix is doing while an environment builds, one line per change, from
+# the client's filter over nix's own progress (src/client/lib/env.sh):
+#
+#     stage <eval|fetch|build> <done> <total> <what>
+#
+# Evaluation has no end nix can name, so it counts files read and sweeps.
+STAGE_PREFIX = "stage\t"
+STAGE_KINDS = ("eval", "fetch", "build")
+
+
+@dataclass(frozen=True)
+class Stage:
+    kind: str
+    done: int
+    total: int  # 0 for evaluation, which has no end nix can name
+    what: str
+
+    @property
+    def fraction(self) -> float | None:
+        if self.total <= 0:
+            return None
+        return min(1.0, self.done / self.total)
+
+    def describe(self) -> str:
+        if self.kind == "eval":
+            return f"evaluating {self.what or 'the emulator'} · {self.done} files read"
+        verb = "fetching" if self.kind == "fetch" else "building"
+        return f"{verb} the emulator · {self.done} of {self.total}"
+
+
+def parse_stage(line: str) -> Stage | None:
+    """One of the client's stage lines, or None for anything else."""
+    if not line.startswith(STAGE_PREFIX):
+        return None
+    fields = line.split("\t")
+    if len(fields) < 5 or fields[1] not in STAGE_KINDS:
+        return None
+    try:
+        return Stage(kind=fields[1], done=int(fields[2]), total=int(fields[3]), what="\t".join(fields[4:]))
+    except ValueError:
+        return None
+
+
 def _human(size: int) -> str:
     """1.5 GB, 300.0 MB, 12 B: the same scale the client prints."""
     value = float(size)
@@ -153,6 +196,7 @@ class Preparer:
         self.argv = argv or ["install"]
         self._lines: collections.deque[str] = collections.deque(maxlen=TAIL_LINES)
         self._progress: Progress | None = None
+        self._stage: Stage | None = None
         self._lock = threading.Lock()
         self.started = time.monotonic()
         env = dict(os.environ)
@@ -195,9 +239,12 @@ class Preparer:
         for line in self.process.stdout:
             text = line.rstrip("\n")
             progress = parse_progress(text)
+            stage = parse_stage(text) if progress is None else None
             with self._lock:
                 if progress is not None:
                     self._progress = progress
+                elif stage is not None:
+                    self._stage = stage
                 else:
                     self._lines.append(text)
         self.process.stdout.close()
@@ -207,6 +254,12 @@ class Preparer:
         """Where the current download is, or None outside one."""
         with self._lock:
             return self._progress
+
+    @property
+    def stage(self) -> Stage | None:
+        """What nix is doing for the environment, or None before it says."""
+        with self._lock:
+            return self._stage
 
     @property
     def elapsed(self) -> float:
