@@ -207,6 +207,7 @@
             iconRules = ./config/icons.yaml;
             iconArt = ./src/ui/assets/icons;
             controllerArt = ./src/ui/assets/controllers;
+            controllerConfig = ./config/controllers;
           };
 
           # What `gotg qa` runs a game inside: headless compositor, recorders,

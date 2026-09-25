@@ -13,6 +13,7 @@ pkgs.rustPlatform.buildRustPackage {
   GOTG_ICON_RULES = ../../config/icons.yaml;
   GOTG_ICON_ART = ../../src/ui/assets/icons;
   GOTG_CONTROLLER_ART = ../../src/ui/assets/controllers;
+  GOTG_CONTROLLER_CONFIG = ../../config/controllers;
   nativeBuildInputs = [
     pkgs.pkg-config
     pkgs.clippy

@@ -6,6 +6,7 @@
 
 pub mod bar;
 pub mod clones;
+pub mod consoles;
 pub mod events;
 pub mod frame;
 pub mod icons;
