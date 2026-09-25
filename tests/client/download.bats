@@ -776,5 +776,66 @@ publish_bundle_game_plus_update() {
   [ "$(cut -f2 <<<"$last")" = "$(stat -c %s "$GOTG_GAMES_DIR/n64/usa.zelda.z64")" ]
   [[ "$(cut -f3 <<<"$last")" =~ ^[0-9]+$ ]]
   [[ "$(cut -f4 <<<"$last")" =~ ^[0-9]+$ ]]
-  [[ "$(cut -f5 <<<"$last")" == "Zelda: usa.zelda.z64" ]]
+  [[ "$(cut -f5 <<<"$last")" == "Zelda" ]]
+}
+
+# A game of several files, as the Wii U's dumps are: three members of
+# different sizes, served one after another.
+three_member_game() {
+  mkdir -p "$SERVICE_LIBRARY_DIR/wiiu/dump/code" "$SERVICE_LIBRARY_DIR/wiiu/dump/meta"
+  head -c 1000 /dev/zero >"$SERVICE_LIBRARY_DIR/wiiu/dump/code/game.rpx"
+  head -c 3000 /dev/zero >"$SERVICE_LIBRARY_DIR/wiiu/dump/code/data.bin"
+  head -c 2000 /dev/zero >"$SERVICE_LIBRARY_DIR/wiiu/dump/meta/meta.xml"
+  local files
+  files="$(jq -n --arg root "$SERVICE_LIBRARY_DIR/wiiu/dump" '[
+    {name: "code/game.rpx", path: ($root + "/code/game.rpx"), size_bytes: 1000, mtime: 1, sha256: null},
+    {name: "code/data.bin", path: ($root + "/code/data.bin"), size_bytes: 3000, mtime: 1, sha256: null},
+    {name: "meta/meta.xml", path: ($root + "/meta/meta.xml"), size_bytes: 2000, mtime: 1, sha256: null}
+  ]')"
+  add_member_game wiiu usa.title "A Wii U Game" wiiu_decrypted "$files"
+  gotg refresh
+}
+
+@test "a game of several files is one bar, sized for the whole game from the first line" {
+  # It used to be a bar per file: full, then empty, then full again, with the
+  # figures of whichever file was going. The total is the whole game, known
+  # from the catalog before a byte moves, and the bar only goes forward.
+  three_member_game
+  GOTG_PROGRESS_LINES=1 gotg download usa.title
+  [ "$status" -eq 0 ]
+  local lines
+  lines="$(grep -P '^progress\t' <<<"$stderr")"
+  [ -n "$lines" ]
+  # Every line: the same total, the whole game's.
+  [ "$(cut -f3 <<<"$lines" | sort -u)" = "6000" ]
+  # Done never goes back, and ends full.
+  [ "$(cut -f2 <<<"$lines" | sort -n -c && echo sorted)" = "sorted" ]
+  [ "$(tail -1 <<<"$lines" | cut -f2)" = "6000" ]
+  # Which file, as a count rather than a name.
+  [[ "$(tail -1 <<<"$lines" | cut -f5)" == "A Wii U Game — file 3 of 3" ]]
+}
+
+@test "bytes already downloaded count from the first line" {
+  # A download resumed after a reset opens part full, not at zero.
+  three_member_game
+  local staged
+  staged="$GOTG_GAMES_DIR/.gotg-partial/usa.title"
+  mkdir -p "$staged/code"
+  head -c 400 /dev/zero >"$staged/code/game.rpx"
+  GOTG_PROGRESS_LINES=1 gotg download usa.title
+  [ "$status" -eq 0 ]
+  local first
+  first="$(grep -P '^progress\t' <<<"$stderr" | head -1)"
+  [ "$(cut -f2 <<<"$first")" -ge 400 ]
+}
+
+@test "no speed is claimed before it has settled" {
+  # Rate and time left over the first seconds are noise -- a burst, a
+  # handshake -- so the lines say 0 until a few seconds of this run's own
+  # bytes have been seen, and the loader shows neither. A local transfer is
+  # over well inside that.
+  three_member_game
+  GOTG_PROGRESS_LINES=1 gotg download usa.title
+  [ "$status" -eq 0 ]
+  [ "$(grep -P '^progress\t' <<<"$stderr" | cut -f4 | sort -u)" = "0" ]
 }
