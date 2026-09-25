@@ -117,7 +117,7 @@ gotg steam picker                   # put it in Steam as "Games On The Go"
 
 ## Controllers
 
-Launches run through [padmap](https://github.com/dscrawford/padmap): pads are republished via `/dev/uinput`, seated by holding a button, and mapped before the emulator starts.
+Launches run through [padmap](https://github.com/dscrawford/danstick) (now danstick): pads are republished via `/dev/uinput`, seated by holding a button, and mapped before the emulator starts.
 
 ```bash
 gotg controllers list               # what SDL sees

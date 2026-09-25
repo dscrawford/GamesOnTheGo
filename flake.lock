@@ -48,13 +48,13 @@
         "rev": "b81d476a395354f18fdb5ae30b8e1e721f4b4038",
         "revCount": 207,
         "type": "git",
-        "url": "ssh://git@github.com/dscrawford/padmap"
+        "url": "ssh://git@github.com/dscrawford/danstick"
       },
       "original": {
         "ref": "main",
         "rev": "b81d476a395354f18fdb5ae30b8e1e721f4b4038",
         "type": "git",
-        "url": "ssh://git@github.com/dscrawford/padmap"
+        "url": "ssh://git@github.com/dscrawford/danstick"
       }
     },
     "pyproject-build-systems": {

@@ -135,7 +135,18 @@ def test_the_drawings_mark_the_sticks_padmap_never_asks_about():
 
 # --- agreement with padmap ---------------------------------------------------
 
-PADMAP_LAYOUTS = pathlib.Path.home() / "Documents/padmap/rust/crates/padmap-core/data/layouts"
+# padmap is danstick now (github.com/dscrawford/danstick); either checkout will do.
+PADMAP_LAYOUTS = next(
+    (
+        path
+        for path in (
+            pathlib.Path.home() / "Documents/danstick/rust/crates/danstick-core/data/layouts",
+            pathlib.Path.home() / "Documents/padmap/rust/crates/padmap-core/data/layouts",
+        )
+        if path.is_dir()
+    ),
+    pathlib.Path("/nonexistent"),
+)
 
 
 @pytest.mark.skipif(not PADMAP_LAYOUTS.is_dir(), reason="padmap is not checked out beside this")
