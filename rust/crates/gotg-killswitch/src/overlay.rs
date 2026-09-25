@@ -7,6 +7,13 @@
 //!       An X11 window with GAMESCOPE_EXTERNAL_OVERLAY set: gamescope's one
 //!       external-overlay slot, which mangoapp uses too. It sits above the
 //!       game and below Steam's own overlay (steamcompmgr.hpp: zpos 2 vs 3).
+//!       On Steam's X server, xwayland 0, not the game's: gamescope takes
+//!       the overlay from that one alone, and a game in Game Mode -- and so
+//!       this, started beside it -- has another server's DISPLAY. Opened on
+//!       the game's, the window was there and never drawn. (Not a layer
+//!       surface on gamescope's socket, which it would also take: gamescope
+//!       3.16 keeps painting one after it is destroyed and crashes, and this
+//!       destroys its window every time the bar goes up. docs/overlay-research.md.)
 //!   a compositor with layer-shell (sway, Hyprland, KDE)
 //!       A layer-shell surface on the overlay layer, which sway stacks above
 //!       fullscreen windows. No input and no keyboard, so a click lands on
@@ -115,6 +122,37 @@ fn has_layer_shell() -> bool {
         list.iter()
             .any(|global| global.interface == ZwlrLayerShellV1::interface().name)
     })
+}
+
+/// DISPLAY from one process's environment, as /proc/<pid>/environ has it.
+fn display_in(environ: &[u8]) -> Option<String> {
+    environ
+        .split(|&b| b == 0)
+        .find_map(|entry| entry.strip_prefix(b"DISPLAY="))
+        .filter(|value| !value.is_empty() && value.iter().all(|&b| b.is_ascii_graphic()))
+        .map(|value| String::from_utf8_lossy(value).into_owned())
+}
+
+/// Steam's X display -- gamescope's xwayland 0 -- read off a `steam`
+/// process of ours, else `:0`, which is what it is on every Deck (and what
+/// the Decky overlays assume outright).
+fn steam_display() -> String {
+    let mine = unsafe { libc::getuid() };
+    let found = std::fs::read_dir("/proc").ok().and_then(|entries| {
+        entries.flatten().find_map(|entry| {
+            let dir = entry.path();
+            let comm = std::fs::read_to_string(dir.join("comm")).ok()?;
+            if comm.trim() != "steam" {
+                return None;
+            }
+            use std::os::unix::fs::MetadataExt;
+            if std::fs::metadata(&dir).ok()?.uid() != mine {
+                return None;
+            }
+            display_in(&std::fs::read(dir.join("environ")).ok()?)
+        })
+    });
+    found.unwrap_or_else(|| ":0".to_owned())
 }
 
 fn choose() -> Kind {
@@ -415,6 +453,13 @@ impl Overlay {
     pub fn open() -> Result<Self, NoOverlay> {
         let kind = choose();
         let fail = |why: String| NoOverlay { kind, why };
+        if kind == Kind::Gamescope {
+            let display = steam_display();
+            eprintln!("gotg-killswitch: gamescope overlay on Steam's display {display}");
+            // SAFETY: the painter is one thread, and nothing has read the
+            // environment for X11 yet: SDL is not initialised.
+            unsafe { std::env::set_var("DISPLAY", display) };
+        }
         // SAFETY: SDL is used from this one thread; every pointer below is
         // SDL's own or a C string literal.
         unsafe {
@@ -784,5 +829,21 @@ impl Drop for Overlay {
             }
             SDL_QuitSubSystem(SDL_INIT_VIDEO);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn steams_display_is_read_off_its_environment() {
+        assert_eq!(
+            display_in(b"HOME=/home/deck\0DISPLAY=:0\0XDG_SESSION_TYPE=x11\0").as_deref(),
+            Some(":0")
+        );
+        assert_eq!(display_in(b"HOME=/home/deck\0"), None, "no DISPLAY");
+        assert_eq!(display_in(b"DISPLAY=\0"), None, "an empty one");
+        assert_eq!(display_in(b"DISPLAY=:0 \x1b[2J\0"), None, "nothing odd");
     }
 }
