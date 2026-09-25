@@ -463,6 +463,8 @@ _run_recipe() {
   local game="$1" handler="$2" staged="$3" dest="$4"
   local attr recipe
   attr="$(env_attr "$game")"
+  # The environment may still be building beside the download.
+  env_build_wait
   recipe="$GOTG_ROOTS_DIR/$attr/bin/gotg-recipe"
   # An environment that gains a recipe leaves every root built before it
   # without one, and env_ensure only builds what is missing altogether — so the

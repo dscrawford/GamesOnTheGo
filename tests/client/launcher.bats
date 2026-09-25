@@ -861,3 +861,60 @@ SHIM
   gotg play usa.zelda
   [ "$(grep -c "build $GOTG_FLAKE#env-n64" "$NIX_LOG")" -eq 3 ]
 }
+
+# --- the emulator is built while the game downloads, for the picker ---------
+
+# A nix that evaluates at once and whose build does not finish until the
+# game's bytes are on disk: an install that built first and downloaded
+# second would time the build out and fail.
+overlapping_nix() {
+  export NIX_LOG="$TEST_TMP/nix.log" GOTG_FLAKE="$TEST_TMP/flake" GOTG_NIX="$TEST_TMP/bin/nix"
+  mkdir -p "$GOTG_FLAKE" "$TEST_TMP/bin"
+  : >"$GOTG_FLAKE/flake.nix"
+  cat >"$GOTG_NIX" <<SHIM
+#!$(command -v bash)
+printf '%s\n' "\$*" >>"$NIX_LOG"
+[[ "\$1" == build ]] || exit ${1:-0}
+for _ in \$(seq 1 100); do
+  [[ -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]] && break
+  sleep 0.05
+done
+[[ -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]] || { echo "build finished before the download started" >&2; exit 1; }
+prev=""; for arg in "\$@"; do [[ "\$prev" != -o ]] || out="\$arg"; prev="\$arg"; done
+mkdir -p "\$out/bin"; printf '#!/bin/sh\n' >"\$out/bin/gotg-play"; chmod +x "\$out/bin/gotg-play"
+SHIM
+  chmod +x "$GOTG_NIX"
+}
+
+@test "installing for the picker builds the emulator while the game downloads" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  rm -rf "$GOTG_ROOTS_DIR/env-n64"
+  overlapping_nix
+  GOTG_PROGRESS_LINES=1 GOTG_NO_DIALOG=1 gotg install usa.zelda
+  [ "$status" -eq 0 ]
+  [ -x "$GOTG_ROOTS_DIR/env-n64/bin/gotg-play" ]
+  [ -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
+}
+
+@test "a flake that does not evaluate stops the picker's install before the download" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  rm -rf "$GOTG_ROOTS_DIR/env-n64"
+  overlapping_nix 1
+  GOTG_PROGRESS_LINES=1 GOTG_NO_DIALOG=1 gotg install usa.zelda
+  [ "$status" -ne 0 ]
+  [ ! -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
+  [[ "$stderr" == *"env-n64"* ]]
+}
+
+@test "an install at a terminal still builds first, then downloads" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  rm -rf "$GOTG_ROOTS_DIR/env-n64"
+  overlapping_nix
+  GOTG_NO_DIALOG=1 gotg install usa.zelda
+  # The overlapping nix times out when nothing downloads beside it.
+  [ "$status" -ne 0 ]
+  [ ! -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
+}

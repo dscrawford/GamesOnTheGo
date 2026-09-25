@@ -1,6 +1,20 @@
 # shellcheck shell=bash
 # install / play / sync — the commands that touch nix and Steam.
 
+# Refresh rather than skip when a root is already there. This runs from a
+# terminal where nix is cheap and a cached build is quick, and the alternative
+# is what bit twice already: an environment whose definition has moved keeps
+# running the old one, silently, until somebody thinks to run sync.
+_install_env() {
+  local attr="$1"
+  if env_is_built "$attr"; then
+    env_refresh "$attr" ||
+      warn "could not rebuild $attr — carrying on with the one already built here"
+  else
+    env_build "$attr"
+  fi
+}
+
 cmd_install() {
   local want="${1:-}"
   [[ -n "$want" ]] || die "usage: gotg install <id>"
@@ -10,20 +24,24 @@ cmd_install() {
   game="$(manifest_find "$want")"
   attr="$(env_attr "$game")"
 
-  # Refresh rather than skip when a root is already there. This runs from a
-  # terminal where nix is cheap and a cached build is quick, and the alternative
-  # is what bit twice already: an environment whose definition has moved keeps
-  # running the old one, silently, until somebody thinks to run sync.
-  if env_is_built "$attr"; then
-    env_refresh "$attr" ||
-      warn "could not rebuild $attr — carrying on with the one already built here"
+  if [[ "${GOTG_PROGRESS_LINES:-}" == "1" ]] && ! game_is_installed "$game"; then
+    # For the picker, the emulator builds while the game downloads: two waits
+    # of minutes each, one after the other, were the whole of a first launch.
+    # Evaluated first, so a broken definition still stops it before a
+    # transfer that can run to tens of gigabytes; a recipe, which needs the
+    # built root, waits for it (env_build_wait).
+    env_evaluate "$attr" || die "could not evaluate $attr; nothing was downloaded"
+    _install_env "$attr" &
+    # shellcheck disable=SC2034 # read by env_build_wait, in env.sh
+    GOTG_ENV_BUILD_PID=$!
+    download_game "$game"
+    env_build_wait
   else
-    env_build "$attr"
+    _install_env "$attr"
+    # After the environment: a raw source that needs processing is processed
+    # by the recipe that environment carries.
+    download_game "$game"
   fi
-
-  # After the environment: a raw source that needs processing is processed by
-  # the recipe that environment carries.
-  download_game "$game"
 
   launcher="$(launcher_write "$game")"
   log ""
