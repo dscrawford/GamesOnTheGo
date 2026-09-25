@@ -74,6 +74,10 @@ def ensure_daemon(force: bool = False, *, fresh: bool = False, follow: int | Non
     # open -- see gate.PAIR_HOLD -- but an assignment session takes whatever
     # the daemon was started with, and that is the wizard.
     os.environ.setdefault("DANSTICK_HOLD_SECONDS", str(config.get("theme.timeouts.pair_hold", 1.5)))
+    # Fixed slots, as `gotg play` asks for (danstick.sh): four controllers from
+    # the start that any pad takes mid-game. The two must agree -- danstick
+    # replaces a daemon on other slots, and the picker's seats with it.
+    os.environ.setdefault("DANSTICK_SLOTS", "fixed")
     danstick = shutil.which("danstick")
     if danstick is None:
         return "danstick is not installed"

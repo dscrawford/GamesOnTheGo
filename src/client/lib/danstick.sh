@@ -57,6 +57,11 @@ danstick_ensure() {
   # -- takes the daemon's, so it is set here as well. danstick keeps its quarter
   # second for anything outside 0.05..10, and an older daemon ignores it.
   export DANSTICK_HOLD_SECONDS="${DANSTICK_HOLD_SECONDS:-1.5}"
+  # Fixed slots: four controllers from the daemon's start, bound by the
+  # emulators before anybody sits down, which any pad takes at any point in
+  # any game. The picker asks for the same (gotg_ui/danstick.py): danstick
+  # replaces a daemon on other slots, and the seats go with it.
+  export DANSTICK_SLOTS="${DANSTICK_SLOTS:-fixed}"
   # Which session this daemon is, for the gate that runs next: seats taken in
   # the picker a moment ago belong to this launch -- the picker's pid is this
   # shell's, through the execvp -- and seats a daemon has held since yesterday
@@ -260,6 +265,8 @@ danstick_identity() {
 # gives.
 danstick_reserve() {
   local attr="$1" manifest seats emulator
+  # Fixed slots stand from the daemon's start: nothing to reserve.
+  [[ "${DANSTICK_SLOTS:-}" != "fixed" ]] || return 0
   manifest="$(env_pads_manifest "$attr")" || return 0
   [[ -f "$manifest" ]] || return 0
   seats="$(jq -r '.reserve // ""' "$manifest" 2>/dev/null)" || return 0
@@ -286,6 +293,10 @@ danstick_reserve() {
 danstick_identity_apply() {
   local attr="$1" identity
   [[ -z "${DANSTICK_PAD_IDENTITY:-}" ]] || return 0
+  # Fixed slots are 360 pads already, each with its own GUID
+  # (xbox360-numbered) -- what the decompiled ports asked for -- and applying
+  # another identity would replace the daemon, and every seat with it.
+  [[ "${DANSTICK_SLOTS:-}" != "fixed" ]] || return 0
   identity="$(danstick_identity "$attr")" || return 0
   [[ -n "$identity" ]] || return 0
   export DANSTICK_PAD_IDENTITY="$identity"

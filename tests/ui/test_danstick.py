@@ -210,6 +210,23 @@ def test_a_daemon_that_starts_says_nothing(tmp_path, monkeypatch):
     assert ensure_daemon() is None
 
 
+def test_the_picker_starts_the_daemon_with_fixed_slots(tmp_path, monkeypatch):
+    # The same policy `gotg play` asks for: danstick replaces a daemon on
+    # other slots, and the picker's seats would go with it at the launch.
+    import os
+
+    from gotg_ui.danstick import ensure_daemon
+
+    fake_danstick(tmp_path, monkeypatch)
+    monkeypatch.delenv("DANSTICK_SLOTS", raising=False)
+    ensure_daemon()
+    assert os.environ["DANSTICK_SLOTS"] == "fixed"
+    monkeypatch.setenv("DANSTICK_SLOTS", "on-demand")
+    monkeypatch.delenv("DANSTICK_SKIP_DAEMON_CHECK", raising=False)
+    ensure_daemon()
+    assert os.environ["DANSTICK_SLOTS"] == "on-demand", "somebody's own choice stands"
+
+
 def test_asking_twice_only_asks_once(tmp_path, monkeypatch):
     # danstick's own flag, and `gotg play` reads the same one -- so a game
     # launched from the grid does not stop to check what the picker checked.
