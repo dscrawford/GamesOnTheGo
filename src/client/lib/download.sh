@@ -99,10 +99,86 @@ _download_lines() {
   return "$status"
 }
 
+# One bar for the whole game, however many files it is.
+#
+# Each file used to report itself -- its own bytes over its own size -- so a
+# game of twelve files was a bar that filled and emptied twelve times with the
+# figures of whichever file was going. What well-behaved downloaders do (apt's
+# "Need to get", rsync's --info=progress2, wget, and the Material and Windows
+# progress guidance; docs/download-progress.md has the sources) is one total
+# known before the first byte, bytes already on disk counted from the start,
+# a bar that never goes back, and a rate taken only over this run's bytes, in
+# a window, left out until it has settled. _fetch_members sets this up; the
+# lines below then speak for the game rather than the file.
+_AGG_TOTAL=""   # the game's bytes; empty outside _fetch_members
+_AGG_DONE=0     # bytes of the files already finished
+_AGG_MOVED=0    # bytes this run moved for the files already finished
+_AGG_HIGH=0     # the most `done` has said, so it never says less
+_AGG_LAST=0     # bytes this run moved for the file going now
+_AGG_AHEAD=0    # bytes already on disk for the files not started yet
+_AGG_START=0    # when this run began, in microseconds
+_AGG_LABEL=""
+_AGG_T=()       # the rate window: when, and how much had moved by then
+_AGG_B=()
+# Rate over the last five seconds of samples (rsync keeps five, wget at
+# least three), and nothing said about it for the first three.
+AGG_WINDOW_US=5000000
+AGG_SETTLE_US=3000000
+
+_agg_now() { local t="$EPOCHREALTIME"; printf '%s' "${t//[!0-9]/}"; }
+
+_agg_begin() {
+  _AGG_TOTAL="$1" _AGG_AHEAD="${2:-0}" _AGG_DONE=0 _AGG_MOVED=0 _AGG_HIGH=0 _AGG_LAST=0
+  _AGG_START="$(_agg_now)" _AGG_T=() _AGG_B=()
+}
+
+# A file is in: its bytes are done, and what this run moved for it is moved.
+_agg_finished() {
+  _AGG_DONE=$((_AGG_DONE + $1))
+  _AGG_MOVED=$((_AGG_MOVED + $2))
+  _AGG_LAST=0
+}
+
+_agg_end() { _AGG_TOTAL=""; }
+
+# Bytes a second over the window, or 0 while it is still settling, into
+# _AGG_RATE: in this shell, not a $(...) one, or the window it keeps would
+# be thrown away with the subshell on every line.
+_AGG_RATE=0
+_agg_rate() {
+  local moved="$1" now keep=() keepb=() i t
+  t="$EPOCHREALTIME"
+  now="${t//[!0-9]/}"
+  _AGG_T+=("$now") _AGG_B+=("$moved")
+  for i in "${!_AGG_T[@]}"; do
+    if ((now - _AGG_T[i] <= AGG_WINDOW_US)); then
+      keep+=("${_AGG_T[i]}") keepb+=("${_AGG_B[i]}")
+    fi
+  done
+  _AGG_T=("${keep[@]}") _AGG_B=("${keepb[@]}")
+  if ((now - _AGG_START < AGG_SETTLE_US || now <= _AGG_T[0])); then
+    _AGG_RATE=0
+    return
+  fi
+  _AGG_RATE=$(((moved - _AGG_B[0]) * 1000000 / (now - _AGG_T[0])))
+}
+
 _progress_line() {
   local out="$1" expected="$2" resumed_from="$3" start="$4" title="$5"
   local size now elapsed rate=0
   size="$(stat -c '%s' "$out" 2>/dev/null || echo 0)"
+  if [[ -n "$_AGG_TOTAL" ]]; then
+    local moved_file=$((size - resumed_from)) got
+    ((moved_file >= 0)) || moved_file=0
+    _AGG_LAST="$moved_file"
+    got=$((_AGG_DONE + size + _AGG_AHEAD))
+    ((_AGG_TOTAL <= 0 || got <= _AGG_TOTAL)) || got="$_AGG_TOTAL"
+    if ((got < _AGG_HIGH)); then got="$_AGG_HIGH"; else _AGG_HIGH="$got"; fi
+    _agg_rate $((_AGG_MOVED + moved_file))
+    rate="$_AGG_RATE"
+    printf 'progress\t%s\t%s\t%s\t%s\n' "$got" "$_AGG_TOTAL" "$rate" "$title" >&2
+    return
+  fi
   now="$(date +%s)"
   elapsed=$((now - start))
   ((elapsed > 0)) && rate=$(((size - resumed_from) / elapsed))
@@ -251,8 +327,30 @@ _fetch_members() {
   local files_base
   files_base="$(manifest_files_pick)"
 
-  local name size sha out url encoded server_path local_src
-  while IFS=$'\t' read -r name size sha encoded server_path; do
+  local name size sha out url encoded server_path local_src rows row
+  mapfile -t rows < <(jq -r --argjson want "$want" '.files[] | select(.name as $n | $want | if type == "array" then any(.[]; . as $r | $n | startswith("extras/" + $r + "/")) else true end)
+    | [.name, .size_bytes, (.sha256 // "null"),
+    (.name | split("/") | map(@uri) | join("/")), (.path // "")] | @tsv' <<<"$game")
+  # The whole game's size, from the catalog, before a byte moves -- and what
+  # of it is on disk already, from a run that stopped, so a resumed download
+  # opens part full rather than at zero.
+  local total=0 ahead=0 count="${#rows[@]}" index=0 label present
+  local -a on_disk=()
+  for row in "${rows[@]+"${rows[@]}"}"; do
+    IFS=$'\t' read -r name size _ <<<"$row"
+    [[ "$size" =~ ^[0-9]+$ ]] && total=$((total + size))
+    present="$(stat -c '%s' "$staged/$name" 2>/dev/null || echo 0)"
+    on_disk+=("$present")
+    ahead=$((ahead + present))
+  done
+  _agg_begin "$total" "$ahead"
+  for row in "${rows[@]+"${rows[@]}"}"; do
+    IFS=$'\t' read -r name size sha encoded server_path <<<"$row"
+    index=$((index + 1))
+    # This file's bytes on disk are its own to count from here.
+    _AGG_AHEAD=$((_AGG_AHEAD - on_disk[index - 1]))
+    label="$title"
+    ((count <= 1)) || label="$title — file $index of $count"
     validate_filename "$name"
     [[ "$sha" == "null" || "$sha" =~ ^[0-9a-f]{64}$ ]] ||
       die "invalid sha256 in catalog for $name"
@@ -264,12 +362,13 @@ _fetch_members() {
       log "copying $name from the library at $GOTG_LIBRARY_MOUNT"
       cp --reflink=auto -- "$local_src" "$out" || die "could not copy $name from $local_src"
       (_verify_checksum "$out" "$sha") || die "the library's copy of $name does not match the catalog"
+      _agg_finished "$(stat -c '%s' "$out")" 0
       continue
     fi
     url="$files_base/games/$platform/$id/$encoded"
     local fetched="" dl_status attempt
     for attempt in 1 2 3; do
-      if _download_with_progress "$url" "$out" "$sha" "$title: $name" "${size:-0}"; then
+      if _download_with_progress "$url" "$out" "$sha" "$label" "${size:-0}"; then
         # Verified inside the loop, in a subshell so its die ends the attempt
         # rather than the command: a poisoned partial resumes into a file
         # that hashes wrong — curl even calls a 416 on an oversized offset
@@ -298,9 +397,9 @@ _fetch_members() {
     done
     [[ -n "$fetched" ]] ||
       die "download failed for $id (partials kept at $staged; run again to resume)"
-  done < <(jq -r --argjson want "$want" '.files[] | select(.name as $n | $want | if type == "array" then any(.[]; . as $r | $n | startswith("extras/" + $r + "/")) else true end)
-    | [.name, .size_bytes, (.sha256 // "null"),
-    (.name | split("/") | map(@uri) | join("/")), (.path // "")] | @tsv' <<<"$game")
+    _agg_finished "$(stat -c '%s' "$out")" "$_AGG_LAST"
+  done
+  _agg_end
 }
 
 # Download one game if it is not already here. Returns 0 when the game is ready.
