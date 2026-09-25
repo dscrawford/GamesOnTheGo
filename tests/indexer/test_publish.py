@@ -72,7 +72,7 @@ class StubCatalog(BaseHTTPRequestHandler):
 def stub():
     handler = type("Bound", (StubCatalog,), {"games": [], "puts": [], "sweeps": []})
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     yield f"http://127.0.0.1:{server.server_port}", handler
     server.shutdown()
 
