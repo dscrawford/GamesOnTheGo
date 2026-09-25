@@ -167,6 +167,9 @@
       # cannot run inside padmap's user namespace. See ownsSession in
       # env/lib.nix for what that breaks and why nothing is lost.
       ownsSession = true;
+      # Every GBA is bound once, here, at launch -- so a player who pairs
+      # mid-game needs their seat to exist already. See padmap_reserve.
+      padReserve = players;
       args = [
         "{state}/splitscreen/session.json"
         "--workdir"

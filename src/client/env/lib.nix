@@ -121,6 +121,11 @@
   # padmap.sh refuses it for that emulator rather than seating four players
   # on top of each other.
   padIdentity ? null,
+  # How many seats padmap should hold open for the length of the game, for an
+  # environment that binds its players once at launch and can still be joined
+  # mid-play (Four Swords). Every seat up to it exists from the start, empty
+  # until somebody takes it; `padmap-rs exec --reserve`, from padmap.sh.
+  padReserve ? null,
   # Whether `gotg configure` can open this emulator's own settings screen.
   #
   # Defaults to whether the environment isolates, because without isolation
@@ -467,7 +472,7 @@ pkgs.runCommand "gotg-env-${name}"
         )
       } $out/share/gotg/configure.json
     ''}
-    ${lib.optionalString (padEmulator != null || padIdentity != null) ''
+    ${lib.optionalString (padEmulator != null || padIdentity != null || padReserve != null) ''
       cp ${
         pkgs.writeText "pads.json" (
           builtins.toJSON (
@@ -481,6 +486,7 @@ pkgs.runCommand "gotg-env-${name}"
             // lib.optionalAttrs (padEmulator != null) { emulator = padEmulator; }
             // lib.optionalAttrs (padConsole != null) { console = padConsole; }
             // lib.optionalAttrs (padIdentity != null) { identity = padIdentity; }
+            // lib.optionalAttrs (padReserve != null) { reserve = padReserve; }
           )
         )
       } $out/share/gotg/pads.json

@@ -125,12 +125,13 @@ def test_it_does_not_ask_again_for_the_same_state():
     assert watch.wanted(True, "idle", 0) is None
 
 
-def test_a_seat_taken_is_worth_asking_again():
-    # Three seats are still free, and the pad that took the first one is not
-    # the only one somebody might pick up.
+def test_a_seat_taken_is_not_a_reason_to_ask_again():
+    # A claim leaves padmap listening, and a `seating` resent ~200 ms after it
+    # dropped every hold in flight: the second person had to hold A again.
     watch = Watch()
     watch.wanted(True, "idle", 0)
-    assert watch.wanted(True, "ready", 1) is not None
+    assert watch.wanted(True, "ready", 1) is None
+    assert watch.wanted(True, "ready", 2) is None
 
 
 def test_nothing_is_asked_while_a_session_is_open():
@@ -318,17 +319,22 @@ def test_a_daemon_too_old_to_listen_is_not_asked_again_and_hands_nothing_back():
 def test_a_tap_on_space_is_still_the_menu():
     hold = KeyHold(seconds=0.6)
     hold.down(10.0)
-    assert hold.due(10.2) is None
-    assert hold.up() is True
+    assert hold.up(10.2) is True
 
 
-def test_space_held_the_whole_way_seats_the_keyboard_once():
+def test_space_held_the_whole_way_is_a_seat_and_not_a_tap():
+    # padmap reads the space bar and seats the keyboard itself (EVENTS.md,
+    # "A held space bar does the same thing, from anywhere"); the picker only
+    # has to not open the menu when the key comes back up.
     hold = KeyHold(seconds=0.6)
     hold.down(10.0)
-    assert hold.due(10.3) is None
-    assert hold.due(10.6) == {"cmd": "seat_keyboard"}
-    assert hold.due(10.9) is None, "said twice for one hold"
-    assert hold.up() is False, "the release after a seat is not a tap"
+    assert hold.up(10.6) is False, "held its length: the keyboard's seat"
+
+
+def test_nothing_asks_padmap_for_the_seat_any_more():
+    # Two things timing one hold was two fills on the strip and a second
+    # seat_keyboard padmap refused.
+    assert not hasattr(KeyHold, "due")
 
 
 def test_progress_fills_over_the_hold_and_is_nothing_when_nothing_is_held():
@@ -337,7 +343,7 @@ def test_progress_fills_over_the_hold_and_is_nothing_when_nothing_is_held():
     hold.down(10.0)
     assert abs(hold.progress(10.3) - 0.5) < 1e-9
     assert hold.progress(11.0) == 1.0
-    hold.up()
+    hold.up(11.0)
     assert hold.progress(11.0) == 0.0
 
 
@@ -346,4 +352,4 @@ def test_key_repeat_does_not_restart_the_hold():
     hold = KeyHold(seconds=0.6)
     hold.down(10.0)
     hold.down(10.5)
-    assert hold.due(10.6) == {"cmd": "seat_keyboard"}
+    assert hold.up(10.6) is False

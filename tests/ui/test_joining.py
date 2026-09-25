@@ -218,3 +218,18 @@ def test_the_sweep_never_ticks_backwards_when_a_reading_lands_behind_it():
     ahead = queue.now(10.10)[0].fraction  # carried to ~0.367
     queue.saw({"event": "progress", "node": "/dev/input/event9", "frac": 0.36}, 10.10)
     assert queue.now(10.10)[0].fraction >= ahead
+
+
+def test_the_keyboard_joining_is_drawn_as_the_keyboard_and_mouse():
+    # padmap times the space bar itself and reports it as a pad's hold, with
+    # the seat's name and no node (docs/EVENTS.md, padmap e0092be): the strip
+    # and the gate have to file it by name and draw the desk.
+    from gotg_ui.icons import icon_name
+
+    joining = Joining()
+    joining.saw({"event": "progress", "frac": 0.4, "name": "Keyboard and Mouse", "node": "", "player": 2}, 10.0)
+    [hold] = joining.now(10.0)
+    assert hold.name == "Keyboard and Mouse"
+    assert icon_name(hold.name) == "keyboard-mouse"
+    joining.saw({"event": "progress", "frac": 0, "name": "Keyboard and Mouse", "node": "", "player": None}, 10.1)
+    assert joining.now(10.1) == [], "let go early, it goes at once"

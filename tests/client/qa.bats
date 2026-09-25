@@ -449,3 +449,77 @@ stub_ssh() {
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"no such run"* ]]
 }
+
+# --- the overlay ---
+#
+# A frame the way gotg-killswitch draws it, over a stand-in game: the bar
+# across the top (8.5% of 720 is 61 px), the exit ring part way closed in
+# its middle. Drawn with the same numbers scene.c uses, so a check that reads
+# the wrong band fails here rather than on the cluster.
+
+overlay_frames() {
+  local dir="$1"
+  magick -size 1280x720 xc:'rgb(40,120,200)' "$dir/game.png"
+  magick "$dir/game.png" \
+    -fill 'rgba(18,18,20,0.88)' -draw 'rectangle 0,0 1279,60' \
+    -fill none -stroke 'rgb(230,40,40)' -strokewidth 5 -draw 'arc 622,12 658,48 -90,90' \
+    -stroke 'rgb(156,32,32)' -strokewidth 5 -draw 'line 632,22 648,38' -draw 'line 648,22 632,38' \
+    "$dir/with-bar.png"
+  # A game that is dark along its top edge all by itself, and nothing else.
+  magick "$dir/game.png" -fill 'rgb(10,10,10)' -draw 'rectangle 0,0 1279,60' "$dir/dark-top.png"
+}
+
+@test "overlay: the bar and its ring over a game pass" {
+  overlay_frames "$TEST_TMP"
+  run -0 qa_overlay_check "$TEST_TMP/game.png" "$TEST_TMP/with-bar.png"
+  [ "$(jq .pass <<<"$output")" = "true" ]
+}
+
+@test "overlay: a game with no bar fails" {
+  overlay_frames "$TEST_TMP"
+  run -0 qa_overlay_check "$TEST_TMP/game.png" "$TEST_TMP/game.png"
+  [ "$(jq .pass <<<"$output")" = "false" ]
+}
+
+@test "overlay: a game dark along its top is not mistaken for the bar" {
+  # Dark where the bar goes, but no ring gained: that is the game, not us.
+  overlay_frames "$TEST_TMP"
+  run -0 qa_overlay_check "$TEST_TMP/game.png" "$TEST_TMP/dark-top.png"
+  [ "$(jq .pass <<<"$output")" = "false" ]
+}
+
+@test "overlay: the verdict grades it only for a run that asked" {
+  make_rundir "$TEST_TMP/run" "$QA_FIX/sine.wav" "$QA_FIX/moving.mkv"
+  run -0 qa_verdict "$TEST_TMP/run" 1 6
+  [ "$(jq .checks.overlay.pass "$TEST_TMP/run/verdict.json")" = "null" ]
+  # Asked for, over a recording with no overlay in it: a failure, said so.
+  make_rundir "$TEST_TMP/asked" "$QA_FIX/sine.wav" "$QA_FIX/moving.mkv"
+  echo '{"overlay_at": 0}' >"$TEST_TMP/asked/run.json"
+  run -1 qa_verdict "$TEST_TMP/asked" 1 6
+  [ "$(jq .checks.overlay.pass "$TEST_TMP/asked/verdict.json")" = "false" ]
+}
+
+@test "overlay: a missing or corrupt frame reads as no bar, not a crash" {
+  run -0 qa_overlay_signature "$TEST_TMP/does-not-exist.png"
+  [ "$(jq .present <<<"$output")" = "false" ]
+  printf 'not a png\n' >"$TEST_TMP/corrupt.png"
+  run -0 qa_overlay_signature "$TEST_TMP/corrupt.png"
+  [ "$(jq .present <<<"$output")" = "false" ]
+}
+
+@test "overlay: an overlay placed past the end of the recording fails, quietly" {
+  mkdir -p "$TEST_TMP/late"
+  cp "$QA_FIX/moving.mkv" "$TEST_TMP/late/video.mkv"
+  echo '{"overlay_at": 100}' >"$TEST_TMP/late/run.json"
+  run -0 qa_overlay_verdict "$TEST_TMP/late"
+  [ "$(jq .pass <<<"$output")" = "false" ]
+}
+
+@test "overlay: a recorded second that is not a number is refused before arithmetic" {
+  mkdir -p "$TEST_TMP/odd"
+  cp "$QA_FIX/moving.mkv" "$TEST_TMP/odd/video.mkv"
+  jq -n --arg at 'a[$(touch '"$TEST_TMP"'/ran)]' '{overlay_at: $at}' >"$TEST_TMP/odd/run.json"
+  run -0 qa_overlay_verdict "$TEST_TMP/odd"
+  [ "$(jq .pass <<<"$output")" = "false" ]
+  [ ! -e "$TEST_TMP/ran" ]
+}

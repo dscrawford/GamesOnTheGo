@@ -31,9 +31,10 @@ PLAYER_COLOURS = [
 # An empty seat is red rather than grey. Grey reads as decoration; red reads as
 # something to do -- which it is, since a seat nobody is in is a controller
 # nobody can play with.
-EMPTY = config.colour("theme.colours.empty", (54, 30, 32))
-EMPTY_RING = config.colour("theme.colours.empty_ring", (208, 78, 78))
-EMPTY_TEXT = config.colour("theme.colours.empty_text", (208, 78, 78))
+EMPTY = config.colour("theme.colours.empty", (52, 52, 58))
+EMPTY_RING = config.colour("theme.colours.empty_ring", (120, 120, 128))
+EMPTY_TEXT = config.colour("theme.colours.empty_text", (150, 150, 158))
+ATTENTION = config.colour("theme.colours.attention", (208, 78, 78))
 LABEL = config.colour("theme.colours.text", (232, 232, 236))
 LABEL_DIM = config.colour("theme.colours.text_dim", (150, 150, 158))
 PANEL = config.colour("theme.colours.panel", (26, 26, 30))

@@ -271,9 +271,12 @@ class Watch:
     in and hold a button" into player one without leaving the grid.
 
     padmap does not acknowledge the command, so there is nothing to read back:
-    it is sent again on each connection and after each change of state, which
-    the daemon takes idempotently. Not every frame, which would be a syscall
-    sixty times a second to tell a daemon what it already knows.
+    it is sent on each connection, after a session, and when a full room has
+    a seat again -- the three times padmap may not be listening. Not after a
+    claim: a claim leaves seating open, and the daemon takes a `seating` as a
+    fresh start that drops every hold in flight. Sent again ~200 ms after each
+    claim, it was the second person's ring emptying just as the first person's
+    seat landed, and "they have to hold A again".
 
     Never closed. The daemon keeps seating open after this client is gone, so
     a pad picked up in the middle of a game takes the next free seat exactly
@@ -282,9 +285,10 @@ class Watch:
     """
 
     slots: int = 4
-    # The (state, seated) it was last asked under. None is "not asked", which
-    # is where a lost connection puts it: a restarted daemon remembers nothing.
-    asked: tuple[str, int] | None = None
+    # Whether padmap has been asked since it last could have stopped
+    # listening. A lost connection clears it: a restarted daemon remembers
+    # nothing.
+    asked: bool = False
     # A daemon too old to know the command. It is never asked again -- and
     # that is all: the pads are not handed back to whoever holds them. A
     # machine whose padmap cannot seat anybody is a machine the keyboard
@@ -308,21 +312,19 @@ class Watch:
         if self.refused:
             return None
         if not connected:
-            self.asked = None
+            self.asked = False
             return None
-        # Inside a session padmap suspends seating, and the assignment screen
-        # is asking for the same holds anyway. Full seats are the same shape of
-        # nothing-to-do. Both forget what was asked rather than keeping it: a
-        # fourth player who unplugs puts the state back to a tuple that was
-        # already sent, and a `wanted` that only compares would then never
-        # mention the seat they freed.
+        # Inside a session padmap suspends seating, and the assignment screen is
+        # asking for the same holds anyway. Full seats are the same shape of
+        # nothing-to-do. Both forget that it was asked: what padmap resumes
+        # after a session is not assumed, and a fourth player who unplugs frees
+        # a seat that should be mentioned.
         if state == "assigning" or seated >= self.slots:
-            self.asked = None
+            self.asked = False
             return None
-        here = (state, seated)
-        if here == self.asked:
+        if self.asked:
             return None
-        self.asked = here
+        self.asked = True
         # The same length the gate asks for: pairing should not be quicker
         # from the grid than it is in front of a launch.
         return {"cmd": "seating", "open": True, "players": self.slots, "hold": PAIR_HOLD}
@@ -359,25 +361,23 @@ KEYBOARD_HOLD = float(config.get("theme.timeouts.keyboard_hold", 1.5))
 
 @dataclass
 class KeyHold:
-    """The space bar, held to seat the keyboard as a player.
+    """The space bar, and whether letting it go was a tap.
 
-    A pad is seated by padmap reading the pad; a keyboard is the compositor's
-    and padmap never sees its keys, so this is the one hold the picker times
-    itself. The clock is passed in, so a test is not a stopwatch.
-
-    Two outcomes from one key. Released early it is the tap it always was --
-    open the menu -- and the caller is told so. Held the whole way it is a
-    seat, said once, and the release after that is nothing.
+    Held, it seats the keyboard as a player -- and padmap does that itself
+    now, reading the space bar wherever the person is, game included
+    (padmap e0092be). The picker used to time the same hold and send
+    `seat_keyboard` too: two fills on the strip for one press, and a second
+    seat padmap refused. What is left here is the other half of one key's two
+    meanings: released early it is the tap it always was -- open the menu --
+    and released after the hold's length it was a seat, and nothing.
     """
 
     seconds: float = KEYBOARD_HOLD
     since: float | None = None
-    said: bool = False
 
     def down(self, now: float) -> None:
         if self.since is None:
             self.since = now
-            self.said = False
 
     def progress(self, now: float) -> float:
         """How far along the hold is, 0 when nothing is held.
@@ -390,15 +390,8 @@ class KeyHold:
         elapsed = now - self.since
         return 1.0 if elapsed >= self.seconds - 1e-3 else max(0.0, elapsed / self.seconds)
 
-    def due(self, now: float) -> dict | None:
-        """The command to send, once, the moment the hold completes."""
-        if self.since is None or self.said or self.progress(now) < 1.0:
-            return None
-        self.said = True
-        return {"cmd": "seat_keyboard"}
-
-    def up(self) -> bool:
+    def up(self, now: float) -> bool:
         """The key released. True when it was a tap and the menu should open."""
-        tap = self.since is not None and not self.said
+        tap = self.since is not None and self.progress(now) < 1.0
         self.since = None
         return tap

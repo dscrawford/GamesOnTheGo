@@ -19,11 +19,13 @@ from .buttons import (
     RIGHT,
     STANDARD,
     START,
+    STEPS,
     UP,
     A,
     B,
     X,
     Y,
+    cardinal,
     hat_step,
     name_for,
     step_for,
@@ -235,6 +237,70 @@ def direction(event) -> tuple[int, int] | None:
             return None
         return hat_step(event.value)
     return step_for(button(event))
+
+
+def pad_of(event) -> int | None:
+    """The SDL instance id this event came from, if it came from a pad."""
+    instance = getattr(event, "instance_id", None)
+    return getattr(event, "joy", None) if instance is None else instance
+
+
+def pushed(event) -> tuple[int, int] | None:
+    """A d-pad direction going down, on a pad padmap published -- read
+    quietly: the screen that acts on the press is what traces it."""
+    if not _allowed(event):
+        return None
+    if event.type == pygame.CONTROLLERBUTTONDOWN:
+        return step_for(name_for(event.button, standard=True))
+    if event.type == pygame.JOYHATMOTION and pad_of(event) not in _mapped:
+        return cardinal(hat_step(event.value))
+    return None
+
+
+def let_go(event) -> tuple[int, int] | None:
+    """A d-pad direction coming back up, on a pad padmap published. A hat
+    centring is (0, 0): it lets go of whichever way it was held."""
+    if not _allowed(event):
+        return None
+    if event.type == pygame.CONTROLLERBUTTONUP:
+        return step_for(name_for(event.button, standard=True))
+    if event.type == pygame.JOYHATMOTION and pad_of(event) not in _mapped and tuple(event.value) == (0, 0):
+        return (0, 0)
+    return None
+
+
+# The d-pad buttons in SDL's controller layout, by the step each takes.
+_DPAD = {STEPS[name]: index for index, name in STANDARD.items() if name in STEPS}
+
+
+def repeat_press(pad: int, step: tuple[int, int]) -> None:
+    """Post a d-pad press from this pad, made up: how a held direction or a
+    pushed stick reaches every screen, which all answer the d-pad already.
+    Marked, so the loop does not take its own repeat for a new press. A step
+    the d-pad has no button for posts nothing."""
+    button = _DPAD.get(step)
+    if button is None:
+        return
+    pygame.event.post(
+        pygame.event.Event(
+            pygame.CONTROLLERBUTTONDOWN, button=button, instance_id=pad, which=pad, gotg_repeat=True
+        )
+    )
+
+
+def drop_repeats() -> None:
+    """Take made-up presses still queued off the queue, keeping real ones: the
+    grid is closing, and the launch gate after it reads the same queue, where
+    a held direction's last repeat would light a label and reset the room's
+    quiet."""
+    for event in pygame.event.get(pygame.CONTROLLERBUTTONDOWN):
+        if not is_repeat(event):
+            pygame.event.post(event)
+
+
+def is_repeat(event) -> bool:
+    """Whether this press is one `repeat_press` made."""
+    return bool(getattr(event, "gotg_repeat", False))
 
 
 class Pads:

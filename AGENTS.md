@@ -86,9 +86,10 @@ nix build .#controllers-image --max-jobs 2 --cores 4                            
   user's game. The suite fails fast if the real socket
   (`$XDG_RUNTIME_DIR/padmap/padmap.sock`) exists; do not override that.
 - **Prefer the cluster.** `k8s/controllers/` runs the same suite in a
-  privileged pod with `/dev/uinput`, which is where it belongs — 44 of 50
-  pass there (one strict xfail); the five that walk padmap's wizard do not
-  yet (see that README). Build and push the image tagged by its store hash,
+  privileged pod with `/dev/uinput`, which is where it belongs — 56 of 71
+  pass there and ten are strict xfails, each naming the padmap request that
+  fixes it (`test_pairing.py`: four people pairing, joins mid-game); the five
+  that walk padmap's wizard do not yet pass (see that README). Build and push the image tagged by its store hash,
   apply the Job, read the logs.
 
 ## Lint & Typecheck
@@ -97,9 +98,12 @@ nix build .#controllers-image --max-jobs 2 --cores 4                            
 ruff check src/ui tests/ui tests/e2e                              # the picker (dev)
 nix build .#checks.x86_64-linux.ruff --max-jobs 2 --cores 4        # src/gotg + tests: check AND format
 nix build .#checks.x86_64-linux.shellcheck --max-jobs 2 --cores 4  # the client
+nix build .#checks.x86_64-linux.rust --max-jobs 2 --cores 4        # rust/: test, clippy -D warnings, fmt
 ```
 
-Both must pass before a change is done. `ruff format` is enforced only on
+All must pass before a change is done. In a checkout, `cargo test` in `rust/`
+needs SDL3 and libwayland on `PKG_CONFIG_PATH` (`nix shell nixpkgs#cargo
+nixpkgs#rustc nixpkgs#pkg-config nixpkgs#sdl3.dev nixpkgs#wayland.dev`). `ruff format` is enforced only on
 `src/gotg`; the picker is `ruff check` (E, F, I, W, B, UP, line length 120).
 
 ## Code Style & Conventions
@@ -111,6 +115,10 @@ Both must pass before a change is done. `ruff format` is enforced only on
   frozen dataclass rebuilt from each event (`assign.Assignment`, `gate.Gate`)
   plus a `decide`/`apply` pair. Put logic there, keep `app.py` a loop.
 - **Immutable by default**: `dataclasses.replace`, never mutate a view.
+- **Rust, Python and Nix** are this repo's languages (plus the bash client
+  that predates the rule). No new C: native programs are crates in `rust/`,
+  built through the flake with `cargoLock`. `gotg-pads` and
+  `gotg-killswitch` were C until 2026-09.
 - `src/gotg` is **stdlib-only** — it faces the internet and holds every
   credential; that is its supply-chain posture. PyYAML is the indexer's
   optional extra, nothing else.
@@ -118,9 +126,11 @@ Both must pass before a change is done. `ruff format` is enforced only on
   (`GOTG_PADMAP`, `GOTG_SEAT`…) so tests can substitute a recorder.
 - Commit subjects are sentences: `fix(ui): leaving the controller screen
   keeps the controller`. Bodies explain the bug that was actually seen.
-- Requests to padmap: one file in `docs/requests/`, mirrored into
-  `~/Documents/padmap/docs/requests/` where they get answered; sync the
-  answer back.
+- Requests to padmap: one file in `docs/requests/`, copied into
+  `~/Documents/padmap/docs/requests/`, where an agent picks it up. A file
+  present is open; padmap answers by deleting it in the commit that does the
+  work (`git -C ~/Documents/padmap log --diff-filter=D -- docs/requests/`).
+  Sync the answer back by deleting GOTG's copy too, and bump the pin to use it.
 
 ## Architecture
 
@@ -130,6 +140,8 @@ src/gotg/indexer     catalog builder; rules.yaml                  (pyyaml extra)
 src/client/bin,lib   `gotg`: install/play/steam/controllers       (bash, bats)
 src/client/env       one Nix environment per platform/game; mods/ per-game overrides
 src/client/qa        the QA harness and its synthetic pad         (runs in k8s/qa)
+rust/crates          gotg-pads (what SDL sees) and gotg-killswitch (the exit chord
+                     and the overlay bar; pure models + overlay/painter)   (cargo)
 src/ui/gotg_ui       the picker: app.py loop; models in assign/gate/clones/padstrip;
                      pads.py + controllers.py are the pygame half
 src/ui/assets        controller SVGs -> assets/built at build time (generated)
@@ -295,6 +307,19 @@ frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).
   `display.image`, never `convert_alpha()`, which needs a display surface the
   renderer's window does not have. Cover art decodes on a worker
   (`decode.py`): ten covers in one frame was 13.5 ms.
+- **The overlay over a game is the kill switch's painter.** `gotg-killswitch`
+  (launched beside every game) watches the exit chord and padmap's socket;
+  a bar comes down for a pad joining and for the exit hold. Drawing is a
+  separate process -- `gotg-killswitch --paint`, fed ~100-byte frames over a
+  non-blocking pipe -- because a display call that stalls (a round trip, a
+  vsynced present, a connect) in the chord's own loop was a kill switch that
+  did nothing. Three ways over a game: gamescope's `GAMESCOPE_EXTERNAL_OVERLAY`
+  (one slot, shared with mangoapp), layer-shell's overlay layer (sway draws
+  it above fullscreen), and an override-redirect X11 window (cage, which QA
+  uses, has no layer-shell). `gotg qa <id> --overlay-at N` has a pad
+  join (a stand-in padmap socket) and the virtual pad hold the chord short of
+  the kill, N seconds in, and grades the recording for it; headless sway and cage
+  with `grim` check it locally without a window on anybody's screen.
 - When the picker does something on a real machine the tests do not show:
   `GOTG_UI_TRACE=/tmp/gotg-trace.log gotg-ui`, ask the person to press the
   buttons in a numbered order, then read the file (one JSON object per

@@ -21,7 +21,6 @@ from __future__ import annotations
 import struct
 import time
 
-import pytest
 from fakepad import ABS_X, BTN_SOUTH, BTN_START, FakePad, event_node, kernel_names
 
 from gotg_ui import pads
@@ -768,7 +767,9 @@ def test_the_keyboard_takes_a_seat_when_asked(daemon, sdl):
 
         picker.padmap.seat_keyboard()
         seated = picker.until(
-            lambda p: any(pl.get("player") == 2 and pl.get("icon") == "keyboard" for pl in p.players),
+            # "Keyboard and Mouse", icon keyboard-mouse since padmap afe321d;
+            # `keyboard` is the flag that does not change with the name.
+            lambda p: any(pl.get("player") == 2 and pl.get("keyboard") for pl in p.players),
             seconds=4.0,
         )
         assert seated, f"padmap seated no keyboard: {picker.players}"
@@ -2259,18 +2260,13 @@ def test_a_hold_is_drawn_for_every_frame_it_is_held(daemon, sdl):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a claim clears every other hold in flight at this pin; "
-           "see docs/requests/two-people-pairing-at-once.md",
-)
 def test_the_seat_goes_to_whoever_pressed_first(daemon, sdl):
     """Not to whichever pad was plugged in first, which is what the daemon
     used to do when two holds finished in the same tick.
 
-    Press order is right at this pin; the second claim never arrives, because
-    the first claim's `seating.reset()` clears the other pad's hold and a
-    button that is already down sends no new edge to restart it.
+    It was a strict xfail until padmap bf6606d: the first claim's
+    `seating.reset()` cleared the other pad's hold, and a button already down
+    sends no new edge to restart it.
     """
     with FakePad("E2E Xbox Pad") as first, FakePad("E2E Other Pad", 0x2AAA, 0x5BBB, 1) as second:
         daemon.send({"cmd": "seating", "open": True, "players": 4, "hold": 1.0})
