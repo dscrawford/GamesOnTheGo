@@ -56,7 +56,7 @@ assert STANDARD[pygame.CONTROLLER_BUTTON_A] == A
 _mapped: set[int] = set()
 
 # What each open pad is called, and its GUID, by SDL instance id. A raw pad
-# reaches this program whenever padmap is not holding it -- a failed grab, a
+# reaches this program whenever danstick is not holding it -- a failed grab, a
 # Steam Controller it cannot grab, or its own seating mode, which grabs
 # nothing on purpose -- and acting on those presses is the picker taking
 # orders from a controller nobody has assigned. See `clones.py`: the rule
@@ -65,7 +65,7 @@ _owners = Owners()
 
 
 def _allowed(event) -> bool:
-    """Whether this event came from a pad padmap published.
+    """Whether this event came from a pad danstick published.
 
     `instance_id` on everything SDL2 sends, and `joy` for the older spelling,
     so a pygame that answers only the second is not a picker that answers
@@ -117,7 +117,7 @@ def button(event) -> str | None:
 
 
 def released(event) -> bool:
-    """Whether this is a button coming back up on a pad padmap published.
+    """Whether this is a button coming back up on a pad danstick published.
 
     The one thing the launch gate reads besides a press: its ready-up hold
     must start from a press that began on that screen, so a button already
@@ -132,10 +132,10 @@ def released(event) -> bool:
 
 
 def raw_input(event) -> tuple[str, int, object] | None:
-    """A raw joystick input from a pad padmap published: (kind, index, value).
+    """A raw joystick input from a pad danstick published: (kind, index, value).
 
     The joystick API's own numbering -- button 3, hat 0, axis 2 -- which is
-    how padmap's profile names things, so a screen can say which control is
+    how danstick's profile names things, so a screen can say which control is
     being pressed. Unlike `button`, the raw event of a mapped pad is *not*
     dropped here: this is not acting on a press, only showing it.
     """
@@ -155,7 +155,7 @@ def raw_input(event) -> tuple[str, int, object] | None:
 def mapped(event) -> bool:
     """Whether SDL has a standard layout for the pad this event came from.
 
-    Which vocabulary names a press: SDL's own for a pad it maps, padmap's
+    Which vocabulary names a press: SDL's own for a pad it maps, danstick's
     capture for one it does not. Deciding that per *event* instead -- a button
     said one thing, an axis the other -- lit two labels for one trigger, which
     is what a GameCube pad on an N64 drawing looked like: R and Z at once.
@@ -167,12 +167,12 @@ def mapped(event) -> bool:
 
 
 def button_up(event) -> str | None:
-    """The name of the button this release is, on a pad padmap published.
+    """The name of the button this release is, on a pad danstick published.
 
     `released` answers only whether something came up. A screen showing what
     is under a thumb needs the name, and for a pad SDL maps that name is the
     standard one -- which is the vocabulary the binding tables use, and is why
-    this is read instead of padmap's capture: a capture holds the controls one
+    this is read instead of danstick's capture: a capture holds the controls one
     console asked for, and half the pad is missing from it.
     """
     if event.type not in (pygame.CONTROLLERBUTTONUP, pygame.JOYBUTTONUP):
@@ -188,7 +188,7 @@ def button_up(event) -> str | None:
 
 
 def axis_move(event) -> tuple[int, float] | None:
-    """A standard axis and where it is, on a pad padmap published.
+    """A standard axis and where it is, on a pad danstick published.
 
     SDL's own axis order (0 leftx, 1 lefty, 2 rightx, 3 righty, 4 and 5 the
     triggers), which holds for every pad it maps -- so which stick is being
@@ -207,7 +207,7 @@ def axis_move(event) -> tuple[int, float] | None:
 
 
 def raw_release(event) -> int | None:
-    """The joystick button index coming back up, on a pad padmap published.
+    """The joystick button index coming back up, on a pad danstick published.
 
     `released` answers only whether *something* came up, which is all the
     launch gate's hold needs. A screen showing which controls are under a
@@ -246,7 +246,7 @@ def pad_of(event) -> int | None:
 
 
 def pushed(event) -> tuple[int, int] | None:
-    """A d-pad direction going down, on a pad padmap published -- read
+    """A d-pad direction going down, on a pad danstick published -- read
     quietly: the screen that acts on the press is what traces it."""
     if not _allowed(event):
         return None
@@ -258,7 +258,7 @@ def pushed(event) -> tuple[int, int] | None:
 
 
 def let_go(event) -> tuple[int, int] | None:
-    """A d-pad direction coming back up, on a pad padmap published. A hat
+    """A d-pad direction coming back up, on a pad danstick published. A hat
     centring is (0, 0): it lets go of whichever way it was held."""
     if not _allowed(event):
         return None
@@ -333,7 +333,7 @@ class Pads:
             # The name and the GUID, because SDL will rename a clone that
             # mirrors a pad it recognises and only the GUID still says what the
             # device was really called. phys is not asked for: SDL does not
-            # answer it, and padmap sets it best-effort anyway.
+            # answer it, and danstick sets it best-effort anyway.
             _owners.opened(instance, stick.get_name() or "", stick.get_guid() or "")
             trace.say(
                 "pad-opened",
@@ -377,10 +377,10 @@ class Pads:
         return out
 
     def any_button_down(self) -> bool:
-        """Whether a button is held on any pad padmap published, right now.
+        """Whether a button is held on any pad danstick published, right now.
 
         Asked, not waited for. A pad whose clone appeared with a button
-        already down carries that state from the first frame -- padmap
+        already down carries that state from the first frame -- danstick
         forwards a Steam Controller's state, not its events -- and SDL may
         or may not report a press for it. The state is what is true.
         """

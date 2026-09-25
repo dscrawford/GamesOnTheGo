@@ -26,6 +26,7 @@ from .browser import SHELF, Browser
 from .catalog import Game, Library
 from .controllers import assets_dir, control_places, draw_assign, draw_strip
 from .controllers import draw as draw_controllers
+from .danstick import DaemonWatch, Danstick, ensure_daemon
 from .decode import PENDING, Decoder
 from .fetch import Loader
 from .filters import Filters
@@ -36,7 +37,6 @@ from .installs import Installs
 from .layout import grid, shelf, shelf_at, tile_at
 from .menu import Menu
 from .nav import Nav
-from .padmap import DaemonWatch, Padmap, ensure_daemon
 from .padstrip import HEIGHT as STRIP_HEIGHT
 from .padstrip import PANEL, status_text, strip_status
 from .prepare import Preparer, is_ready
@@ -679,7 +679,7 @@ def draw_prepare(
 
 
 def _steered(steer: Nav, event, now: float) -> Nav:
-    """A held direction's start and end, from a pad padmap published. The
+    """A held direction's start and end, from a pad danstick published. The
     press itself is the screens' to act on; a stick has no press, so its first
     step is posted here, as the d-pad press it stands for."""
     pad = pads.pad_of(event)
@@ -797,53 +797,53 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # The controller layer. Absent is a state rather than a failure: a machine
     # with no daemon running is what every machine looks like before anybody
     # has set a controller up, and the strip says so instead of disappearing.
-    padmap = Padmap()
+    danstick = Danstick()
     # Started rather than waited for: the picker is usually the first thing
     # open on this machine, so if it does not start the daemon nothing will.
     # A failure is a sentence in the strip, not a reason to refuse to draw.
-    # No session, ever, from the grid. padmap opens one by itself the first
+    # No session, ever, from the grid. danstick opens one by itself the first
     # time it meets a pad it has no mapping for -- which grabs every
     # controller, takes the screen, and is exactly the pairing detour this
     # picker is supposed to have stopped needing. A seat comes from a hold,
     # and what a button means is asked at launch by gotg-seat, where there is
     # a game to ask about. Set before the daemon is started, since it is the
     # daemon that reads it, and left alone when somebody set it themselves.
-    os.environ.setdefault("PADMAP_NO_AUTOSETUP", "1")
-    # And no seat but by a hold. padmap seats a pad it has a stored mapping
+    os.environ.setdefault("DANSTICK_NO_AUTOSETUP", "1")
+    # And no seat but by a hold. danstick seats a pad it has a stored mapping
     # for the moment it sees it, which --fresh does not stop: the Xbox pad
     # was player one two seconds after the grid opened, nobody had held
     # anything, and the strip said "no controllers" because no state ever
     # followed. Seen in a trace, not reasoned about.
-    os.environ.setdefault("PADMAP_NO_AUTOATTACH", "1")
+    os.environ.setdefault("DANSTICK_NO_AUTOATTACH", "1")
     # Unseated, and for as long as this process lives -- which, after a pick
     # execvp's into a game, is the game. Nobody is seated when the picker
     # opens; a hold seats them; the daemon goes when the session does.
-    padmap_trouble = ensure_daemon(fresh=True, follow=os.getpid())
+    danstick_trouble = ensure_daemon(fresh=True, follow=os.getpid())
     trace.say(
         "start",
         pid=os.getpid(),
-        padmap_on_path=bool(__import__("shutil").which("padmap")),
-        daemon_trouble=padmap_trouble,
+        danstick_on_path=bool(__import__("shutil").which("danstick")),
+        daemon_trouble=danstick_trouble,
         any_pad=os.environ.get("GOTG_ANY_PAD"),
         pads_open=len(sticks),
         held=hush.refresh(),
     )
-    padmap.connect()
+    danstick.connect()
     # And asked after again whenever the connection is gone -- see DaemonWatch
     # for why reconnecting alone was not enough.
-    padmap_watch = DaemonWatch()
+    danstick_watch = DaemonWatch()
     # Where that asking happens, so the grid keeps drawing while it does.
-    restarter = ThreadPoolExecutor(max_workers=1, thread_name_prefix="padmap-start")
+    restarter = ThreadPoolExecutor(max_workers=1, thread_name_prefix="danstick-start")
     restarting: Future | None = None
     # The assignment screen. `open` is what decides whether it is on screen,
-    # and padmap closes it by accepting rather than this program deciding.
+    # and danstick closes it by accepting rather than this program deciding.
     seating = Session()
-    # And the standing invitation underneath it: padmap listening for a hold
+    # And the standing invitation underneath it: danstick listening for a hold
     # for as long as the grid is up, so picking a controller up and holding a
     # button is all it takes to become player one. Nothing on screen until
     # somebody does -- see assign.Watch.
     watch = Watch()
-    # The space bar: tapped it opens the menu as it always did; held, padmap
+    # The space bar: tapped it opens the menu as it always did; held, danstick
     # seats the keyboard and the release is nothing. Decided on release.
     space = KeyHold()
     controller_art: dict = {}
@@ -924,7 +924,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     try:
         while running:
             state = browser.grid
-            heard = padmap.heard
+            heard = danstick.heard
             # Repeats due now, posted as d-pad presses before this frame's
             # events are read, so every screen takes them as it takes a press.
             # A held direction keeps the frames coming, or the repeat would
@@ -947,12 +947,12 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     continue
 
                 # Before any screen, because every screen needs it. Assigning
-                # controllers *replaces* them: padmap grabs the physical pad,
-                # which then reports nothing, and publishes `padmap Player N`
+                # controllers *replaces* them: danstick grabs the physical pad,
+                # which then reports nothing, and publishes `danstick Player N`
                 # in its place. A picker holding only the handles it opened at
                 # startup goes dead at exactly the moment somebody finishes
                 # setting their controller up -- which is the worst possible
-                # moment, because it looks like padmap broke the machine.
+                # moment, because it looks like danstick broke the machine.
                 if event.type == pygame.JOYDEVICEADDED:
                     sticks.add(event.device_index)
                     hush.refresh()
@@ -976,13 +976,13 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 # daemon, no seat, no problem -- and that was the hole the
                 # rule exists to close: a controller is a keyboard in
                 # hardware, so "anything that types" included pads nobody had
-                # assigned. Until padmap has seated it, the only key heard is
+                # assigned. Until danstick has seated it, the only key heard is
                 # the space bar that asks for the seat. See keys.py.
                 if event.type in (pygame.KEYDOWN, pygame.KEYUP, pygame.TEXTINPUT):
                     # The space bar is always heard: a keyboard that cannot
                     # ask for a seat cannot be given one.
                     asking = getattr(event, "key", None) == pygame.K_SPACE
-                    if not asking and not keys.drives(padmap.players, padmap.connected):
+                    if not asking and not keys.drives(danstick.players, danstick.connected):
                         trace.say("key-refused", key=getattr(event, "key", None))
                         continue
 
@@ -1047,7 +1047,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 # Same for the controller diagram, which is also where a
                 # controller is assigned -- so it takes A, B and Y from both
                 # the keyboard and a pad, and nothing else. `seating.open` as
-                # well as the screen, because padmap opens sessions of its own
+                # well as the screen, because danstick opens sessions of its own
                 # and the way out of one has to be reachable from wherever the
                 # picker happened to be.
                 if controllers is not None or seating.open:
@@ -1058,7 +1058,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             # away, which took the clone with it, which left
                             # nothing able to press the second.
                             if seating.open:
-                                padmap.send(seating.leave())
+                                danstick.send(seating.leave())
                             controllers = None
                         elif event.key in ARROWS and not seating.open:
                             focus = around.nearest(control_anchors, focus, ARROWS[event.key])
@@ -1066,9 +1066,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             # One key, two meanings, and the state says which:
                             # nothing started yet means start, and a session in
                             # flight means keep what has been claimed.
-                            padmap.send(seating.accept() if seating.open else seating.begin())
+                            danstick.send(seating.accept() if seating.open else seating.begin())
                         elif event.key == pygame.K_r and seating.open:
-                            padmap.send(seating.reset())
+                            danstick.send(seating.reset())
                     elif pads.direction(event) is not None and not seating.open:
                         # Around the drawing itself. Geometric, so "right" from
                         # the d-pad reaches the face buttons rather than
@@ -1081,13 +1081,13 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         # hold a button *at*.
                         pressed = pads.button(event)
                         if pressed == pads.A:
-                            padmap.send(seating.accept() if seating.open else seating.begin())
+                            danstick.send(seating.accept() if seating.open else seating.begin())
                         elif pressed == pads.B:
                             if seating.open:
-                                padmap.send(seating.leave())
+                                danstick.send(seating.leave())
                             controllers = None
                         elif pressed == pads.Y and seating.open:
-                            padmap.send(seating.reset())
+                            danstick.send(seating.reset())
                     continue
 
                 # While the menu is open it owns the input: the grid must
@@ -1383,30 +1383,30 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             # Reconnected here rather than on a timer: connect() on an absent
             # socket fails at once with ENOENT, and a daemon started while the
             # picker is open should be picked up without restarting it.
-            if not padmap.connected:
-                if restarting is None and padmap_watch.due(time.monotonic()):
-                    padmap_watch.mark(time.monotonic())
+            if not danstick.connected:
+                if restarting is None and danstick_watch.due(time.monotonic()):
+                    danstick_watch.mark(time.monotonic())
                     # Not fresh: a daemon that died mid-session restores the
                     # seats it had, which is what somebody halfway through an
                     # evening wants back.
                     #
                     # And not here: starting a daemon is a subprocess waited
                     # on for up to ten seconds, and it used to be waited on
-                    # inside a frame -- the grid froze for as long as padmap
+                    # inside a frame -- the grid froze for as long as danstick
                     # took to come back. A thread starts it; the frame only
                     # looks to see whether it has finished.
                     restarting = restarter.submit(ensure_daemon, force=True, follow=os.getpid())
                 if restarting is not None and restarting.done():
-                    padmap_trouble = restarting.result()
+                    danstick_trouble = restarting.result()
                     restarting = None
-                padmap.connect()
-            # Keeping up with padmap, once a frame: fold in what it said and
+                danstick.connect()
+            # Keeping up with danstick, once a frame: fold in what it said and
             # keep it listening for a hold. Who may move the cursor is not a
-            # question here -- pads.py refuses anything padmap did not
+            # question here -- pads.py refuses anything danstick did not
             # publish, on every event, with no switch to turn that off.
-            listen = attend(padmap, seating, watch)
+            listen = attend(danstick, seating, watch)
             if listen is not None:
-                padmap.send(listen)
+                danstick.send(listen)
 
             painting = time.perf_counter()
             # The full-screen views draw into the band below the strip rather
@@ -1474,12 +1474,12 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             draw_strip(
                 screen,
                 font_at,
-                padmap.players,
-                padmap.slots,
-                strip_status(padmap.status_word, len(padmap.players))
-                if padmap.connected
-                else (padmap_trouble or status_text(padmap.status_word)),
-                # `filling`, not the last reading: a hold let go is padmap
+                danstick.players,
+                danstick.slots,
+                strip_status(danstick.status_word, len(danstick.players))
+                if danstick.connected
+                else (danstick_trouble or status_text(danstick.status_word)),
+                # `filling`, not the last reading: a hold let go is danstick
                 # going quiet, and the strip has to empty on its own.
                 #
                 # And only a daemon that does not name its pads gets the single
@@ -1493,7 +1493,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             # Moving on its own clock, or the daemon talking: full rate. Idle
             # is only ever a screen with nothing on it that changes by itself.
             if (
-                padmap.heard != heard
+                danstick.heard != heard
                 or seating.open
                 or space.since is not None
                 or preparer is not None
@@ -1507,7 +1507,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             presented = time.perf_counter()
             # The loader only mirrors streamed text; 30fps halves the redundant
             # re-render of a mostly-unchanged tail across a minutes-long build.
-            shown.rest(cap=30 if preparer is not None else None, woken=padmap.pending)
+            shown.rest(cap=30 if preparer is not None else None, woken=danstick.pending)
             ticked = time.perf_counter()
             said = fps.frame(drawn - painting, presented - drawn, ticked - presented, ticked)
             if said is not None:
@@ -1528,7 +1528,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
         # terminal, so nothing else will ever stop it.
         if preparer is not None and (chosen is None or preparer.game != chosen[0]):
             preparer.cancel()
-        # padmap goes on listening for a hold. It used to be told to stop
+        # danstick goes on listening for a hold. It used to be told to stop
         # here, on the theory that a game has its own idea of what a button
         # does -- but the daemon seats only pads that hold no seat, so a
         # button in a game reseats nobody, and a second player arriving
@@ -1546,14 +1546,14 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # process, which is still how Steam and a bare terminal meet it.
     if chosen is not None and chosen[1] == "play" and config.get("theme.gate_in_window", True):
         try:
-            seat.before_launch(shown, font_at, padmap, chosen[0].platform, chosen[0].title, hush)
+            seat.before_launch(shown, font_at, danstick, chosen[0].platform, chosen[0].title, hush)
             os.environ["GOTG_SEAT_MET"] = "1"
         except Exception as error:  # noqa: BLE001 - a screen must never stop a launch
             trace.say("gate-in-window-failed", why=str(error))
 
     # Before the caller execs: the emulator must not inherit a window and a
     # grabbed GPU from a process that is about to stop existing -- nor the
-    # controllers' keyboards, which are padmap's to hold from here on.
+    # controllers' keyboards, which are danstick's to hold from here on.
     hush.release()
     pygame.quit()
     return chosen

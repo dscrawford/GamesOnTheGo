@@ -1,12 +1,12 @@
 # SNES.
 #
-# `a: B` is not a mistake. padmap names a control by where it sits on a
+# `a: B` is not a mistake. danstick names a control by where it sits on a
 # modern pad -- `a` is the bottom face button -- and on a SNES pad that
 # button says B. The label is what is written on the plastic.
 
 label: SNES
 
-# The padmap layout the capture walks; `controls` is its control set.
+# The danstick layout the capture walks; `controls` is its control set.
 layout: snes
 # assets/controllers/<artwork>.svg
 artwork: snes
@@ -16,7 +16,7 @@ ares: [SuperFamicom]
 # The GOTG platforms played with this controller.
 platforms: [snes]
 
-# padmap's control id -> what the button says.
+# danstick's control id -> what the button says.
 controls:
   a: B (bottom)
   b: A (right)
@@ -32,7 +32,7 @@ controls:
   rightshoulder: R
 
 # Where the drawing marks it, when the circle is not named after the
-# control. These drawings predate padmap and use the console's letters.
+# control. These drawings predate danstick and use the console's letters.
 anchors:
   a: B
   b: A

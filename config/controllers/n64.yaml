@@ -5,7 +5,7 @@
 
 label: Nintendo 64
 
-# The padmap layout the capture walks; `controls` is its control set.
+# The danstick layout the capture walks; `controls` is its control set.
 layout: n64
 # assets/controllers/<artwork>.svg
 artwork: n64
@@ -15,7 +15,7 @@ ares: [Nintendo64]
 # The GOTG platforms played with this controller.
 platforms: [n64]
 
-# padmap's control id -> what the button says.
+# danstick's control id -> what the button says.
 # The stick sits in an octagonal gate -- eight corners you can feel through
 # the thumb -- so the ring drawn over it is an octagon too. The C group is
 # bound to the right stick by everything that plays an N64, but on the
@@ -46,7 +46,7 @@ controls:
   leftstick_right: Control stick right
 
 # Where the drawing marks it, when the circle is not named after the
-# control. These drawings predate padmap and use the console's letters.
+# control. These drawings predate danstick and use the console's letters.
 anchors:
   a: A
   b: B

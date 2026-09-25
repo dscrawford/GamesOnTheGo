@@ -55,12 +55,12 @@ cmd_controllers() {
 controllers_list() {
   local pads
   if [[ "${1:-}" == "--as-game" ]]; then
-    # What a *game* sees, which is not this: a game runs inside padmap's
+    # What a *game* sees, which is not this: a game runs inside danstick's
     # sandbox with only the clones visible, Steam's ignore list cleared,
-    # hidapi off and padmap's mapping in hand. When a port says it has no
+    # hidapi off and danstick's mapping in hand. When a port says it has no
     # controller while this command lists two, this is the view to ask for.
-    # In a subshell, because padmap_exec execs.
-    pads="$(padmap_clear_steam_env; padmap_exec "$(pads_bin)" 2>/dev/null)" ||
+    # In a subshell, because danstick_exec execs.
+    pads="$(danstick_clear_steam_env; danstick_exec "$(pads_bin)" 2>/dev/null)" ||
       die "could not run $(pads_bin) the way a game would"
   else
     pads="$("$(pads_bin)" 2>/dev/null)" || die "could not run $(pads_bin)"

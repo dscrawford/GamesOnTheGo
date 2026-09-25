@@ -5,7 +5,7 @@
 
 label: GameCube
 
-# The padmap layout the capture walks; `controls` is its control set.
+# The danstick layout the capture walks; `controls` is its control set.
 layout: gamecube
 # assets/controllers/<artwork>.svg
 artwork: gamecube
@@ -13,7 +13,7 @@ players: 4
 # The GOTG platforms played with this controller.
 platforms: [gamecube, wii]
 
-# padmap's control id -> what the button says.
+# danstick's control id -> what the button says.
 # Both sticks sit in octagonal gates, which is the thing a GameCube player
 # feels first; the ring drawn over them follows.
 gate: octagon

@@ -1,5 +1,28 @@
 {
   "nodes": {
+    "danstick": {
+      "inputs": {
+        "flake-utils": "flake-utils",
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1790349438,
+        "narHash": "sha256-6GLzhEq4DcK/y2L/sC4uhq6mh+CfHRXlxWfbDP7gGB8=",
+        "ref": "main",
+        "rev": "572f90acf29c9479901d996ea66cfccb18c69319",
+        "revCount": 209,
+        "type": "git",
+        "url": "ssh://git@github.com/dscrawford/danstick"
+      },
+      "original": {
+        "ref": "main",
+        "rev": "572f90acf29c9479901d996ea66cfccb18c69319",
+        "type": "git",
+        "url": "ssh://git@github.com/dscrawford/danstick"
+      }
+    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -32,29 +55,6 @@
         "ref": "nixos-unstable",
         "repo": "nixpkgs",
         "type": "github"
-      }
-    },
-    "padmap": {
-      "inputs": {
-        "flake-utils": "flake-utils",
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1790315106,
-        "narHash": "sha256-jOz8B45oOydZ1PWiS6cvcSNkrutaczzmB2jWaTbxNgs=",
-        "ref": "main",
-        "rev": "b81d476a395354f18fdb5ae30b8e1e721f4b4038",
-        "revCount": 207,
-        "type": "git",
-        "url": "ssh://git@github.com/dscrawford/danstick"
-      },
-      "original": {
-        "ref": "main",
-        "rev": "b81d476a395354f18fdb5ae30b8e1e721f4b4038",
-        "type": "git",
-        "url": "ssh://git@github.com/dscrawford/danstick"
       }
     },
     "pyproject-build-systems": {
@@ -105,8 +105,8 @@
     },
     "root": {
       "inputs": {
+        "danstick": "danstick",
         "nixpkgs": "nixpkgs",
-        "padmap": "padmap",
         "pyproject-build-systems": "pyproject-build-systems",
         "pyproject-nix": "pyproject-nix",
         "uv2nix": "uv2nix"

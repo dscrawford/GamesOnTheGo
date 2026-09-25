@@ -1,6 +1,6 @@
-//! The few padmap events the overlay listens to, read off one line of JSON.
+//! The few danstick events the overlay listens to, read off one line of JSON.
 //!
-//! padmap broadcasts to every client on its socket; the overlay is one more,
+//! danstick broadcasts to every client on its socket; the overlay is one more,
 //! beside the picker and the gate. It wants three things: a hold filling
 //! (`progress`), a seat taken (`claim`), and who is seated (`state`) -- and
 //! nothing else, so everything else is [`Event::Other`] and ignored. A line
@@ -51,7 +51,7 @@ pub enum Event {
         player: i32,
         frac: f64,
     },
-    /// padmap refused a command.
+    /// danstick refused a command.
     Error {
         message: String,
     },

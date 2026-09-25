@@ -56,7 +56,7 @@ in
       emulator = split;
       bin = "splitscreen-session";
       # A nested sway with a gamescope per copy, which is why this
-      # cannot run inside padmap's user namespace. See ownsSession in
+      # cannot run inside danstick's user namespace. See ownsSession in
       # env/lib.nix for what that breaks and why nothing is lost.
       ownsSession = true;
       args = [

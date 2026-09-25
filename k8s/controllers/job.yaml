@@ -1,6 +1,6 @@
 # The controller requirement, run on the cluster instead of somebody's desk.
 #
-# The suite makes real pads through /dev/uinput and runs a real padmap daemon
+# The suite makes real pads through /dev/uinput and runs a real danstick daemon
 # against them. On a desktop that is a fake pad joining the game the person at
 # the keyboard is playing -- it happened -- so this is where it belongs.
 #
@@ -79,7 +79,7 @@ spec:
             - name: input
               mountPath: /dev/input
               # The pads are created through /dev/uinput; this is only how SDL
-              # and padmap enumerate them. Not read-only, unlike QA's: padmap
+              # and danstick enumerate them. Not read-only, unlike QA's: danstick
               # opens a pad to grab it, and the suite reads a clone's node
               # directly to time a press.
             - name: tmp

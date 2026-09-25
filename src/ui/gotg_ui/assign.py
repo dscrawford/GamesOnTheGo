@@ -3,13 +3,13 @@
 Four identical adapter ports report the same name, phys, uniq, vendor, product
 and version, and differ only by an ordinal the kernel hands out in plug order.
 No file can pin player one to hardware that is genuinely indistinguishable, so
-padmap asks the person holding them — and this is the screen that asks.
+danstick asks the person holding them — and this is the screen that asks.
 
 The whole flow is driven by what comes back from the daemon, not by the pad.
-padmap holds EVIOCGRAB for the length of a session, so while this screen is up
+danstick holds EVIOCGRAB for the length of a session, so while this screen is up
 no controller input reaches this program at all: a button held here arrives as
 a `claim` event and never as a pygame one. That is also why the way out is the
-keyboard, or the one gamepad button padmap has not grabbed — there isn't one,
+keyboard, or the one gamepad button danstick has not grabbed — there isn't one,
 so it is the keyboard.
 
 Model only. What it looks like is drawing's business; what is tested is what a
@@ -32,7 +32,7 @@ class Seat:
 
     player: int
     name: str = ""
-    # The device node padmap seated. A drawing is chosen from it where the
+    # The device node danstick seated. A drawing is chosen from it where the
     # name cannot say which pad this is -- see devices.py.
     node: str = ""
     icon: str = ""
@@ -74,7 +74,7 @@ class Assignment:
         """The way off this screen that a controller can reach, once there is
         one to reach it with.
 
-        padmap grabs every pad for the length of a session, so nothing on this
+        danstick grabs every pad for the length of a session, so nothing on this
         screen answers a button -- except a longer hold on a pad that already
         has a seat, which the daemon itself takes as "accept". That was true
         before this line existed and nothing said so, which left somebody
@@ -167,7 +167,7 @@ def apply(assignment: Assignment, event: dict) -> Assignment:
         return replace(assignment, finished=True, progress=0.0, confirm=0.0, message="")
 
     if kind == "error":
-        return replace(assignment, message=str(event.get("message") or "padmap said no"))
+        return replace(assignment, message=str(event.get("message") or "danstick said no"))
 
     return assignment
 
@@ -178,13 +178,13 @@ class Session:
 
     Holds the commands as well as the state so that the picker's event loop
     stays a loop -- it hands over a key press and gets back whatever should be
-    sent, rather than knowing padmap's vocabulary itself.
+    sent, rather than knowing danstick's vocabulary itself.
     """
 
     slots: int = 4
     view: Assignment = field(default_factory=Assignment)
     open: bool = False
-    # The reveal's own clock. padmap sends `progress` while a button is held
+    # The reveal's own clock. danstick sends `progress` while a button is held
     # and nothing at all when it is let go, so the last reading would sit on
     # the strip for ever: `gate.Fade` is what empties it. Fed from `handle`,
     # which is where a reading actually arrives.
@@ -214,7 +214,7 @@ class Session:
     def leave(self) -> dict:
         """Out of this screen, keeping whatever has been claimed.
 
-        B used to cancel, and cancel is padmap throwing every claim away: the
+        B used to cancel, and cancel is danstick throwing every claim away: the
         clones go with them, and a picker that only answers published pads has
         just lost the controller that pressed B. So anything claimed is kept --
         that is what `accept` is -- and cancel is left for the case where there
@@ -230,17 +230,17 @@ class Session:
         return self.fade.now(now)
 
     def handle(self, event: dict) -> None:
-        """One event from padmap, and what it does to the screen.
+        """One event from danstick, and what it does to the screen.
 
         `open` follows the daemon rather than only this program's own `begin`.
-        padmap opens a session by itself for a pad it has no mapping for, and
+        danstick opens a session by itself for a pad it has no mapping for, and
         for the length of one it holds every pad -- so a picker that did not
         notice sat on the grid answering no button, with nothing on screen to
         say why or how to get out.
         """
         self.view = apply(self.view, event)
         # The fraction, dated. Only a message can refresh it, which is what
-        # makes the strip empty again when a hold is let go -- padmap does not
+        # makes the strip empty again when a hold is let go -- danstick does not
         # say so, it simply stops talking.
         self.fade.saw(self.view.progress, time.monotonic())
         now = time.monotonic()
@@ -262,7 +262,7 @@ class Session:
 
 @dataclass
 class Watch:
-    """Keeping padmap listening for a hold, for as long as the picker is up.
+    """Keeping danstick listening for a hold, for as long as the picker is up.
 
     `seating` rather than `begin`: a session grabs every pad and owns the
     screen, which is right when somebody asked to set controllers up and wrong
@@ -270,9 +270,9 @@ class Watch:
     Seating grabs nothing, claims only free seats, and is what makes "plug one
     in and hold a button" into player one without leaving the grid.
 
-    padmap does not acknowledge the command, so there is nothing to read back:
+    danstick does not acknowledge the command, so there is nothing to read back:
     it is sent on each connection, after a session, and when a full room has
-    a seat again -- the three times padmap may not be listening. Not after a
+    a seat again -- the three times danstick may not be listening. Not after a
     claim: a claim leaves seating open, and the daemon takes a `seating` as a
     fresh start that drops every hold in flight. Sent again ~200 ms after each
     claim, it was the second person's ring emptying just as the first person's
@@ -285,14 +285,14 @@ class Watch:
     """
 
     slots: int = 4
-    # Whether padmap has been asked since it last could have stopped
+    # Whether danstick has been asked since it last could have stopped
     # listening. A lost connection clears it: a restarted daemon remembers
     # nothing.
     asked: bool = False
     # A daemon too old to know the command. It is never asked again -- and
     # that is all: the pads are not handed back to whoever holds them. A
-    # machine whose padmap cannot seat anybody is a machine the keyboard
-    # drives, until padmap is fixed.
+    # machine whose danstick cannot seat anybody is a machine the keyboard
+    # drives, until danstick is fixed.
     refused: bool = False
 
     def filling(self, now: float) -> float:
@@ -300,7 +300,7 @@ class Watch:
         return self.fade.now(now)
 
     def handle(self, event: dict) -> None:
-        """padmap's answer, when it has one. Only a refusal says anything: the
+        """danstick's answer, when it has one. Only a refusal says anything: the
         daemon acknowledges `seating` with silence, and names the command it
         did not understand. Matched whole, because other errors mention
         seating too and none of them mean this."""
@@ -308,15 +308,15 @@ class Watch:
             self.refused = True
 
     def wanted(self, connected: bool, state: str, seated: int) -> dict | None:
-        """The command to send now, or None when padmap is already listening."""
+        """The command to send now, or None when danstick is already listening."""
         if self.refused:
             return None
         if not connected:
             self.asked = False
             return None
-        # Inside a session padmap suspends seating, and the assignment screen is
+        # Inside a session danstick suspends seating, and the assignment screen is
         # asking for the same holds anyway. Full seats are the same shape of
-        # nothing-to-do. Both forget that it was asked: what padmap resumes
+        # nothing-to-do. Both forget that it was asked: what danstick resumes
         # after a session is not assumed, and a fourth player who unplugs frees
         # a seat that should be mentioned.
         if state == "assigning" or seated >= self.slots:
@@ -331,23 +331,23 @@ class Watch:
 
 
 
-def attend(padmap, seating: Session, watch: Watch) -> dict | None:
-    """One frame of keeping up with padmap.
+def attend(danstick, seating: Session, watch: Watch) -> dict | None:
+    """One frame of keeping up with danstick.
 
-    What the daemon has said is folded in, and padmap is told to go on
+    What the daemon has said is folded in, and danstick is told to go on
     listening for a hold if it needs telling. Who may move the cursor is not
-    decided here or anywhere: a pad padmap published, and nothing else, and
+    decided here or anywhere: a pad danstick published, and nothing else, and
     `pads.py` asks `clones.py` on every event.
 
     Returns the command to send, if any. Nothing is sent from here: the
     caller owns the socket.
     """
-    for event in padmap.poll():
+    for event in danstick.poll():
         if trace.on() and event.get("event") != "progress":
-            trace.say("padmap", **{k: v for k, v in event.items() if k not in ("lines", "build")})
+            trace.say("danstick", **{k: v for k, v in event.items() if k not in ("lines", "build")})
         seating.handle(event)
         watch.handle(event)
-    command = watch.wanted(padmap.connected, padmap.status_word, len(padmap.players))
+    command = watch.wanted(danstick.connected, danstick.status_word, len(danstick.players))
     if command is not None:
         trace.say("sent", **command)
     return command
@@ -363,11 +363,11 @@ KEYBOARD_HOLD = float(config.get("theme.timeouts.keyboard_hold", 1.5))
 class KeyHold:
     """The space bar, and whether letting it go was a tap.
 
-    Held, it seats the keyboard as a player -- and padmap does that itself
+    Held, it seats the keyboard as a player -- and danstick does that itself
     now, reading the space bar wherever the person is, game included
-    (padmap e0092be). The picker used to time the same hold and send
+    (danstick e0092be). The picker used to time the same hold and send
     `seat_keyboard` too: two fills on the strip for one press, and a second
-    seat padmap refused. What is left here is the other half of one key's two
+    seat danstick refused. What is left here is the other half of one key's two
     meanings: released early it is the tap it always was -- open the menu --
     and released after the hold's length it was a seat, and nothing.
     """

@@ -171,7 +171,7 @@ def wait(seconds: float, woken=None, *, peek=None, sleep=time.sleep, clock=time.
     """Sleep `seconds`, or less if something arrives.
 
     Long waits are sliced so an SDL event (`peek`, pygame's own
-    `event.peek`) or anything `woken` reports -- padmap's socket having
+    `event.peek`) or anything `woken` reports -- danstick's socket having
     something to say -- ends it within a few milliseconds. Short ones, the
     refresh-aligned rests, are one sleep: slicing them would only add the
     slices' own lateness to a frame that has to land on time.

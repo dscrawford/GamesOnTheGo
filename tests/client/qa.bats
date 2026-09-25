@@ -226,7 +226,7 @@ make_rundir() {
 
 @test "a qa run brings its own pad, so the controller gate is turned off" {
   # Nobody is in front of a QA run to hold a button, and the gate waits for
-  # one until somebody does. On a machine with a padmap daemon and a pad it
+  # one until somebody does. On a machine with a danstick daemon and a pad it
   # has never mapped, that is a run which never starts and never says why.
   grep -A6 'export GOTG_NO_DIALOG=1' "$GOTG_LIB/cmd-qa.sh" | grep -qx '  export GOTG_SEAT_GATE=0'
 }

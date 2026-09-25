@@ -12,11 +12,11 @@ import threading
 
 import pytest
 
-from gotg_ui.padmap import Padmap
+from gotg_ui.danstick import Danstick
 
 
 class FakeDaemon:
-    """padmap, as far as the client can tell: one connection, lines in and out."""
+    """danstick, as far as the client can tell: one connection, lines in and out."""
 
     def __init__(self, path):
         self.path = str(path)
@@ -70,19 +70,19 @@ class FakeDaemon:
 
 @pytest.fixture
 def daemon(tmp_path):
-    fake = FakeDaemon(tmp_path / "padmap.sock")
+    fake = FakeDaemon(tmp_path / "danstick.sock")
     yield fake
     fake.close()
 
 
-def connected(daemon) -> Padmap:
-    client = Padmap(daemon.path)
+def connected(daemon) -> Danstick:
+    client = Danstick(daemon.path)
     assert client.connect()
     return client
 
 
 def test_no_daemon_is_a_state_not_a_crash(tmp_path):
-    client = Padmap(tmp_path / "nothing.sock")
+    client = Danstick(tmp_path / "nothing.sock")
     assert not client.connect()
     assert not client.connected
     assert client.status_word == "offline"
@@ -125,8 +125,8 @@ def test_a_message_split_across_reads_is_not_two_broken_ones(daemon):
 def test_state_is_remembered_for_the_strip(daemon):
     client = connected(daemon)
     daemon.send({"event": "state", "state": "ready", "slots": 4,
-                 "players": [{"player": 2, "name": "padmap Player 2"},
-                             {"player": 1, "name": "padmap Player 1"}]})
+                 "players": [{"player": 2, "name": "danstick Player 2"},
+                             {"player": 1, "name": "danstick Player 1"}]})
     for _ in range(100):
         list(client.poll())
         if client.players:
@@ -179,19 +179,19 @@ def test_the_commands_are_the_protocol_s_words(daemon):
 
 
 def test_sending_to_a_dead_socket_reports_rather_than_raises(tmp_path):
-    client = Padmap(tmp_path / "nothing.sock")
+    client = Danstick(tmp_path / "nothing.sock")
     assert client.send({"cmd": "status"}) is False
 
 
 # --- starting the daemon ----------------------------------------------------
 #
 # The picker is usually the first thing open on the machine, so if it does not
-# start padmap nothing will. What is tested is that it never becomes a reason
+# start danstick nothing will. What is tested is that it never becomes a reason
 # not to draw: every failure comes back as a sentence.
 
 
-def fake_padmap(tmp_path, monkeypatch, *, exit_code=0, message=""):
-    script = tmp_path / "padmap"
+def fake_danstick(tmp_path, monkeypatch, *, exit_code=0, message=""):
+    script = tmp_path / "danstick"
     script.write_text(
         "#!/bin/sh\n"
         f'[ -n "{message}" ] && echo "{message}" >&2\n'
@@ -199,45 +199,45 @@ def fake_padmap(tmp_path, monkeypatch, *, exit_code=0, message=""):
     )
     script.chmod(0o755)
     monkeypatch.setenv("PATH", str(tmp_path), prepend=False)
-    monkeypatch.delenv("PADMAP_SKIP_DAEMON_CHECK", raising=False)
+    monkeypatch.delenv("DANSTICK_SKIP_DAEMON_CHECK", raising=False)
     return script
 
 
 def test_a_daemon_that_starts_says_nothing(tmp_path, monkeypatch):
-    from gotg_ui.padmap import ensure_daemon
+    from gotg_ui.danstick import ensure_daemon
 
-    fake_padmap(tmp_path, monkeypatch)
+    fake_danstick(tmp_path, monkeypatch)
     assert ensure_daemon() is None
 
 
 def test_asking_twice_only_asks_once(tmp_path, monkeypatch):
-    # padmap's own flag, and `gotg play` reads the same one -- so a game
+    # danstick's own flag, and `gotg play` reads the same one -- so a game
     # launched from the grid does not stop to check what the picker checked.
-    from gotg_ui.padmap import ensure_daemon
+    from gotg_ui.danstick import ensure_daemon
 
-    fake_padmap(tmp_path, monkeypatch)
+    fake_danstick(tmp_path, monkeypatch)
     ensure_daemon()
     import os
 
-    assert os.environ["PADMAP_SKIP_DAEMON_CHECK"] == "1"
+    assert os.environ["DANSTICK_SKIP_DAEMON_CHECK"] == "1"
     assert ensure_daemon() is None
 
 
 def test_a_daemon_that_will_not_start_is_a_sentence(tmp_path, monkeypatch):
-    from gotg_ui.padmap import ensure_daemon
+    from gotg_ui.danstick import ensure_daemon
 
-    fake_padmap(tmp_path, monkeypatch, exit_code=1, message="no permission for uinput")
+    fake_danstick(tmp_path, monkeypatch, exit_code=1, message="no permission for uinput")
     trouble = ensure_daemon()
     assert trouble is not None
     assert "uinput" in trouble
 
 
-def test_no_padmap_at_all_is_a_sentence_too(tmp_path, monkeypatch):
-    from gotg_ui.padmap import ensure_daemon
+def test_no_danstick_at_all_is_a_sentence_too(tmp_path, monkeypatch):
+    from gotg_ui.danstick import ensure_daemon
 
     monkeypatch.setenv("PATH", str(tmp_path))
-    monkeypatch.delenv("PADMAP_SKIP_DAEMON_CHECK", raising=False)
-    assert ensure_daemon() == "padmap is not installed"
+    monkeypatch.delenv("DANSTICK_SKIP_DAEMON_CHECK", raising=False)
+    assert ensure_daemon() == "danstick is not installed"
 
 
 def test_a_daemon_that_would_not_start_is_asked_again(tmp_path, monkeypatch):
@@ -245,11 +245,11 @@ def test_a_daemon_that_would_not_start_is_asked_again(tmp_path, monkeypatch):
     # the picker disabled the check for every game launched from it after.
     import os
 
-    from gotg_ui.padmap import ensure_daemon
+    from gotg_ui.danstick import ensure_daemon
 
-    fake_padmap(tmp_path, monkeypatch, exit_code=1, message="no permission for uinput")
+    fake_danstick(tmp_path, monkeypatch, exit_code=1, message="no permission for uinput")
     assert ensure_daemon() is not None
-    assert "PADMAP_SKIP_DAEMON_CHECK" not in os.environ
+    assert "DANSTICK_SKIP_DAEMON_CHECK" not in os.environ
     assert ensure_daemon() is not None
 
 
@@ -258,11 +258,11 @@ def test_force_asks_past_the_latch(tmp_path, monkeypatch):
     # to ask again, and the latch was set by the picker's own first ask.
     import os
 
-    from gotg_ui.padmap import ensure_daemon
+    from gotg_ui.danstick import ensure_daemon
 
-    script = fake_padmap(tmp_path, monkeypatch)
+    script = fake_danstick(tmp_path, monkeypatch)
     assert ensure_daemon() is None
-    assert os.environ["PADMAP_SKIP_DAEMON_CHECK"] == "1"
+    assert os.environ["DANSTICK_SKIP_DAEMON_CHECK"] == "1"
     log = tmp_path / "calls"
     script.write_text(f'#!/bin/sh\necho asked >>{log}\nexit 0\n')
     assert ensure_daemon() is None
@@ -273,11 +273,11 @@ def test_force_asks_past_the_latch(tmp_path, monkeypatch):
 
 def test_the_daemon_is_started_unseated_and_following_the_session(tmp_path, monkeypatch):
     # Nobody is seated when a picker or a game opens, and the daemon goes
-    # when the session does. Both are padmap's flags; this only has to say
+    # when the session does. Both are danstick's flags; this only has to say
     # them, and say the pid it means.
-    from gotg_ui.padmap import ensure_daemon
+    from gotg_ui.danstick import ensure_daemon
 
-    script = fake_padmap(tmp_path, monkeypatch)
+    script = fake_danstick(tmp_path, monkeypatch)
     log = tmp_path / "calls"
     script.write_text(f'#!/bin/sh\necho "$@" >>{log}\nexit 0\n')
     assert ensure_daemon(fresh=True, follow=4321) is None
@@ -287,9 +287,9 @@ def test_the_daemon_is_started_unseated_and_following_the_session(tmp_path, monk
 def test_asking_again_mid_session_follows_but_is_not_fresh(tmp_path, monkeypatch):
     # A daemon that died halfway through an evening restores the seats it
     # had, which is what somebody halfway through an evening wants back.
-    from gotg_ui.padmap import ensure_daemon
+    from gotg_ui.danstick import ensure_daemon
 
-    script = fake_padmap(tmp_path, monkeypatch)
+    script = fake_danstick(tmp_path, monkeypatch)
     log = tmp_path / "calls"
     script.write_text(f'#!/bin/sh\necho "$@" >>{log}\nexit 0\n')
     assert ensure_daemon(force=True, follow=4321) is None
@@ -312,7 +312,7 @@ def test_unseat_is_the_protocols_word(daemon):
 
 
 def test_the_watch_asks_on_an_interval_not_every_frame():
-    from gotg_ui.padmap import DaemonWatch
+    from gotg_ui.danstick import DaemonWatch
 
     watch = DaemonWatch(interval=5.0)
     assert watch.due(100.0)

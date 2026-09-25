@@ -44,7 +44,7 @@ class Ready:
         Three things in one place because they are one thing: a hold that has
         reached its length becomes ready, a seat with nothing down starts its
         pause, and a hold nobody is holding stops counting. That last one is
-        not paranoia -- a release can go missing when padmap republishes a
+        not paranoia -- a release can go missing when danstick republishes a
         clone, and a hold that kept its start time finished three seconds
         later with nobody holding anything.
         """

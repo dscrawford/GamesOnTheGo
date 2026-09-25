@@ -26,14 +26,14 @@
 
     # The controller layer. Four identical adapter ports report the same
     # everything and differ only by an ordinal libudev sorts as a string, so no
-    # configuration file can pin player order to them: padmap asks the person
+    # configuration file can pin player order to them: danstick asks the person
     # holding the controllers instead, and republishes each one through uinput
     # as a pad whose identity it made. Everything downstream binds to those.
     #
     # Pinned to a revision rather than following the branch, so that a launch
     # that worked yesterday is not changed by somebody else's commit today.
-    padmap = {
-      url = "git+ssh://git@github.com/dscrawford/danstick?ref=main&rev=b81d476a395354f18fdb5ae30b8e1e721f4b4038";
+    danstick = {
+      url = "git+ssh://git@github.com/dscrawford/danstick?ref=main&rev=572f90acf29c9479901d996ea66cfccb18c69319";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -45,7 +45,7 @@
       pyproject-nix,
       uv2nix,
       pyproject-build-systems,
-      padmap,
+      danstick,
     }:
     let
       systems = [
@@ -107,11 +107,11 @@
           # its own settings — see src/client/env. `gotg play` builds these by name.
           envs = import ./src/client/env {
             inherit pkgs;
-            # For the split-screen sessions, which put the game inside padmap's
+            # For the split-screen sessions, which put the game inside danstick's
             # sandbox themselves -- see mods/four-swords-split.nix. `gotg-pads`
             # goes with it: that session has to ask what the *game* will see,
             # which is not what the session sees.
-            inherit (padmap.packages.${pkgs.stdenv.hostPlatform.system}) padmap-rs;
+            inherit (danstick.packages.${pkgs.stdenv.hostPlatform.system}) danstick-rs;
             inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg-pads;
           };
           py = pythonSets.${pkgs.stdenv.hostPlatform.system};
@@ -120,7 +120,7 @@
         // rec {
           gotg = pkgs.callPackage ./src/client {
             inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg-pads gotg-killswitch;
-            inherit (padmap.packages.${pkgs.stdenv.hostPlatform.system}) padmap padmap-rs;
+            inherit (danstick.packages.${pkgs.stdenv.hostPlatform.system}) danstick danstick-rs;
           };
 
           # The picker. Takes the client rather than reimplementing it: what
@@ -128,9 +128,9 @@
           # and the copy nobody runs from a terminal is the one that rots.
           gotg-ui = pkgs.callPackage ./src/ui {
             inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg;
-            inherit (padmap.packages.${pkgs.stdenv.hostPlatform.system}) padmap;
+            inherit (danstick.packages.${pkgs.stdenv.hostPlatform.system}) danstick;
           };
-          # The controller requirement, run against a real padmap daemon and
+          # The controller requirement, run against a real danstick daemon and
           # real kernel devices: tests/e2e. Packaged rather than left in the
           # dev shell so the machine that matters can run it -- `nix run
           # .#test-controllers` on a Deck, over ssh, with no checkout to set
@@ -152,7 +152,7 @@
                 exit 1
               fi
               export PATH="${pkgs.lib.makeBinPath [
-                padmap.packages.${pkgs.stdenv.hostPlatform.system}.padmap
+                danstick.packages.${pkgs.stdenv.hostPlatform.system}.danstick
               ]}:$PATH"
               export PYTHONPATH="$root/src/ui''${PYTHONPATH:+:$PYTHONPATH}"
               export SDL_VIDEODRIVER="''${SDL_VIDEODRIVER:-dummy}"
@@ -160,10 +160,10 @@
               # pygame.init() probed ALSA, and in a pod logged a screenful of
               # errors about it.
               export SDL_AUDIODRIVER="''${SDL_AUDIODRIVER:-dummy}"
-              # Each test starts a padmap of its own under its tmp_path. This
+              # Each test starts a danstick of its own under its tmp_path. This
               # is the one variable that could point it at the daemon somebody
               # is playing with instead.
-              unset PADMAP_SKIP_DAEMON_CHECK
+              unset DANSTICK_SKIP_DAEMON_CHECK
               exec ${testPython}/bin/python3 -m pytest "$root/tests/e2e" "$@"
             '';
 
@@ -250,7 +250,7 @@
           # is what is under test: see tests/e2e/image.nix.
           controllers-image = pkgs.callPackage ./tests/e2e/image.nix {
             controllerTests = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-test-controllers;
-            padmap = padmap.packages.${pkgs.stdenv.hostPlatform.system}.padmap;
+            danstick = danstick.packages.${pkgs.stdenv.hostPlatform.system}.danstick;
             # Only what the suite reads. The whole checkout made every edit --
             # a doc, the bash client, a crate -- a new image, a new push and a
             # new tag to run, for tests that had not changed.
@@ -401,15 +401,15 @@
           uiPkg = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-ui;
           uiPython = pkgs.python3.withPackages (ps: [ ps.pygame-ce ps.pyyaml ]);
           # What the packaged picker puts on PATH, and for the same reasons:
-          # `gotg` because a pick execs it, and padmap because the picker is
-          # what starts the daemon. Without padmap here the dev picker said
-          # "padmap is not installed" at the top of the screen, found no
+          # `gotg` because a pick execs it, and danstick because the picker is
+          # what starts the daemon. Without danstick here the dev picker said
+          # "danstick is not installed" at the top of the screen, found no
           # controllers however many were plugged in, and answered no hold --
           # a shell in which the one feature that needs a daemon cannot work.
-          padmapPkg = padmap.packages.${pkgs.stdenv.hostPlatform.system}.padmap;
+          danstickPkg = danstick.packages.${pkgs.stdenv.hostPlatform.system}.danstick;
           uiPath = pkgs.lib.makeBinPath [
             gotgPkg
-            padmapPkg
+            danstickPkg
           ];
 
           # The picker and the controller check, from the working tree, for the
@@ -458,11 +458,11 @@
               gotg-dev
               pickerDev
               seatDev
-              # By hand as well as on the picker's PATH: `padmap list` is the
+              # By hand as well as on the picker's PATH: `danstick list` is the
               # first question to ask when the strip says no controllers, and
               # answering it should not mean digging the store path out of a
               # wrapper script.
-              padmapPkg
+              danstickPkg
               controllerTests
             ]
             ++ [

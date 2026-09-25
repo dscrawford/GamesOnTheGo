@@ -1,6 +1,6 @@
-//! The overlay's connection to padmap: one more client on its socket.
+//! The overlay's connection to danstick: one more client on its socket.
 //!
-//! Never blocks. A game runs with or without padmap, and an overlay waiting on
+//! Never blocks. A game runs with or without danstick, and an overlay waiting on
 //! a socket is an exit chord that stops working, so the socket is read only
 //! when it has something and connected only when it is due -- every couple of
 //! seconds while it is not there, which picks up a daemon that starts (or
@@ -16,7 +16,7 @@ use crate::events;
 use crate::pairing::Pairing;
 use crate::rebind::Rebind;
 
-/// Long enough for padmap's longest line (an `sdl_mapping` carries a whole
+/// Long enough for danstick's longest line (an `sdl_mapping` carries a whole
 /// mapping string per pad); a line longer still is skipped whole.
 pub const BUFFER: usize = 65536;
 
@@ -35,7 +35,7 @@ pub struct Link {
     /// Inside a line too long to keep, until its newline.
     skipping: bool,
     next_try: f64,
-    /// Each pad's drawing by its node, looked up once: padmap reads out a
+    /// Each pad's drawing by its node, looked up once: danstick reads out a
     /// hold every ~58 ms, and the look-up reads sysfs in the loop that
     /// watches the exit chord. Forgotten on close, since a node's number is
     /// another device's once it has gone.
@@ -48,9 +48,9 @@ pub struct Link {
 const ICONS_KEPT: usize = 64;
 
 impl Link {
-    /// `path` None or empty means padmap's own rule --
-    /// $XDG_RUNTIME_DIR/padmap/padmap.sock -- and no link at all when there is
-    /// no XDG_RUNTIME_DIR. padmap falls back to /tmp then, where any local
+    /// `path` None or empty means danstick's own rule --
+    /// $XDG_RUNTIME_DIR/danstick/danstick.sock -- and no link at all when there is
+    /// no XDG_RUNTIME_DIR. danstick falls back to /tmp then, where any local
     /// user can put a socket first; the joining picture is not worth listening
     /// to a stranger for.
     pub fn new(path: Option<&str>) -> Self {
@@ -58,7 +58,7 @@ impl Link {
             Some(path) => Some(PathBuf::from(path)),
             None => std::env::var_os("XDG_RUNTIME_DIR")
                 .filter(|dir| !dir.is_empty())
-                .map(|dir| PathBuf::from(dir).join("padmap/padmap.sock")),
+                .map(|dir| PathBuf::from(dir).join("danstick/danstick.sock")),
         };
         Self {
             path,
@@ -181,7 +181,7 @@ impl Link {
         applied
     }
 
-    /// One line to padmap: a command. False when there is no daemon to send
+    /// One line to danstick: a command. False when there is no daemon to send
     /// it to, or it would not take the line now -- a rebind the bar then
     /// gives up on (`rebind::ASK_SECONDS`), never a loop that waits.
     pub fn send(&mut self, line: &str) -> bool {
@@ -193,7 +193,7 @@ impl Link {
         bytes.push(b'\n');
         match stream.write(&bytes) {
             Ok(wrote) if wrote == bytes.len() => true,
-            // Half a command is a stranger's line to padmap; start over.
+            // Half a command is a stranger's line to danstick; start over.
             Ok(_) => {
                 self.close();
                 false
@@ -252,8 +252,8 @@ fn connect(path: &std::path::Path) -> Option<UnixStream> {
     if unsafe { libc::connect(raw, (&raw const address).cast(), length) } != 0 {
         return None;
     }
-    // padmap is this user's own daemon; a socket anyone else answers is not
-    // padmap, whatever it is called.
+    // danstick is this user's own daemon; a socket anyone else answers is not
+    // danstick, whatever it is called.
     // SAFETY: ucred is plain data, and getsockopt writes at most `size` bytes.
     let mut peer: libc::ucred = unsafe { std::mem::zeroed() };
     let mut size = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
@@ -451,7 +451,7 @@ mod tests {
 
     #[test]
     fn a_pad_s_drawing_is_looked_up_once_while_it_holds() {
-        // padmap sends a reading every ~58 ms; the device behind a node does
+        // danstick sends a reading every ~58 ms; the device behind a node does
         // not change between them, and the look-up reads sysfs in the loop
         // that watches the exit chord.
         let mut link = Link {
@@ -484,7 +484,7 @@ mod tests {
 
     #[test]
     fn a_keyboard_joining_is_drawn_as_the_keyboard() {
-        // padmap names a keyboard's hold and seat but no node: the bar keys it
+        // danstick names a keyboard's hold and seat but no node: the bar keys it
         // by name, draws the picker's keyboard drawing filling in, and takes
         // it down when the seat is claimed.
         let mut link = Link::new(Some("/nonexistent"));
@@ -508,7 +508,7 @@ mod tests {
     }
 
     #[test]
-    fn a_command_goes_to_padmap_as_one_line_and_the_wizard_comes_back_to_the_rebind() {
+    fn a_command_goes_to_danstick_as_one_line_and_the_wizard_comes_back_to_the_rebind() {
         let (ours, mut daemon) = UnixStream::pair().expect("a socket pair");
         ours.set_nonblocking(true).expect("non-blocking");
         daemon.set_nonblocking(true).expect("non-blocking");
@@ -521,7 +521,7 @@ mod tests {
         assert_eq!(sent, format!("{line}\n"));
         daemon
             .write_all(b"{\"event\":\"mapping\",\"player\":1,\"control\":\"b\",\"index\":1,\"total\":14}\n")
-            .expect("padmap writes");
+            .expect("danstick writes");
         link.pump(&mut pairing(), &mut rebind, 10.2);
         assert_eq!(rebind.view(10.2).map(|v| v.control), Some("b".into()));
     }

@@ -58,7 +58,7 @@ killswitch_start() {
   local -a picture=()
   [[ "${GOTG_KILLSWITCH_OVERLAY:-1}" != "0" ]] || picture=(--no-overlay)
 
-  # Which controller the rebind chord draws, and which padmap layout it walks.
+  # Which controller the rebind chord draws, and which danstick layout it walks.
   local -a console=()
   [[ ! "$platform" =~ ^[A-Za-z0-9_-]+$ ]] || console=(--platform "$platform")
 

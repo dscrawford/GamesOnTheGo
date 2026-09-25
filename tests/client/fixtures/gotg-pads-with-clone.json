@@ -68,7 +68,7 @@
     "leftx": {"type": "axis", "index": 0, "min": -32768, "max": 32767},
     "lefty": {"type": "axis", "index": 1, "min": -32768, "max": 32767}
   }},
-  {"instance": 4, "name": "Xbox 360 Controller", "guid": "0300c9a75e0400008e02000001000000", "identity": "0300c9a75e0400008e02000001000000", "slot": 0, "vid": "045e", "pid": "028e", "gamepad": true, "path": "/dev/input/event262", "evdev": "/dev/input/event262", "steamSlot": null, "motion": false, "map": {
+  {"instance": 4, "name": "Xbox 360 Controller", "guid": "0300724d5e0400008e02000001000000", "identity": "0300724d5e0400008e02000001000000", "slot": 0, "vid": "045e", "pid": "028e", "gamepad": true, "path": "/dev/input/event262", "evdev": "/dev/input/event262", "steamSlot": null, "motion": false, "map": {
     "a": {"type": "button", "index": 0},
     "b": {"type": "button", "index": 1},
     "x": {"type": "button", "index": 2},
@@ -92,7 +92,7 @@
     "leftx": {"type": "axis", "index": 0, "min": -32768, "max": 32767},
     "lefty": {"type": "axis", "index": 1, "min": -32768, "max": 32767}
   }},
-  {"instance": 6, "name": "padmap Player 1", "guid": "0300c9a7aa2a0000bb5b000001000000", "identity": "0300c9a7aa2a0000bb5b000001000000", "slot": 0, "vid": "2aaa", "pid": "5bbb", "gamepad": true, "path": "/dev/input/event264", "evdev": "/dev/input/event264", "steamSlot": null, "motion": false, "map": {
+  {"instance": 6, "name": "danstick Player 1", "guid": "0300724daa2a0000bb5b000001000000", "identity": "0300724daa2a0000bb5b000001000000", "slot": 0, "vid": "2aaa", "pid": "5bbb", "gamepad": true, "path": "/dev/input/event264", "evdev": "/dev/input/event264", "steamSlot": null, "motion": false, "map": {
     "a": {"type": "button", "index": 0},
     "b": {"type": "button", "index": 1},
     "x": {"type": "button", "index": 2},

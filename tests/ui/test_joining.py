@@ -75,7 +75,7 @@ def test_a_fill_that_goes_backwards_is_a_fresh_press_and_goes_to_the_back():
 
 
 def test_a_daemon_that_names_no_pads_still_draws_one_fill():
-    """What padmap does today: one anonymous fraction per pad per tick.
+    """What danstick does today: one anonymous fraction per pad per tick.
 
     Two holds arrive as one number jumping about, and the honest drawing of
     that is the single fill the picker has always had -- not two fills of a
@@ -105,7 +105,7 @@ def test_a_claim_clears_the_queue_because_the_state_is_the_truth_after_one():
 
 
 def test_a_state_while_somebody_is_still_holding_keeps_their_fill():
-    """The flash: padmap restates the world mid-hold and the reveal blinked.
+    """The flash: danstick restates the world mid-hold and the reveal blinked.
 
     A `state` arrives for all sorts of reasons -- a pad appearing, a
     republish, the daemon's own tick -- and the queue used to be wiped by
@@ -130,7 +130,7 @@ def test_and_drops_the_hold_that_has_become_a_seat():
 
 
 def test_a_seat_matched_by_its_node_when_the_hold_never_said_a_player():
-    """padmap names the pad before it knows which seat it is filling."""
+    """danstick names the pad before it knows which seat it is filling."""
     queue = Joining(hold_seconds=1.5)
     queue.saw({"event": "progress", "node": "/dev/input/event9", "frac": 0.4}, 10.0)
     queue.seated([{"player": 1, "name": "Pad", "node": "/dev/input/event9"}])
@@ -140,7 +140,7 @@ def test_a_seat_matched_by_its_node_when_the_hold_never_said_a_player():
 def test_a_stale_seat_number_does_not_blink_the_second_persons_fill():
     """Two at once, which is the whole reason this queue exists.
 
-    padmap's reading names the seat a hold is filling towards, and that
+    danstick's reading names the seat a hold is filling towards, and that
     number is stale for a tick after somebody else's claim lands: the second
     person's reading still says seat one while the daemon works out that they
     are seat two. Identity is what settles it -- their pad is not the pad in
@@ -163,7 +163,7 @@ def test_an_anonymous_hold_goes_when_its_seat_is_taken():
 
 
 def test_a_named_hold_survives_the_daemon_pausing_to_rescan():
-    """The flash: padmap sends progress from the same loop that rescans every
+    """The flash: danstick sends progress from the same loop that rescans every
     device once a second, and a rescan outlasts fifty milliseconds. The hold
     was dropped mid-press -- the red empty seat, then the controller again.
     A named reading's release is said out loud, so silence is not one."""
@@ -221,8 +221,8 @@ def test_the_sweep_never_ticks_backwards_when_a_reading_lands_behind_it():
 
 
 def test_the_keyboard_joining_is_drawn_as_the_keyboard_and_mouse():
-    # padmap times the space bar itself and reports it as a pad's hold, with
-    # the seat's name and no node (docs/EVENTS.md, padmap e0092be): the strip
+    # danstick times the space bar itself and reports it as a pad's hold, with
+    # the seat's name and no node (docs/EVENTS.md, danstick e0092be): the strip
     # and the gate have to file it by name and draw the desk.
     from gotg_ui.icons import icon_name
 

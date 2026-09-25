@@ -18,24 +18,24 @@
 
 pads_bin() { printf '%s' "${GOTG_PADS:-gotg-pads}"; }
 
-# What SDL sees, with padmap's mapping in hand and its hidapi off.
+# What SDL sees, with danstick's mapping in hand and its hidapi off.
 #
-# Once padmap has published, the pads to bind are its clones, and they are
+# Once danstick has published, the pads to bind are its clones, and they are
 # evdev. gotg-pads turns SDL's hidapi on for the Steam Controller so a raw
-# one is visible to bind when there is no padmap; with padmap there is, that
+# one is visible to bind when there is no danstick; with danstick there is, that
 # same hidapi claims Valve's ids and SDL then hides the *clone* of a Steam
 # Controller -- one pad listed, the published one absent, nothing seated,
 # nothing rewritten, and ares kept the raw pad the sandbox was about to hide.
 # Measured with gotg-pads against a clone wearing 28de:1304. The environment
 # outranks the hint the binary sets, which is what makes this reachable.
 #
-# The mapping string is the same one the game gets from `padmap-rs exec`: a
+# The mapping string is the same one the game gets from `danstick-rs exec`: a
 # clone of a pad SDL has no mapping of its own for is otherwise a joystick
 # with no map, and the writer passes it over.
 pads_enumerate() {
   local config=""
-  if declare -F padmap_sdl_config >/dev/null; then
-    config="$(padmap_sdl_config 2>/dev/null || true)"
+  if declare -F danstick_sdl_config >/dev/null; then
+    config="$(danstick_sdl_config 2>/dev/null || true)"
   fi
   if [[ -n "$config" ]]; then
     SDL_GAMECONTROLLERCONFIG="$config" SDL_JOYSTICK_HIDAPI=0 SDL_JOYSTICK_HIDAPI_STEAM=0 \
@@ -347,22 +347,22 @@ pads_order_read() {
 
 # The controllers that can be bound, in the order they will be seated.
 #
-# padmap's order first. Once it has published anything, the seats are its:
-# player N is the pad it calls "padmap Player N", found by the GUID it wrote
+# danstick's order first. Once it has published anything, the seats are its:
+# player N is the pad it calls "danstick Player N", found by the GUID it wrote
 # -- SDL renames a clone of a pad it recognises, so the name is not enough --
-# and nothing else is seated, because `padmap-rs exec` is about to hide every
+# and nothing else is seated, because `danstick-rs exec` is about to hide every
 # raw pad from the game. Binding one of those named a controller the emulator
 # could not see, while the clone it could see was named by nothing.
 #
-# Without padmap, SDL's enumeration order decides it unless something has
+# Without danstick, SDL's enumeration order decides it unless something has
 # been pinned. Every caller comes through here — both emulators and `gotg
 # controllers order` — so what is displayed and what is written cannot
 # disagree. A pinned controller that is not attached simply is not there to
 # seat, and the ones behind it move up.
 pads_seating() {
   local order published="${2-}"
-  if [[ -z "$published" ]] && declare -F padmap_published >/dev/null; then
-    published="$(padmap_published 2>/dev/null || true)"
+  if [[ -z "$published" ]] && declare -F danstick_published >/dev/null; then
+    published="$(danstick_published 2>/dev/null || true)"
   fi
   if [[ -n "$published" && "$published" != "[]" ]]; then
     jq -c --argjson published "$published" '
@@ -402,17 +402,17 @@ pads_configure() {
       ares_heal_audio "$attr"
       pads_ares_configure "$attr"
       ;;
-    # After gotg's own writer, so what padmap knows -- the player order it
+    # After gotg's own writer, so what danstick knows -- the player order it
     # seated, and its DSU server for motion -- is what the emulator reads.
     # Ryujinx's runs inside its snapshot cycle instead.
     dolphin)
       pads_dolphin_configure "$attr"
-      padmap_emit "$attr" || true
+      danstick_emit "$attr" || true
       ;;
     ryujinx) pads_ryujinx_configure "$attr" ;;
     cemu)
       pads_cemu_configure "$attr"
-      padmap_emit "$attr" || true
+      danstick_emit "$attr" || true
       ;;
     *) return 0 ;;
   esac

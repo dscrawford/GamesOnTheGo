@@ -30,15 +30,15 @@
       # can never end up on different emulators.
       #
       # Wrapped, though, and this is the whole reason the wrapper exists: the
-      # session runs outside padmap's sandbox (ownsSession, below) because a
+      # session runs outside danstick's sandbox (ownsSession, below) because a
       # nested compositor cannot start Xwayland inside one, and that left the
-      # game seeing every raw pad on the machine beside padmap's. The other
+      # game seeing every raw pad on the machine beside danstick's. The other
       # split modes do not care -- they hand each copy its own seat -- but
       # this one is a single Dolphin binding pads by name, and with the raw
       # pads visible it bound the Steam Controller where player 1 was an Xbox
       # pad. So the sandbox goes around the game instead of around the
       # session: the compositor stays outside it, Dolphin goes inside, and
-      # what Dolphin can see is padmap's pads and nothing else.
+      # what Dolphin can see is danstick's pads and nothing else.
       #
       # Which is half of it. The step that writes those bindings runs in the
       # session, outside the sandbox, so it enumerates every pad on the
@@ -46,25 +46,25 @@
       # it wrote `GBA1 <- SDL/0/Steam Deck`, a name that does not exist
       # inside. So the pads are not counted.
       #
-      # --pad "padmap:N" below. The wrapper finds player N's clone by its
+      # --pad "danstick:N" below. The wrapper finds player N's clone by its
       # GUID, which carries a CRC of the real name taken before SDL renames
       # anything, and writes the name it finds in the pad list -- which is
       # why the list is rewritten below to say what Dolphin calls each clone.
-      # What Dolphin calls padmap's clones, put in the pad list in place of
+      # What Dolphin calls danstick's clones, put in the pad list in place of
       # what gotg-pads calls them.
       #
       # The two disagree, and Dolphin's own log is the one that counts. For
       # the Xbox pad's clone gotg-pads reports SDL's joystick name, `Xbox 360
-      # Controller` -- the same name as the raw pad padmap has grabbed -- and
-      # Dolphin, running under `padmap-rs exec` with padmap's mapping for that
-      # GUID, lists it as `SDL/0/padmap Player 1`. The binder took gotg-pads'
+      # Controller` -- the same name as the raw pad danstick has grabbed -- and
+      # Dolphin, running under `danstick-rs exec` with danstick's mapping for that
+      # GUID, lists it as `SDL/0/danstick Player 1`. The binder took gotg-pads'
       # word for it, wrote `GBA1 <- SDL/0/Xbox 360 Controller`, and bound
       # player one to the grabbed pad: nothing moved at all, because player
       # one drives the menus. Measured with Dolphin's CI log on:
       #
       #   Added device: SDL/0/Xbox 360 Controller     (the raw pad, grabbed)
-      #   Added device: SDL/0/padmap Player 1         (its clone)
-      #   Added device: SDL/0/padmap Player 2         (the Steam Controller's)
+      #   Added device: SDL/0/danstick Player 1         (its clone)
+      #   Added device: SDL/0/danstick Player 2         (the Steam Controller's)
       #
       # A clone is recognised by its GUID's name-CRC, which SDL cannot
       # rename, and every clone's name is its own, so its slot is 0.
@@ -72,7 +72,7 @@
         import json
         import sys
 
-        PREFIX = "padmap Player "
+        PREFIX = "danstick Player "
 
 
         def crc16(data):
@@ -153,7 +153,7 @@
       dolphin = pkgs.writeShellScript "gotg-fsa-dolphin" ''
         export DISABLE_GAMESCOPE_WSI=1
         export PATH=${popupWitness}/bin:$PATH
-        exec ${gotgPkgs.padmap-rs}/bin/padmap-rs exec -- \
+        exec ${gotgPkgs.danstick-rs}/bin/danstick-rs exec -- \
           ${base.emulator}/bin/${base.bin} -C Dolphin.Interface.UsePanicHandlers=False "$@"
       '';
     in
@@ -164,11 +164,11 @@
       emulator = split;
       bin = "splitscreen-session";
       # A nested sway with a gamescope per copy, which is why this
-      # cannot run inside padmap's user namespace. See ownsSession in
+      # cannot run inside danstick's user namespace. See ownsSession in
       # env/lib.nix for what that breaks and why nothing is lost.
       ownsSession = true;
       # Every GBA is bound once, here, at launch -- so a player who pairs
-      # mid-game needs their seat to exist already. See padmap_reserve.
+      # mid-game needs their seat to exist already. See danstick_reserve.
       padReserve = players;
       args = [
         "{state}/splitscreen/session.json"
@@ -208,27 +208,27 @@
 
           # Ask what *Dolphin* will see, not what the session sees.
           #
-          # `--pad padmap:N` is resolved by a step that runs in the session,
+          # `--pad danstick:N` is resolved by a step that runs in the session,
           # outside the sandbox -- and out there the raw pads are visible
-          # beside padmap's clones, and the slots count a different set of
+          # beside danstick's clones, and the slots count a different set of
           # pads than Dolphin will. And the names come out of the pipe below
           # as Dolphin says them, not as gotg-pads does: see `dolphinNames`.
           #
-          # So the enumerator runs inside the sandbox, through padmap, exactly
+          # So the enumerator runs inside the sandbox, through danstick, exactly
           # as Dolphin will. `GOTG_PADS` is what the resolver looks for, and
           # the session hands its environment to the step.
           # HIDAPI off, for the same reason `pads_enumerate` turns it off:
           # gotg-pads sets SDL_HINT_JOYSTICK_HIDAPI_STEAM itself, so a raw
-          # Steam Controller is bindable when padmap is not running. In here
-          # padmap *is* running, and that driver claims Valve's ids and then
+          # Steam Controller is bindable when danstick is not running. In here
+          # danstick *is* running, and that driver claims Valve's ids and then
           # hides the evdev *clone* wearing them -- player one simply absent
-          # from the list, which the session's log records as `padmap has
+          # from the list, which the session's log records as `danstick has
           # published no pad for player 1; using keyboard`. The environment
           # outranks the hint the binary sets.
           cat >"$state/splitscreen/gotg-pads" <<'SHIM'
           #!/bin/sh
           export SDL_JOYSTICK_HIDAPI=0 SDL_JOYSTICK_HIDAPI_STEAM=0
-          ${gotgPkgs.padmap-rs}/bin/padmap-rs exec -- ${gotgPkgs.gotg-pads}/bin/gotg-pads "$@" |
+          ${gotgPkgs.danstick-rs}/bin/danstick-rs exec -- ${gotgPkgs.gotg-pads}/bin/gotg-pads "$@" |
             ${pkgs.python3}/bin/python3 ${dolphinNames}
           SHIM
           chmod +x "$state/splitscreen/gotg-pads"
@@ -237,27 +237,27 @@
           # And wait for those clones to be *enumerable* before anything reads
           # the list.
           #
-          # `padmap-rs exec` republishes on the way into a launch, so the
+          # `danstick-rs exec` republishes on the way into a launch, so the
           # clones a game will use are seconds old when this runs -- and a
           # device node exists before udev has finished with it, so SDL lists
-          # it a moment after padmap made it. padmap's own log has the two
+          # it a moment after danstick made it. danstick's own log has the two
           # events a fifth of a second apart (`player 1: forwarding input to
           # the clone`, then player 2) in the same second the GBA bindings
-          # were written, and that launch wrote `padmap has published no pad
+          # were written, and that launch wrote `danstick has published no pad
           # for player 2; using keyboard`.
           #
           # This is not the Steam Controller failure above -- that one was the
           # hint, and is fixed by the two lines in the shim. This is the pad
           # that simply was not there yet.
           #
-          # So: poll until as many of padmap's pads are listed as padmap says
+          # So: poll until as many of danstick's pads are listed as danstick says
           # it has seated, and carry on regardless after a few seconds --
           # a game that starts with one pad bound is better than one that
           # never starts.
           ${pkgs.python3}/bin/python3 - "$GOTG_PADS" <<'WAIT' || true
           import json, os, subprocess, sys, time
 
-          PREFIX = "padmap Player "
+          PREFIX = "danstick Player "
 
           def crc16(data):
               crc = 0
@@ -288,12 +288,12 @@
           try:
               # Only the seats with a device behind them: the keyboard takes a
               # seat too and has no clone to wait for.
-              seated = json.load(open(f"{runtime}/padmap/assignments.json"))
+              seated = json.load(open(f"{runtime}/danstick/assignments.json"))
               seats = sum(1 for seat in seated if isinstance(seat, dict) and seat.get("path"))
           except (OSError, ValueError):
               seats = 0
           if seats:
-              # Two ways to stop: the pads padmap says it seated are all
+              # Two ways to stop: the pads danstick says it seated are all
               # listed, or the list has stopped growing. The second matters
               # because assignments.json outlives the daemon that wrote it --
               # a file left from last night would otherwise cost every launch
@@ -311,16 +311,16 @@
                   if found >= seats:
                       break
                   if found and found == was:
-                      print(f"gotg: padmap seated {seats} pad(s) and SDL lists {found}; "
+                      print(f"gotg: danstick seated {seats} pad(s) and SDL lists {found}; "
                             "one of the GBAs may come up on the keyboard", file=sys.stderr)
                       break
                   was = found
                   time.sleep(0.25)
               else:
-                  print(f"gotg: padmap seated {seats} pad(s) and SDL lists none; "
+                  print(f"gotg: danstick seated {seats} pad(s) and SDL lists none; "
                         "the GBAs will come up on the keyboard", file=sys.stderr)
               # What the binder is about to read, said out loud. Every FSA
-              # failure so far has been a pad that padmap had seated and this
+              # failure so far has been a pad that danstick had seated and this
               # list did not have -- SDL's Steam driver hiding a clone, or a
               # node udev had not finished with -- and each one cost an
               # evening to work out from the outside. One line, every launch.
@@ -332,7 +332,7 @@
           WAIT
           ${split}/bin/splitscreen-fsa \
             --players ${toString players} \
-            ${lib.concatMapStringsSep " " (n: ''--pad "padmap:${toString n}"'') (lib.range 1 players)} \
+            ${lib.concatMapStringsSep " " (n: ''--pad "danstick:${toString n}"'') (lib.range 1 players)} \
             --gc "$target" \
             --gba-bios "$state/bios/gba_bios.bin" \
             --dolphin ${lib.escapeShellArg dolphin} \

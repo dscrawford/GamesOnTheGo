@@ -3,12 +3,12 @@
 One SVG per console, each carrying an `anchor-<input>` circle for every button.
 
 `<input>` is the ares input name exactly as `ares-pads.json` spells it — except
-for `gamecube.svg`, whose anchors are named for padmap's canonical controls
+for `gamecube.svg`, whose anchors are named for danstick's canonical controls
 (`a`, `dpup`, `righttrigger`). There is no ares GameCube: Dolphin writes its own
 configuration and publishes no console, so that drawing exists for the launch
 wizard rather than the binding screen, and naming its anchors after the only
 thing that asks for them beats inventing a table to translate between two
-spellings of "Z". `gate.ANCHOR_ALIASES` maps padmap's names onto the ares ones
+spellings of "Z". `gate.ANCHOR_ALIASES` maps danstick's names onto the ares ones
 for the consoles that have both.
 
 `build-controllers.py` reads those circles and nothing else, so the artwork

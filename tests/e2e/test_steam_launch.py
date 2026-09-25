@@ -1,10 +1,10 @@
-"""The picker started by Steam hears padmap's clones.
+"""The picker started by Steam hears danstick's clones.
 
-On a Deck in Game Mode a Steam Controller paired -- padmap seated it and
+On a Deck in Game Mode a Steam Controller paired -- danstick seated it and
 published its clone, the picker drew the seat -- and then nothing pressed moved
 anything. Steam hands everything it launches SDL_GAMECONTROLLER_IGNORE_DEVICES:
 on that Deck, 2026-09-24, some seven hundred vendor/product pairs, Valve's own
-and the Xbox 360 pad's among them. padmap's clones wear their source pad's ids
+and the Xbox 360 pad's among them. danstick's clones wear their source pad's ids
 (`mirror` identity), so the picker's SDL skipped the one device it was there to
 listen to. Read off the running picker's /proc/<pid>/environ; the pairs below
 are the part of that list these clones wear.
@@ -42,7 +42,7 @@ STEAM_IGNORES = ",".join(
     ]
 )
 
-# What padmap published on the Deck for the Steam Controller: its name, the
+# What danstick published on the Deck for the Steam Controller: its name, the
 # puck's ids, version 1 (/proc/bus/input/devices). And the commonest clone of
 # all, an Xbox 360 pad's.
 CLONES = {
@@ -95,7 +95,7 @@ def _sdl_sees(how: str, want: str) -> list[str]:
 
 
 @pytest.mark.parametrize("clone", sorted(CLONES))
-def test_the_picker_started_by_steam_sees_padmap_s_clone(clone):
+def test_the_picker_started_by_steam_sees_danstick_s_clone(clone):
     trouble = fakepad.available()
     if trouble:
         if os.environ.get("GOTG_E2E_REQUIRE") == "1":
@@ -105,12 +105,12 @@ def test_the_picker_started_by_steam_sees_padmap_s_clone(clone):
 
     vendor, product, version = CLONES[clone]
     want = _guid_part(vendor, product)
-    with FakePad("padmap Player 1", vendor=vendor, product=product, version=version):
+    with FakePad("danstick Player 1", vendor=vendor, product=product, version=version):
         bare = _sdl_sees("bare", want)
         assert not any(want in guid for guid in bare), (
             f"Steam's list did not hide the clone, so this does not reproduce the Deck: {bare}"
         )
         picker = _sdl_sees("picker", want)
         assert any(want in guid for guid in picker), (
-            f"the picker, started as Steam starts it, still cannot see padmap's clone: {picker}"
+            f"the picker, started as Steam starts it, still cannot see danstick's clone: {picker}"
         )

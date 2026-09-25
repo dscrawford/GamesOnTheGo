@@ -15,7 +15,7 @@
 //! because the emulators ask SDL: "the left shoulder" is a per-model fact.
 //!
 //! It also draws the bar over the game (see `painter`), for the exit hold and
-//! for a pad holding to join padmap.
+//! for a pad holding to join danstick.
 
 use std::ffi::CStr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -72,11 +72,11 @@ is asked to stop, and killed if it will not. Exits on its own when
 that process is gone.
 
 Both shoulders and Select, held as long, walk that controller's
-buttons again in padmap, over the game, with the console's controller
+buttons again in danstick, over the game, with the console's controller
 drawn for --platform (the generic pad without one).
 
 A bar comes down over the game while the hold runs, and while a
-controller is holding a button to join padmap -- unless --no-overlay
+controller is holding a button to join danstick -- unless --no-overlay
 says otherwise.
 ";
 
@@ -89,7 +89,7 @@ struct Options {
     quiet: bool,
     draw: bool,
     /// The game's platform, for which controller the rebind draws and which
-    /// padmap layout it walks.
+    /// danstick layout it walks.
     platform: String,
 }
 
@@ -251,7 +251,7 @@ struct Watched {
     state: Pad,
     /// The rebind chord's hold, beside the exit's.
     rebind: Pad,
-    /// The seat this pad is padmap's clone for; None for a raw pad.
+    /// The seat this pad is danstick's clone for; None for a raw pad.
     player: Option<i32>,
     /// Whether this hold has been mentioned in the log.
     announced: bool,
@@ -333,10 +333,10 @@ unsafe fn read_pad(pad: *mut SDL_Gamepad) -> Input {
     }
 }
 
-/// How long padmap was asked to make a hold take, so a fill carries on at the
+/// How long danstick was asked to make a hold take, so a fill carries on at the
 /// right rate between readings.
 fn pair_hold_seconds() -> f64 {
-    std::env::var("PADMAP_HOLD_SECONDS")
+    std::env::var("DANSTICK_HOLD_SECONDS")
         .ok()
         .and_then(|text| text.parse::<f64>().ok())
         .filter(|&value| value > 0.0 && value < 60.0)
@@ -437,10 +437,10 @@ fn run(options: &Options) -> i32 {
 }
 
 fn watch(options: &Options, game: &Game, pads: &mut Pads) {
-    // Who is joining, from padmap's own socket: one more client beside the
+    // Who is joining, from danstick's own socket: one more client beside the
     // picker. Nothing is asked of the daemon; the overlay only listens.
     let mut pairing = Pairing::new(pair_hold_seconds());
-    let mut link = Link::new(std::env::var("GOTG_OVERLAY_PADMAP_SOCKET").ok().as_deref());
+    let mut link = Link::new(std::env::var("GOTG_OVERLAY_DANSTICK_SOCKET").ok().as_deref());
     let mut bar = Bar::new(SLIDE_SECONDS);
     let mut painter = Painter::default();
     let mut rebind = Rebind::default();
@@ -549,7 +549,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         if moving {
             std::thread::sleep(Duration::from_millis(FRAME_MS));
         } else if let Some(fd) = link.fd() {
-            // A join has to show the moment padmap says so: sleep on its
+            // A join has to show the moment danstick says so: sleep on its
             // socket rather than for a fixed tenth of a second.
             let mut wait = libc::pollfd {
                 fd,
@@ -565,7 +565,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
     painter.close();
 }
 
-/// The rebind chord fired on a pad: ask padmap to walk that seat's buttons.
+/// The rebind chord fired on a pad: ask danstick to walk that seat's buttons.
 fn ask_for_rebind(
     player: Option<i32>,
     console: &consoles::Console,
@@ -575,10 +575,10 @@ fn ask_for_rebind(
     quiet: bool,
 ) {
     let Some(player) = player else {
-        // A raw pad: padmap has published no clone for it, so there is no
-        // seat of padmap's to rebind. Seat it first, then rebind it.
+        // A raw pad: danstick has published no clone for it, so there is no
+        // seat of danstick's to rebind. Seat it first, then rebind it.
         if !quiet {
-            eprintln!("gotg-killswitch: rebind held on a pad padmap has not seated; nothing to rebind");
+            eprintln!("gotg-killswitch: rebind held on a pad danstick has not seated; nothing to rebind");
         }
         return;
     };
@@ -593,7 +593,7 @@ fn ask_for_rebind(
             );
         }
     } else {
-        eprintln!("gotg-killswitch: padmap is not listening; cannot rebind player {player}");
+        eprintln!("gotg-killswitch: danstick is not listening; cannot rebind player {player}");
         rebind.unsent(clock);
     }
 }

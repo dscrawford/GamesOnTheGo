@@ -52,31 +52,31 @@ def test_the_gate_describes_an_n64_pad_in_words_somebody_can_check(control, expe
 
 
 @pytest.mark.parametrize(
-    "padmap_id,expected",
+    "danstick_id,expected",
     [
         ("dpup", "Up"),
         ("a", "A"),
         ("x", "B"),                 # the N64's B is the pad's X
         ("leftshoulder", "L"),
         ("lefttrigger", "Z"),
-        ("rightstick_up", "C-Up"),  # padmap's spelling of righty-
+        ("rightstick_up", "C-Up"),  # danstick's spelling of righty-
         ("leftstick_left", "X-Axis/Lo"),
         ("b", None),                # drives nothing on an N64 pad
     ],
 )
-def test_a_press_is_named_by_what_the_console_calls_it(padmap_id, expected, monkeypatch):
+def test_a_press_is_named_by_what_the_console_calls_it(danstick_id, expected, monkeypatch):
     """The bug the dots were invisible for.
 
-    padmap's profile answers `leftshoulder`; every label on the drawing is
+    danstick's profile answers `leftshoulder`; every label on the drawing is
     called `L`. Nothing compared the two, so a press lit nothing at all.
     """
     monkeypatch.setenv("GOTG_DATA", str(pathlib.Path(__file__).parents[2] / "src" / "client" / "data"))
-    assert pad_controls("Nintendo64").get(padmap_id) == expected
+    assert pad_controls("Nintendo64").get(danstick_id) == expected
 
 
 def test_a_console_the_table_has_never_heard_of_translates_nothing(monkeypatch):
     # Dolphin's two publish no console, and there the drawing is labelled with
-    # padmap's own ids already -- so an empty table is the right answer, and
+    # danstick's own ids already -- so an empty table is the right answer, and
     # the door falls back to passing the id through.
     monkeypatch.setenv("GOTG_DATA", str(pathlib.Path(__file__).parents[2] / "src" / "client" / "data"))
     assert pad_controls("GameCube") == {}
@@ -113,8 +113,8 @@ def test_a_stick_is_one_thing_not_four_labels(monkeypatch):
         assert not {"Up", "Down", "Left", "Right", "Z", "L", "R", "A", "B", "Start"} & set(stick)
 
 
-def test_a_drawing_labelled_with_padmaps_own_ids_groups_those(monkeypatch):
-    # Dolphin's two publish no console, so the drawing carries padmap's ids.
+def test_a_drawing_labelled_with_dansticks_own_ids_groups_those(monkeypatch):
+    # Dolphin's two publish no console, so the drawing carries danstick's ids.
     monkeypatch.setenv("GOTG_DATA", str(pathlib.Path(__file__).parents[2] / "src" / "client" / "data"))
     groups = sticks_by_id(["rightstick_up", "rightstick_left", "dpup", "a", "lefttrigger"])
     assert groups == {"right": {"rightstick_up": (0, -1), "rightstick_left": (-1, 0)}}

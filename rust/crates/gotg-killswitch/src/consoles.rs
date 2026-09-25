@@ -1,7 +1,7 @@
 //! Each console's controller, as the picker's config/controllers describes it:
-//! which padmap layout its buttons are walked in, its drawing, and where on
+//! which danstick layout its buttons are walked in, its drawing, and where on
 //! the drawing each button is. The rebind shows the drawing over the game
-//! and rings the button padmap is asking for.
+//! and rings the button danstick is asking for.
 //!
 //! Read at build time from the same files the picker reads, so the two draw
 //! the same controller and ring the same place.
@@ -9,7 +9,7 @@
 use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg::{Options, Tree};
 
-/// One control padmap walks, and where it sits on the drawing (0..1 of the
+/// One control danstick walks, and where it sits on the drawing (0..1 of the
 /// drawing's width and height), if the drawing shows it at all -- an N64's
 /// Z is underneath the pad, and bound all the same.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -44,12 +44,12 @@ pub fn for_platform(platform: &str) -> usize {
 }
 
 impl Console {
-    /// padmap's scope for "every game on this console", as the gate asks.
+    /// danstick's scope for "every game on this console", as the gate asks.
     pub fn scope(&self) -> String {
         format!("console:{}", self.layout)
     }
 
-    /// The control padmap is asking for, by its id.
+    /// The control danstick is asking for, by its id.
     pub fn control(&self, id: &str) -> Option<usize> {
         self.controls.iter().position(|control| control.id == id)
     }
@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn a_button_the_drawing_names_by_the_consoles_letters_is_still_found() {
-        // padmap says `dpup`; the N64 drawing's circle is `Up`.
+        // danstick says `dpup`; the N64 drawing's circle is `Up`.
         let n64 = named("n64");
         let up = n64.control("dpup").map(|at| n64.controls[at]);
         assert!(up.is_some_and(|c| c.anchor.is_some()), "{up:?}");

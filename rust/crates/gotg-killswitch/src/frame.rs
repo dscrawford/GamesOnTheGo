@@ -6,7 +6,7 @@
 //! and drawing means talking to a compositor: a round trip, a present that
 //! waits for the panel, a connect. Any of those can stall, and a stall in the
 //! same loop was a kill chord that did nothing. So the kill switch keeps the
-//! chord, padmap's socket and every decision, and hands the painter only this.
+//! chord, danstick's socket and every decision, and hands the painter only this.
 //! A painter that hangs misses frames; the kill switch does not notice.
 //!
 //! Encoded field by field in native byte order: both ends are this binary.

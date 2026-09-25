@@ -33,7 +33,7 @@ TWO_PADS = (FIXTURES / "input-devices-two-pads.txt").read_text()
         (None, ""),
     ],
 )
-def test_a_node_is_read_however_padmap_named_it(node, expected):
+def test_a_node_is_read_however_danstick_named_it(node, expected):
     assert node_key(node) == expected
 
 

@@ -7,8 +7,8 @@
   jq,
   unzip,
   gotg-pads,
-  padmap,
-  padmap-rs,
+  danstick,
+  danstick-rs,
   gotg-killswitch,
   gnutar,
   zstd,
@@ -43,12 +43,12 @@ let
     procps # `gotg steam` has to know whether Steam is running
     (python3.withPackages (ps: [ ps.vdf ])) # binary shortcuts.vdf
     gotg-pads # reports what SDL sees, for generated bindings
-    # The controller layer: `padmap ensure-daemon` before a launch, and
-    # `padmap-rs exec` around it so the game is told about the pads it
+    # The controller layer: `danstick ensure-daemon` before a launch, and
+    # `danstick-rs exec` around it so the game is told about the pads it
     # publishes. SDL reads its database once, at startup, so a mapping has to
     # be in the environment before the emulator is.
-    padmap
-    padmap-rs
+    danstick
+    danstick-rs
     gotg-killswitch # the controller way out of a running game
     gnutar # save bundles, and the archive a pull takes before it overwrites
     zstd

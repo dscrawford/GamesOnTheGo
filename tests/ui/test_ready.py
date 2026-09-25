@@ -90,7 +90,7 @@ def test_a_hold_let_go_of_is_lost_and_starts_again():
 
 
 def test_the_press_that_paired_this_pad_does_not_ready_it():
-    """The pause, per seat. The pairing hold is padmap's quarter second and a
+    """The pause, per seat. The pairing hold is danstick's quarter second and a
     thumb stays down longer than that."""
     ready = Ready(seconds=3.0, pause=1.0)
     seats = {1}

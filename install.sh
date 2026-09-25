@@ -12,7 +12,7 @@
 #
 # Idempotent: running it twice does nothing the second time. It needs a password
 # for three things, each said before it asks -- /nix on SteamOS, Nix's own
-# installer elsewhere, and making /dev/uinput openable so padmap can publish
+# installer elsewhere, and making /dev/uinput openable so danstick can publish
 # controllers.
 set -euo pipefail
 
@@ -176,7 +176,7 @@ ensure_flakes() {
 
 # --- controllers -------------------------------------------------------------
 
-# padmap publishes each controller as a new device through /dev/uinput, and
+# danstick publishes each controller as a new device through /dev/uinput, and
 # cannot open it without permission. `uaccess` gives it to whoever is logged in
 # at the seat, which is the right answer on a handheld.
 UDEV_RULE='KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"'

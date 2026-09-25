@@ -1,7 +1,7 @@
-"""An input from the pad, read back through padmap's profile: which control.
+"""An input from the pad, read back through danstick's profile: which control.
 
-The profile below is the one padmap wrote for the user's Xbox Wireless
-Controller, trimmed. Every value in it was measured by padmap.
+The profile below is the one danstick wrote for the user's Xbox Wireless
+Controller, trimmed. Every value in it was measured by danstick.
 """
 
 from __future__ import annotations

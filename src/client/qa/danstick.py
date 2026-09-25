@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""A stand-in for padmap's socket, saying one pad joined, once.
+"""A stand-in for danstick's socket, saying one pad joined, once.
 
-The overlay listens to padmap for who is holding to join; in QA there is no
+The overlay listens to danstick for who is holding to join; in QA there is no
 daemon, and the virtual pad cannot join one that is not there. So this plays
-the events padmap sends while somebody pairs -- a hold filling for the length
+the events danstick sends while somebody pairs -- a hold filling for the length
 the room asked for, then the claim -- at the second it is told, to every
 client connected by then. What the overlay does with them is what is graded:
-the events are padmap's own shape (see docs/requests), not a private demo
+the events are danstick's own shape (see docs/requests), not a private demo
 switch inside the program under test.
 
 Stdlib only; nothing is read from clients.
@@ -25,7 +25,7 @@ PLAYER = 2
 
 
 def events(hold, name="QA Joiner"):
-    """The lines padmap sends for one press held to the end, with when."""
+    """The lines danstick sends for one press held to the end, with when."""
     steps = max(int(hold * 30), 1)
     for i in range(1, steps + 1):
         frac = round(i / steps, 3)
@@ -60,7 +60,7 @@ def main():
                 clients.append(conn)
 
     threading.Thread(target=accept, daemon=True).start()
-    print(f"padmap stand-in: listening on {args.socket}", flush=True)
+    print(f"danstick stand-in: listening on {args.socket}", flush=True)
 
     def send(line):
         data = (json.dumps(line) + "\n").encode()
@@ -76,7 +76,7 @@ def main():
         time.sleep(max(begin + offset - time.monotonic(), 0.0))
         send(line)
     with lock:
-        print(f"padmap stand-in: joined player {PLAYER} for {len(clients)} client(s)", flush=True)
+        print(f"danstick stand-in: joined player {PLAYER} for {len(clients)} client(s)", flush=True)
     # Stay up, quiet, until the session goes: a socket that closed would be
     # reconnected to every couple of seconds for nothing.
     while True:

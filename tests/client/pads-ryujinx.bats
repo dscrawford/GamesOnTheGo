@@ -566,17 +566,17 @@ VIRTUAL='[{"id": "0-00000003-28de-0000-ff11-000001000000", "name": "Steam Contro
   [ "$(jq -r '.[0].id' "$(snap_path)")" = "0-00000003-28de-0000-0413-000002006800" ]
 }
 
-@test "what padmap writes is in the snapshot the next launch restores" {
-  # padmap's writer runs inside the keep cycle: the motion block it adds
+@test "what danstick writes is in the snapshot the next launch restores" {
+  # danstick's writer runs inside the keep cycle: the motion block it adds
   # -- CemuHook, pointed at its DSU server -- would otherwise be restored
   # away one launch later.
   fake_ryujinx_env
   write_ryujinx_config "$BOUND"
-  export GOTG_PADMAP_RUNTIME="$TEST_TMP/padmap-runtime"
-  mkdir -p "$GOTG_PADMAP_RUNTIME" "$TEST_TMP/bin"
-  printf "SDL_GAMECONTROLLERCONFIG='0300c9a7de2800000413000001000000,padmap Player 1,a:b0,'\nexport SDL_GAMECONTROLLERCONFIG\n" \
-    >"$GOTG_PADMAP_RUNTIME/env.sh"
-  export GOTG_PADMAP_RS="$TEST_TMP/bin/padmap-rs"
+  export GOTG_DANSTICK_RUNTIME="$TEST_TMP/danstick-runtime"
+  mkdir -p "$GOTG_DANSTICK_RUNTIME" "$TEST_TMP/bin"
+  printf "SDL_GAMECONTROLLERCONFIG='0300724dde2800000413000001000000,danstick Player 1,a:b0,'\nexport SDL_GAMECONTROLLERCONFIG\n" \
+    >"$GOTG_DANSTICK_RUNTIME/env.sh"
+  export GOTG_DANSTICK_RS="$TEST_TMP/bin/danstick-rs"
   {
     printf '#!%s\n' "$(command -v bash)"
     printf 'config="%s"\n' "$(config_path)"
@@ -587,8 +587,8 @@ jq '.input_config[0].motion = {motion_backend: "CemuHook", dsu_server_host: "127
   "$config" >"$config.new" && mv "$config.new" "$config"
 printf '%s\n' "$config"
 SHIM
-  } >"$GOTG_PADMAP_RS"
-  chmod +x "$GOTG_PADMAP_RS"
+  } >"$GOTG_DANSTICK_RS"
+  chmod +x "$GOTG_DANSTICK_RS"
   run pads_ryujinx_configure env-switch
   [ "$status" -eq 0 ]
   [ "$(jq -r '.input_config[0].motion.motion_backend' "$(config_path)")" = CemuHook ]

@@ -117,11 +117,11 @@ gotg steam picker                   # put it in Steam as "Games On The Go"
 
 ## Controllers
 
-Launches run through [padmap](https://github.com/dscrawford/danstick) (now danstick): pads are republished via `/dev/uinput`, seated by holding a button, and mapped before the emulator starts.
+Launches run through [danstick](https://github.com/dscrawford/danstick) (formerly padmap): pads are republished via `/dev/uinput`, seated by holding a button, and mapped before the emulator starts.
 
 ```bash
 gotg controllers list               # what SDL sees
-gotg controllers list --as-game     # what a game sees: inside padmap's sandbox, clones only
+gotg controllers list --as-game     # what a game sees: inside danstick's sandbox, clones only
 gotg controllers order [--json]     # player order
 gotg controllers order --set xbox   # pin player 1; --clear to undo
 gotg controllers apply [<id>|--all] # write bindings without launching
@@ -134,15 +134,15 @@ gotg controllers apply [<id>|--all] # write bindings without launching
 | Ryujinx | Switch | `Config.json` |
 | Cemu | Wii U | `controllerProfiles/*.xml` |
 
-**Motion:** padmap serves every seated pad's gyro and accelerometer over DSU (`127.0.0.1:26760`, slot = player − 1) and writes each environment's Ryujinx, Cemu and Dolphin config to read it. `PADMAP_DSU_PORT=0` turns it off.
+**Motion:** danstick serves every seated pad's gyro and accelerometer over DSU (`127.0.0.1:26760`, slot = player − 1) and writes each environment's Ryujinx, Cemu and Dolphin config to read it. `DANSTICK_DSU_PORT=0` turns it off.
 
 **Stop any game:** hold a shoulder or trigger on each side + Start for 3 s.
 
-**Every session starts with nobody seated** — the picker and each game alike. padmap's daemon is the session's: started unseated, following the process, gone when it is. Pick a controller up, hold a button, and you are player one; the next to hold is player two, which is the numbering every game is bound against.
+**Every session starts with nobody seated** — the picker and each game alike. danstick's daemon is the session's: started unseated, following the process, gone when it is. Pick a controller up, hold a button, and you are player one; the next to hold is player two, which is the numbering every game is bound against.
 
 **What a clone looks like** is `mirror` by default: the physical pad's vendor and product, which is what an emulator told to bind that controller expects. The decompiled ports (DK64 Recompiled, Snowboard Kids 2, Paper Mario ReCut) carry their own controller database and a clone of a Steam Controller is in nobody's, so their environments ask for `xbox360` — every clone a wired `045e:028e`, the one GUID every SDL maps by heart. Refused for Ryujinx whatever an environment says: under it every clone shares a GUID and Ryujinx cannot tell them apart.
 
-**In the picker**, padmap listens for a hold for as long as the grid is up: pick a controller up, hold a button, and the ring above the games fills in your colour and seats you. Only pads padmap has published move the cursor — an unseated one is ignored, so a controller nobody has assigned cannot drive the library. That holds whether or not padmap is running; the keyboard and mouse always work. A controller that is *also* a keyboard — a Steam Controller in lizard mode, a Bluetooth Xbox pad's extra collections — is held quiet at the kernel while the picker runs, so it cannot arrive as arrow keys either. `GOTG_ANY_PAD=1` lifts it by hand, for a television with no keyboard in the room.
+**In the picker**, danstick listens for a hold for as long as the grid is up: pick a controller up, hold a button, and the ring above the games fills in your colour and seats you. Only pads danstick has published move the cursor — an unseated one is ignored, so a controller nobody has assigned cannot drive the library. That holds whether or not danstick is running; the keyboard and mouse always work. A controller that is *also* a keyboard — a Steam Controller in lizard mode, a Bluetooth Xbox pad's extra collections — is held quiet at the kernel while the picker runs, so it cannot arrive as arrow keys either. `GOTG_ANY_PAD=1` lifts it by hand, for a television with no keyboard in the room.
 
 That is a requirement, and it has a test that runs it against a real daemon and real kernel devices — `tests/e2e`:
 
@@ -151,11 +151,11 @@ nix run .#test-controllers                 # or gotg-test-controllers in the dev
 GOTG_E2E_REQUIRE=1 nix run .#test-controllers   # a machine that cannot run it fails instead of skipping
 ```
 
-It needs `/dev/uinput` writable and nothing else; each test starts a padmap of its own under a temporary directory and never touches the one you are playing with.
+It needs `/dev/uinput` writable and nothing else; each test starts a danstick of its own under a temporary directory and never touches the one you are playing with.
 
-**During a game** padmap stops listening for new holds: with seating open it rescans every input device 50 times a second, and a press then takes ~108 ms to reach the game instead of ~0.03 ms. A pad cannot join mid-level until [that is fixed](docs/requests/seating-costs-the-game-its-input.md); the latency is measured by `tests/e2e`.
+**During a game** danstick stops listening for new holds: with seating open it rescans every input device 50 times a second, and a press then takes ~108 ms to reach the game instead of ~0.03 ms. A pad cannot join mid-level until [that is fixed](docs/requests/seating-costs-the-game-its-input.md); the latency is measured by `tests/e2e`.
 
-**Before a launch**, `gotg-seat` forgets whatever the daemon remembers, asks for a hold, walks the buttons only if that pad is unmapped for this console, and then waits: the game starts when somebody lets go and holds a button again for a full second (Enter does it from the keyboard). Then the emulator is bound to what that seated: port N is `padmap Player N`, found by the GUID padmap published, and never a raw pad — `padmap-rs exec` hides those from the game.
+**Before a launch**, `gotg-seat` forgets whatever the daemon remembers, asks for a hold, walks the buttons only if that pad is unmapped for this console, and then waits: the game starts when somebody lets go and holds a button again for a full second (Enter does it from the keyboard). Then the emulator is bound to what that seated: port N is `danstick Player N`, found by the GUID danstick published, and never a raw pad — `danstick-rs exec` hides those from the game.
 
 ## Steam
 
@@ -258,7 +258,7 @@ $ gotg admin scan
 | `~/.config/gotg/overrides.json` | per-game `target` / `unzip` (defaults: `src/client/data/overrides.json`) |
 | `config/theme.yaml` | picker colours, window, grid/list shape, timeouts |
 | `config/icons.yaml` | controller name → icon |
-| `config/controllers/*.yaml` | per-controller platforms, padmap layout, control names |
+| `config/controllers/*.yaml` | per-controller platforms, danstick layout, control names |
 
 | Variable | Effect |
 |---|---|

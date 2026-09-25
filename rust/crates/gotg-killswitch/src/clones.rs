@@ -1,13 +1,13 @@
 //! Which seat a pad is, from what SDL says about it.
 //!
-//! The rebind chord has to reach padmap as "player N", and all the kill switch
-//! has is SDL's view of the pad the chord came from. padmap's clones are named
-//! `padmap Player N`, but SDL renames a clone that mirrors a pad it knows
+//! The rebind chord has to reach danstick as "player N", and all the kill switch
+//! has is SDL's view of the pad the chord came from. danstick's clones are named
+//! `danstick Player N`, but SDL renames a clone that mirrors a pad it knows
 //! (`Xbox 360 Controller`), so the name cannot say. The GUID can: bytes 2-3
 //! carry a CRC-16 of the name the device was made with, taken before any
 //! renaming -- the same thing the picker's clones.py reads.
 
-/// Seats looked for. padmap allows sixteen, RetroArch's limit.
+/// Seats looked for. danstick allows sixteen, RetroArch's limit.
 const SEATS: i32 = 16;
 
 /// SDL's CRC-16 (reflected 0x8005, from zero), as it hashes a device's name
@@ -27,14 +27,14 @@ fn crc16(bytes: &[u8]) -> u16 {
     crc
 }
 
-/// The seat a pad is padmap's clone for, or None for any other pad -- a raw
-/// controller, which padmap has not published and cannot be rebound here.
+/// The seat a pad is danstick's clone for, or None for any other pad -- a raw
+/// controller, which danstick has not published and cannot be rebound here.
 pub fn player_of_guid(guid: &[u8; 16]) -> Option<i32> {
     let crc = u16::from_le_bytes([guid[2], guid[3]]);
     if crc == 0 {
         return None;
     }
-    (1..=SEATS).find(|n| crc16(format!("padmap Player {n}").as_bytes()) == crc)
+    (1..=SEATS).find(|n| crc16(format!("danstick Player {n}").as_bytes()) == crc)
 }
 
 #[cfg(test)]
@@ -51,11 +51,12 @@ mod tests {
 
     #[test]
     fn a_clone_is_known_by_the_name_it_was_made_with() {
-        // The Deck's env.sh, 2026-09-24: player one's clone of a Steam
-        // Controller Puck, which SDL shows under another name.
-        assert_eq!(player_of_guid(&guid("0300c9a7de2800000413000001000000")), Some(1));
-        let mut two = guid("0300c9a7de2800000413000001000000");
-        [two[2], two[3]] = crc16(b"padmap Player 2").to_le_bytes();
+        // The Deck's env.sh, 2026-09-24, its CRC re-hashed for danstick's
+        // name: player one's clone of a Steam Controller Puck, which SDL
+        // shows under another name.
+        assert_eq!(player_of_guid(&guid("0300724dde2800000413000001000000")), Some(1));
+        let mut two = guid("0300724dde2800000413000001000000");
+        [two[2], two[3]] = crc16(b"danstick Player 2").to_le_bytes();
         assert_eq!(player_of_guid(&two), Some(2));
     }
 
