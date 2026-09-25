@@ -310,7 +310,10 @@ frame, deliberately inseparable), and `gate.decide` (unseat, hold, map).
   (`decode.py`): ten covers in one frame was 13.5 ms.
 - **The overlay over a game is the kill switch's painter.** `gotg-killswitch`
   (launched beside every game) watches the exit chord and padmap's socket;
-  a bar comes down for a pad joining and for the exit hold. Drawing is a
+  a bar comes down for a pad joining and for the exit hold, and further --
+  the game's controller drawn, the asked-for button ringed -- for L + R +
+  Select held 3 s, which has padmap walk that pad's buttons again (`map`,
+  no session: only that pad is grabbed, its clone held back from the game). Drawing is a
   separate process -- `gotg-killswitch --paint`, fed ~100-byte frames over a
   non-blocking pipe -- because a display call that stalls (a round trip, a
   vsynced present, a connect) in the chord's own loop was a kill switch that
