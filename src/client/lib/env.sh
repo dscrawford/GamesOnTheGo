@@ -28,10 +28,33 @@ GOTG_REMOTE_FLAKE="${GOTG_REMOTE_FLAKE:-github:dscrawford/GamesOnTheGo}"
 # The flake the environments are built from: explicit env, then the config
 # key, then a checkout in the usual place, then the repo over the network.
 gotg_flake() {
+  local candidate
+  candidate="$(_gotg_named_flake)"
+  # The source this client was built from (GOTG_OWN_FLAKE, set by the
+  # package), before GitHub. Without it a client built from anything but
+  # GitHub's head -- a Deck given a copy of a checkout -- built every
+  # emulator environment from GitHub all the same: a client speaking
+  # danstick, and environments still naming padmap.
+  [[ -z "$candidate" && -f "${GOTG_OWN_FLAKE:-/nonexistent}/flake.nix" ]] && candidate="$GOTG_OWN_FLAKE"
+  [[ -z "$candidate" ]] && candidate="$GOTG_REMOTE_FLAKE"
+  printf '%s' "$candidate"
+}
+
+# Where a newer client comes from: `gotg sync`, and the hint the Steam
+# launcher prints. Never the client's own source -- that is what it already is.
+gotg_update_flake() {
+  local candidate
+  candidate="$(_gotg_named_flake)"
+  [[ -z "$candidate" ]] && candidate="$GOTG_REMOTE_FLAKE"
+  printf '%s' "$candidate"
+}
+
+# A flake somebody chose: GOTG_FLAKE, the config's `flake`, or a checkout in
+# the usual place. Empty when none was.
+_gotg_named_flake() {
   local candidate="${GOTG_FLAKE:-}"
   [[ -z "$candidate" ]] && candidate="$(config_get flake 2>/dev/null || true)"
   [[ -z "$candidate" && -f "$HOME/Documents/GOTG/flake.nix" ]] && candidate="$HOME/Documents/GOTG"
-  [[ -z "$candidate" ]] && candidate="$GOTG_REMOTE_FLAKE"
   printf '%s' "$candidate"
 }
 
@@ -49,6 +72,11 @@ nix_bin() { printf '%s' "${GOTG_NIX:-nix}"; }
 # without paying for the evaluation to find out.
 flake_fingerprint() {
   local flake="$1" rev
+  # A source in the store is content-addressed: its path is its version.
+  if [[ "$flake" == /nix/store/* ]]; then
+    printf '%s' "$flake"
+    return 0
+  fi
   if flake_is_path "$flake"; then
     [[ -z "$(git -C "$flake" status --porcelain 2>/dev/null)" ]] || return 0
     rev="$(git -C "$flake" rev-parse HEAD 2>/dev/null)" || return 0

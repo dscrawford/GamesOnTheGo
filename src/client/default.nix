@@ -2,6 +2,9 @@
   lib,
   stdenvNoCC,
   makeWrapper,
+  # The flake this client was built from, in the store, lock and all: what
+  # its emulator environments are built from when nobody named another.
+  ownFlake ? null,
   bash,
   curl,
   jq,
@@ -92,6 +95,7 @@ stdenvNoCC.mkDerivation {
 
     makeWrapper $out/share/gotg/bin/gotg $out/bin/gotg \
       --set GOTG_ROOT $out/share/gotg \
+      ${lib.optionalString (ownFlake != null) "--set-default GOTG_OWN_FLAKE ${ownFlake} \\"}
       --prefix PATH : ${lib.makeBinPath runtimeInputs}
 
     runHook postInstall

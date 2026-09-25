@@ -72,7 +72,7 @@ launcher_write() {
     if [[ -n "$variant" ]]; then printf ' "%s"' "$(escape_replacement "$variant")"; fi
   )}"
   content="${content//@TITLE@/$(escape_replacement "$title")}"
-  content="${content//@FLAKE@/$(escape_replacement "$(gotg_flake)")}"
+  content="${content//@FLAKE@/$(escape_replacement "$(gotg_update_flake)")}"
 
   mkdir -p "$(dirname "$dest")"
   printf '%s\n' "$content" >"$dest"
