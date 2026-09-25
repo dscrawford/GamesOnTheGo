@@ -25,7 +25,9 @@ def game(id="usa.zelda", platform="n64"):
     return Game(id=id, platform=platform, title="A Game", handler="single_file")
 
 
-def test_the_id_is_always_qualified_by_platform():
+def test_the_id_is_always_qualified_by_platform(monkeypatch):
+    # The dev shell exports GOTG_BIN, which would stand in for "gotg" below.
+    monkeypatch.delenv("GOTG_BIN", raising=False)
     # Ids are unique per platform and not globally — usa.bugs_life is on both
     # n64 and snes — so the grid, which knows which one you were looking at,
     # must say. A bare id throws that away.

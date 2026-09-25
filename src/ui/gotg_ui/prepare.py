@@ -214,7 +214,10 @@ class Preparer:
 
     @property
     def running(self) -> bool:
-        return self.process is not None and self.process.poll() is None
+        # And until the reader has drained the pipe: exit comes before the last lines.
+        if self.process is None:
+            return False
+        return self.process.poll() is None or self._reader.is_alive()
 
     @property
     def ok(self) -> bool:
