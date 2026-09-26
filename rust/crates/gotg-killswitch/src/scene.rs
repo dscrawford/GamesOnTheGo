@@ -128,6 +128,39 @@ pub fn item_x(width: i32, bar_height: f32, index: usize, count: usize) -> f32 {
     width as f32 / 2.0 - span / 2.0 + step * index as f32
 }
 
+/// The card everything sits on: centred on the top edge, `w` wide and `h`
+/// tall, its bottom corners rounded and a hairline under it so it has an
+/// edge over a dark scene. Sized to what it holds rather than the width of
+/// the screen -- a ring for the exit, a row of pads for joining, a
+/// controller for a rebind -- so it covers only as much of the game as it
+/// has to, and sits in the middle however wide the screen is.
+fn card(mesh: &mut Mesh, cx: f32, top: f32, w: f32, h: f32) {
+    let r = (h * 0.22).min(w / 2.0).min(28.0);
+    let x = cx - w / 2.0;
+    mesh.rect(x, top, w, h - r, BAR);
+    mesh.rect(x + r, top + h - r, w - 2.0 * r, r, BAR);
+    // Filled quarters: a ring as thick as its radius, centred on half of it.
+    mesh.arc(x + r, top + h - r, r / 2.0, r, 0.5, 0.25, BAR, FEATHER);
+    mesh.arc(x + w - r, top + h - r, r / 2.0, r, 0.25, 0.25, BAR, FEATHER);
+    mesh.rect(
+        x + r,
+        top + h - 1.0,
+        w - 2.0 * r,
+        1.0,
+        Colour::rgb(theme::TEXT, 0.18),
+    );
+}
+
+/// How wide the joining card is for `count` pads: the row, and a margin.
+pub fn joining_width(bar_height: f32, count: usize) -> f32 {
+    (bar_height * 1.15 * count as f32 + bar_height * 0.5).max(exit_width(bar_height))
+}
+
+/// How wide the exit card is: the ring and its margin.
+pub fn exit_width(bar_height: f32) -> f32 {
+    bar_height * 1.6
+}
+
 fn exit_ring(mesh: &mut Mesh, cx: f32, cy: f32, radius: f32, width: f32, progress: f64) {
     let p = progress.min(1.0) as f32;
     mesh.arc(cx, cy, radius, width, 0.0, 1.0, RED.with_alpha(0.25), FEATHER);
@@ -199,11 +232,13 @@ fn build_rebind(scene: &Scene, rebind: &Rebinding, top: f32, drawing: &mut Drawi
     let panel = scene.panel_height;
     let width = scene.width as f32;
     let colour = player_colour(rebind.player);
-    drawing.under.rect(0.0, top, width, panel, BAR);
-    drawing
-        .under
-        .rect(0.0, top + panel - 1.0, width, 1.0, Colour::rgb(theme::TEXT, 0.18));
     let (cx, cy, height, drawn_width) = rebind_layout(scene, rebind, top);
+    // The drawing, the finish ring on its right and the same room on its
+    // left, and the row of dots, whichever is wider.
+    let total = rebind.total.clamp(0, 40);
+    let dots = panel * 0.045 * total as f32;
+    let card_width = (drawn_width + panel * 0.46).max(dots + panel * 0.2).min(width);
+    card(&mut drawing.under, cx, top, card_width, panel);
     drawing.sprites.push(Sprite {
         icon: u8::try_from(rebind.console).unwrap_or(0),
         cx,
@@ -292,9 +327,13 @@ pub fn build(scene: &Scene, drawing: &mut Drawing) {
     let width = scene.width as f32;
     let top = -bar * (1.0 - scene.position as f32);
     let mesh = &mut drawing.under;
-    mesh.rect(0.0, top, width, bar, BAR);
-    // A hairline under it, so the bar has an edge over a dark scene.
-    mesh.rect(0.0, top + bar - 1.0, width, 1.0, Colour::rgb(theme::TEXT, 0.18));
+    let count = scene.joined.len() + scene.fractions.len();
+    let card_width = if scene.exit_progress > 0.0 {
+        exit_width(bar)
+    } else {
+        joining_width(bar, count)
+    };
+    card(mesh, width / 2.0, top, card_width.min(width), bar);
 
     let cy = top + bar / 2.0;
     if scene.exit_progress > 0.0 {
@@ -309,7 +348,6 @@ pub fn build(scene: &Scene, drawing: &mut Drawing) {
         return;
     }
     let icon_height = bar * 0.62;
-    let count = scene.joined.len() + scene.fractions.len();
     let x = |at| item_x(scene.width, bar, at, count);
     let empty = Colour::rgb(theme::EMPTY, 1.0);
     for (at, (&player, &icon)) in scene.joined.iter().zip(scene.joined_icons).enumerate() {
@@ -403,7 +441,7 @@ mod tests {
         let mut drawing = Drawing::default();
         build(&rebinding(a as i32, 0), &mut drawing);
         assert!(
-            near(highest_y(&drawing.under), panel_height(800), 0.5),
+            near(highest_y(&drawing.under), panel_height(800), 2.0),
             "the panel, not the bar: {}",
             highest_y(&drawing.under)
         );
@@ -477,7 +515,7 @@ mod tests {
             "no controller while the game is being stopped"
         );
         assert!(
-            near(highest_y(&drawing.under), bar_height(800), 0.5),
+            near(highest_y(&drawing.under), bar_height(800), 2.0),
             "and only the bar"
         );
     }
@@ -498,6 +536,60 @@ mod tests {
         assert!(
             ring_at(&kept) > ring_at(&walking) + 50.0,
             "the tick sits beside the drawing, not on A"
+        );
+    }
+
+    fn span_x(mesh: &Mesh) -> (f32, f32) {
+        let xs = mesh.vertices.iter().map(|v| v.x);
+        (
+            xs.clone().fold(f32::INFINITY, f32::min),
+            xs.fold(f32::NEG_INFINITY, f32::max),
+        )
+    }
+
+    #[test]
+    fn the_card_is_centred_and_no_wider_than_it_has_to_be() {
+        let mut drawing = Drawing::default();
+        build(&down(0.5), &mut drawing);
+        let (left, right) = span_x(&drawing.under);
+        assert!(near((left + right) / 2.0, 640.0, 1.0), "centred: {left}..{right}");
+        assert!(
+            right - left < 400.0,
+            "an exit ring's card, not the screen: {}",
+            right - left
+        );
+    }
+
+    #[test]
+    fn the_exit_card_is_smallest_and_a_rebind_card_largest() {
+        let width_of = |scene: &Scene| {
+            let mut drawing = Drawing::default();
+            build(scene, &mut drawing);
+            let (left, right) = span_x(&drawing.under);
+            right - left
+        };
+        let exit = width_of(&down(0.5));
+        let joining = width_of(&Scene {
+            joined: &[1, 2, 3],
+            joined_icons: &[0, 0, 0],
+            ..down(0.0)
+        });
+        let (_, a) = n64();
+        let rebind = width_of(&rebinding(a as i32, 0));
+        assert!(
+            exit < joining && joining < rebind,
+            "{exit} < {joining} < {rebind}"
+        );
+    }
+
+    #[test]
+    fn a_card_of_more_pads_is_wider() {
+        let bar = bar_height(800);
+        assert!(joining_width(bar, 4) > joining_width(bar, 1));
+        assert_eq!(
+            joining_width(bar, 0),
+            exit_width(bar),
+            "never smaller than the exit's"
         );
     }
 
@@ -551,9 +643,13 @@ mod tests {
             drawing.sprites.is_empty(),
             "no pad's drawing while the exit is held"
         );
-        let reach = bar_height(800) * 0.5;
+        // Only the exit's card and ring: nothing reaches past it to where a
+        // joining pad would be drawn.
+        let reach = exit_width(bar_height(800)) / 2.0 + FEATHER + 0.5;
         assert!(
-            drawing.under.vertices[8..]
+            drawing
+                .under
+                .vertices
                 .iter()
                 .all(|v| (v.x - 640.0).abs() <= reach)
         );
