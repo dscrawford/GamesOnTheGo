@@ -134,7 +134,7 @@ pub fn bar_height(screen_height: i32) -> f32 {
 /// enough to find one button on from a sofa. The overlay's window is this
 /// tall wherever it is only a strip, so the panel has somewhere to be.
 pub fn panel_height(screen_height: i32) -> f32 {
-    (screen_height as f32 * 0.46)
+    (screen_height as f32 * 0.55)
         .round()
         .max(bar_height(screen_height))
 }
@@ -495,6 +495,14 @@ fn build_rebind(scene: &Scene, rebind: &Rebinding, top: f32, drawing: &mut Drawi
                 ink.with_alpha(if lit { 1.0 } else { 0.55 }),
                 FEATHER,
             );
+            // A dot on the button, where the line starts: the picker's.
+            drawing.lines.disc(
+                placed.from.0,
+                placed.from.1,
+                (layout.label_size * 0.14).max(2.0),
+                ink.with_alpha(if lit { 1.0 } else { 0.8 }),
+                FEATHER,
+            );
             drawing.labels.push(Label {
                 text: control.label.to_owned(),
                 x: placed.to.0
@@ -830,11 +838,19 @@ mod tests {
 
     #[test]
     fn a_button_the_drawing_cannot_show_rings_nothing_and_a_rebind_before_its_first_step_neither() {
-        let (console, _) = n64();
-        let z = CONSOLES[console as usize].control("lefttrigger").expect("Z");
-        for control in [z as i32, -1] {
+        let switch = crate::consoles::for_platform("switch");
+        let zl = CONSOLES[switch].control("lefttrigger").expect("ZL");
+        for control in [zl as i32, -1] {
             let mut drawing = Drawing::default();
-            build(&rebinding(control, 0), &mut drawing);
+            let scene = rebinding(control, 0);
+            let scene = Scene {
+                rebind: scene.rebind.map(|r| Rebinding {
+                    console: switch as u32,
+                    ..r
+                }),
+                ..scene
+            };
+            build(&scene, &mut drawing);
             assert!(
                 drawing.over.vertices.is_empty(),
                 "control {control} ringed something"

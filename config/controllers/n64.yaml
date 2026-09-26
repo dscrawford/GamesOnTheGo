@@ -1,7 +1,7 @@
 # Nintendo 64.
 #
-# Z is underneath the pad and the drawing is from the front, so it has
-# nowhere to point at. It is bound; it just cannot be shown.
+# Z is underneath the pad and the drawing is from the front; its circle is
+# on the grip the finger pressing it rests on.
 
 label: Nintendo 64
 
@@ -57,6 +57,7 @@ anchors:
   dpright: Right
   leftshoulder: L
   rightshoulder: R
+  lefttrigger: Z
   rightstick_up: C-Up
   rightstick_down: C-Down
   rightstick_left: C-Left
