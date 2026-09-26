@@ -12,6 +12,7 @@
   resvg,
   mesa,
   gotg,
+  gotg-killswitch,
   danstick,
   # Everything under config/: the controller descriptions, the theme, the icon
   # rules. From the repository root rather than src/ui, because what a pad
@@ -95,6 +96,8 @@ stdenvNoCC.mkDerivation {
       --prefix PATH : ${lib.makeBinPath [
         gotg
         danstick
+        # The bar over the picker, as over a game: gotg_ui/beside.py.
+        gotg-killswitch
       ]}
 
     # The launch-time controller check, as its own command. The client runs it

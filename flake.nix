@@ -129,7 +129,7 @@
           # makes a game run is already in src/client/lib and already tested,
           # and the copy nobody runs from a terminal is the one that rots.
           gotg-ui = pkgs.callPackage ./src/ui {
-            inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg;
+            inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg gotg-killswitch;
             inherit (danstick.packages.${pkgs.stdenv.hostPlatform.system}) danstick;
           };
           # The controller requirement, run against a real danstick daemon and
@@ -413,6 +413,7 @@
           uiPath = pkgs.lib.makeBinPath [
             gotgPkg
             danstickPkg
+            self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-killswitch
           ];
 
           # The picker and the controller check, from the working tree, for the

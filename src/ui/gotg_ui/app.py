@@ -19,7 +19,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 
 import pygame
 
-from . import around, config, devices, display, filters, keys, meter, pads, prepare, seat, trace
+from . import around, beside, config, devices, display, filters, keys, meter, pads, prepare, seat, trace
 from .art import ArtStore
 from .assign import KeyHold, Session, Watch, attend
 from .browser import SHELF, Browser
@@ -829,6 +829,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
         held=hush.refresh(),
     )
     danstick.connect()
+    # The overlay's bar over this window, as over a game: see beside.py.
+    overlay = beside.start(os.getpid())
     # And asked after again whenever the connection is gone -- see DaemonWatch
     # for why reconnecting alone was not enough.
     danstick_watch = DaemonWatch()
@@ -1555,5 +1557,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # grabbed GPU from a process that is about to stop existing -- nor the
     # controllers' keyboards, which are danstick's to hold from here on.
     hush.release()
+    # And the bar: the game gets its own, which knows its console.
+    beside.stop(overlay)
     pygame.quit()
     return chosen

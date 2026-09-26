@@ -65,7 +65,7 @@ extern "C" fn on_signal(_: libc::c_int) {
 
 const USAGE: &str =
     "usage: gotg-killswitch --pid <pid> [--platform P] [--hold-ms N] [--grace-ms N] [--poll-ms N]
-                       [--quiet] [--no-overlay]
+                       [--quiet] [--no-overlay] [--overlay-only]
 
 Watches every controller SDL can see. When both shoulders (or both
 triggers) and Start are held together for the hold time, the process
@@ -79,6 +79,9 @@ drawn for --platform (the generic pad without one).
 A bar comes down over the game while the hold runs, and while a
 controller is holding a button to join danstick -- unless --no-overlay
 says otherwise.
+
+--overlay-only is the bar and nothing else, for beside something that
+is not a game (the picker): no chord stops it and none rebinds.
 ";
 
 #[derive(Debug)]
@@ -92,6 +95,9 @@ struct Options {
     /// The game's platform, for which controller the rebind draws and which
     /// danstick layout it walks.
     platform: String,
+    /// The bar alone: no exit, no rebind. Beside the picker, which has its
+    /// own way out and no console to rebind for.
+    overlay_only: bool,
 }
 
 /// Digits only. A leading minus is refused rather than wrapped: "--hold-ms
@@ -114,6 +120,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         quiet: false,
         draw: true,
         platform: String::new(),
+        overlay_only: false,
     };
     let mut target = 0u64;
     let mut args = args.iter();
@@ -125,6 +132,10 @@ fn parse(args: &[String]) -> Result<Options, String> {
             }
             "--no-overlay" => {
                 options.draw = false;
+                continue;
+            }
+            "--overlay-only" => {
+                options.overlay_only = true;
                 continue;
             }
             "--platform" => {
@@ -459,7 +470,11 @@ fn run(options: &Options) -> i32 {
     }
     // Armed, and the log says so: a launch that promised a kill switch and a
     // launch whose watcher died on the first line must not look the same.
-    if !options.quiet {
+    if options.overlay_only {
+        if !options.quiet {
+            eprintln!("gotg-killswitch: the bar alone, beside {}", game.pid);
+        }
+    } else if !options.quiet {
         eprintln!(
             "gotg-killswitch: watching {}; both shoulders and Start, held {}ms",
             game.pid, options.hold_ms
@@ -517,7 +532,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
             if link.fd().is_none() {
                 pairing.room(None);
             }
-            if let Some(player) = rebind.due(clock) {
+            if let Some(player) = rebind.due(clock).filter(|_| !options.overlay_only) {
                 if !options.quiet {
                     eprintln!("gotg-killswitch: player {player}'s pad has no buttons yet; walking them");
                 }
@@ -538,6 +553,9 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         for watched in &mut pads.0 {
             // SAFETY: every watched pad is open.
             let input = unsafe { read_pad(watched.pad) };
+            if options.overlay_only {
+                continue;
+            }
             fire |= watched.state.step(input, now);
             if watched.rebind.step(input, now) && options.draw {
                 ask_for_rebind(
@@ -753,7 +771,8 @@ mod tests {
             "--grace-ms",
             "10",
         ]));
-        assert!(options.is_ok_and(|o| o.quiet && !o.draw && o.grace_ms == 10));
+        assert!(options.is_ok_and(|o| o.quiet && !o.draw && o.grace_ms == 10 && !o.overlay_only));
+        assert!(parse(&args(&["--pid", "7", "--overlay-only"])).is_ok_and(|o| o.overlay_only && o.draw));
         assert!(parse(&args(&["--pid", "7", "--bogus"])).is_err());
     }
 
