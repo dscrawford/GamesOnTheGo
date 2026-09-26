@@ -217,6 +217,7 @@ pub fn apply(event: &Event, pairing: &mut Pairing, now: f64, icon_of: &mut dyn F
         // somebody is still holding, and clearing everything on one was the
         // flash back to an empty seat in the picker.
         Event::State { seated } => {
+            pairing.room(Some(seated.len()));
             for seat in seated {
                 pairing.seated(&seat.node, &seat.name, seat.player);
             }

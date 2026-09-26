@@ -59,6 +59,8 @@ pub struct Scene<'a> {
     pub panel_height: f32,
     /// A controller being rebound, if one is.
     pub rebind: Option<Rebinding>,
+    /// danstick has nobody seated and nobody joining.
+    pub nobody: bool,
 }
 
 /// A controller's drawing, centred at (`cx`, `cy`) and `height` tall: shown
@@ -608,6 +610,39 @@ fn build_rebind(scene: &Scene, rebind: &Rebinding, top: f32, drawing: &mut Drawi
     }
 }
 
+/// What the bar says to a room with no controller in it.
+pub const NOBODY: &str = "No controllers connected";
+pub const NOBODY_HOW: &str = "Hold a button on a controller to join";
+
+/// A game with nobody seated: said, in a card as wide as the words, until
+/// somebody's hold starts -- which is the joining card taking its place.
+fn build_nobody(scene: &Scene, top: f32, drawing: &mut Drawing) {
+    let bar = scene.bar_height;
+    let cx = scene.width as f32 / 2.0;
+    let (big, small) = (bar * 0.3, bar * 0.19);
+    let wide = text::width(NOBODY, big).max(text::width(NOBODY_HOW, small));
+    card(
+        &mut drawing.under,
+        cx,
+        top,
+        (wide + bar).min(scene.width as f32),
+        bar,
+    );
+    for (text, size, y, colour) in [
+        (NOBODY, big, 0.4, theme::TEXT),
+        (NOBODY_HOW, small, 0.72, theme::TEXT_DIM),
+    ] {
+        drawing.labels.push(Label {
+            text: text.to_owned(),
+            x: cx,
+            y: top + bar * y,
+            size,
+            colour: Colour::rgb(colour, 1.0),
+            align: Align::Centre,
+        });
+    }
+}
+
 /// Whether control `id` of the console is down on the seat being rebound.
 fn pressed(rebind: &Rebinding, id: usize) -> bool {
     id < 64 && rebind.pressed & (1 << id) != 0
@@ -629,8 +664,12 @@ pub fn build(scene: &Scene, drawing: &mut Drawing) {
     let bar = scene.bar_height;
     let width = scene.width as f32;
     let top = -bar * (1.0 - scene.position as f32);
-    let mesh = &mut drawing.under;
     let count = scene.joined.len() + scene.fractions.len();
+    if scene.nobody && count == 0 && scene.exit_progress <= 0.0 {
+        build_nobody(scene, top, drawing);
+        return;
+    }
+    let mesh = &mut drawing.under;
     let card_width = if scene.exit_progress > 0.0 {
         exit_width(bar)
     } else {
@@ -963,6 +1002,32 @@ mod tests {
         let texts: Vec<&str> = drawing.labels.iter().map(|l| l.text.as_str()).collect();
         assert!(texts.contains(&"C-up"), "{texts:?}");
         assert!(!texts.iter().any(|t| t.starts_with("Control stick")), "{texts:?}");
+    }
+
+    #[test]
+    fn a_room_with_nobody_seated_is_told_so_until_somebody_joins() {
+        let said = |scene: &Scene| {
+            let mut drawing = Drawing::default();
+            build(scene, &mut drawing);
+            drawing.labels.iter().any(|label| label.text == NOBODY)
+        };
+        let nobody = Scene {
+            nobody: true,
+            ..down(0.0)
+        };
+        assert!(said(&nobody));
+        let joining = Scene {
+            fractions: &[0.4],
+            players: &[1],
+            hold_icons: &[0],
+            ..nobody.clone()
+        };
+        assert!(!said(&joining), "a hold is the joining card instead");
+        assert!(!said(&Scene { ..down(0.5) }), "the exit outranks it");
+        assert!(!said(&Scene {
+            nobody: false,
+            ..down(0.0)
+        }));
     }
 
     #[test]

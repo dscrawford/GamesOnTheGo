@@ -514,6 +514,9 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         if options.draw {
             link.tick(clock);
             link.pump(&mut pairing, &mut rebind, clock);
+            if link.fd().is_none() {
+                pairing.room(None);
+            }
             if let Some(player) = rebind.due(clock) {
                 if !options.quiet {
                     eprintln!("gotg-killswitch: player {player}'s pad has no buttons yet; walking them");
@@ -573,7 +576,11 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         // and less often.
         let rebinding = rebind.view(clock);
         bar.want(
-            options.draw && (exit_progress > 0.0 || pairing.busy(clock) || rebinding.is_some()),
+            options.draw
+                && (exit_progress > 0.0
+                    || pairing.busy(clock)
+                    || pairing.nobody(clock)
+                    || rebinding.is_some()),
             clock,
         );
         let showing = !bar.gone(clock);
@@ -584,8 +591,9 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
             // A rebind panel shows what is pressed, so it is redrawn at the
             // frame rate for as long as it is down.
             moving = bar.moving(clock) || !holds.is_empty() || exit_progress > 0.0 || rebinding.is_some();
-            let frame = Frame::pack(bar.position(clock), exit_progress, &holds, &joined).with_rebind(
-                rebinding.map(|view| {
+            let frame = Frame::pack(bar.position(clock), exit_progress, &holds, &joined)
+                .with_nobody(pairing.nobody(clock))
+                .with_rebind(rebinding.map(|view| {
                     // danstick's word while it walks; the seat's clone after.
                     let held = view.held.clone().unwrap_or_else(|| {
                         pads.0
@@ -596,8 +604,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                             .unwrap_or_default()
                     });
                     drawn(&view, &held, console, console_index)
-                }),
-            );
+                }));
             painter.ensure(clock);
             painter.send(&frame, clock);
         } else if painter.open() {

@@ -66,6 +66,9 @@ pub struct Pairing {
     joined: Vec<Joined>,
     /// The length danstick was asked for, to carry fills between readings.
     hold_seconds: f64,
+    /// How many seats danstick's last `state` had; None until one arrives,
+    /// and again when danstick goes, since then nobody knows.
+    room: Option<usize>,
 }
 
 /// A key cut to [`KEY_MAX`] bytes, on a character boundary.
@@ -90,7 +93,20 @@ impl Pairing {
             holds: Vec::with_capacity(HOLDS_MAX),
             joined: Vec::with_capacity(JOINED_MAX),
             hold_seconds,
+            room: None,
         }
+    }
+
+    /// A `state` said this many seats are taken; None for no daemon.
+    pub fn room(&mut self, seated: Option<usize>) {
+        self.room = seated;
+    }
+
+    /// Nobody is seated and nobody is joining: a game with no controller,
+    /// which the bar says rather than leaving the room to guess why nothing
+    /// moves.
+    pub fn nobody(&mut self, now: f64) -> bool {
+        self.room == Some(0) && !self.busy(now)
     }
 
     /// One `progress` event. `node` and `name` may be empty; `player` is 0
@@ -454,6 +470,21 @@ mod tests {
         p.progress("/dev/input/event9", "", 0.5, 1, 0, 10.0);
         p.claim("", "", 0, 0, 10.0);
         assert!(p.now(10.0).is_empty() && p.joined(10.0).is_empty());
+    }
+
+    #[test]
+    fn nobody_is_said_only_when_danstick_has_said_so_and_nobody_is_joining() {
+        let mut p = fresh();
+        assert!(!p.nobody(0.0), "no daemon: nothing known");
+        p.room(Some(0));
+        assert!(p.nobody(0.0));
+        p.progress("/dev/input/event9", "Pad", 0.2, 1, 0, 0.0);
+        assert!(!p.nobody(0.1), "somebody is joining");
+        p.room(Some(1));
+        p.seated("/dev/input/event9", "Pad", 1);
+        assert!(!p.nobody(0.2));
+        p.room(None);
+        assert!(!p.nobody(0.2), "danstick gone: unknown, not empty");
     }
 
     #[test]

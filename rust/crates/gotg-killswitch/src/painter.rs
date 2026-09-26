@@ -232,6 +232,7 @@ pub fn paint() -> i32 {
         let scene = Scene {
             panel_height,
             rebind: frame.rebind,
+            nobody: frame.nobody,
             width,
             bar_height,
             position: f64::from(frame.position),

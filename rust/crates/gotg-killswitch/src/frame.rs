@@ -16,9 +16,9 @@ use crate::pairing::{HOLDS_MAX, Hold, JOINED_MAX};
 /// "GOSV", so a torn or foreign read is refused.
 pub const MAGIC: u32 = 0x5653_4f47;
 
-/// Bytes on the pipe: five words, the five arrays a word per entry, then
+/// Bytes on the pipe: six words, the five arrays a word per entry, then
 /// the rebind's thirteen words.
-pub const SIZE: usize = 4 * (5 + HOLDS_MAX * 3 + JOINED_MAX * 2 + REBIND_WORDS);
+pub const SIZE: usize = 4 * (6 + HOLDS_MAX * 3 + JOINED_MAX * 2 + REBIND_WORDS);
 
 const REBIND_WORDS: usize = 13;
 
@@ -59,6 +59,8 @@ pub struct Frame {
     joined_count: usize,
     /// On the wire as player 0 when there is none.
     pub rebind: Option<Rebinding>,
+    /// danstick has nobody seated and nobody joining.
+    pub nobody: bool,
 }
 
 impl Frame {
@@ -82,6 +84,11 @@ impl Frame {
             frame.joined_icon[i] = icon;
         }
         frame
+    }
+
+    /// This frame, saying whether nobody is seated.
+    pub fn with_nobody(self, nobody: bool) -> Self {
+        Self { nobody, ..self }
     }
 
     /// This frame, with a rebind on it.
@@ -127,6 +134,7 @@ impl Frame {
         put(self.exit_progress.to_ne_bytes());
         put((self.hold_count as u32).to_ne_bytes());
         put((self.joined_count as u32).to_ne_bytes());
+        put(u32::from(self.nobody).to_ne_bytes());
         self.hold_fraction
             .iter()
             .for_each(|value| put(value.to_ne_bytes()));
@@ -174,7 +182,7 @@ impl Frame {
         if u32::from_ne_bytes(word(0)) != MAGIC || hold_count > HOLDS_MAX || joined_count > JOINED_MAX {
             return None;
         }
-        let holds = 5;
+        let holds = 6;
         let joined = holds + 3 * HOLDS_MAX;
         let rebind = joined + 2 * JOINED_MAX;
         let player = i32::from_ne_bytes(word(rebind));
@@ -200,6 +208,7 @@ impl Frame {
                     }
                 }),
             }),
+            nobody: u32::from_ne_bytes(word(5)) != 0,
             position: f32::from_ne_bytes(word(1)),
             exit_progress: f32::from_ne_bytes(word(2)),
             hold_fraction: std::array::from_fn(|i| f32::from_ne_bytes(word(holds + i))),
@@ -264,6 +273,9 @@ mod tests {
         );
         let none = Frame::pack(1.0, 0.0, &[], &[]);
         assert_eq!(Frame::decode(&none.encode()).map(|f| f.rebind), Some(None));
+        assert_eq!(Frame::decode(&none.encode()).map(|f| f.nobody), Some(false));
+        let nobody = none.with_nobody(true);
+        assert_eq!(Frame::decode(&nobody.encode()).map(|f| f.nobody), Some(true));
         let wild = Frame {
             rebind: Some(Rebinding {
                 sticks: [f32::NAN, 7.0, f32::NEG_INFINITY, -0.5],
