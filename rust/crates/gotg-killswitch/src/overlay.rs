@@ -52,8 +52,12 @@ use std::collections::HashMap;
 
 use crate::consoles;
 use crate::icons;
-use crate::scene::{Drawing, Sprite, bar_height, panel_height};
+use crate::scene::{Align, Drawing, Label, Sprite, bar_height, panel_height};
 use crate::shapes::{Colour, Mesh, Vertex, wedge};
+use crate::text;
+
+/// Lines of words kept as textures before the cache starts over.
+const WORDS_KEPT: usize = 128;
 
 /// Which way in was taken.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -425,6 +429,10 @@ pub struct Overlay {
     /// rasterised once. A pad's is a white silhouette, tinted per seat; a
     /// console's (the rebind's, `true`) is in its own colours.
     textures: HashMap<(u8, u32, bool), (*mut SDL_Texture, u32)>,
+    /// Each line of words at each size, white coverage to be tinted, and its
+    /// width and height. Bounded: a label that changes every frame (a count)
+    /// must not grow this for the length of a game.
+    words: HashMap<(String, u32), (*mut SDL_Texture, u32, u32)>,
     /// Scratch for a reveal's triangles, kept so a frame allocates nothing.
     swept: Vec<[f32; 2]>,
     vertices: Vec<SDL_Vertex>,
@@ -485,6 +493,7 @@ impl Overlay {
                 layer: None,
                 x11: None,
                 textures: HashMap::new(),
+                words: HashMap::new(),
                 swept: Vec::new(),
                 vertices: Vec::new(),
             };
@@ -727,6 +736,77 @@ impl Overlay {
         Some((texture, width))
     }
 
+    /// A line of words as a texture, made the first time it is asked for.
+    fn words_texture(&mut self, text: &str, size: u32) -> Option<(*mut SDL_Texture, u32, u32)> {
+        let key = (text.to_owned(), size);
+        if let Some(&found) = self.words.get(&key) {
+            return Some(found);
+        }
+        if self.words.len() >= WORDS_KEPT {
+            // SAFETY: each texture is ours, destroyed once, before the map forgets it.
+            for (texture, _, _) in self.words.values() {
+                unsafe { SDL_DestroyTexture(*texture) };
+            }
+            self.words.clear();
+        }
+        let mask = text::render(text, size as f32);
+        if mask.width == 0 {
+            return None;
+        }
+        let pixels: Vec<u8> = mask.coverage.iter().flat_map(|&c| [255, 255, 255, c]).collect();
+        // SAFETY: the renderer is live; the pixels are width x height RGBA,
+        // width * 4 bytes a row, and outlive the upload.
+        let texture = unsafe {
+            let texture = SDL_CreateTexture(
+                self.renderer,
+                SDL_PIXELFORMAT_RGBA32,
+                SDL_TEXTUREACCESS_STATIC,
+                mask.width as c_int,
+                mask.height as c_int,
+            );
+            if texture.is_null() {
+                return None;
+            }
+            SDL_UpdateTexture(
+                texture,
+                std::ptr::null(),
+                pixels.as_ptr().cast(),
+                (mask.width * 4) as c_int,
+            );
+            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+            texture
+        };
+        self.words.insert(key, (texture, mask.width, mask.height));
+        Some((texture, mask.width, mask.height))
+    }
+
+    fn draw_label(&mut self, label: &Label) {
+        let size = label.size.round().max(4.0) as u32;
+        let Some((texture, w, h)) = self.words_texture(&label.text, size) else {
+            return;
+        };
+        let (w, h) = (w as f32, h as f32);
+        let left = match label.align {
+            Align::Left => label.x,
+            Align::Centre => label.x - w / 2.0,
+            Align::Right => label.x - w,
+        };
+        let byte = |channel: f32| (channel.clamp(0.0, 1.0) * 255.0).round() as u8;
+        let c = label.colour;
+        let rect = SDL_FRect {
+            x: left.round(),
+            y: (label.y - h / 2.0).round(),
+            w,
+            h,
+        };
+        // SAFETY: the renderer and texture are live; the rect is a local.
+        unsafe {
+            SDL_SetTextureColorMod(texture, byte(c.r), byte(c.g), byte(c.b));
+            SDL_SetTextureAlphaMod(texture, byte(c.a));
+            SDL_RenderTexture(self.renderer, texture, std::ptr::null(), &rect);
+        }
+    }
+
     /// One pad's drawing: the dim copy where it is not yet revealed, then the
     /// swept part in its seat's colour.
     fn draw_sprite(&mut self, sprite: &Sprite) {
@@ -801,6 +881,9 @@ impl Overlay {
             self.draw_sprite(sprite);
         }
         self.draw_mesh(&drawing.over);
+        for label in &drawing.labels {
+            self.draw_label(label);
+        }
         // SAFETY: the renderer is live.
         unsafe { SDL_RenderPresent(self.renderer) };
         if self.kind == Kind::X11
@@ -819,6 +902,9 @@ impl Drop for Overlay {
         // renderer, the renderer before its window.
         unsafe {
             for (texture, _) in self.textures.values() {
+                SDL_DestroyTexture(*texture);
+            }
+            for (texture, _, _) in self.words.values() {
                 SDL_DestroyTexture(*texture);
             }
             if !self.renderer.is_null() {

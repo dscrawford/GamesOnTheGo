@@ -19,6 +19,7 @@ pub mod procstat;
 pub mod rebind;
 pub mod scene;
 pub mod shapes;
+pub mod text;
 
 /// config/theme.yaml's colours, generated at build time.
 pub mod theme {

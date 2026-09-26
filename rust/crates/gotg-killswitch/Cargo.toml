@@ -23,6 +23,9 @@ x11rb = { version = "0.14", features = ["shape"] }
 # No text or system fonts: the drawings have none, and fontdb would scan the
 # machine's fonts at start.
 resvg = { version = "0.48", default-features = false }
+# The overlay's words, from one bundled face (GOTG_FONT) and nothing else:
+# no system font scan, no shaping stack for a handful of labels.
+fontdue = "0.9"
 
 [build-dependencies]
 # The palette comes from config/theme.yaml, the file the picker reads.

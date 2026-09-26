@@ -210,6 +210,7 @@
             iconArt = ./src/ui/assets/icons;
             controllerArt = ./src/ui/assets/controllers;
             controllerConfig = ./config/controllers;
+            font = "${pkgs.freefont_ttf}/share/fonts/truetype/FreeSansBold.ttf";
           };
 
           # What `gotg qa` runs a game inside: headless compositor, recorders,

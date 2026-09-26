@@ -16,6 +16,9 @@
   # config/controllers: each console's layout, drawing and anchors, for the
   # in-game rebind.
   controllerConfig,
+  # The picker's own face (pygame's default is FreeSans Bold), for the
+  # overlay's words: a label on the controller, "No controllers connected".
+  font,
 }:
 
 let
@@ -37,6 +40,7 @@ rustPlatform.buildRustPackage {
   GOTG_ICON_ART = iconArt;
   GOTG_CONTROLLER_ART = controllerArt;
   GOTG_CONTROLLER_CONFIG = controllerConfig;
+  GOTG_FONT = font;
 
   nativeBuildInputs = [ pkg-config ];
   # SDL for the pads and the window; libwayland for layer-shell on SDL's own

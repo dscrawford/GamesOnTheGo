@@ -14,6 +14,7 @@ pkgs.rustPlatform.buildRustPackage {
   GOTG_ICON_ART = ../../src/ui/assets/icons;
   GOTG_CONTROLLER_ART = ../../src/ui/assets/controllers;
   GOTG_CONTROLLER_CONFIG = ../../config/controllers;
+  GOTG_FONT = "${pkgs.freefont_ttf}/share/fonts/truetype/FreeSansBold.ttf";
   nativeBuildInputs = [
     pkgs.pkg-config
     pkgs.clippy

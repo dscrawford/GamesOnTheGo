@@ -76,13 +76,34 @@ pub struct Sprite {
     pub picture: bool,
 }
 
-/// A frame: flat shapes under the drawings, the drawings, and what goes on
-/// top of them. Reused from frame to frame, so drawing allocates nothing.
+/// Where a label sits against its point: its left edge, its middle, or its
+/// right edge there; vertically it is always centred on the point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Align {
+    Left,
+    Centre,
+    Right,
+}
+
+/// A line of words, drawn last, over everything else.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Label {
+    pub text: String,
+    pub x: f32,
+    pub y: f32,
+    pub size: f32,
+    pub colour: Colour,
+    pub align: Align,
+}
+
+/// A frame: flat shapes under the drawings, the drawings, what goes on top
+/// of them, and the words. Reused from frame to frame.
 #[derive(Debug, Clone, Default)]
 pub struct Drawing {
     pub under: Mesh,
     pub sprites: Vec<Sprite>,
     pub over: Mesh,
+    pub labels: Vec<Label>,
 }
 
 impl Drawing {
@@ -90,6 +111,7 @@ impl Drawing {
         self.under.clear();
         self.sprites.clear();
         self.over.clear();
+        self.labels.clear();
     }
 }
 
@@ -272,6 +294,22 @@ fn build_rebind(scene: &Scene, rebind: &Rebinding, top: f32, drawing: &mut Drawi
             .over
             .arc(x, y, radius, radius * 0.28, 0.0, 1.0, colour, FEATHER);
     }
+    // What is being asked for, in words, under the drawing: the button's
+    // name as the console config says it, or what is happening instead.
+    let said = match (rebind.ended, asked) {
+        (1, _) => "Saved".to_owned(),
+        (2, _) => "Nothing changed".to_owned(),
+        (_, Some(control)) => format!("Press {}", control.label),
+        (_, None) => "Getting ready".to_owned(),
+    };
+    drawing.labels.push(Label {
+        text: said,
+        x: cx,
+        y: top + panel * 0.8,
+        size: panel * 0.065,
+        colour: Colour::rgb(theme::TEXT, 1.0),
+        align: Align::Centre,
+    });
     // One dot a step, the ones done in the seat's colour.
     let dots_y = top + panel * 0.9;
     let total = rebind.total.clamp(0, 40);
@@ -518,6 +556,18 @@ mod tests {
             near(highest_y(&drawing.under), bar_height(800), 2.0),
             "and only the bar"
         );
+    }
+
+    #[test]
+    fn the_button_being_asked_for_is_named_in_words() {
+        let (console, a) = n64();
+        let label = CONSOLES[console as usize].controls[a].label;
+        let mut drawing = Drawing::default();
+        build(&rebinding(a as i32, 0), &mut drawing);
+        let said: Vec<&str> = drawing.labels.iter().map(|l| l.text.as_str()).collect();
+        assert!(said.contains(&format!("Press {label}").as_str()), "{said:?}");
+        build(&rebinding(a as i32, 1), &mut drawing);
+        assert!(drawing.labels.iter().any(|l| l.text == "Saved"));
     }
 
     #[test]
