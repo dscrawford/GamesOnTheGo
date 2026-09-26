@@ -19,7 +19,9 @@
 
 use crate::consoles::CONSOLES;
 use crate::frame::Rebinding;
+use crate::leaders;
 use crate::shapes::{Colour, Mesh};
+use crate::text;
 use crate::theme;
 
 /// A pixel and a bit: wider reads as blur, narrower as the staircase back.
@@ -102,6 +104,8 @@ pub struct Label {
 pub struct Drawing {
     pub under: Mesh,
     pub sprites: Vec<Sprite>,
+    /// Leader lines: over the drawing they point into, under its ring.
+    pub lines: Mesh,
     pub over: Mesh,
     pub labels: Vec<Label>,
 }
@@ -110,6 +114,7 @@ impl Drawing {
     fn clear(&mut self) {
         self.under.clear();
         self.sprites.clear();
+        self.lines.clear();
         self.over.clear();
         self.labels.clear();
     }
@@ -237,14 +242,77 @@ fn tick(over: &mut Mesh, cx: f32, cy: f32, radius: f32, stroke: f32, colour: Col
 
 /// Where a rebind's parts go on a panel `panel` tall at `top`: the drawing,
 /// centred, and its height and width.
-fn rebind_layout(scene: &Scene, rebind: &Rebinding, top: f32) -> (f32, f32, f32, f32) {
+/// Where the labels' rail may reach down to, and where the words under the
+/// drawing sit, as fractions of the panel.
+const RAIL_BOTTOM: f32 = 0.74;
+const SAID_AT: f32 = 0.82;
+
+/// How the rebind panel is laid out: the drawing's centre, height and width,
+/// the labels' size, and how wide the card is to hold drawing and labels.
+struct RebindLayout {
+    cx: f32,
+    cy: f32,
+    height: f32,
+    drawn_width: f32,
+    label_size: f32,
+    card_width: f32,
+}
+
+fn rebind_layout(scene: &Scene, rebind: &Rebinding, top: f32) -> RebindLayout {
     let panel = scene.panel_height;
-    let aspect = CONSOLES
-        .get(rebind.console as usize)
-        .map_or(1.6, |console| console.aspect);
-    let height = (panel * 0.72).min(scene.width as f32 * 0.8 / aspect);
-    let (cx, cy) = (scene.width as f32 / 2.0, top + panel * 0.44);
-    (cx, cy, height, height * aspect)
+    let screen = scene.width as f32;
+    let console = CONSOLES.get(rebind.console as usize);
+    let aspect = console.map_or(1.6, |console| console.aspect);
+    let label_size = panel * 0.045;
+    // The longest label a rail holds sets how far the card reaches past the
+    // drawing on each side.
+    let longest = console
+        .map(|console| {
+            console
+                .controls
+                .iter()
+                .filter(|c| c.anchor.is_some())
+                .map(|c| text::width(c.label, label_size))
+                .fold(0.0, f32::max)
+        })
+        .unwrap_or(0.0);
+    let beside = |drawn: f32| drawn * leaders::GUTTER_FRACTION + longest + label_size * 1.5;
+    // The labels may reach 18% of the drawing's height past it at either end
+    // (leaders::place's band); that whole band sits between the card's top
+    // and the words under it, so a pad with a long rail cannot run into them.
+    let band_top = top + panel * 0.05;
+    let band_bottom = top + panel * RAIL_BOTTOM;
+    let mut height = (panel * 0.6).min((band_bottom - band_top) / 1.36);
+    let mut drawn_width = height * aspect;
+    let most = screen * 0.96;
+    if drawn_width + 2.0 * beside(drawn_width) > most {
+        // Too wide for the screen: a smaller drawing, labels kept readable.
+        drawn_width = ((most - 2.0 * (longest + label_size * 1.5)) / (1.0 + 2.0 * leaders::GUTTER_FRACTION))
+            .max(panel * 0.2);
+        height = drawn_width / aspect;
+    }
+    RebindLayout {
+        cx: screen / 2.0,
+        cy: band_top + height * 0.18 + height / 2.0,
+        height,
+        drawn_width,
+        label_size,
+        card_width: (drawn_width + 2.0 * beside(drawn_width)).min(screen),
+    }
+}
+
+/// Which rail a control's label goes on when its half would be wrong: the
+/// shoulders and triggers sit near the top middle, and a midline split would
+/// run their leaders across the pad -- the picker pins them the same way.
+fn pinned_side(id: &str) -> Option<leaders::Side> {
+    let shoulder = id.ends_with("shoulder") || id.ends_with("trigger");
+    if shoulder && id.starts_with("left") {
+        Some(leaders::Side::Left)
+    } else if (shoulder && id.starts_with("right")) || id.starts_with("rightstick") {
+        Some(leaders::Side::Right)
+    } else {
+        None
+    }
 }
 
 /// A controller being rebound: its drawing, the button being asked for
@@ -254,12 +322,11 @@ fn build_rebind(scene: &Scene, rebind: &Rebinding, top: f32, drawing: &mut Drawi
     let panel = scene.panel_height;
     let width = scene.width as f32;
     let colour = player_colour(rebind.player);
-    let (cx, cy, height, drawn_width) = rebind_layout(scene, rebind, top);
-    // The drawing, the finish ring on its right and the same room on its
-    // left, and the row of dots, whichever is wider.
+    let layout = rebind_layout(scene, rebind, top);
+    let (cx, cy, height, drawn_width) = (layout.cx, layout.cy, layout.height, layout.drawn_width);
     let total = rebind.total.clamp(0, 40);
     let dots = panel * 0.045 * total as f32;
-    let card_width = (drawn_width + panel * 0.46).max(dots + panel * 0.2).min(width);
+    let card_width = layout.card_width.max(dots + panel * 0.2).min(width);
     card(&mut drawing.under, cx, top, card_width, panel);
     drawing.sprites.push(Sprite {
         icon: u8::try_from(rebind.console).unwrap_or(0),
@@ -281,6 +348,68 @@ fn build_rebind(scene: &Scene, rebind: &Rebinding, top: f32, drawing: &mut Drawi
     let asked = usize::try_from(rebind.control)
         .ok()
         .and_then(|at| console?.controls.get(at));
+    // Every control the drawing shows, labelled down a rail on its side with
+    // a line to its button -- the picker's controller screen -- the one being
+    // asked for lit in the seat's colour.
+    if let Some(console) = console {
+        let at = |(u, v): (f32, f32)| {
+            (
+                cx - drawn_width / 2.0 + u * drawn_width,
+                cy - height / 2.0 + v * height,
+            )
+        };
+        let anchors: Vec<leaders::Anchor> = console
+            .controls
+            .iter()
+            .enumerate()
+            .filter_map(|(id, control)| {
+                let (x, y) = at(control.anchor?);
+                Some(leaders::Anchor { id, x, y })
+            })
+            .collect();
+        let label_height = layout.label_size * 1.3;
+        let diagram = (cx - drawn_width / 2.0, cy - height / 2.0, drawn_width, height);
+        let pinned = |id: usize| pinned_side(console.controls[id].id);
+        for placed in leaders::place(&anchors, diagram, label_height, &pinned) {
+            let control = console.controls[placed.anchor.id];
+            let lit = rebind.ended == 0 && usize::try_from(rebind.control).ok() == Some(placed.anchor.id);
+            let ink = if lit {
+                colour
+            } else {
+                Colour::rgb(theme::TEXT_DIM, 0.9)
+            };
+            drawing.lines.line(
+                placed.from.0,
+                placed.from.1,
+                placed.to.0,
+                placed.to.1,
+                if lit { 2.5 } else { 1.25 },
+                ink.with_alpha(if lit { 1.0 } else { 0.55 }),
+                FEATHER,
+            );
+            drawing.labels.push(Label {
+                text: control.label.to_owned(),
+                x: placed.to.0
+                    + if placed.side == leaders::Side::Left {
+                        -6.0
+                    } else {
+                        6.0
+                    },
+                y: placed.to.1,
+                size: layout.label_size,
+                colour: if lit {
+                    colour
+                } else {
+                    Colour::rgb(theme::TEXT_DIM, 1.0)
+                },
+                align: if placed.side == leaders::Side::Left {
+                    Align::Right
+                } else {
+                    Align::Left
+                },
+            });
+        }
+    }
     if rebind.ended == 0
         && let Some((u, v)) = asked.and_then(|control| control.anchor)
     {
@@ -302,11 +431,14 @@ fn build_rebind(scene: &Scene, rebind: &Rebinding, top: f32, drawing: &mut Drawi
         (_, Some(control)) => format!("Press {}", control.label),
         (_, None) => "Getting ready".to_owned(),
     };
+    let said_size = panel * 0.06;
+    let said_y = top + panel * SAID_AT;
+    let said_width = text::width(&said, said_size);
     drawing.labels.push(Label {
         text: said,
         x: cx,
-        y: top + panel * 0.8,
-        size: panel * 0.065,
+        y: said_y,
+        size: said_size,
         colour: Colour::rgb(theme::TEXT, 1.0),
         align: Align::Centre,
     });
@@ -325,9 +457,9 @@ fn build_rebind(scene: &Scene, rebind: &Rebinding, top: f32, drawing: &mut Drawi
         };
         drawing.under.disc(x, dots_y, step * 0.28, dot, FEATHER);
     }
-    // The early finish: a ring to the right of the drawing, filling while the
-    // hold runs, as the wizard draws it at the gate.
-    let (fx, fy, fr) = (cx + drawn_width / 2.0 + panel * 0.1, cy, panel * 0.06);
+    // The early finish: a ring beside the words, filling while the hold that
+    // ends the walk runs, as the wizard draws it at the gate.
+    let (fx, fy, fr) = (cx + said_width / 2.0 + said_size * 1.2, said_y, said_size * 0.55);
     if rebind.finish > 0.0 && rebind.ended == 0 {
         drawing
             .over
@@ -571,6 +703,45 @@ mod tests {
     }
 
     #[test]
+    fn every_label_stays_above_the_words_under_the_drawing() {
+        // A GameCube pad has eleven labels down one side: its rail ran into
+        // "Press D-pad up" and the finish ring beside it.
+        for platform in ["n64", "gamecube", "switch", "snes"] {
+            let console = crate::consoles::for_platform(platform);
+            let mut drawing = Drawing::default();
+            build(
+                &Scene {
+                    rebind: Some(Rebinding {
+                        player: 1,
+                        console: console as u32,
+                        control: 0,
+                        index: 0,
+                        total: 14,
+                        finish: 0.0,
+                        ended: 0,
+                    }),
+                    ..rebinding(0, 0)
+                },
+                &mut drawing,
+            );
+            let said = drawing
+                .labels
+                .iter()
+                .find(|l| l.text.starts_with("Press"))
+                .expect("words");
+            for label in drawing.labels.iter().filter(|l| l.align != Align::Centre) {
+                assert!(
+                    label.y + label.size / 2.0 < said.y - said.size / 2.0,
+                    "{platform}: {} at {} runs into the words at {}",
+                    label.text,
+                    label.y,
+                    said.y
+                );
+            }
+        }
+    }
+
+    #[test]
     fn a_kept_rebind_ends_on_a_tick_and_rings_no_button() {
         let (_, a) = n64();
         let mut walking = Drawing::default();
@@ -582,10 +753,10 @@ mod tests {
         assert!(!kept.over.vertices.is_empty(), "a tick");
         assert!(dropped.over.vertices.is_empty(), "nothing kept, nothing ticked");
         let ring_at =
-            |d: &Drawing| d.over.vertices.iter().map(|p| p.x).sum::<f32>() / d.over.vertices.len() as f32;
+            |d: &Drawing| d.over.vertices.iter().map(|p| p.y).sum::<f32>() / d.over.vertices.len() as f32;
         assert!(
             ring_at(&kept) > ring_at(&walking) + 50.0,
-            "the tick sits beside the drawing, not on A"
+            "the tick sits by the words under the drawing, not on A"
         );
     }
 

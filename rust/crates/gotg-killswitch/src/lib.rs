@@ -11,6 +11,7 @@ pub mod events;
 pub mod frame;
 pub mod icons;
 pub mod killswitch;
+pub mod leaders;
 pub mod overlay;
 pub mod padlink;
 pub mod painter;

@@ -880,6 +880,7 @@ impl Overlay {
         for sprite in &drawing.sprites {
             self.draw_sprite(sprite);
         }
+        self.draw_mesh(&drawing.lines);
         self.draw_mesh(&drawing.over);
         for label in &drawing.labels {
             self.draw_label(label);

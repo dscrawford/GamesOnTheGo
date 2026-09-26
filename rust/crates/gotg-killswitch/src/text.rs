@@ -33,6 +33,20 @@ pub struct Mask {
     pub coverage: Vec<u8>,
 }
 
+/// How wide `text` is at `px`, without drawing it: what a layout needs to
+/// size a card around its labels.
+pub fn width(text: &str, px: f32) -> f32 {
+    let text = text.replace(['\n', '\r'], " ");
+    let mut layout = Layout::new(CoordinateSystem::PositiveYDown);
+    layout.reset(&LayoutSettings::default());
+    layout.append(&[font()], &TextStyle::new(&text, px.clamp(4.0, 400.0), 0));
+    layout
+        .glyphs()
+        .iter()
+        .map(|g| g.x + g.width as f32)
+        .fold(0.0, f32::max)
+}
+
 /// `text` set `px` pixels tall, on one line. Newlines are not lines here: a
 /// label is one line, and a caller that wants two asks twice.
 pub fn render(text: &str, px: f32) -> Mask {
@@ -106,6 +120,14 @@ mod tests {
         let long = render("A (bottom face)", 32.0);
         assert!(long.width > short.width * 3);
         assert!(render("A", 64.0).height > short.height);
+    }
+
+    #[test]
+    fn a_measured_width_is_the_drawn_width() {
+        for text in ["A", "C-up", "Left shoulder (top left)"] {
+            let drawn = render(text, 24.0).width as f32;
+            assert!((width(text, 24.0) - drawn).abs() <= 1.0, "{text}");
+        }
     }
 
     #[test]
