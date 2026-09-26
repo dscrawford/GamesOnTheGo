@@ -28,6 +28,10 @@ pub struct Console {
     pub artwork: usize,
     /// The drawing's width over its height.
     pub aspect: f32,
+    /// Each stick's gate, left then right: `octagon`, `circle`, or `buttons`
+    /// for a group bound as a stick that is four buttons in the hand (an
+    /// N64's C buttons), which is drawn as four labels rather than a ring.
+    pub gates: [&'static str; 2],
     pub controls: &'static [Control],
 }
 

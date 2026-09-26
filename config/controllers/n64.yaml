@@ -61,3 +61,7 @@ anchors:
   rightstick_down: C-Down
   rightstick_left: C-Left
   rightstick_right: C-Right
+  leftstick_left: X-Axis/Lo
+  leftstick_right: X-Axis/Hi
+  leftstick_up: Y-Axis/Lo
+  leftstick_down: Y-Axis/Hi

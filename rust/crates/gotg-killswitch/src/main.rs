@@ -29,6 +29,7 @@ use gotg_killswitch::killswitch::{Chord, Input, Pad};
 use gotg_killswitch::padlink::Link;
 use gotg_killswitch::painter::{self, Painter};
 use gotg_killswitch::pairing::Pairing;
+use gotg_killswitch::pressing::Held;
 use gotg_killswitch::procstat;
 use gotg_killswitch::rebind::{Rebind, View};
 use sdl3_sys::everything::*;
@@ -333,6 +334,53 @@ unsafe fn read_pad(pad: *mut SDL_Gamepad) -> Input {
     }
 }
 
+/// SDL's buttons by danstick's name for each: they are SDL's element names.
+const STANDARD_BUTTONS: [(SDL_GamepadButton, &str); 16] = [
+    (SDL_GAMEPAD_BUTTON_SOUTH, "a"),
+    (SDL_GAMEPAD_BUTTON_EAST, "b"),
+    (SDL_GAMEPAD_BUTTON_WEST, "x"),
+    (SDL_GAMEPAD_BUTTON_NORTH, "y"),
+    (SDL_GAMEPAD_BUTTON_BACK, "back"),
+    (SDL_GAMEPAD_BUTTON_GUIDE, "guide"),
+    (SDL_GAMEPAD_BUTTON_START, "start"),
+    (SDL_GAMEPAD_BUTTON_LEFT_STICK, "leftstick"),
+    (SDL_GAMEPAD_BUTTON_RIGHT_STICK, "rightstick"),
+    (SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, "leftshoulder"),
+    (SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, "rightshoulder"),
+    (SDL_GAMEPAD_BUTTON_DPAD_UP, "dpup"),
+    (SDL_GAMEPAD_BUTTON_DPAD_DOWN, "dpdown"),
+    (SDL_GAMEPAD_BUTTON_DPAD_LEFT, "dpleft"),
+    (SDL_GAMEPAD_BUTTON_DPAD_RIGHT, "dpright"),
+    (SDL_GAMEPAD_BUTTON_MISC1, "misc1"),
+];
+
+/// What a clone has down, in danstick's names, and where its sticks are.
+///
+/// # Safety
+/// `pad` is an open gamepad.
+unsafe fn read_held(pad: *mut SDL_Gamepad) -> Held {
+    // SAFETY: per this function's contract.
+    unsafe {
+        let buttons: Vec<&str> = STANDARD_BUTTONS
+            .iter()
+            .filter(|(button, _)| SDL_GetGamepadButton(pad, *button))
+            .map(|(_, name)| *name)
+            .collect();
+        let axis = |axis| f32::from(SDL_GetGamepadAxis(pad, axis)) / 32767.0;
+        Held::standard(
+            &buttons,
+            [
+                axis(SDL_GAMEPAD_AXIS_LEFTX),
+                axis(SDL_GAMEPAD_AXIS_LEFTY),
+                axis(SDL_GAMEPAD_AXIS_RIGHTX),
+                axis(SDL_GAMEPAD_AXIS_RIGHTY),
+                axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER),
+                axis(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER),
+            ],
+        )
+    }
+}
+
 /// How long danstick was asked to make a hold take, so a fill carries on at the
 /// right rate between readings.
 fn pair_hold_seconds() -> f64 {
@@ -520,9 +568,23 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         if showing {
             let holds = pairing.now(clock);
             let joined = pairing.joined(clock);
-            moving = bar.moving(clock) || !holds.is_empty() || exit_progress > 0.0;
-            let frame = Frame::pack(bar.position(clock), exit_progress, &holds, &joined)
-                .with_rebind(rebinding.map(|view| drawn(&view, console, console_index)));
+            // A rebind panel shows what is pressed, so it is redrawn at the
+            // frame rate for as long as it is down.
+            moving = bar.moving(clock) || !holds.is_empty() || exit_progress > 0.0 || rebinding.is_some();
+            let frame = Frame::pack(bar.position(clock), exit_progress, &holds, &joined).with_rebind(
+                rebinding.map(|view| {
+                    // danstick's word while it walks; the seat's clone after.
+                    let held = view.held.clone().unwrap_or_else(|| {
+                        pads.0
+                            .iter()
+                            .find(|watched| watched.player == Some(view.player))
+                            // SAFETY: every watched pad is open.
+                            .map(|watched| unsafe { read_held(watched.pad) })
+                            .unwrap_or_default()
+                    });
+                    drawn(&view, &held, console, console_index)
+                }),
+            );
             painter.ensure(clock);
             painter.send(&frame, clock);
         } else if painter.open() {
@@ -599,7 +661,7 @@ fn ask_for_rebind(
 }
 
 /// A rebind as the painter draws it.
-fn drawn(view: &View, console: &consoles::Console, console_index: usize) -> Rebinding {
+fn drawn(view: &View, held: &Held, console: &consoles::Console, console_index: usize) -> Rebinding {
     Rebinding {
         player: view.player,
         console: console_index as u32,
@@ -615,6 +677,8 @@ fn drawn(view: &View, console: &consoles::Console, console_index: usize) -> Rebi
             Some(true) => 1,
             Some(false) => 2,
         },
+        pressed: held.bits(console.controls.iter().map(|control| control.id)),
+        sticks: held.sticks,
     }
 }
 

@@ -13,6 +13,7 @@
 use serde_json::json;
 
 use crate::events::Event;
+use crate::pressing::{Binding, Held};
 
 /// How long danstick has to begin the walk before the bar gives up on it: a
 /// daemon too old to know `map` with no session answers with an error, but
@@ -44,16 +45,26 @@ pub struct View {
     pub finish: f64,
     /// Some once it has ended: whether danstick kept the new buttons.
     pub stored: Option<bool>,
+    /// What is down on the pad, heard from danstick while it walks; None
+    /// when the clone is the place to look instead.
+    pub held: Option<Held>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rebind {
     phase: Phase,
+    /// What the walk has bound so far, as its last step said.
+    captured: Vec<Binding>,
+    held: Held,
 }
 
 impl Default for Rebind {
     fn default() -> Self {
-        Self { phase: Phase::Idle }
+        Self {
+            phase: Phase::Idle,
+            captured: Vec::new(),
+            held: Held::default(),
+        }
     }
 }
 
@@ -67,6 +78,8 @@ impl Rebind {
             return None;
         }
         self.phase = Phase::Asked { player, since: now };
+        self.captured.clear();
+        self.held = Held::default();
         Some(json!({"cmd": "map", "player": player, "layout": layout, "scope": scope}).to_string())
     }
 
@@ -116,10 +129,12 @@ impl Rebind {
                 total,
                 done,
                 stored,
+                captured,
             } if mine(*player) => {
                 if *done {
                     self.end(current, *stored, now);
                 } else {
+                    self.captured.clone_from(captured);
                     self.phase = Phase::Walking(View {
                         control: control.clone(),
                         index: *index,
@@ -129,6 +144,12 @@ impl Rebind {
                     });
                 }
             }
+            Event::Input {
+                player,
+                kind,
+                index,
+                value,
+            } if mine(*player) => self.held.raw(&self.captured, *kind, *index, *value),
             Event::Finish { player, frac } if mine(*player) => {
                 if let Phase::Walking(view) = &mut self.phase {
                     view.finish = frac.clamp(0.0, 1.0);
@@ -170,7 +191,11 @@ impl Rebind {
                 player: *player,
                 ..View::default()
             }),
-            Phase::Walking(view) | Phase::Ended { view, .. } => Some(view.clone()),
+            Phase::Walking(view) => Some(View {
+                held: Some(self.held.clone()),
+                ..view.clone()
+            }),
+            Phase::Ended { view, .. } => Some(view.clone()),
         }
     }
 }
@@ -187,6 +212,7 @@ mod tests {
             total,
             done: false,
             stored: false,
+            captured: Vec::new(),
         }
     }
 
@@ -198,6 +224,7 @@ mod tests {
             total: 0,
             done: true,
             stored,
+            captured: Vec::new(),
         }
     }
 
@@ -306,6 +333,55 @@ mod tests {
         rebind.unsent(0.0);
         assert_eq!(rebind.view(0.1).and_then(|v| v.stored), Some(false));
         assert_eq!(rebind.view(LINGER_SECONDS), None);
+    }
+
+    #[test]
+    fn while_it_walks_a_press_is_named_by_what_the_walk_has_bound() {
+        use crate::pressing::{Kind, spelled};
+        let mut rebind = Rebind::default();
+        rebind.start(1, "n64", "console:n64", 0.0);
+        let mut first = step(1, "b", 1, 14);
+        if let Event::Mapping { captured, .. } = &mut first {
+            captured.extend(spelled("a", "b0"));
+        }
+        rebind.apply(&first, 0.1);
+        let press = |value| Event::Input {
+            player: 1,
+            kind: Kind::Button,
+            index: 0,
+            value,
+        };
+        rebind.apply(&press(1.0), 0.2);
+        let lit = rebind
+            .view(0.2)
+            .and_then(|v| v.held)
+            .expect("heard while walking");
+        assert!(lit.controls.contains("a"), "A, just bound, lights");
+        rebind.apply(&press(0.0), 0.3);
+        assert!(
+            rebind
+                .view(0.3)
+                .and_then(|v| v.held)
+                .is_some_and(|h| h.controls.is_empty())
+        );
+        let mut other = press(1.0);
+        if let Event::Input { player, .. } = &mut other {
+            *player = 2;
+        }
+        rebind.apply(&other, 0.4);
+        assert!(
+            rebind
+                .view(0.4)
+                .and_then(|v| v.held)
+                .is_some_and(|h| h.controls.is_empty()),
+            "another seat's thumb is not this one's"
+        );
+        rebind.apply(&done(1, true), 1.0);
+        assert_eq!(
+            rebind.view(1.1).map(|v| v.held),
+            Some(None),
+            "ended: the clone says"
+        );
     }
 
     #[test]

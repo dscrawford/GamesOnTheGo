@@ -315,6 +315,108 @@ fn pinned_side(id: &str) -> Option<leaders::Side> {
     }
 }
 
+/// A stick drawn as its travel: where its four directions' circles are on
+/// the drawing, the ring through them, and its gate's shape.
+struct Ring {
+    stick: usize,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    octagon: bool,
+}
+
+/// The sticks a console's drawing shows as rings, and the controls they
+/// stand in for. A stick is one thing, not four rails of text: its
+/// directions are a ring with a dot in it, as the picker drew them. The
+/// D-pad keeps its labels -- four switches read that way in the hand -- and
+/// so does a group whose gate is `buttons` (an N64's C buttons). One circle
+/// alone says nothing of where the middle is, so it takes two.
+fn rings(
+    console: &crate::consoles::Console,
+    at: &dyn Fn((f32, f32)) -> (f32, f32),
+    height: f32,
+) -> (Vec<Ring>, Vec<usize>) {
+    let mut rings = Vec::new();
+    let mut taken = Vec::new();
+    for (stick, name) in ["leftstick_", "rightstick_"].iter().enumerate() {
+        let gate = console.gates[stick];
+        if gate == "buttons" {
+            continue;
+        }
+        let ways: Vec<(usize, (f32, f32))> = console
+            .controls
+            .iter()
+            .enumerate()
+            .filter(|(_, control)| control.id.starts_with(name))
+            .filter_map(|(id, control)| Some((id, at(control.anchor?))))
+            .collect();
+        if ways.len() < 2 {
+            continue;
+        }
+        let n = ways.len() as f32;
+        let (cx, cy) = (
+            ways.iter().map(|(_, (x, _))| x).sum::<f32>() / n,
+            ways.iter().map(|(_, (_, y))| y).sum::<f32>() / n,
+        );
+        let reach = ways
+            .iter()
+            .map(|(_, (x, y))| (x - cx).hypot(y - cy))
+            .fold(0.0, f32::max);
+        rings.push(Ring {
+            stick,
+            cx,
+            cy,
+            // Big enough to see a dot move in: a stick's circles sit close
+            // together on a drawing this size, and a ring through them was a
+            // speck.
+            radius: (reach + height * 0.03).max(height * 0.1),
+            octagon: gate == "octagon",
+        });
+        taken.extend(ways.iter().map(|(id, _)| *id));
+    }
+    (rings, taken)
+}
+
+/// A stick's gate with a dot where the thumb has it: `at` is -1..1 each way,
+/// y down. At rest and untouched, a small dim dot marks the middle, so the
+/// ring is not an empty hoop whose meaning has to be guessed.
+fn draw_ring(mesh: &mut Mesh, ring: &Ring, at: (f32, f32), ink: Colour, player: Colour, stroke: f32) {
+    let r = ring.radius;
+    if ring.octagon {
+        // Flat side up, as a real gate sits: controllers.py's gate_points.
+        let corner = |k: usize| {
+            let turn = std::f32::consts::TAU * k as f32 / 8.0 + std::f32::consts::PI / 8.0;
+            (ring.cx + r * turn.sin(), ring.cy - r * turn.cos())
+        };
+        for k in 0..8 {
+            let ((x1, y1), (x2, y2)) = (corner(k), corner(k + 1));
+            mesh.line(x1, y1, x2, y2, stroke, ink, FEATHER);
+            mesh.disc(x1, y1, stroke / 2.0, ink, FEATHER);
+        }
+    } else {
+        mesh.arc(ring.cx, ring.cy, r, stroke, 0.0, 1.0, ink, FEATHER);
+    }
+    let dot = (r * 0.25).max(3.0);
+    if at == (0.0, 0.0) {
+        mesh.disc(
+            ring.cx,
+            ring.cy,
+            dot * 0.7,
+            Colour::rgb(theme::TEXT_DIM, 0.8),
+            FEATHER,
+        );
+    } else {
+        let reach = r - dot;
+        mesh.disc(
+            ring.cx + at.0 * reach,
+            ring.cy + at.1 * reach,
+            dot,
+            player,
+            FEATHER,
+        );
+    }
+}
+
 /// A controller being rebound: its drawing, the button being asked for
 /// ringed in the seat's colour, a dot a step under it, and the ring that
 /// fills while the early finish is held.
@@ -358,10 +460,12 @@ fn build_rebind(scene: &Scene, rebind: &Rebinding, top: f32, drawing: &mut Drawi
                 cy - height / 2.0 + v * height,
             )
         };
+        let (sticks, taken) = rings(console, &at, height);
         let anchors: Vec<leaders::Anchor> = console
             .controls
             .iter()
             .enumerate()
+            .filter(|(id, _)| !taken.contains(id))
             .filter_map(|(id, control)| {
                 let (x, y) = at(control.anchor?);
                 Some(leaders::Anchor { id, x, y })
@@ -372,7 +476,9 @@ fn build_rebind(scene: &Scene, rebind: &Rebinding, top: f32, drawing: &mut Drawi
         let pinned = |id: usize| pinned_side(console.controls[id].id);
         for placed in leaders::place(&anchors, diagram, label_height, &pinned) {
             let control = console.controls[placed.anchor.id];
-            let lit = rebind.ended == 0 && usize::try_from(rebind.control).ok() == Some(placed.anchor.id);
+            // Asked for, or under a thumb right now: both are this seat's.
+            let lit = (rebind.ended == 0 && usize::try_from(rebind.control).ok() == Some(placed.anchor.id))
+                || pressed(rebind, placed.anchor.id);
             let ink = if lit {
                 colour
             } else {
@@ -408,6 +514,28 @@ fn build_rebind(scene: &Scene, rebind: &Rebinding, top: f32, drawing: &mut Drawi
                     Align::Left
                 },
             });
+        }
+        for ring in &sticks {
+            // Lit while one of its directions is asked for or pushed.
+            let lit = console.controls.iter().enumerate().any(|(id, control)| {
+                control.id.starts_with(["leftstick_", "rightstick_"][ring.stick])
+                    && ((rebind.ended == 0 && usize::try_from(rebind.control).ok() == Some(id))
+                        || pressed(rebind, id))
+            });
+            let ink = if lit {
+                colour
+            } else {
+                Colour::rgb(theme::TEXT, 0.85)
+            };
+            let at = (rebind.sticks[ring.stick * 2], rebind.sticks[ring.stick * 2 + 1]);
+            draw_ring(
+                &mut drawing.lines,
+                ring,
+                at,
+                ink,
+                colour,
+                if lit { 2.5 } else { 1.75 },
+            );
         }
     }
     if rebind.ended == 0
@@ -478,6 +606,11 @@ fn build_rebind(scene: &Scene, rebind: &Rebinding, top: f32, drawing: &mut Drawi
     if rebind.ended == 1 {
         tick(&mut drawing.over, fx, fy, fr, fr * 0.35, colour);
     }
+}
+
+/// Whether control `id` of the console is down on the seat being rebound.
+fn pressed(rebind: &Rebinding, id: usize) -> bool {
+    id < 64 && rebind.pressed & (1 << id) != 0
 }
 
 /// The frame, into `drawing` (cleared first).
@@ -593,6 +726,8 @@ mod tests {
                 total: 14,
                 finish: 0.0,
                 ended,
+                pressed: 0,
+                sticks: [0.0; 4],
             }),
             ..down(0.0)
         }
@@ -719,6 +854,8 @@ mod tests {
                         total: 14,
                         finish: 0.0,
                         ended: 0,
+                        pressed: 0,
+                        sticks: [0.0; 4],
                     }),
                     ..rebinding(0, 0)
                 },
@@ -739,6 +876,93 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_pressed_button_lights_its_label_in_the_seats_colour() {
+        let (console, a) = n64();
+        let b = CONSOLES[console as usize].control("b").expect("an N64 has B");
+        let label_of = |drawing: &Drawing, text: &str| {
+            drawing
+                .labels
+                .iter()
+                .find(|label| label.text == text)
+                .map(|label| label.colour)
+                .unwrap_or_else(|| panic!("no {text} label"))
+        };
+        let mut scene = rebinding(a as i32, 0);
+        let mut drawing = Drawing::default();
+        build(&scene, &mut drawing);
+        assert_ne!(label_of(&drawing, "B"), player_colour(2), "B is not pressed");
+        if let Some(rebind) = &mut scene.rebind {
+            rebind.pressed = 1 << b;
+        }
+        build(&scene, &mut drawing);
+        assert_eq!(label_of(&drawing, "B"), player_colour(2), "B, pressed, is lit");
+        assert_eq!(
+            label_of(&drawing, "A"),
+            player_colour(2),
+            "and A is still asked for"
+        );
+    }
+
+    #[test]
+    fn a_stick_is_a_ring_not_four_labels_and_its_dot_follows_the_thumb() {
+        let gamecube = crate::consoles::for_platform("gamecube");
+        let scene = |sticks: [f32; 4]| Scene {
+            rebind: Some(Rebinding {
+                console: gamecube as u32,
+                control: -1,
+                sticks,
+                ..rebinding(0, 0).rebind.expect("a rebind")
+            }),
+            ..rebinding(0, 0)
+        };
+        let mut drawing = Drawing::default();
+        build(&scene([0.0; 4]), &mut drawing);
+        assert!(
+            !drawing.labels.iter().any(|label| label.text.contains("stick")),
+            "no stick direction has a label of its own: {:?}",
+            drawing.labels.iter().map(|l| &l.text).collect::<Vec<_>>()
+        );
+        let ring = Ring {
+            stick: 0,
+            cx: 100.0,
+            cy: 100.0,
+            radius: 20.0,
+            octagon: true,
+        };
+        let seat = player_colour(2);
+        let dot_at = |at: (f32, f32)| {
+            let mut mesh = Mesh::default();
+            draw_ring(&mut mesh, &ring, at, Colour::rgb(theme::TEXT_DIM, 0.8), seat, 2.0);
+            let dot: Vec<_> = mesh.vertices.iter().filter(|p| p.colour == seat).collect();
+            let n = dot.len().max(1) as f32;
+            (
+                dot.iter().map(|p| p.x).sum::<f32>() / n,
+                dot.iter().map(|p| p.y).sum::<f32>() / n,
+                dot.len(),
+            )
+        };
+        assert_eq!(dot_at((0.0, 0.0)).2, 0, "at rest, no seat's dot: the dim middle");
+        let (x, y, _) = dot_at((1.0, 0.0));
+        assert!(
+            near(x, 115.0, 1.0) && near(y, 100.0, 1.0),
+            "pushed right: ({x}, {y})"
+        );
+        let (x, y, _) = dot_at((0.0, -1.0));
+        assert!(near(x, 100.0, 1.0) && near(y, 85.0, 1.0), "pushed up: ({x}, {y})");
+    }
+
+    #[test]
+    fn an_n64s_c_buttons_stay_four_labels_and_its_stick_is_an_octagon() {
+        let n64 = &CONSOLES[n64().0 as usize];
+        assert_eq!(n64.gates, ["octagon", "buttons"]);
+        let mut drawing = Drawing::default();
+        build(&rebinding(-1, 0), &mut drawing);
+        let texts: Vec<&str> = drawing.labels.iter().map(|l| l.text.as_str()).collect();
+        assert!(texts.contains(&"C-up"), "{texts:?}");
+        assert!(!texts.iter().any(|t| t.starts_with("Control stick")), "{texts:?}");
     }
 
     #[test]

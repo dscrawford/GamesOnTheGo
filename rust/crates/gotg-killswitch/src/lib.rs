@@ -16,6 +16,7 @@ pub mod overlay;
 pub mod padlink;
 pub mod painter;
 pub mod pairing;
+pub mod pressing;
 pub mod procstat;
 pub mod rebind;
 pub mod scene;

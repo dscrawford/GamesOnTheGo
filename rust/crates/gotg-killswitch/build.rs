@@ -240,13 +240,23 @@ fn consoles() -> String {
                     .collect()
             })
             .unwrap_or_default();
+        // `gate: octagon` for every stick, or `gate: {left: .., right: ..}`;
+        // a stick not said is round, as schemes.py reads it.
+        let gate = |stick: &str| {
+            raw["gate"]
+                .as_str()
+                .or_else(|| raw["gate"][stick].as_str())
+                .unwrap_or("circle")
+                .to_owned()
+        };
+        let gates = [gate("left"), gate("right")];
         let platforms: Vec<String> = raw["platforms"]
             .as_vec()
             .map(|list| list.iter().filter_map(Yaml::as_str).map(str::to_owned).collect())
             .unwrap_or_default();
         entries.push(format!(
             "Console {{ name: {name:?}, platforms: &{platforms:?}, layout: {layout:?}, artwork: {art_index}, \
-             aspect: {aspect:?}, controls: &[{}] }}",
+             aspect: {aspect:?}, gates: {gates:?}, controls: &[{}] }}",
             controls.join(", ")
         ));
     }

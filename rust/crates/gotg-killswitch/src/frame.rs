@@ -17,14 +17,15 @@ use crate::pairing::{HOLDS_MAX, Hold, JOINED_MAX};
 pub const MAGIC: u32 = 0x5653_4f47;
 
 /// Bytes on the pipe: five words, the five arrays a word per entry, then
-/// the rebind's seven words.
+/// the rebind's thirteen words.
 pub const SIZE: usize = 4 * (5 + HOLDS_MAX * 3 + JOINED_MAX * 2 + REBIND_WORDS);
 
-const REBIND_WORDS: usize = 7;
+const REBIND_WORDS: usize = 13;
 
 /// A rebind as the bar draws it: which seat, on which console's drawing,
 /// which control (an index into that console's, -1 before the first step),
-/// how far through, the early-finish hold, and how it ended.
+/// how far through, the early-finish hold, how it ended, and what the
+/// player is pressing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rebinding {
     pub player: i32,
@@ -35,6 +36,10 @@ pub struct Rebinding {
     pub finish: f32,
     /// 0 still walking, 1 kept, 2 given up on.
     pub ended: u32,
+    /// The console's controls down, a bit each in its order.
+    pub pressed: u64,
+    /// Left stick x, y, right stick x, y: -1..1, y down.
+    pub sticks: [f32; 4],
 }
 
 /// One frame, in fixed arrays as it crosses the pipe: nothing to allocate
@@ -141,6 +146,8 @@ impl Frame {
             total: 0,
             finish: 0.0,
             ended: 0,
+            pressed: 0,
+            sticks: [0.0; 4],
         });
         put(rebind.player.to_ne_bytes());
         put(rebind.console.to_ne_bytes());
@@ -149,6 +156,9 @@ impl Frame {
         put(rebind.total.to_ne_bytes());
         put(rebind.finish.to_ne_bytes());
         put(rebind.ended.to_ne_bytes());
+        put((rebind.pressed as u32).to_ne_bytes());
+        put(((rebind.pressed >> 32) as u32).to_ne_bytes());
+        rebind.sticks.iter().for_each(|value| put(value.to_ne_bytes()));
         out
     }
 
@@ -177,6 +187,18 @@ impl Frame {
                 total: i32::from_ne_bytes(word(rebind + 4)),
                 finish: f32::from_ne_bytes(word(rebind + 5)),
                 ended: u32::from_ne_bytes(word(rebind + 6)),
+                pressed: u64::from(u32::from_ne_bytes(word(rebind + 7)))
+                    | u64::from(u32::from_ne_bytes(word(rebind + 8))) << 32,
+                // A stick off its travel is at its edge, and not a number
+                // is the middle: this came through a pipe.
+                sticks: std::array::from_fn(|i| {
+                    let value = f32::from_ne_bytes(word(rebind + 9 + i));
+                    if value.is_finite() {
+                        value.clamp(-1.0, 1.0)
+                    } else {
+                        0.0
+                    }
+                }),
             }),
             position: f32::from_ne_bytes(word(1)),
             exit_progress: f32::from_ne_bytes(word(2)),
@@ -229,6 +251,8 @@ mod tests {
             total: 14,
             finish: 0.25,
             ended: 0,
+            pressed: 1 << 40 | 0b101,
+            sticks: [-1.0, 0.5, 0.0, 0.25],
         };
         let frame = Frame {
             rebind: Some(rebinding),
@@ -240,6 +264,20 @@ mod tests {
         );
         let none = Frame::pack(1.0, 0.0, &[], &[]);
         assert_eq!(Frame::decode(&none.encode()).map(|f| f.rebind), Some(None));
+        let wild = Frame {
+            rebind: Some(Rebinding {
+                sticks: [f32::NAN, 7.0, f32::NEG_INFINITY, -0.5],
+                ..rebinding
+            }),
+            ..none
+        };
+        assert_eq!(
+            Frame::decode(&wild.encode())
+                .and_then(|f| f.rebind)
+                .map(|r| r.sticks),
+            Some([0.0, 1.0, 0.0, -0.5]),
+            "a stick off its travel is drawn at its edge or in the middle"
+        );
     }
 
     #[test]

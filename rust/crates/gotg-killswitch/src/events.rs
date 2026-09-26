@@ -10,6 +10,10 @@
 use serde_json::{Map, Value};
 
 use crate::pairing::Pairing;
+use crate::pressing::{self, Binding, Kind};
+
+/// Controls read off one `mapping`'s `captured`; more are ignored.
+pub const CAPTURED_MAX: usize = 64;
 
 /// Seats read off one `state`; more are ignored.
 pub const SEATED_MAX: usize = 8;
@@ -45,6 +49,15 @@ pub enum Event {
         total: i32,
         done: bool,
         stored: bool,
+        /// What the walk has bound so far, each control once.
+        captured: Vec<Binding>,
+    },
+    /// A raw input on the pad under the wizard: see [`pressing`].
+    Input {
+        player: i32,
+        kind: Kind,
+        index: i32,
+        value: f32,
     },
     /// The long hold that ends a mapping run early, keeping what is bound.
     Finish {
@@ -132,6 +145,32 @@ pub fn parse(line: &[u8]) -> Option<Event> {
             total: count(&root, "total"),
             done: flag(&root, "done"),
             stored: flag(&root, "stored"),
+            captured: root
+                .get("captured")
+                .and_then(Value::as_object)
+                .map(|captured| {
+                    captured
+                        .iter()
+                        .filter_map(|(control, sdl)| pressing::spelled(control, sdl.as_str()?))
+                        .take(CAPTURED_MAX)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        },
+        Some("input") => match (
+            root.get("kind").and_then(Value::as_str).and_then(Kind::named),
+            root.get("index").and_then(Value::as_f64),
+            root.get("value").and_then(Value::as_f64),
+        ) {
+            (Some(kind), Some(index), Some(value)) if (0.0..256.0).contains(&index) && value.is_finite() => {
+                Event::Input {
+                    player: player_of(&root),
+                    kind,
+                    index: index as i32,
+                    value: value.clamp(-16.0, 16.0) as f32,
+                }
+            }
+            _ => Event::Other,
         },
         Some("finish") => Event::Finish {
             player: player_of(&root),
@@ -166,7 +205,11 @@ pub fn apply(event: &Event, pairing: &mut Pairing, now: f64, icon_of: &mut dyn F
             }
         }
         // The rebind's, not the joining picture's: see `rebind`.
-        Event::Mapping { .. } | Event::Finish { .. } | Event::Error { .. } | Event::Other => {}
+        Event::Mapping { .. }
+        | Event::Finish { .. }
+        | Event::Input { .. }
+        | Event::Error { .. }
+        | Event::Other => {}
     }
 }
 
@@ -272,6 +315,7 @@ mod tests {
                 total: 14,
                 done: false,
                 stored: false,
+                captured: Vec::new(),
             })
         );
         assert!(matches!(
@@ -303,6 +347,37 @@ mod tests {
             ),
             "odd counts are 0, not a crash"
         );
+    }
+
+    #[test]
+    fn what_the_walk_has_bound_and_what_is_under_the_thumb_are_read() {
+        let Some(Event::Mapping { captured, .. }) = parsed(
+            r#"{"event":"mapping","player":1,"control":"b","captured":{"a":"b0","dpup":"h0.1","x":7,"leftstick_left":"-a0"}}"#,
+        ) else {
+            panic!("a mapping");
+        };
+        let named: Vec<&str> = captured.iter().map(|b| b.control.as_str()).collect();
+        assert_eq!(
+            named,
+            ["a", "dpup", "leftstick_left"],
+            "a spelling that is not one is skipped"
+        );
+        assert_eq!(
+            parsed(r#"{"event":"input","player":1,"kind":"axis","index":2,"value":-0.95}"#),
+            Some(Event::Input {
+                player: 1,
+                kind: Kind::Axis,
+                index: 2,
+                value: -0.95
+            })
+        );
+        for odd in [
+            r#"{"event":"input","player":1,"kind":"wheel","index":2,"value":1}"#,
+            r#"{"event":"input","player":1,"kind":"button","index":-1,"value":1}"#,
+            r#"{"event":"input","player":1,"kind":"button","index":2}"#,
+        ] {
+            assert_eq!(parsed(odd), Some(Event::Other), "{odd}");
+        }
     }
 
     #[test]
