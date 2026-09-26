@@ -514,6 +514,19 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         if options.draw {
             link.tick(clock);
             link.pump(&mut pairing, &mut rebind, clock);
+            if let Some(player) = rebind.due(clock) {
+                if !options.quiet {
+                    eprintln!("gotg-killswitch: player {player}'s pad has no buttons yet; walking them");
+                }
+                ask_for_rebind(
+                    Some(player),
+                    console,
+                    &mut rebind,
+                    &mut link,
+                    clock,
+                    options.quiet,
+                );
+            }
         }
         // The furthest along any one pad is, since the picture is of a hold
         // rather than of a controller.

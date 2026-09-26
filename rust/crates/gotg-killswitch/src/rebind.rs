@@ -12,7 +12,9 @@
 
 use serde_json::json;
 
-use crate::events::Event;
+use std::collections::BTreeSet;
+
+use crate::events::{Event, Seat};
 use crate::pressing::{Binding, Held};
 
 /// How long danstick has to begin the walk before the bar gives up on it: a
@@ -56,6 +58,12 @@ pub struct Rebind {
     /// What the walk has bound so far, as its last step said.
     captured: Vec<Binding>,
     held: Held,
+    /// Who is seated, as the last `state` said.
+    seated: Vec<Seat>,
+    /// Pads already walked unasked this session, by seat and node: one
+    /// that was let go without saving is not asked again -- the chord is
+    /// still there -- or the panel would come back for ever.
+    offered: BTreeSet<(i32, String)>,
 }
 
 impl Default for Rebind {
@@ -64,6 +72,8 @@ impl Default for Rebind {
             phase: Phase::Idle,
             captured: Vec::new(),
             held: Held::default(),
+            seated: Vec::new(),
+            offered: BTreeSet::new(),
         }
     }
 }
@@ -109,6 +119,9 @@ impl Rebind {
     /// One danstick event. Only this rebind's player's, and only while one is
     /// on: somebody else's wizard at the picker is not ours to draw.
     pub fn apply(&mut self, event: &Event, now: f64) {
+        if let Event::State { seated } = event {
+            self.seated.clone_from(seated);
+        }
         let Some(ours) = self.player() else { return };
         if matches!(self.phase, Phase::Ended { .. }) {
             return;
@@ -180,6 +193,21 @@ impl Rebind {
             Phase::Ended { until, .. } if now >= *until => self.phase = Phase::Idle,
             _ => {}
         }
+    }
+
+    /// A seat whose pad danstick has no buttons for, to walk now: the panel
+    /// comes down for it by itself, as the picker's gate walked an unmapped
+    /// pad before the game. One at a time, and never over another rebind.
+    pub fn due(&mut self, now: f64) -> Option<i32> {
+        self.expire(now);
+        if self.phase != Phase::Idle {
+            return None;
+        }
+        let seat = self.seated.iter().find(|seat| {
+            seat.player > 0 && !seat.mapped && !self.offered.contains(&(seat.player, seat.node.clone()))
+        })?;
+        self.offered.insert((seat.player, seat.node.clone()));
+        Some(seat.player)
     }
 
     /// What to draw now, or None when nothing is being rebound.
@@ -382,6 +410,47 @@ mod tests {
             Some(None),
             "ended: the clone says"
         );
+    }
+
+    #[test]
+    fn a_pad_danstick_cannot_play_is_walked_unasked_once_and_one_at_a_time() {
+        let seat = |player: i32, node: &str, mapped: bool| Seat {
+            node: node.into(),
+            name: String::new(),
+            player,
+            mapped,
+        };
+        let mut rebind = Rebind::default();
+        assert_eq!(rebind.due(0.0), None, "nobody seated");
+        rebind.apply(
+            &Event::State {
+                seated: vec![seat(1, "e1", true), seat(2, "e2", false), seat(3, "e3", false)],
+            },
+            0.0,
+        );
+        assert_eq!(rebind.due(0.0), Some(2));
+        rebind.start(2, "n64", "console:n64", 0.0);
+        assert_eq!(rebind.due(0.1), None, "not over a walk already on screen");
+        rebind.apply(&done(2, false), 1.0);
+        assert_eq!(
+            rebind.due(1.0 + LINGER_SECONDS),
+            Some(3),
+            "the next, once it has gone up"
+        );
+        rebind.start(3, "n64", "console:n64", 2.0);
+        rebind.apply(&done(3, false), 3.0);
+        assert_eq!(
+            rebind.due(3.0 + LINGER_SECONDS),
+            None,
+            "a pad let go without saving is not asked again"
+        );
+        rebind.apply(
+            &Event::State {
+                seated: vec![seat(2, "e7", false)],
+            },
+            5.0,
+        );
+        assert_eq!(rebind.due(5.0), Some(2), "a different pad in that seat is");
     }
 
     #[test]

@@ -23,6 +23,22 @@ pub struct Seat {
     pub node: String,
     pub name: String,
     pub player: i32,
+    /// Whether danstick knows this pad's buttons: gate.py's `Seat.mapped`.
+    pub mapped: bool,
+}
+
+/// A seat danstick knows the buttons of: any capture, since danstick falls
+/// back to the universal one, or `configured`. A keyboard is its own
+/// mapping, and a daemon that says neither is taken at its word that the pad
+/// works -- asking every pad to be walked because the fields are missing
+/// would be worse than asking none.
+fn mapped(seat: &Map<String, Value>) -> bool {
+    let scopes = seat.get("mappings").and_then(Value::as_array);
+    let configured = seat.get("configured").and_then(Value::as_bool);
+    flag(seat, "keyboard")
+        || configured == Some(true)
+        || scopes.is_some_and(|scopes| !scopes.is_empty())
+        || (configured.is_none() && scopes.is_none())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -133,6 +149,7 @@ pub fn parse(line: &[u8]) -> Option<Event> {
                             node: text(seat, "node"),
                             name: text(seat, "name"),
                             player: player_of(seat),
+                            mapped: mapped(seat),
                         })
                         .collect()
                 })
@@ -301,6 +318,25 @@ mod tests {
         assert_eq!(
             parsed(r#"{"event":"state","players":"nope"}"#),
             Some(Event::State { seated: vec![] })
+        );
+    }
+
+    #[test]
+    fn a_seat_says_whether_danstick_knows_its_buttons() {
+        let seats = |line: &str| match parsed(line) {
+            Some(Event::State { seated }) => seated.iter().map(|s| s.mapped).collect::<Vec<_>>(),
+            other => panic!("not a state: {other:?}"),
+        };
+        assert_eq!(
+            seats(
+                r#"{"event":"state","players":[
+                {"player":1,"configured":false,"mappings":[]},
+                {"player":2,"configured":true,"mappings":[]},
+                {"player":3,"configured":false,"mappings":["console:n64"]},
+                {"player":4,"configured":false,"mappings":[],"keyboard":true},
+                {"player":5}]}"#
+            ),
+            [false, true, true, true, true]
         );
     }
 
