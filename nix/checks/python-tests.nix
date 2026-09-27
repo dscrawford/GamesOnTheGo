@@ -12,19 +12,15 @@ pkgs.runCommand "check-python-tests" { nativeBuildInputs = [ venv ]; } ''
   # The contract drift-guards read the shell client's patterns and the
   # project version; nothing else of src/client, so a client edit does
   # not re-run this suite.
-  mkdir -p src/client/lib src/client/data
+  mkdir -p src/client/lib
   cp -r ${../../src/gotg} src/gotg
   # The picker's model half — catalog, paging, cursor — holds no
   # pygame on purpose, so it runs in this venv like anything else.
   # Its drawing does not, and is not tested here.
   cp -r ${../../src/ui} src/ui
-  # The controller descriptions the picker reads, and the tests check against
-  # the artwork beside them.
+  # The theme and settings the picker reads.
   cp -r ${../../config} config
   cp ${../../src/client/lib/common.sh} src/client/lib/common.sh
-  # And the ares binding table: the launch gate describes it, and one test
-  # pins the N64 stick against the file both of them read.
-  cp ${../../src/client/data/ares-pads.json} src/client/data/ares-pads.json
   cp ${../../pyproject.toml} pyproject.toml
   chmod -R u+w tests src config
   # And how the controller suite is split across the cluster's nodes: pure,

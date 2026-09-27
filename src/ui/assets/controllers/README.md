@@ -1,18 +1,16 @@
 # Controller artwork
 
-One SVG per console, each carrying an `anchor-<input>` circle for every button.
+One SVG per console, each carrying an `anchor-<input>` circle for every button:
+the controller the overlay draws when a pad's buttons are walked (L+R+Select,
+or a pad danstick has no buttons for). gotg-killswitch embeds these at build time
+(`rust/crates/gotg-killswitch/build.rs`) and puts a label and a line on each
+anchored control.
 
-`<input>` is the ares input name exactly as `ares-pads.json` spells it — except
-for `gamecube.svg`, whose anchors are named for danstick's canonical controls
-(`a`, `dpup`, `righttrigger`). There is no ares GameCube: Dolphin writes its own
-configuration and publishes no console, so that drawing exists for the launch
-wizard rather than the binding screen, and naming its anchors after the only
-thing that asks for them beats inventing a table to translate between two
-spellings of "Z". `gate.ANCHOR_ALIASES` maps danstick's names onto the ares ones
-for the consoles that have both.
-
-`build-controllers.py` reads those circles and nothing else, so the artwork
-itself can be drawn however it likes.
+An anchor is named for danstick's control (`a`, `dpup`, `righttrigger`), or for
+whatever the older drawings called it (the ares input name, `C-Up`,
+`X-Axis/Lo`); a console's `config/controllers/<name>.yaml` maps danstick's names
+onto the second kind under `anchors:`. The circles are all that is read, so the
+artwork itself can be drawn however it likes.
 
 ## Where these came from
 
@@ -56,8 +54,9 @@ files here differ from upstream, which MIT permits and this note records.
 3. Append an `anchors` layer of unstroked circles named `anchor-<input>`.
    Unstroked because a stroked shape has two different bounding boxes and
    nobody should have to ask a tool which one it reported.
-4. Name it in `TABLE` in `gotg_ui/controllers.py`.
+4. Name it as `artwork:` in the console's `config/controllers/<name>.yaml`, with
+   `anchors:` for any circle not named after danstick's control.
 
-Inkscape is an authoring aid, not a dependency — the build needs only resvg.
-Anything the artwork does not have an anchor for is left off the diagram and
-counted in the footer, so a partial drawing is visible rather than silent.
+Inkscape is an authoring aid, not a dependency — the build reads the SVG
+itself. A control the artwork has no anchor for is still walked; it simply has
+no label on the drawing.

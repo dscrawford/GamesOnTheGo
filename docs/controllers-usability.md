@@ -75,3 +75,18 @@ pad is present, or only when the mirrored pad is.
 - The picker asks after the daemon again on an interval while it has no
   connection, past the latch, so a daemon that died leaves "danstick not
   running" on screen for seconds rather than for the evening.
+
+## 2026-09-27: the controller screens moved into the overlay
+
+The picker's controller screens and the launch gate are gone: the strip of
+seats, the assignment and controller screens, and the door with its ready-up
+hold that `gotg-seat` put in front of every game. The overlay does all of it,
+over whatever is on screen. It keeps danstick's `seating` open (so a pad joins
+by being held, mid-level included), draws the join, walks a pad danstick has no
+buttons for, rebinds one pad on L+R+Select with the console's controller drawn
+and each press lit, and says "No controllers connected" over a game nobody has
+joined. What stayed in the picker is the rule, not a screen: only a pad danstick
+published moves the cursor, the keyboard only once seated, and a controller's
+keyboard nodes are held while the picker runs. Some of the notes above describe
+the picker's strip and the gate; they are kept as the record of why the rules
+are shaped the way they are.

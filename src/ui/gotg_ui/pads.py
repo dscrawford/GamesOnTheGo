@@ -34,7 +34,7 @@ from .clones import Owners, is_clone
 
 __all__ = [
     "A", "B", "BACK", "DOWN", "LB", "LEFT", "RB", "RIGHT", "START", "UP", "X", "Y",
-    "Pads", "button", "direction", "init", "raw_input", "released",
+    "Pads", "button", "direction", "init",
 ]
 
 # SDL's own constants, checked against the numbers buttons.py writes out. If a
@@ -116,77 +116,6 @@ def button(event) -> str | None:
     return name
 
 
-def released(event) -> bool:
-    """Whether this is a button coming back up on a pad danstick published.
-
-    The one thing the launch gate reads besides a press: its ready-up hold
-    must start from a press that began on that screen, so a button already
-    down when the screen appeared -- the hold that took the seat, still going
-    -- does not count until it has come up once.
-    """
-    if event.type not in (pygame.CONTROLLERBUTTONUP, pygame.JOYBUTTONUP):
-        return False
-    if event.type == pygame.JOYBUTTONUP and getattr(event, "instance_id", None) in _mapped:
-        return False
-    return _allowed(event)
-
-
-def raw_input(event) -> tuple[str, int, object] | None:
-    """A raw joystick input from a pad danstick published: (kind, index, value).
-
-    The joystick API's own numbering -- button 3, hat 0, axis 2 -- which is
-    how danstick's profile names things, so a screen can say which control is
-    being pressed. Unlike `button`, the raw event of a mapped pad is *not*
-    dropped here: this is not acting on a press, only showing it.
-    """
-    if not _allowed(event):
-        return None
-    if event.type == pygame.JOYBUTTONDOWN:
-        return ("button", event.button, 1)
-    if event.type == pygame.JOYHATMOTION:
-        dx, dy = event.value
-        mask = (1 if dy > 0 else 0) | (2 if dx > 0 else 0) | (4 if dy < 0 else 0) | (8 if dx < 0 else 0)
-        return ("hat", event.hat, mask)
-    if event.type == pygame.JOYAXISMOTION:
-        return ("axis", event.axis, event.value)
-    return None
-
-
-def mapped(event) -> bool:
-    """Whether SDL has a standard layout for the pad this event came from.
-
-    Which vocabulary names a press: SDL's own for a pad it maps, danstick's
-    capture for one it does not. Deciding that per *event* instead -- a button
-    said one thing, an axis the other -- lit two labels for one trigger, which
-    is what a GameCube pad on an N64 drawing looked like: R and Z at once.
-    """
-    instance = getattr(event, "instance_id", None)
-    if instance is None:
-        instance = getattr(event, "joy", None)
-    return instance in _mapped
-
-
-def button_up(event) -> str | None:
-    """The name of the button this release is, on a pad danstick published.
-
-    `released` answers only whether something came up. A screen showing what
-    is under a thumb needs the name, and for a pad SDL maps that name is the
-    standard one -- which is the vocabulary the binding tables use, and is why
-    this is read instead of danstick's capture: a capture holds the controls one
-    console asked for, and half the pad is missing from it.
-    """
-    if event.type not in (pygame.CONTROLLERBUTTONUP, pygame.JOYBUTTONUP):
-        return None
-    if not _allowed(event):
-        return None
-    if event.type == pygame.CONTROLLERBUTTONUP:
-        return name_for(event.button, standard=True)
-    if getattr(event, "instance_id", None) in _mapped:
-        # The same release, already reported as a controller event.
-        return None
-    return name_for(event.button, standard=False)
-
-
 def axis_move(event) -> tuple[int, float] | None:
     """A standard axis and where it is, on a pad danstick published.
 
@@ -204,22 +133,6 @@ def axis_move(event) -> tuple[int, float] | None:
         # SDL2's raw range, which pygame passes through for some events.
         value = value / 32767.0
     return (event.axis, float(value))
-
-
-def raw_release(event) -> int | None:
-    """The joystick button index coming back up, on a pad danstick published.
-
-    `released` answers only whether *something* came up, which is all the
-    launch gate's hold needs. A screen showing which controls are under a
-    thumb needs to know which one let go -- two buttons held and one released
-    must take one dot away, not both -- and only the raw event carries the
-    index.
-    """
-    if event.type != pygame.JOYBUTTONUP:
-        return None
-    if not _allowed(event):
-        return None
-    return event.button
 
 
 def direction(event) -> tuple[int, int] | None:
@@ -290,9 +203,8 @@ def repeat_press(pad: int, step: tuple[int, int]) -> None:
 
 def drop_repeats() -> None:
     """Take made-up presses still queued off the queue, keeping real ones: the
-    grid is closing, and the launch gate after it reads the same queue, where
-    a held direction's last repeat would light a label and reset the room's
-    quiet."""
+    grid is closing, and a held direction's last repeat is the grid's, not
+    whatever reads the queue next."""
     for event in pygame.event.get(pygame.CONTROLLERBUTTONDOWN):
         if not is_repeat(event):
             pygame.event.post(event)
@@ -353,28 +265,6 @@ class Pads:
         self._open.pop(instance_id, None)
         _mapped.discard(instance_id)
         _owners.closed(instance_id)
-
-    def holding(self) -> set[int]:
-        """Which seats have a button down right now.
-
-        Per seat, because a hold is per person: the door used to ask "is
-        anything down anywhere", and with two controllers that is nearly
-        always yes -- one player holding A meant nobody else could start a
-        hold, including the first player after letting go. Two people trying
-        to ready up could lock each other out entirely.
-        """
-        out: set[int] = set()
-        for instance, pad in list(self._open.items()):
-            player = _owners.player(instance)
-            if player is None:
-                continue
-            stick = pad.as_joystick() if hasattr(pad, "as_joystick") else pad
-            try:
-                if any(stick.get_button(i) for i in range(stick.get_numbuttons())):
-                    out.add(player)
-            except pygame.error:
-                continue
-        return out
 
     def any_button_down(self) -> bool:
         """Whether a button is held on any pad danstick published, right now.

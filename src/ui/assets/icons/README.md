@@ -1,16 +1,15 @@
 # Controller icons
 
 Small, glanceable drawings of *controllers* — one per model a person might be
-holding — for the strip along the top of the picker that says who is in which
-seat. Not the same thing as `../controllers/`, which holds one diagram per
-*console* with an `anchor-<input>` circle on every button so a binding can be
-labelled. These have no anchors and are never annotated; they are read at about
-28 pixels.
+holding — for the overlay's bar, which draws a pad filling in its seat's colour
+as somebody joins. Not the same thing as `../controllers/`, which holds one
+diagram per *console* with an `anchor-<input>` circle on every button so a
+binding can be labelled. These have no anchors and are never annotated; they are
+read at about the height of the bar.
 
-Rasterised at build time, like the diagrams next door and for the same reason
-(`build-controllers.py --icons`), to one height so a row of them shares a
-baseline. The artwork is a black silhouette and the runtime tints it to the
-player's colour, so nothing here needs a light and a dark copy.
+Embedded at build time by gotg-killswitch and rasterised there. The artwork is a
+black silhouette and the overlay tints it to the player's colour, so nothing
+here needs a light and a dark copy.
 
 `generic.svg` is the one that matters most: it stands in for every controller
 without a rule of its own, which on a shelf of third-party pads is most of
@@ -74,12 +73,12 @@ There is no free vector of a Steam Controller. Commons has
 `Steam Controller colored logo.svg`, which is the Steam *logo*, public domain as
 a text logo and marked `Restrictions: trademarked` — the wrong thing twice over.
 So `steam.svg` is ours: flat, unbranded, and CC0, in the same shape language as
-the ES-DE pads so the strip does not look like two sets of artwork.
+the ES-DE pads so the bar does not look like two sets of artwork.
 
 ## Which icon a pad gets
 
-`icons.py` decides, and falls back to `../controllers/` for the consoles that
-already have a drawing there — `n64`, `nes`, `snes`, `megadrive`, `gameboy`,
+`config/icons.yaml` decides (gotg-killswitch's `icons.rs` reads it), and falls
+back to `../controllers/` for the consoles that already have a drawing there — `n64`, `nes`, `snes`, `megadrive`, `gameboy`,
 `gba` and `generic`. Those were vendored and de-branded once; copying them here
 would be the same bytes under a second name, free to drift.
 

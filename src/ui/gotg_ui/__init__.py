@@ -19,7 +19,7 @@ def steam_leftovers(environ: _Mapping[str, str]) -> tuple[str, ...]:
 
 
 # Before pygame initialises anything, which is why it lives here: the picker
-# and the launch gate both import this package before SDL starts.
+# imports this package before SDL starts.
 for _name in steam_leftovers(_os.environ):
     del _os.environ[_name]
 

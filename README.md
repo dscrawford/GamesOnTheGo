@@ -153,9 +153,7 @@ GOTG_E2E_REQUIRE=1 nix run .#test-controllers   # a machine that cannot run it f
 
 It needs `/dev/uinput` writable and nothing else; each test starts a danstick of its own under a temporary directory and never touches the one you are playing with.
 
-**During a game** danstick stops listening for new holds: with seating open it rescans every input device 50 times a second, and a press then takes ~108 ms to reach the game instead of ~0.03 ms. A pad cannot join mid-level until [that is fixed](docs/requests/seating-costs-the-game-its-input.md); the latency is measured by `tests/e2e`.
-
-**Before a launch**, `gotg-seat` forgets whatever the daemon remembers, asks for a hold, walks the buttons only if that pad is unmapped for this console, and then waits: the game starts when somebody lets go and holds a button again for a full second (Enter does it from the keyboard). Then the emulator is bound to what that seated: port N is `danstick Player N`, found by the GUID danstick published, and never a raw pad — `danstick-rs exec` hides those from the game.
+**Controllers join over whatever is on screen** — the picker or a game. The overlay (`gotg-killswitch`, started beside both) keeps danstick listening for a hold: pick a controller up and hold any button for a second and a half, and the bar at the top fills in that seat's colour. A controller danstick has no buttons for gets them walked right there, over the game; **L + R + Select** held three seconds walks one controller's buttons again, lighting each as it is pressed; **L + R + Start** held three seconds stops the game. A game started with nobody seated says "No controllers connected" until somebody holds a button. Nothing is asked before a launch. The emulator is bound to port N = `danstick Player N`, found by the GUID danstick published, and never a raw pad — `danstick-rs exec` hides those from the game. Seating stays open during play; the press latency through a clone is measured by `tests/e2e`.
 
 ## Steam
 
@@ -263,7 +261,6 @@ $ gotg admin scan
 | Variable | Effect |
 |---|---|
 | `GOTG_FLAKE` | flake to build from (else `flake` in config, `~/Documents/GOTG`, `github:dscrawford/GamesOnTheGo`) |
-| `GOTG_SEAT_GATE=0` | skip the pre-launch controller check |
 | `GOTG_KILLSWITCH=0` / `GOTG_KILLSWITCH_OVERLAY=0` | disable the stop combo / its overlay |
 | `GOTG_KILLSWITCH_HOLD_MS` | stop-combo hold time (default 3000) |
 | `GOTG_CONFIG` | picker config directory |
@@ -307,7 +304,7 @@ Every run says which machine it exercised — the real one or a stand-in — bec
 ## Development
 
 ```bash
-nix develop                         # gotg, gotg-ui, gotg-seat from the working tree; uv, ruff, shellcheck, bats
+nix develop                         # gotg, gotg-ui from the working tree; uv, ruff, shellcheck, bats
 nix flake check                     # 1211 python tests, 667 client tests, ruff, shellcheck, drift checks
 uv lock                             # after changing pyproject.toml
 ```

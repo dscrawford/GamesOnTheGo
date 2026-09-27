@@ -100,9 +100,9 @@ def ensure_daemon(force: bool = False, *, fresh: bool = False, follow: int | Non
     os.environ["DANSTICK_SKIP_DAEMON_CHECK"] = "1"
     if follow is not None:
         # Which session this daemon belongs to, for whatever comes after the
-        # execvp: the launch gate reads it to tell seats somebody took in the
-        # picker a moment ago from seats a daemon has been holding since
-        # yesterday. `danstick.sh` exports the same thing for the same reason.
+        # execvp: the launch that follows keeps the seats somebody took in the
+        # picker a moment ago rather than a daemon's from yesterday.
+        # `danstick.sh` exports the same thing for the same reason.
         os.environ["DANSTICK_FOLLOW"] = str(follow)
     return None
 
