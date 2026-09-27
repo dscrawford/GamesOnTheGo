@@ -20,6 +20,7 @@ pub mod pressing;
 pub mod procstat;
 pub mod rebind;
 pub mod scene;
+pub mod seating;
 pub mod shapes;
 pub mod text;
 

@@ -32,6 +32,7 @@ use gotg_killswitch::pairing::Pairing;
 use gotg_killswitch::pressing::Held;
 use gotg_killswitch::procstat;
 use gotg_killswitch::rebind::{Rebind, View};
+use gotg_killswitch::seating::Seating;
 use sdl3_sys::everything::*;
 
 const DEFAULT_HOLD_MS: u64 = 3000;
@@ -501,12 +502,14 @@ fn run(options: &Options) -> i32 {
 
 fn watch(options: &Options, game: &Game, pads: &mut Pads) {
     // Who is joining, from danstick's own socket: one more client beside the
-    // picker. Nothing is asked of the daemon; the overlay only listens.
+    // picker. What it asks is that danstick go on listening for a hold
+    // (`seating`), and a rebind when somebody wants one.
     let mut pairing = Pairing::new(pair_hold_seconds());
     let mut link = Link::new(std::env::var("GOTG_OVERLAY_DANSTICK_SOCKET").ok().as_deref());
     let mut bar = Bar::new(SLIDE_SECONDS);
     let mut painter = Painter::default();
     let mut rebind = Rebind::default();
+    let mut seating = Seating::new(pair_hold_seconds());
     let console_index = consoles::for_platform(&options.platform);
     let console = &CONSOLES[console_index];
     let mut next_alive_ms = 0;
@@ -526,25 +529,33 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         // SAFETY: as above.
         let now = unsafe { SDL_GetTicks() };
         let clock = seconds_now();
-        if options.draw {
-            link.tick(clock);
-            link.pump(&mut pairing, &mut rebind, clock);
-            if link.fd().is_none() {
-                pairing.room(None);
+        // Linked whether or not anything is drawn: somebody joining is not
+        // a picture, and without the overlay nothing else keeps seating open.
+        link.tick(clock);
+        link.pump(&mut pairing, &mut rebind, &mut seating, clock);
+        if link.fd().is_none() {
+            pairing.room(None);
+            seating.lost();
+        } else if let Some(line) = seating.wanted()
+            && !link.send(&line)
+        {
+            seating.lost();
+        }
+        if let Some(player) = rebind
+            .due(clock)
+            .filter(|_| options.draw && !options.overlay_only)
+        {
+            if !options.quiet {
+                eprintln!("gotg-killswitch: player {player}'s pad has no buttons yet; walking them");
             }
-            if let Some(player) = rebind.due(clock).filter(|_| !options.overlay_only) {
-                if !options.quiet {
-                    eprintln!("gotg-killswitch: player {player}'s pad has no buttons yet; walking them");
-                }
-                ask_for_rebind(
-                    Some(player),
-                    console,
-                    &mut rebind,
-                    &mut link,
-                    clock,
-                    options.quiet,
-                );
-            }
+            ask_for_rebind(
+                Some(player),
+                console,
+                &mut rebind,
+                &mut link,
+                clock,
+                options.quiet,
+            );
         }
         // The furthest along any one pad is, since the picture is of a hold
         // rather than of a controller.

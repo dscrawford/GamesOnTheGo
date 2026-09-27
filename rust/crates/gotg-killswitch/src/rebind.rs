@@ -119,7 +119,7 @@ impl Rebind {
     /// One danstick event. Only this rebind's player's, and only while one is
     /// on: somebody else's wizard at the picker is not ours to draw.
     pub fn apply(&mut self, event: &Event, now: f64) {
-        if let Event::State { seated } = event {
+        if let Event::State { seated, .. } = event {
             self.seated.clone_from(seated);
         }
         let Some(ours) = self.player() else { return };
@@ -425,6 +425,9 @@ mod tests {
         rebind.apply(
             &Event::State {
                 seated: vec![seat(1, "e1", true), seat(2, "e2", false), seat(3, "e3", false)],
+                listening: Some(true),
+                status: "idle".into(),
+                slots: 4,
             },
             0.0,
         );
@@ -447,6 +450,9 @@ mod tests {
         rebind.apply(
             &Event::State {
                 seated: vec![seat(2, "e7", false)],
+                listening: Some(true),
+                status: "idle".into(),
+                slots: 4,
             },
             5.0,
         );

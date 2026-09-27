@@ -56,6 +56,13 @@ pub enum Event {
     },
     State {
         seated: Vec<Seat>,
+        /// Whether a hold would take a seat now (`seating`); None from a
+        /// daemon that does not say.
+        listening: Option<bool>,
+        /// idle, assigning or ready.
+        status: String,
+        /// Seats danstick has; 0 when it does not say.
+        slots: i32,
     },
     /// A step of the mapping wizard, or its end (`done`).
     Mapping {
@@ -154,6 +161,9 @@ pub fn parse(line: &[u8]) -> Option<Event> {
                         .collect()
                 })
                 .unwrap_or_default(),
+            listening: root.get("seating").and_then(Value::as_bool),
+            status: text(&root, "state"),
+            slots: count(&root, "slots"),
         },
         Some("mapping") => Event::Mapping {
             player: player_of(&root),
@@ -216,7 +226,7 @@ pub fn apply(event: &Event, pairing: &mut Pairing, now: f64, icon_of: &mut dyn F
         // Only the holds that have become seats. A `state` arrives while
         // somebody is still holding, and clearing everything on one was the
         // flash back to an empty seat in the picker.
-        Event::State { seated } => {
+        Event::State { seated, .. } => {
             pairing.room(Some(seated.len()));
             for seat in seated {
                 pairing.seated(&seat.node, &seat.name, seat.player);
@@ -257,7 +267,7 @@ mod tests {
     #[test]
     fn a_state_names_who_is_seated() {
         let line = r#"{"event":"state","players":[{"player":1,"node":"/dev/input/event3"},{"player":2,"name":"Pad"}],"slots":4}"#;
-        let Some(Event::State { seated }) = parsed(line) else {
+        let Some(Event::State { seated, .. }) = parsed(line) else {
             panic!("not a state")
         };
         assert_eq!(seated.len(), 2);
@@ -306,11 +316,11 @@ mod tests {
             .map(|i| format!(r#"{{"player":{},"node":"n{i}"}}"#, i + 1))
             .collect();
         let line = format!(r#"{{"event":"state","players":[{}]}}"#, many.join(","));
-        let Some(Event::State { seated }) = parsed(&line) else {
+        let Some(Event::State { seated, .. }) = parsed(&line) else {
             panic!("not a state")
         };
         assert_eq!(seated.len(), SEATED_MAX, "more seats than fit are capped");
-        let Some(Event::State { seated }) =
+        let Some(Event::State { seated, .. }) =
             parsed(r#"{"event":"state","players":[1,"x",null,{"player":2,"node":"n"}]}"#)
         else {
             panic!("not a state")
@@ -318,14 +328,35 @@ mod tests {
         assert_eq!(seated.len(), 1, "entries that are not objects are skipped");
         assert_eq!(
             parsed(r#"{"event":"state","players":"nope"}"#),
-            Some(Event::State { seated: vec![] })
+            Some(Event::State {
+                seated: vec![],
+                listening: None,
+                status: String::new(),
+                slots: 0
+            })
         );
+    }
+
+    #[test]
+    fn a_state_says_whether_danstick_is_listening_for_a_hold() {
+        assert!(matches!(
+            parsed(r#"{"event":"state","state":"idle","slots":4,"seating":false,"players":[]}"#),
+            Some(Event::State { listening: Some(false), ref status, slots: 4, .. }) if status == "idle"
+        ));
+        assert!(matches!(
+            parsed(r#"{"event":"state","players":[]}"#),
+            Some(Event::State {
+                listening: None,
+                slots: 0,
+                ..
+            })
+        ));
     }
 
     #[test]
     fn a_seat_says_whether_danstick_knows_its_buttons() {
         let seats = |line: &str| match parsed(line) {
-            Some(Event::State { seated }) => seated.iter().map(|s| s.mapped).collect::<Vec<_>>(),
+            Some(Event::State { seated, .. }) => seated.iter().map(|s| s.mapped).collect::<Vec<_>>(),
             other => panic!("not a state: {other:?}"),
         };
         assert_eq!(

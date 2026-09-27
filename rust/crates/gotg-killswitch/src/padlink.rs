@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use crate::events;
 use crate::pairing::Pairing;
 use crate::rebind::Rebind;
+use crate::seating::Seating;
 
 /// Long enough for danstick's longest line (an `sdl_mapping` carries a whole
 /// mapping string per pad); a line longer still is skipped whole.
@@ -98,10 +99,16 @@ impl Link {
         self.stream = connect(path);
     }
 
-    /// Read what has arrived and apply every complete line to `pairing` and
-    /// `rebind`. Returns how many events were applied; a closed or broken
+    /// Read what has arrived and apply every complete line to `pairing`,
+    /// `rebind` and `seating`. Returns how many events were applied; a closed or broken
     /// socket is dropped and retried later.
-    pub fn pump(&mut self, pairing: &mut Pairing, rebind: &mut Rebind, now: f64) -> usize {
+    pub fn pump(
+        &mut self,
+        pairing: &mut Pairing,
+        rebind: &mut Rebind,
+        seating: &mut Seating,
+        now: f64,
+    ) -> usize {
         let mut applied = 0;
         let mut chunk = [0u8; 8192];
         for _ in 0..READS_PER_PUMP {
@@ -113,7 +120,7 @@ impl Link {
                     self.close();
                     break;
                 }
-                Ok(got) => applied += self.feed(&chunk[..got], pairing, rebind, now),
+                Ok(got) => applied += self.feed(&chunk[..got], pairing, rebind, seating, now),
                 Err(error) if error.kind() == ErrorKind::WouldBlock => break,
                 Err(error) if error.kind() == ErrorKind::Interrupted => {}
                 Err(_) => {
@@ -127,18 +134,31 @@ impl Link {
 
     /// Apply every complete line in `bytes` and what was held before them.
     /// Split out so a test can feed bytes without a socket.
-    pub fn feed(&mut self, mut bytes: &[u8], pairing: &mut Pairing, rebind: &mut Rebind, now: f64) -> usize {
+    pub fn feed(
+        &mut self,
+        mut bytes: &[u8],
+        pairing: &mut Pairing,
+        rebind: &mut Rebind,
+        seating: &mut Seating,
+        now: f64,
+    ) -> usize {
         let mut applied = 0;
         while !bytes.is_empty() {
             let take = bytes.len().min(BUFFER - self.buffer.len());
             self.buffer.extend_from_slice(&bytes[..take]);
             bytes = &bytes[take..];
-            applied += self.drain(pairing, rebind, now);
+            applied += self.drain(pairing, rebind, seating, now);
         }
         applied
     }
 
-    fn drain(&mut self, pairing: &mut Pairing, rebind: &mut Rebind, now: f64) -> usize {
+    fn drain(
+        &mut self,
+        pairing: &mut Pairing,
+        rebind: &mut Rebind,
+        seating: &mut Seating,
+        now: f64,
+    ) -> usize {
         let (icons, resolve) = (&mut self.icons, self.resolve);
         let mut icon_of = |node: &str, name: &str| -> u8 {
             // A keyboard seat names no node, and needs no look-up to name.
@@ -166,6 +186,7 @@ impl Link {
             {
                 events::apply(&event, pairing, now, &mut icon_of);
                 rebind.apply(&event, now);
+                seating.apply(&event);
                 applied += 1;
             }
             start += at + 1;
@@ -284,7 +305,13 @@ mod tests {
     }
 
     fn feed_text(text: &str) -> usize {
-        Link::new(Some("/nonexistent")).feed(text.as_bytes(), &mut pairing(), &mut Rebind::default(), 10.0)
+        Link::new(Some("/nonexistent")).feed(
+            text.as_bytes(),
+            &mut pairing(),
+            &mut Rebind::default(),
+            &mut Seating::new(1.5),
+            10.0,
+        )
     }
 
     #[test]
@@ -294,12 +321,24 @@ mod tests {
         let first = r#"{"event":"progress","frac":0.2,"node":"/dev/in"#;
         let rest = "put/event9\",\"player\":1}\n";
         assert_eq!(
-            link.feed(first.as_bytes(), &mut p, &mut Rebind::default(), 10.0),
+            link.feed(
+                first.as_bytes(),
+                &mut p,
+                &mut Rebind::default(),
+                &mut Seating::new(1.5),
+                10.0
+            ),
             0,
             "half a line is kept, not applied"
         );
         assert_eq!(
-            link.feed(rest.as_bytes(), &mut p, &mut Rebind::default(), 10.0),
+            link.feed(
+                rest.as_bytes(),
+                &mut p,
+                &mut Rebind::default(),
+                &mut Seating::new(1.5),
+                10.0
+            ),
             1,
             "and applied once the rest arrives"
         );
@@ -310,10 +349,22 @@ mod tests {
     fn a_line_too_long_is_skipped_whole() {
         let mut link = Link::new(Some("/nonexistent"));
         let mut p = pairing();
-        link.feed(&vec![b'x'; BUFFER + 100], &mut p, &mut Rebind::default(), 10.0);
+        link.feed(
+            &vec![b'x'; BUFFER + 100],
+            &mut p,
+            &mut Rebind::default(),
+            &mut Seating::new(1.5),
+            10.0,
+        );
         let after = "\n{\"event\":\"progress\",\"frac\":0.3,\"node\":\"n\"}\n";
         assert_eq!(
-            link.feed(after.as_bytes(), &mut p, &mut Rebind::default(), 10.0),
+            link.feed(
+                after.as_bytes(),
+                &mut p,
+                &mut Rebind::default(),
+                &mut Seating::new(1.5),
+                10.0
+            ),
             1,
             "the line after it still parses"
         );
@@ -324,12 +375,24 @@ mod tests {
         let mut link = Link::new(Some("/nonexistent"));
         let mut p = pairing();
         assert_eq!(
-            link.feed(&vec![b'x'; BUFFER], &mut p, &mut Rebind::default(), 10.0),
+            link.feed(
+                &vec![b'x'; BUFFER],
+                &mut p,
+                &mut Rebind::default(),
+                &mut Seating::new(1.5),
+                10.0
+            ),
             0
         );
         let after = "\n{\"event\":\"progress\",\"frac\":0.3,\"node\":\"n\"}\n";
         assert_eq!(
-            link.feed(after.as_bytes(), &mut p, &mut Rebind::default(), 10.0),
+            link.feed(
+                after.as_bytes(),
+                &mut p,
+                &mut Rebind::default(),
+                &mut Seating::new(1.5),
+                10.0
+            ),
             1
         );
     }
@@ -347,6 +410,7 @@ mod tests {
                 line.as_bytes(),
                 &mut pairing(),
                 &mut Rebind::default(),
+                &mut Seating::new(1.5),
                 10.0
             ),
             1
@@ -381,7 +445,12 @@ mod tests {
         // Blocking in the test: one read gets the line, the close ends it.
         drop(theirs);
         assert_eq!(
-            link.pump(&mut pairing(), &mut Rebind::default(), 10.0),
+            link.pump(
+                &mut pairing(),
+                &mut Rebind::default(),
+                &mut Seating::new(1.5),
+                10.0
+            ),
             1,
             "a claim comes in over the socket"
         );
@@ -438,7 +507,15 @@ mod tests {
         let (ours, _theirs) = UnixStream::pair().expect("socketpair");
         ours.set_nonblocking(true).expect("nonblocking");
         let mut link = Link::with_stream(ours);
-        assert_eq!(link.pump(&mut pairing(), &mut Rebind::default(), 10.0), 0);
+        assert_eq!(
+            link.pump(
+                &mut pairing(),
+                &mut Rebind::default(),
+                &mut Seating::new(1.5),
+                10.0
+            ),
+            0
+        );
         assert!(link.fd().is_some(), "nothing to say is not a closed connection");
     }
 
@@ -468,13 +545,20 @@ mod tests {
                 line(f64::from(step) / 20.0).as_bytes(),
                 &mut p,
                 &mut Rebind::default(),
+                &mut Seating::new(1.5),
                 10.0,
             );
         }
         assert_eq!(RESOLVED.load(std::sync::atomic::Ordering::SeqCst) - before, 1);
         assert_eq!(p.now(10.0)[0].icon, 3);
         link.close();
-        link.feed(line(0.9).as_bytes(), &mut p, &mut Rebind::default(), 10.0);
+        link.feed(
+            line(0.9).as_bytes(),
+            &mut p,
+            &mut Rebind::default(),
+            &mut Seating::new(1.5),
+            10.0,
+        );
         assert_eq!(
             RESOLVED.load(std::sync::atomic::Ordering::SeqCst) - before,
             2,
@@ -490,13 +574,25 @@ mod tests {
         let mut link = Link::new(Some("/nonexistent"));
         let mut p = pairing();
         let hold = "{\"event\":\"progress\",\"frac\":0.4,\"name\":\"Keyboard\",\"node\":\"\",\"player\":2}\n";
-        link.feed(hold.as_bytes(), &mut p, &mut Rebind::default(), 10.0);
+        link.feed(
+            hold.as_bytes(),
+            &mut p,
+            &mut Rebind::default(),
+            &mut Seating::new(1.5),
+            10.0,
+        );
         let holds = p.now(10.0);
         assert_eq!(holds.len(), 1);
         assert_eq!(crate::icons::NAMES[usize::from(holds[0].icon)], "keyboard-mouse");
         let claim =
             "{\"event\":\"claim\",\"player\":2,\"name\":\"Keyboard\",\"node\":\"\",\"icon\":\"keyboard\"}\n";
-        link.feed(claim.as_bytes(), &mut p, &mut Rebind::default(), 10.1);
+        link.feed(
+            claim.as_bytes(),
+            &mut p,
+            &mut Rebind::default(),
+            &mut Seating::new(1.5),
+            10.1,
+        );
         assert!(p.now(10.1).is_empty(), "the hold that took the seat is over");
         let [(player, icon)] = p.joined(10.1)[..] else {
             panic!("one seat taken")
@@ -522,7 +618,7 @@ mod tests {
         daemon
             .write_all(b"{\"event\":\"mapping\",\"player\":1,\"control\":\"b\",\"index\":1,\"total\":14}\n")
             .expect("danstick writes");
-        link.pump(&mut pairing(), &mut rebind, 10.2);
+        link.pump(&mut pairing(), &mut rebind, &mut Seating::new(1.5), 10.2);
         assert_eq!(rebind.view(10.2).map(|v| v.control), Some("b".into()));
     }
 
