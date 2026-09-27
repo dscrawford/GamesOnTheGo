@@ -19,13 +19,10 @@ from concurrent.futures import Future, ThreadPoolExecutor
 
 import pygame
 
-from . import around, beside, config, devices, display, filters, keys, meter, pads, prepare, seat, trace
+from . import beside, config, display, filters, keys, meter, pads, prepare, trace
 from .art import ArtStore
-from .assign import KeyHold, Session, Watch, attend
 from .browser import SHELF, Browser
 from .catalog import Game, Library
-from .controllers import assets_dir, control_places, draw_assign, draw_strip
-from .controllers import draw as draw_controllers
 from .danstick import DaemonWatch, Danstick, ensure_daemon
 from .decode import PENDING, Decoder
 from .fetch import Loader
@@ -34,11 +31,10 @@ from .grid import Grid
 from .hush import Hush
 from .installed import installed_games
 from .installs import Installs
+from .keys import KeyHold
 from .layout import grid, shelf, shelf_at, tile_at
 from .menu import Menu
 from .nav import Nav
-from .padstrip import HEIGHT as STRIP_HEIGHT
-from .padstrip import PANEL, status_text, strip_status
 from .prepare import Preparer, is_ready
 from .recent import Recent
 from .storage import Storage, human
@@ -52,18 +48,11 @@ TILE = config.colour("theme.colours.tile", (38, 38, 44))
 TILE_SELECTED = config.colour("theme.colours.tile_selected", (58, 104, 148))
 TEXT = config.colour("theme.colours.text", (232, 232, 236))
 TEXT_DIM = config.colour("theme.colours.text_dim", (150, 150, 158))
+# The menu's list, a shade off the background.
+PANEL = config.colour("theme.colours.panel", (26, 26, 30))
 
 # The Deck's own panel, so a window on a desktop is the shape it will be there.
 WINDOW = tuple(config.get("theme.window", [1280, 800]))
-
-# The keyboard's arrows as the same steps a d-pad gives, so the diagram is
-# walked the same way from either.
-ARROWS = {
-    pygame.K_LEFT: (-1, 0),
-    pygame.K_RIGHT: (1, 0),
-    pygame.K_UP: (0, -1),
-    pygame.K_DOWN: (0, 1),
-}
 
 
 def _fit(font_at, text: str, width: int, size: int):
@@ -171,9 +160,9 @@ def view_rects(browser, size) -> list:
     not the one on screen, and the picker died with an IndexError.
     """
     if browser.view == SHELF:
-        _hero, rows = shelf(*size, STRIP_HEIGHT)
+        _hero, rows = shelf(*size)
         return rows
-    return grid(*size, STRIP_HEIGHT)
+    return grid(*size)
 
 
 def hovering(browser, pos, size) -> int | None:
@@ -184,7 +173,7 @@ def hovering(browser, pos, size) -> int | None:
     along from the one it is over.
     """
     finder = shelf_at if browser.view == SHELF else tile_at
-    return finder(*pos, *size, STRIP_HEIGHT)
+    return finder(*pos, *size)
 
 
 def draw_cover(screen, tile, game, picture, font_at, selected: bool) -> None:
@@ -273,7 +262,7 @@ def draw_shelf(
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
     page = state.page
-    hero, rows = shelf(width, height, STRIP_HEIGHT)
+    hero, rows = shelf(width, height)
 
     chosen = page[state.selected] if 0 <= state.selected < len(page) else None
     if chosen is not None:
@@ -331,7 +320,7 @@ def draw(
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
     page = state.page
-    tiles = grid(width, height, STRIP_HEIGHT)
+    tiles = grid(width, height)
     # One translucent wash per tile size, cached: while the menu is open every
     # other tile drops to ~90% so the chosen one reads as chosen.
     dim = None
@@ -438,7 +427,7 @@ def menu_rects(menu: Menu, tiles, font_at, bounds=None) -> list[tuple[int, int, 
     y = tile.y + (tile.height - height) // 2
     if bounds is not None:
         screen_width, screen_height = bounds
-        y = max(STRIP_HEIGHT + 4, min(y, screen_height - height - 4))
+        y = max(4, min(y, screen_height - height - 4))
         x = max(4, min(x, screen_width - width - 4))
     return [(x, y + 4 + i * row_h, width, row_h) for i in range(len(menu.actions))]
 
@@ -536,7 +525,7 @@ def draw_choice(screen, font_at, panel, rows) -> int:
     list_x = rx + rw - list_w
     list_y = ry + rh - 6
     list_h = row_h * shown + 8 + footer_h
-    # Upwards when there is no room below, which there is not for the last row.
+    # Upwards when there is no room screen, which there is not for the last row.
     if list_y + list_h > screen.get_height():
         list_y = ry - list_h + 6
 
@@ -710,7 +699,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     grabbed GPU from a process that is about to stop existing.
     """
     pygame.init()
-    # One window for the whole program, the gate included. Full screen when
+    # One window for the whole program. Full screen when
     # the launcher says so, scaled from one layout size, and presented on the
     # panel's own beat -- see display.py for why that last part is the one
     # that mattered.
@@ -783,37 +772,27 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     typing: str | None = None
     typing_from = ""  # the search before typing began, for Escape
     menu: Menu | None = None
-    # Which platform's bindings are being looked at, or None for the grid.
-    # A screen rather than an overlay: it is a page of reference, not an
-    # action, and nothing underneath it should keep moving.
-    controllers: str | None = None
-    # Which control the cursor is on while the diagram is up.
-    focus: str = ""
-    # Filled in when the diagram is drawn. Empty until then, which the cursor
-    # treats as "nowhere to go" rather than as an error.
-    control_anchors: dict[str, tuple[float, float]] = {}
     # The filter panel, while it is open. None is the grid.
     panel: Filters | None = None
     # The controller layer. Absent is a state rather than a failure: a machine
     # with no daemon running is what every machine looks like before anybody
-    # has set a controller up, and the strip says so instead of disappearing.
+    # has set a controller up.
     danstick = Danstick()
     # Started rather than waited for: the picker is usually the first thing
     # open on this machine, so if it does not start the daemon nothing will.
-    # A failure is a sentence in the strip, not a reason to refuse to draw.
+    # A failure is a line in the trace, not a reason to refuse to draw.
     # No session, ever, from the grid. danstick opens one by itself the first
     # time it meets a pad it has no mapping for -- which grabs every
     # controller, takes the screen, and is exactly the pairing detour this
     # picker is supposed to have stopped needing. A seat comes from a hold,
-    # and what a button means is asked at launch by gotg-seat, where there is
-    # a game to ask about. Set before the daemon is started, since it is the
-    # daemon that reads it, and left alone when somebody set it themselves.
+    # and what a button means is asked over the game, by the overlay. Set
+    # before the daemon is started, since it is the daemon that reads it, and
+    # left alone when somebody set it themselves.
     os.environ.setdefault("DANSTICK_NO_AUTOSETUP", "1")
     # And no seat but by a hold. danstick seats a pad it has a stored mapping
     # for the moment it sees it, which --fresh does not stop: the Xbox pad
     # was player one two seconds after the grid opened, nobody had held
-    # anything, and the strip said "no controllers" because no state ever
-    # followed. Seen in a trace, not reasoned about.
+    # anything. Seen in a trace, not reasoned about.
     os.environ.setdefault("DANSTICK_NO_AUTOATTACH", "1")
     # Unseated, and for as long as this process lives -- which, after a pick
     # execvp's into a game, is the game. Nobody is seated when the picker
@@ -829,7 +808,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
         held=hush.refresh(),
     )
     danstick.connect()
-    # The overlay's bar over this window, as over a game: see beside.py.
+    # The overlay's bar over this window, as over a game: see beside.py. It is
+    # what keeps danstick listening for a hold, and what shows somebody joining.
     overlay = beside.start(os.getpid())
     # And asked after again whenever the connection is gone -- see DaemonWatch
     # for why reconnecting alone was not enough.
@@ -837,18 +817,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # Where that asking happens, so the grid keeps drawing while it does.
     restarter = ThreadPoolExecutor(max_workers=1, thread_name_prefix="danstick-start")
     restarting: Future | None = None
-    # The assignment screen. `open` is what decides whether it is on screen,
-    # and danstick closes it by accepting rather than this program deciding.
-    seating = Session()
-    # And the standing invitation underneath it: danstick listening for a hold
-    # for as long as the grid is up, so picking a controller up and holding a
-    # button is all it takes to become player one. Nothing on screen until
-    # somebody does -- see assign.Watch.
-    watch = Watch()
     # The space bar: tapped it opens the menu as it always did; held, danstick
     # seats the keyboard and the release is nothing. Decided on release.
     space = KeyHold()
-    controller_art: dict = {}
     # The storage screen, and the path being typed to add to it.
     storage: Storage | None = None
     storage_typing: str | None = None
@@ -862,12 +833,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     running = True
 
     def pick(game: Game | None, verb: str = "play", variant: str | None = None, version: str | None = None) -> None:
-        nonlocal chosen, running, preparer, after_prepare, controllers, storage
+        nonlocal chosen, running, preparer, after_prepare, storage
         if game is None:
-            return
-        if verb == "controllers":
-            # A screen in this program, not a verb for the client.
-            controllers = game.platform
             return
         if verb == "storage":
             storage = Storage()
@@ -948,25 +915,18 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     running = False
                     continue
 
-                # Before any screen, because every screen needs it. Assigning
-                # controllers *replaces* them: danstick grabs the physical pad,
-                # which then reports nothing, and publishes `danstick Player N`
-                # in its place. A picker holding only the handles it opened at
-                # startup goes dead at exactly the moment somebody finishes
-                # setting their controller up -- which is the worst possible
-                # moment, because it looks like danstick broke the machine.
+                # Before any screen, because every screen needs it. Seating a
+                # controller *replaces* it: danstick publishes `danstick Player
+                # N` in its place. A picker holding only the handles it opened
+                # at startup goes dead at exactly the moment somebody joins.
                 if event.type == pygame.JOYDEVICEADDED:
                     sticks.add(event.device_index)
                     hush.refresh()
-                    # Event node numbers are reused, so what /proc said about
-                    # eventN a moment ago can be another device now.
-                    devices.forget()
                     continue
                 if event.type == pygame.JOYDEVICEREMOVED:
                     steer = steer.forget(event.instance_id)
                     sticks.remove(event.instance_id)
                     hush.refresh()
-                    devices.forget()
                     continue
 
                 if not pads.is_repeat(event):
@@ -1044,52 +1004,6 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         elif pressed == pads.Y:
                             # A Deck raises the Steam keyboard over this.
                             storage_typing = ""
-                    continue
-
-                # Same for the controller diagram, which is also where a
-                # controller is assigned -- so it takes A, B and Y from both
-                # the keyboard and a pad, and nothing else. `seating.open` as
-                # well as the screen, because danstick opens sessions of its own
-                # and the way out of one has to be reachable from wherever the
-                # picker happened to be.
-                if controllers is not None or seating.open:
-                    if event.type == pygame.KEYDOWN:
-                        if event.key in (pygame.K_ESCAPE, pygame.K_b, pygame.K_c):
-                            # One press, and it keeps what was claimed. Two
-                            # presses was the bug: the first threw the claim
-                            # away, which took the clone with it, which left
-                            # nothing able to press the second.
-                            if seating.open:
-                                danstick.send(seating.leave())
-                            controllers = None
-                        elif event.key in ARROWS and not seating.open:
-                            focus = around.nearest(control_anchors, focus, ARROWS[event.key])
-                        elif event.key in (pygame.K_RETURN, pygame.K_a):
-                            # One key, two meanings, and the state says which:
-                            # nothing started yet means start, and a session in
-                            # flight means keep what has been claimed.
-                            danstick.send(seating.accept() if seating.open else seating.begin())
-                        elif event.key == pygame.K_r and seating.open:
-                            danstick.send(seating.reset())
-                    elif pads.direction(event) is not None and not seating.open:
-                        # Around the drawing itself. Geometric, so "right" from
-                        # the d-pad reaches the face buttons rather than
-                        # whichever control the config happens to list next.
-                        focus = around.nearest(control_anchors, focus, pads.direction(event))
-                    else:
-                        # The same three things the keyboard does. Leaving them
-                        # off was the whole of "I hold A and nothing happens":
-                        # no session was ever begun, so there was nothing to
-                        # hold a button *at*.
-                        pressed = pads.button(event)
-                        if pressed == pads.A:
-                            danstick.send(seating.accept() if seating.open else seating.begin())
-                        elif pressed == pads.B:
-                            if seating.open:
-                                danstick.send(seating.leave())
-                            controllers = None
-                        elif pressed == pads.Y and seating.open:
-                            danstick.send(seating.reset())
                     continue
 
                 # While the menu is open it owns the input: the grid must
@@ -1176,11 +1090,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             panel.adjust(browser, 1)
                         elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
                             if panel.open:
-                                # A platform back means the controller row: it
-                                # is a door out of the panel, not a filter.
-                                chosen = panel.choose(browser)
-                                if chosen:
-                                    controllers, panel = chosen, None
+                                panel.choose(browser)
                             elif panel.press(browser) == filters.TYPING:
                                 typing = typing_from = browser.search
                     else:
@@ -1194,9 +1104,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                                 panel.adjust(browser, dx)
                         elif pressed == pads.A:
                             if panel.open:
-                                chosen = panel.choose(browser)
-                                if chosen:
-                                    controllers, panel = chosen, None
+                                panel.choose(browser)
                             elif panel.press(browser) == filters.TYPING:
                                 typing = typing_from = browser.search
                         elif pressed == pads.B:
@@ -1236,12 +1144,6 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         running = False
                     elif event.key in (pygame.K_SLASH, pygame.K_f):
                         typing = typing_from = browser.search
-                    elif event.key == pygame.K_c:
-                        # The selected game names the platform; the diagram is
-                        # per-platform, because that is the grain the bindings
-                        # are written at.
-                        if state.game is not None:
-                            controllers = state.game.platform
                     elif event.key == pygame.K_TAB:
                         # The panel, which is every filter in one place and
                         # both directions on each. It used to cycle platforms
@@ -1399,54 +1301,34 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     # looks to see whether it has finished.
                     restarting = restarter.submit(ensure_daemon, force=True, follow=os.getpid())
                 if restarting is not None and restarting.done():
-                    danstick_trouble = restarting.result()
+                    trace.say("daemon-restarted", trouble=restarting.result())
                     restarting = None
                 danstick.connect()
-            # Keeping up with danstick, once a frame: fold in what it said and
-            # keep it listening for a hold. Who may move the cursor is not a
-            # question here -- pads.py refuses anything danstick did not
-            # publish, on every event, with no switch to turn that off.
-            listen = attend(danstick, seating, watch)
-            if listen is not None:
-                danstick.send(listen)
+            # Keeping up with danstick, once a frame: what it said is who is
+            # seated, which is who the keyboard rule and pads.py ask about.
+            # Keeping it listening for a hold is the overlay's (beside.py).
+            for said in danstick.poll():
+                if trace.on() and said.get("event") != "progress":
+                    trace.say("danstick", **{k: v for k, v in said.items() if k not in ("lines", "build")})
 
             painting = time.perf_counter()
-            # The full-screen views draw into the band below the strip rather
-            # than under it: each starts its heading a sixteenth of the way
-            # down, which on a 800-pixel screen is where the strip ends. None
-            # of them hit-tests, so a subsurface costs nothing and no screen
-            # carries a copy of the strip's height.
-            below = screen.subsurface(
-                (0, STRIP_HEIGHT, screen.get_width(), screen.get_height() - STRIP_HEIGHT)
-            )
             if preparer is not None:
                 draw_prepare(
-                    below, font_at, preparer.game, preparer.tail(28), prepare_failed,
+                    screen, font_at, preparer.game, preparer.tail(28), prepare_failed,
                     progress=preparer.progress if preparer.running else None,
                     stage=preparer.stage if preparer.running else None,
                     elapsed=preparer.elapsed,
                 )
             elif storage is not None:
-                draw_storage(below, font_at, storage, storage_typing)
+                draw_storage(screen, font_at, storage, storage_typing)
             elif panel is not None:
                 # The grid behind it, so changing a filter is visibly changing
                 # the thing underneath rather than a number on a form.
                 if browser.view == SHELF:
-                    draw_shelf(below, state, font_at, art, browser.status, browser.installed, installs.rings())
+                    draw_shelf(screen, state, font_at, art, browser.status, browser.installed, installs.rings())
                 else:
-                    draw(below, state, font_at, art, browser.status, None, None, browser.installed, installs.rings())
-                draw_filters(below, font_at, browser, panel, typing)
-            elif controllers is not None or seating.open:
-                if seating.open or seating.view.finished:
-                    draw_assign(below, font_at, seating.view)
-                else:
-                    control_anchors = control_places(assets_dir(), controllers, controller_art)
-                    if focus not in control_anchors:
-                        focus = around.first(control_anchors)
-                    draw_controllers(
-                        below, assets_dir(), controllers, font_at, controller_art,
-                        highlight=focus,
-                    )
+                    draw(screen, state, font_at, art, browser.status, None, None, browser.installed, installs.rings())
+                draw_filters(screen, font_at, browser, panel, typing)
             else:
                 # Whatever the workers finished since the last frame stops being a
                 # placeholder now. Only the page on screen is ever asked for.
@@ -1470,39 +1352,16 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 if menu is not None:
                     draw_menu(screen, menu, view_rects(browser, screen.get_size()), font_at)
 
-            # Last, and over everything: which seat a person is in is the one
-            # thing worth knowing on every screen, and drawing it after the
-            # others means no screen has to leave room for it.
-            draw_strip(
-                screen,
-                font_at,
-                danstick.players,
-                danstick.slots,
-                strip_status(danstick.status_word, len(danstick.players))
-                if danstick.connected
-                else (danstick_trouble or status_text(danstick.status_word)),
-                # `filling`, not the last reading: a hold let go is danstick
-                # going quiet, and the strip has to empty on its own.
-                #
-                # And only a daemon that does not name its pads gets the single
-                # fill: one that does has every hold in `holds`, and drawing
-                # both put one press in two places, taking turns.
-                progress=seating.joining.anonymous(seating.filling(time.monotonic())),
-                holds=seating.joining.now(time.monotonic()),
-            )
             drawn = time.perf_counter()
             now = time.monotonic()
             # Moving on its own clock, or the daemon talking: full rate. Idle
             # is only ever a screen with nothing on it that changes by itself.
             if (
                 danstick.heard != heard
-                or seating.open
                 or space.since is not None
                 or preparer is not None
                 # A failed install's ring is a mark that stays, not a motion.
                 or any(not failed for _, failed in installs.rings().values())
-                or seating.filling(now) > 0
-                or seating.joining.now(now)
             ):
                 shown.pace.busy(now)
             shown.present()
@@ -1521,7 +1380,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         file=sys.stderr,
                     )
         # Whatever repeat a held direction had queued is the grid's, not the
-        # launch gate's that reads the queue next.
+        # next program's.
         pads.drop_repeats()
 
     finally:
@@ -1536,22 +1395,6 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
         # button in a game reseats nobody, and a second player arriving
         # mid-level is exactly who this is for. Seating outlives this client
         # in the daemon, which is what lets it.
-
-    # The gate, in this window rather than in a second one.
-    #
-    # The picker used to close its display and exec the client, and the client
-    # started `gotg-seat`, which opened another window -- one program, two
-    # windows, a black flicker between them, and the seat somebody had just
-    # taken thrown away in the middle of it. It runs here now, while the
-    # window is still up and the seats still stand, and the client is told the
-    # gate has been met. `theme.gate_in_window: false` puts it back in its own
-    # process, which is still how Steam and a bare terminal meet it.
-    if chosen is not None and chosen[1] == "play" and config.get("theme.gate_in_window", True):
-        try:
-            seat.before_launch(shown, font_at, danstick, chosen[0].platform, chosen[0].title, hush)
-            os.environ["GOTG_SEAT_MET"] = "1"
-        except Exception as error:  # noqa: BLE001 - a screen must never stop a launch
-            trace.say("gate-in-window-failed", why=str(error))
 
     # Before the caller execs: the emulator must not inherit a window and a
     # grabbed GPU from a process that is about to stop existing -- nor the

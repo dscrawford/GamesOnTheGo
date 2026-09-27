@@ -10,6 +10,7 @@ means anything is the one asking for the seat.
 from __future__ import annotations
 
 from gotg_ui import keys
+from gotg_ui.keys import KeyHold
 
 SEATED = [{"player": 1, "name": "Keyboard", "icon": "keyboard", "keyboard": True}]
 A_PAD = [{"player": 1, "name": "Xbox Wireless Controller", "icon": "xbox"}]
@@ -59,3 +60,45 @@ def test_the_keyboards_own_seat_is_findable():
     assert keys.seat_of([{"player": 3, "keyboard": True}]) == 3
     assert keys.seat_of(A_PAD) is None
     assert keys.seat_of([]) is None
+
+
+# --- the space bar, held ------------------------------------------------------
+
+
+def test_a_tap_on_space_is_still_the_menu():
+    hold = KeyHold(seconds=0.6)
+    hold.down(10.0)
+    assert hold.up(10.2) is True
+
+
+def test_space_held_the_whole_way_is_a_seat_and_not_a_tap():
+    # danstick reads the space bar and seats the keyboard itself (EVENTS.md,
+    # "A held space bar does the same thing, from anywhere"); the picker only
+    # has to not open the menu when the key comes back up.
+    hold = KeyHold(seconds=0.6)
+    hold.down(10.0)
+    assert hold.up(10.6) is False, "held its length: the keyboard's seat"
+
+
+def test_nothing_asks_danstick_for_the_seat_any_more():
+    # Two things timing one hold was two fills and a second seat_keyboard
+    # danstick refused.
+    assert not hasattr(KeyHold, "due")
+
+
+def test_progress_fills_over_the_hold_and_is_nothing_when_nothing_is_held():
+    hold = KeyHold(seconds=0.6)
+    assert hold.progress(5.0) == 0.0
+    hold.down(10.0)
+    assert abs(hold.progress(10.3) - 0.5) < 1e-9
+    assert hold.progress(11.0) == 1.0
+    hold.up(11.0)
+    assert hold.progress(11.0) == 0.0
+
+
+def test_key_repeat_does_not_restart_the_hold():
+    # A second KEYDOWN while the key is down is the repeat, not a new press.
+    hold = KeyHold(seconds=0.6)
+    hold.down(10.0)
+    hold.down(10.5)
+    assert hold.up(10.6) is False

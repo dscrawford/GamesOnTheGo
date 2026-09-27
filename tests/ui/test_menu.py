@@ -18,7 +18,7 @@ def game(id="usa.zelda", platform="n64"):
 
 
 def test_the_verbs_in_order():
-    assert [label for label, _ in ACTIONS] == ["Play Game", "Configure", "Controllers", "Storage", "Add to Steam"]
+    assert [label for label, _ in ACTIONS] == ["Play Game", "Configure", "Storage", "Add to Steam"]
 
 
 def test_opening_holds_the_game_and_starts_on_play():
@@ -34,8 +34,6 @@ def test_moving_walks_and_clamps():
     assert m.action == "install"  # not here yet, so Install sits under Play
     m.move(1)
     assert m.action == "configure"
-    m.move(1)
-    assert m.action == "controllers"
     m.move(1)
     assert m.action == "storage"
     m.move(1)
@@ -59,9 +57,9 @@ def test_the_panel_lands_on_the_open_side_of_the_tile(tile_index, side):
 
 def test_selecting_an_item_by_index_is_refused_off_the_list():
     m = Menu(game(), tile_index=0)
-    assert m.select(5) is True
+    assert m.select(4) is True
     assert m.action == "steam-add"
-    assert m.select(6) is False
+    assert m.select(5) is False
     assert m.action == "steam-add", "a refused select leaves the cursor"
     assert m.select(-1) is False
 
@@ -74,7 +72,6 @@ def test_a_game_that_is_here_gets_uninstall_last():
     assert [label for label, _ in m.actions] == [
         "Play Game",
         "Configure",
-        "Controllers",
         "Storage",
         "Add to Steam",
         "Uninstall",
@@ -85,10 +82,10 @@ def test_a_game_that_is_here_gets_uninstall_last():
 
 def test_a_game_that_is_not_here_has_no_uninstall_to_press():
     m = Menu(game(), tile_index=0, installed=False)
-    assert len(m.actions) == 6  # Play, Install, Configure, Controllers, Storage, Add to Steam
+    assert len(m.actions) == 5  # Play, Install, Configure, Storage, Add to Steam
     m.move(10)
     assert m.action == "steam-add"
-    assert m.select(6) is False
+    assert m.select(5) is False
 
 
 # --- mods, as a menu you walk into ------------------------------------------
@@ -111,7 +108,7 @@ def test_the_mods_row_comes_first_and_names_what_is_chosen():
     m = with_mods()
     label, verb = m.actions[0]
     assert verb == MODS and label == f"Mods: {PLAIN}"
-    assert [v for _, v in m.actions[1:]] == ["play", "install", "configure", "controllers", "storage", "steam-add"]
+    assert [v for _, v in m.actions[1:]] == ["play", "install", "configure", "storage", "steam-add"]
 
 
 def test_opening_the_row_replaces_the_verbs_with_the_variants():
@@ -176,7 +173,7 @@ def test_a_verb_is_what_leaves_the_menu():
 def test_every_verb_still_reachable_with_a_mod_chosen():
     m = with_mods(installed=True)
     verbs = [verb for _, verb in m.actions]
-    assert verbs == [MODS, "play", "configure", "controllers", "storage", "steam-add", "uninstall"]
+    assert verbs == [MODS, "play", "configure", "storage", "steam-add", "uninstall"]
 
 
 def test_the_cursor_never_names_a_row_that_is_not_there():
