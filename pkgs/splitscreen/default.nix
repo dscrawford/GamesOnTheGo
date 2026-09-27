@@ -37,8 +37,8 @@ stdenvNoCC.mkDerivation {
   src = fetchFromGitHub {
     owner = "dscrawford";
     repo = "SplitScreenWrapper";
-    rev = "c4f7423cd84a0e76f750876edb5184ad6c1eb1b1";
-    hash = "sha256-I05lhLZdQXPIv6ElZhCO7ZLQMhxDAYv6+jxJHFOyTIs=";
+    rev = "2809b5de387a9c6eb68652f7c062e9ee77012ba6";
+    hash = "sha256-R8icXRxXgDlW6CHZU54+Iluz2v1TB4+1AkTKJcOU7ms=";
   };
 
   nativeBuildInputs = [ makeWrapper ];
