@@ -9,7 +9,7 @@ being played, which is exactly what happened once.
 
 ```bash
 nix run .#controllers-cluster                        # the whole suite, one pod per node
-nix run .#controllers-cluster -- -k lights_the_label # pytest's arguments, in every pod
+nix run .#controllers-cluster -- -k full_room        # pytest's arguments, in every pod
 nix run .#controllers-cluster -- --shards 1 -k x     # one pod
 nix run .#controllers-cluster -- --durations         # and rewrite tests/e2e/durations.json
 ```
@@ -57,10 +57,9 @@ uses, with `GOTG_DEV_ROOT=/gotg`.
 - **Privileged.** containerd's device cgroup denies `/dev/uinput` to an
   unprivileged container whatever the node's permissions say. Same trade the
   QA job takes, on the same private cluster.
-- **The wizard tests do not pass here yet.** Five of the fifty —
-  everything that walks danstick's capture wizard through a gate subprocess —
-  fail with "the wizard never finished", and danstick's states show `ready`
-  without a mapping run: in a pod it seats the fake pad as already configured,
-  so the gate never asks. The other forty-four pass, including the whole
-  controller requirement and the press-to-light-a-label set. Chasing that
-  difference is the next thing here.
+- **Nothing here walks danstick's capture wizard.** The five tests that did —
+  all through the launch gate, which is gone — failed in a pod with "the
+  wizard never finished": danstick seats a fake pad there as already
+  configured, so nothing asked. The overlay's auto-walk of an unmapped seat
+  (`map`) is tested in its crate, not here; an e2e for it would meet the same
+  difference.

@@ -68,9 +68,9 @@ PYTHONPATH=src/ui:src python -m pytest tests/ui/test_keys.py::test_name -q      
 nix build .#checks.x86_64-linux.python-tests --max-jobs 2 --cores 4              # same, in the sandbox
 nix build .#checks.x86_64-linux.client-tests --max-jobs 2 --cores 4              # bats, whole suite
 nix run .#test-controllers --max-jobs 2 --cores 4 -- -q                          # controller e2e, real devices
-nix run .#test-controllers --max-jobs 2 --cores 4 -- -q -k "top_bar"             # one e2e test
+nix run .#test-controllers --max-jobs 2 --cores 4 -- -q -k "full_room"           # one e2e test
 nix run .#controllers-cluster                                                    # the same suite on the cluster, a pod per node
-nix run .#controllers-cluster -- -k "top_bar"                                    # one e2e test there
+nix run .#controllers-cluster -- -k "full_room"                                  # one e2e test there
 ```
 
 - The dev venv has **no pygame** on purpose: `tests/ui` tests models only,

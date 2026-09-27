@@ -5,7 +5,7 @@ The connection API is danstick's seating mode: `{"cmd": "seating", "open": true,
 claims the next seat. The daemon says `progress` per pad per tick (`frac`,
 `name`, `node`, `player` -- the seat that hold is filling towards; `frac: 0`
 when it is let go), `claim` when a seat goes, and `state` after. Everything in
-here drives that directly -- no picker, no gate -- because the thing reported
+here drives that directly -- no picker, no overlay -- because the thing reported
 from the sofa lives in the daemon: "if someone claims a controller, it cancels
 another controller and they have to hold A again."
 
@@ -64,8 +64,8 @@ bc61806, 0bcd1dc, 9463268, a03dc32, 18829da, dd7db61, 4ff56ba):
     claimed 113-237 ms late at ac0a3dc).
   - the fourth seat's `state` comes within 100 ms of the first's. PASSES --
     claim to `state` is ~1 ms for every seat at ac0a3dc, from 1.19 s.
-  - four holds at once: each is read often enough that the 0.5 s safety net
-    in `joining.NAMED_STALE` is never crossed, starts filling promptly, and
+  - four holds at once: each is read often enough that the overlay's 0.5 s
+    safety net (`NAMED_STALE`) is never crossed, starts filling promptly, and
     fills towards its press-order seat. PASSES.
   - four holds at once cost a seated pad's forwarding nothing. PASSES --
     p95 0.20 ms at ac0a3dc, from 16.9 ms at e0092be.
@@ -93,13 +93,11 @@ import pytest
 from fakepad import BTN_SOUTH, FakePad, kernel_names
 from test_controllers import A_FRAME_MS, EV_KEY_T, EVENT, _percentile, _tap_latencies
 
-from gotg_ui.joining import NAMED_STALE
-
 # --- the numbers, and where each came from ------------------------------------
 
 # The hold the trace was taken with, and theme.timeouts.pair_hold's default.
 # Fixed rather than read from the theme: the offsets below are fractions of
-# it, and test_a_seat_takes_the_hold_the_picker_asked_for already proves the
+# it, and test_a_seat_takes_the_hold_that_was_asked_for already proves the
 # configured length reaches the daemon.
 HOLD = 1.5
 
@@ -151,10 +149,14 @@ LISTENING_WITHIN = 4.0
 STATE_GROWTH = 0.1
 
 # Readings: the desktop's median was 58 ms (tick 20 ms plus scans). The max is
-# the contract -- `joining.NAMED_STALE`, past which the overlay and the picker
-# take a pad's fill off the screen. The median bound catches the loop getting
-# slower long before the safety net is reached.
+# the contract -- NAMED_STALE, past which the overlay takes a pad's fill off
+# the screen. The median bound catches the loop getting slower long before the
+# safety net is reached.
 CADENCE_MEDIAN = 0.1
+
+# The overlay's silence that ends a named hold (gotg-killswitch pairing.rs,
+# STALE_NAMED; the picker's joining.py had the same until it lost its screens).
+NAMED_STALE = 0.5
 
 # Press to first reading: the ring should start moving the moment a thumb
 # goes down. A tick, a scan, and a slow pod.
@@ -178,9 +180,7 @@ class Room:
 
     Every event is stamped as it arrives, on one clock with the presses, so
     "how long after the press" is a subtraction. Not `Daemon.drain`, which
-    sleeps 20 ms on a quiet socket -- a third of the gaps this measures --
-    and not `_progress_arrivals`, which drops everything but progress,
-    claims included.
+    sleeps 20 ms on a quiet socket -- a third of the gaps this measures.
     """
 
     def __init__(self, daemon):
@@ -329,7 +329,7 @@ def _pads(count: int, first: str = "A") -> Iterator[list[FakePad]]:
 
 
 def _open(daemon, hold: float = HOLD, players: int = 4) -> Room:
-    """Seating open, as the picker and the gate open it, and every pad watched.
+    """Seating open, as the overlay opens it, and every pad watched.
 
     A second is danstick's scan interval: pads made just before this are all
     being read before anybody presses.
@@ -747,9 +747,10 @@ def test_a_state_mid_hold_resets_nothing(daemon):
 
 def test_seating_sent_again_with_the_same_hold_resets_nothing(daemon):
     """The picker sent `seating` again about 200 ms after every claim (the
-    trace: `sent seating 1.5` after each one; assign.Watch no longer does),
-    and a gate still sends it when it opens -- the launch door, while somebody
-    in the room is holding. Same length, so nobody's hold should change."""
+    trace: `sent seating 1.5` after each one), and the overlay still sends it
+    on every connection -- a game starting, while somebody in the room is
+    holding -- and whenever danstick says it stopped listening. Same length,
+    so nobody's hold should change."""
     with _pads(1) as (pad,):
         poke = {"cmd": "seating", "open": True, "players": 4, "hold": HOLD}
         room, _, claim = _held_while(daemon, pad, poke)
@@ -1096,8 +1097,8 @@ def test_a_join_costs_the_same_however_full_the_room(daemon):
     the new player's own clone appeared 1, 75, 165, 230 ms after the claim --
     the whole room's clones made again one by one (the new player's last),
     then every seated player's autoconfig and SDL mapping written, and only
-    then `state`. Until it arrives the picker's strip does not show the seat,
-    and seating is not listening to anybody else. a03dc32 sends `state` first:
+    then `state`. Until it arrives the overlay does not show the seat, and
+    seating is not listening to anybody else. a03dc32 sends `state` first:
     ~1 ms for every seat.
     """
     with _pads(4) as pads:
@@ -1111,7 +1112,7 @@ def test_a_join_costs_the_same_however_full_the_room(daemon):
 def test_four_holds_at_once_are_each_read_often_enough(daemon):
     """Four rings on screen at once, each drawn from its own readings. The
     longest silence for any pad has to stay inside the 0.5 s after which the
-    overlay and the picker take a fill down (`NAMED_STALE`); the typical one
+    overlay takes a fill down (`NAMED_STALE`); the typical one
     has to be a few frames. And each fills towards the seat its press order
     gives it. The hold is long so nothing claims while this listens."""
     with _pads(4) as pads:

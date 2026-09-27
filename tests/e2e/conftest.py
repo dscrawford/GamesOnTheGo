@@ -158,8 +158,9 @@ def daemon(tmp_path):
             except ProcessLookupError:
                 pass
         # And any daemon a test started under this runtime dir since -- the
-        # Steam route replaces the fixture's with one following a gate that
-        # the test then kills, and the follower needs a moment to notice. A
+        # fresh-session test replaces the fixture's with one following this
+        # process, and the launch-gate tests did the same with a gate they
+        # then killed, the follower needing a moment to notice. A
         # daemon left behind holds the machine's real pads; three of them,
         # from one evening's experiments, were grabbing the user's
         # controllers during his own launch. By runtime dir, never by name:

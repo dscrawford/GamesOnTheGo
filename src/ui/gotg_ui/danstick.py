@@ -70,9 +70,9 @@ def ensure_daemon(force: bool = False, *, fresh: bool = False, follow: int | Non
     """
     if not force and os.environ.get("DANSTICK_SKIP_DAEMON_CHECK") == "1":
         return None
-    # What a daemon starts with. `seating` carries the same length on every
-    # open -- see gate.PAIR_HOLD -- but an assignment session takes whatever
-    # the daemon was started with, and that is the wizard.
+    # What a daemon starts with. The overlay's `seating` carries the same
+    # length on every open, but a mapping run takes whatever the daemon was
+    # started with, and that is the wizard.
     os.environ.setdefault("DANSTICK_HOLD_SECONDS", str(config.get("theme.timeouts.pair_hold", 1.5)))
     # Fixed slots, as `gotg play` asks for (danstick.sh): four controllers from
     # the start that any pad takes mid-game. The two must agree -- danstick
@@ -128,19 +128,6 @@ class DaemonWatch:
 
     def mark(self, now: float) -> None:
         self._last = now
-
-
-def session_pid() -> int | None:
-    """The pid danstick's daemon was asked to follow, if this is that session.
-
-    Set by `ensure_daemon` here and by `danstick_ensure` in the client, and the
-    picker's pid survives its execvp -- so a gate running inside the launch
-    that picker started sees its own number here.
-    """
-    try:
-        return int(os.environ["DANSTICK_FOLLOW"])
-    except (KeyError, ValueError):
-        return None
 
 
 def socket_path() -> Path:
