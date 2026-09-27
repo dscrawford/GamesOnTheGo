@@ -40,68 +40,21 @@
       # session: the compositor stays outside it, Dolphin goes inside, and
       # what Dolphin can see is danstick's pads and nothing else.
       #
-      # Which is half of it. The step that writes those bindings runs in the
-      # session, outside the sandbox, so it enumerates every pad on the
-      # machine and "the first one" is not the first one Dolphin will see --
-      # it wrote `GBA1 <- SDL/0/Steam Deck`, a name that does not exist
-      # inside. So the pads are not counted.
-      #
-      # --pad "danstick:N" below. The wrapper finds player N's clone by its
-      # GUID, which carries a CRC of the real name taken before SDL renames
-      # anything, and writes the name it finds in the pad list -- which is
-      # why the list is rewritten below to say what Dolphin calls each clone.
-      # What Dolphin calls danstick's clones, put in the pad list in place of
-      # what gotg-pads calls them.
-      #
-      # The two disagree, and Dolphin's own log is the one that counts. For
-      # the Xbox pad's clone gotg-pads reports SDL's joystick name, `Xbox 360
-      # Controller` -- the same name as the raw pad danstick has grabbed -- and
-      # Dolphin, running under `danstick-rs exec` with danstick's mapping for that
-      # GUID, lists it as `SDL/0/danstick Player 1`. The binder took gotg-pads'
-      # word for it, wrote `GBA1 <- SDL/0/Xbox 360 Controller`, and bound
-      # player one to the grabbed pad: nothing moved at all, because player
-      # one drives the menus. Measured with Dolphin's CI log on:
+      # Which is half of it. The step that writes the GBA bindings runs in
+      # the session, outside the sandbox, where every pad on the machine is
+      # visible -- so it is not asked to count pads. Each GBA is named: `--pad
+      # "sdl:danstick Player N"`, which the binder writes verbatim as
+      # `SDL/0/danstick Player N`. That is the name *Dolphin* gives the clone,
+      # from danstick's mapping, even where gotg-pads reports SDL's joystick
+      # name (`Xbox 360 Controller`, which in Dolphin is the raw pad danstick
+      # has grabbed). Measured with Dolphin's CI log on:
       #
       #   Added device: SDL/0/Xbox 360 Controller     (the raw pad, grabbed)
-      #   Added device: SDL/0/danstick Player 1         (its clone)
-      #   Added device: SDL/0/danstick Player 2         (the Steam Controller's)
+      #   Added device: SDL/0/danstick Player 1       (its clone)
+      #   Added device: SDL/0/danstick Player 2       (the Steam Controller's)
       #
-      # A clone is recognised by its GUID's name-CRC, which SDL cannot
-      # rename, and every clone's name is its own, so its slot is 0.
-      dolphinNames = pkgs.writeText "gotg-fsa-dolphin-names.py" ''
-        import json
-        import sys
-
-        PREFIX = "danstick Player "
-
-
-        def crc16(data):
-            crc = 0
-            for byte in data:
-                crc ^= byte
-                for _ in range(8):
-                    crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
-            return crc & 0xFFFF
-
-
-        NAMES = {crc16(f"{PREFIX}{n}".encode()): f"{PREFIX}{n}" for n in range(1, 9)}
-
-        try:
-            rows = json.load(sys.stdin)
-        except ValueError:
-            sys.exit(1)
-        for row in rows if isinstance(rows, list) else []:
-            guid = str(row.get("guid") or "")
-            try:
-                pair = bytes.fromhex(guid[4:8])
-            except ValueError:
-                continue
-            if len(pair) == 2 and (pair[0] | pair[1] << 8) in NAMES:
-                row["name"] = NAMES[pair[0] | pair[1] << 8]
-                row["slot"] = 0
-        json.dump(rows, sys.stdout)
-      '';
-
+      # Every clone's name is its own, so its slot is 0. The split screen
+      # knows nothing of danstick; GOTG, which does, says which device.
       #
       # And with Dolphin's error popups off. Inside the nested session a
       # popup has nowhere to go: SDL hands it to zenity, zenity cannot draw
@@ -206,17 +159,10 @@
           # four-player session at whatever was played last.
           mkdir -p "$state/splitscreen"
 
-          # Ask what *Dolphin* will see, not what the session sees.
-          #
-          # `--pad danstick:N` is resolved by a step that runs in the session,
-          # outside the sandbox -- and out there the raw pads are visible
-          # beside danstick's clones, and the slots count a different set of
-          # pads than Dolphin will. And the names come out of the pipe below
-          # as Dolphin says them, not as gotg-pads does: see `dolphinNames`.
-          #
-          # So the enumerator runs inside the sandbox, through danstick, exactly
-          # as Dolphin will. `GOTG_PADS` is what the resolver looks for, and
-          # the session hands its environment to the step.
+          # What *Dolphin* will see, not what the session sees: an enumerator
+          # run inside the sandbox, through danstick, exactly as Dolphin will
+          # be -- for the wait below, and for the one line that says what the
+          # GBAs are about to meet.
           # HIDAPI off, for the same reason `pads_enumerate` turns it off:
           # gotg-pads sets SDL_HINT_JOYSTICK_HIDAPI_STEAM itself, so a raw
           # Steam Controller is bindable when danstick is not running. In here
@@ -228,14 +174,12 @@
           cat >"$state/splitscreen/gotg-pads" <<'SHIM'
           #!/bin/sh
           export SDL_JOYSTICK_HIDAPI=0 SDL_JOYSTICK_HIDAPI_STEAM=0
-          ${gotgPkgs.danstick-rs}/bin/danstick-rs exec -- ${gotgPkgs.gotg-pads}/bin/gotg-pads "$@" |
-            ${pkgs.python3}/bin/python3 ${dolphinNames}
+          ${gotgPkgs.danstick-rs}/bin/danstick-rs exec -- ${gotgPkgs.gotg-pads}/bin/gotg-pads "$@"
           SHIM
           chmod +x "$state/splitscreen/gotg-pads"
-          export GOTG_PADS="$state/splitscreen/gotg-pads"
 
-          # And wait for those clones to be *enumerable* before anything reads
-          # the list.
+          # And wait for those clones to be *enumerable* before Dolphin starts
+          # and looks for the devices its GBAs are bound to.
           #
           # `danstick-rs exec` republishes on the way into a launch, so the
           # clones a game will use are seconds old when this runs -- and a
@@ -254,7 +198,7 @@
           # it has seated, and carry on regardless after a few seconds --
           # a game that starts with one pad bound is better than one that
           # never starts.
-          ${pkgs.python3}/bin/python3 - "$GOTG_PADS" <<'WAIT' || true
+          ${pkgs.python3}/bin/python3 - "$state/splitscreen/gotg-pads" <<'WAIT' || true
           import json, os, subprocess, sys, time
 
           PREFIX = "danstick Player "
@@ -332,7 +276,7 @@
           WAIT
           ${split}/bin/splitscreen-fsa \
             --players ${toString players} \
-            ${lib.concatMapStringsSep " " (n: ''--pad "danstick:${toString n}"'') (lib.range 1 players)} \
+            ${lib.concatMapStringsSep " " (n: ''--pad "sdl:danstick Player ${toString n}"'') (lib.range 1 players)} \
             --gc "$target" \
             --gba-bios "$state/bios/gba_bios.bin" \
             --dolphin ${lib.escapeShellArg dolphin} \
