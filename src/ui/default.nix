@@ -9,7 +9,6 @@
   stdenvNoCC,
   makeWrapper,
   python3,
-  resvg,
   mesa,
   gotg,
   gotg-killswitch,
@@ -45,32 +44,15 @@ stdenvNoCC.mkDerivation {
 
   src = lib.cleanSource ./.;
 
-  # resvg is a build-time tool and nothing more: it turns the controller SVGs
-  # into the PNGs the diagram screen loads, and never enters the runtime
-  # closure. pygame can rasterise an SVG itself, and deliberately is not asked
-  # to — it clamps to the source aspect ratio, so a diagram sized from the
-  # request rather than the result puts every leader line off its button.
-  nativeBuildInputs = [
-    makeWrapper
-    resvg
-    python3
-  ];
+  nativeBuildInputs = [ makeWrapper ];
 
-  buildPhase = ''
-    runHook preBuild
-    python3 build-controllers.py assets/controllers assets/built
-    # The strip's icons: a second pass, because these carry no anchors and
-    # the diagram build refuses an SVG without them.
-    python3 build-controllers.py --icons assets/icons assets/built/icons
-    runHook postBuild
-  '';
+  dontBuild = true;
 
   installPhase = ''
     runHook preInstall
 
     mkdir -p $out/share/gotg-ui
     cp -r gotg_ui $out/share/gotg-ui/
-    cp -r assets/built $out/share/gotg-ui/assets
     cp -r ${configDir} $out/share/gotg-ui/config
 
     # The client's own artwork sources ride on PYTHONPATH rather than being
@@ -80,18 +62,12 @@ stdenvNoCC.mkDerivation {
     # GOTG_UI_ENV is the client's environment files, which is where a game's
     # variants are: a mod is a file there rather than a catalog row, so the
     # menu reads the same directory `gotg play <id> <variant>` resolves
-    # against. GOTG_UI_DATA is the client's own table directory, which is where
-    # ares-pads.json lives — the file `gotg pads` writes the bindings from. The
-    # diagram reads that one rather than a copy, so what it draws and what the
-    # emulator is given cannot disagree. GOTG_DATA wins when the client
-    # exported it, which is the case for anything the client itself started.
+    # against.
     makeWrapper ${python}/bin/python3 $out/bin/gotg-ui \
       --add-flags "-m gotg_ui" \
       --run ${lib.escapeShellArg foreignGl} \
       --set PYTHONPATH "$out/share/gotg-ui:${gotg}/share/gotg/steam" \
-      --set GOTG_UI_DATA "${gotg}/share/gotg/data" \
       --set GOTG_UI_ENV "${gotg}/share/gotg/env" \
-      --set GOTG_UI_ASSETS "$out/share/gotg-ui/assets" \
       --set GOTG_CONFIG "$out/share/gotg-ui/config" \
       --prefix PATH : ${lib.makeBinPath [
         gotg
@@ -99,20 +75,6 @@ stdenvNoCC.mkDerivation {
         # The bar over the picker, as over a game: gotg_ui/beside.py.
         gotg-killswitch
       ]}
-
-    # The launch-time controller check, as its own command. The client runs it
-    # by name if it is on PATH and shrugs if it is not, which is what keeps the
-    # dependency pointing one way: this package knows about the client, and the
-    # client never has to know about this one.
-    makeWrapper ${python}/bin/python3 $out/bin/gotg-seat \
-      --add-flags "-m gotg_ui.seat" \
-      --run ${lib.escapeShellArg foreignGl} \
-      --set PYTHONPATH "$out/share/gotg-ui:${gotg}/share/gotg/steam" \
-      --set GOTG_UI_DATA "${gotg}/share/gotg/data" \
-      --set GOTG_UI_ENV "${gotg}/share/gotg/env" \
-      --set GOTG_UI_ASSETS "$out/share/gotg-ui/assets" \
-      --set GOTG_CONFIG "$out/share/gotg-ui/config" \
-      --prefix PATH : ${lib.makeBinPath [ danstick ]}
 
     runHook postInstall
   '';

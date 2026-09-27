@@ -401,7 +401,6 @@
             exec "$root/src/client/bin/gotg" "$@"
           '';
 
-          uiPkg = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-ui;
           uiPython = pkgs.python3.withPackages (ps: [ ps.pygame-ce ps.pyyaml ]);
           # What the packaged picker puts on PATH, and for the same reasons:
           # `gotg` because a pick execs it, and danstick because the picker is
@@ -416,23 +415,7 @@
             self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-killswitch
           ];
 
-          # The picker and the controller check, from the working tree, for the
-          # same reason `gotg` is. These two especially: the check runs in front
-          # of a launch and is found *beside the picker*, so a shell with one
-          # and not the other tests a path that cannot happen on a real machine
-          # -- which is exactly how it came to be shipped skipping itself.
-          #
-          # Only the artwork comes from the store. It is resvg output, produced
-          # at build time from the SVGs, and rasterising it on shell entry would
-          # charge every `nix develop` for something that changes about twice a
-          # year.
-          # The check first, so the picker can point at it. In the packaged
-          # install the two sit in one bin/ and the client finds the check
-          # beside the picker; here each shim is its own store path, so a
-          # picker started from Steam launched games past the check with
-          # "no gotg-seat here" in a log nobody reads, and Ryujinx then asked
-          # for a controller itself. GOTG_SEAT is the client's explicit
-          # override, and the picker sets it on its way in.
+          # The picker, from the working tree, for the same reason `gotg` is.
           uiDev = name: module: extra: pkgs.writeShellScriptBin name ''
             root="''${GOTG_DEV_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
             if [ ! -d "$root/src/ui/gotg_ui" ]; then
@@ -442,28 +425,21 @@
             fi
             export PATH="${uiPath}:$PATH"
             export PYTHONPATH="$root/src/ui:${gotgPkg}/share/gotg/steam''${PYTHONPATH:+:$PYTHONPATH}"
-            export GOTG_UI_DATA="''${GOTG_UI_DATA:-${gotgPkg}/share/gotg/data}"
             export GOTG_UI_ENV="''${GOTG_UI_ENV:-${gotgPkg}/share/gotg/env}"
-            export GOTG_UI_ASSETS="''${GOTG_UI_ASSETS:-${uiPkg}/share/gotg-ui/assets}"
             export GOTG_CONFIG="''${GOTG_CONFIG:-$root/config}"
             ${extra}
             exec ${uiPython}/bin/python3 -m ${module} "$@"
           '';
-          seatDev = uiDev "gotg-seat" "gotg_ui.seat" "";
-
           controllerTests = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-test-controllers;
-          pickerDev = uiDev "gotg-ui" "gotg_ui" ''
-            export GOTG_SEAT="''${GOTG_SEAT:-${seatDev}/bin/gotg-seat}"
-          '';
+          pickerDev = uiDev "gotg-ui" "gotg_ui" "";
         in
         {
           default = pkgs.mkShell {
             packages = [
               gotg-dev
               pickerDev
-              seatDev
               # By hand as well as on the picker's PATH: `danstick list` is the
-              # first question to ask when the strip says no controllers, and
+              # first question to ask when nothing joins, and
               # answering it should not mean digging the store path out of a
               # wrapper script.
               danstickPkg
@@ -494,14 +470,11 @@
             # even from a subdirectory.
             shellHook = ''
               export GOTG_DEV_ROOT="$PWD"
-              # The checkout's own gate and client by name, not only by PATH:
-              # a pick execs `gotg play`, which looks for `gotg-seat`, and a
-              # launch that lost this PATH found an older one that had no
-              # ready-up door and started the game on the seating hold. These
-              # are the client's and picker's existing overrides, set only if
-              # unset so a test can still substitute a recorder. The picker
-              # has no such variable, so it stays a PATH entry.
-              export GOTG_SEAT="''${GOTG_SEAT:-${seatDev}/bin/gotg-seat}"
+              # The checkout's own client by name, not only by PATH: a pick
+              # execs `gotg play`, and a launch that lost this PATH would run
+              # an older one. Set only if unset so a test can still substitute
+              # a recorder. The picker has no such variable, so it stays a
+              # PATH entry.
               export GOTG_BIN="''${GOTG_BIN:-${gotg-dev}/bin/gotg}"
               export PATH="${pickerDev}/bin:$PATH"
               # Machinery first, then gotg's own from the checkout so edits
