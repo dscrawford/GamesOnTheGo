@@ -108,7 +108,7 @@ cmd_play() {
 
   # Steam's controller and overlay settings, off, on every route -- see
   # danstick_clear_steam_env for the launch that found the picker's route
-  # missing it. Before the gate, which is SDL and would be blinded the same.
+  # missing it.
   danstick_clear_steam_env
 
   # And the identity this environment wants its clones to have, before the
@@ -116,14 +116,12 @@ cmd_play() {
   # database, and what the clone claims to be decides whether it is in it.
   danstick_identity_apply "$PLAY_ATTR"
 
-  # Before the kill switch rather than after: the gate draws a window, and the
-  # watcher is holding the pid that is about to become the game.
-  danstick_seat_gate \
-    "$(manifest_field "$PLAY_GAME" platform)" \
-    "$(manifest_field "$PLAY_GAME" title)"
+  # Nobody is asked about controllers here: pairing is the overlay's, over the
+  # game. danstick only has to be running, and to have published its pads.
+  danstick_launch_ready
 
-  # And the bindings again, now that the gate has seated somebody. The ones
-  # play_prepare wrote were from what SDL saw before anyone held a button --
+  # And the bindings again, now that danstick has published. The ones
+  # play_prepare wrote were from what SDL saw before the daemon was up --
   # the raw pads, which `danstick-rs exec` is about to hide from the game -- so
   # ares' port 1 named a controller the emulator could not see, and the one
   # it could see was named by nothing. Seen on a real launch: the Steam

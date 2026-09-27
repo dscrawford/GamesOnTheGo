@@ -33,24 +33,14 @@ setup() {
     printf 'while [ "$#" -gt 0 ] && [ "$1" != -- ]; do shift; done; shift\n'
     printf 'exec "$@"\n'
   } >"$FAKE_BIN/danstick-rs"
+  # Where the stand-ins below write what they saw.
   export SEAT_LOG="$TEST_TMP/seat.log"
-  {
-    printf '#!%s\n' "$(command -v bash)"
-    printf 'printf "gotg-seat %%s\\n" "$*" >>"$SEAT_LOG"\n'
-    # What Steam's environment looked like by the time the gate ran: the
-    # gate is SDL, and Steam's ignore list would blind it exactly as it
-    # blinds a game.
-    printf 'printf "env SDL_GAMECONTROLLER_IGNORE_DEVICES=%%s LD_PRELOAD=%%s\\n" "${SDL_GAMECONTROLLER_IGNORE_DEVICES-unset}" "${LD_PRELOAD-unset}" >>"$SEAT_LOG"\n'
-    printf '[ -z "${ORDER_LOG:-}" ] || echo seat >>"$ORDER_LOG"\n'
-    printf 'exit "${FAKE_SEAT_EXIT:-0}"\n'
-  } >"$FAKE_BIN/gotg-seat"
-  chmod +x "$FAKE_BIN/danstick" "$FAKE_BIN/danstick-rs" "$FAKE_BIN/gotg-seat"
+  chmod +x "$FAKE_BIN/danstick" "$FAKE_BIN/danstick-rs"
   export PATH="$FAKE_BIN:$PATH"
   # Named rather than found: the packaged client puts the real danstick first on
   # PATH, where a stand-in in this directory could never win.
   export GOTG_DANSTICK="$FAKE_BIN/danstick"
   export GOTG_DANSTICK_RS="$FAKE_BIN/danstick-rs"
-  export GOTG_SEAT="$FAKE_BIN/gotg-seat"
   unset DANSTICK_SKIP_DAEMON_CHECK
 }
 
@@ -77,34 +67,16 @@ teardown() { stop_saves_service; }
   grep -q "DANSTICK_SLOTS=on-demand" "$DANSTICK_LOG"
 }
 
-@test "a gate the picker met still waits for danstick to publish" {
-  # Only the asking is skipped. The daemon is still ensured and the publish
-  # still waited for, because the bindings written after this read danstick's
-  # pad list -- and Four Swords Adventures came up with player two on the
-  # keyboard when that list was read before danstick had finished.
-  export GOTG_SEAT="$FAKE_BIN/gotg-seat"
-  GOTG_SEAT_MET=1 danstick_seat_gate n64 "Donkey Kong 64"
+@test "a launch readies danstick and asks nobody anything" {
+  # Pairing is the overlay's, over the game. A launch still owes the game a
+  # daemon and its published pads: the bindings written after this read them.
+  danstick_launch_ready
   grep -q "danstick ensure-daemon" "$DANSTICK_LOG"
-}
-
-@test "the gate is not asked for twice when the picker already met it" {
-  # The picker runs the gate in its own window before it execs here, so the
-  # seats are already taken and the screen has already been seen. Saying so
-  # is not the same as turning the check off.
-  export GOTG_SEAT="$FAKE_BIN/gotg-seat"
-  GOTG_SEAT_MET=1 danstick_seat_gate n64 "Donkey Kong 64"
-  [ ! -s "$SEAT_LOG" ] || fail "the gate ran again: $(cat "$SEAT_LOG")"
-}
-
-@test "and it is asked for when nobody has met it" {
-  export GOTG_SEAT="$FAKE_BIN/gotg-seat"
-  danstick_seat_gate n64 "Donkey Kong 64"
-  grep -q "n64" "$SEAT_LOG"
 }
 
 @test "a seat takes a hold long enough to be deliberate, not a quarter second" {
   # danstick's own default claims a seat in 0.25s, which is short enough that
-  # picking a controller up takes one. The picker and the gate ask for the
+  # picking a controller up takes one. The overlay asks for the
   # length on every `seating`; a session -- danstick's wizard -- takes what the
   # daemon was started with, so it is set here too.
   run danstick_ensure
@@ -283,26 +255,6 @@ EOF
   grep -q "danstick-rs exec --" "$DANSTICK_LOG"
 }
 
-@test "the check is found in a Nix profile when PATH has none" {
-  # Which is every launch from Steam: its environment carries no profile
-  # directory, so `command -v gotg-seat` finds nothing and the check was
-  # skipped -- with the warning going to a log nobody reads.
-  local profile="$TEST_TMP/home/.nix-profile/bin"
-  mkdir -p "$profile"
-  printf '#!/bin/sh\n' >"$profile/gotg-seat"
-  chmod +x "$profile/gotg-seat"
-  run env -u GOTG_SEAT HOME="$TEST_TMP/home" PATH=/usr/bin:/bin "$BASH" -c \
-    "source '$GOTG_LIB/common.sh'; source '$GOTG_LIB/danstick.sh'; danstick_seat_bin"
-  [ "$status" -eq 0 ]
-  [[ "$output" == "$profile/gotg-seat" ]]
-}
-
-@test "a machine with no check anywhere still says so" {
-  run env -u GOTG_SEAT HOME="$TEST_TMP/empty" PATH=/usr/bin:/bin "$BASH" -c \
-    "source '$GOTG_LIB/common.sh'; source '$GOTG_LIB/danstick.sh'; danstick_seat_bin"
-  [ "$status" -ne 0 ]
-}
-
 @test "a session that owns its compositor is launched outside the sandbox" {
   # danstick's sandbox is a user namespace, where every root-owned file reads as
   # `nobody`. wlroots then refuses /tmp/.X11-unix, Xwayland never starts, and
@@ -354,54 +306,7 @@ EOF
   grep -q "danstick-rs exec --" "$DANSTICK_LOG"
 }
 
-@test "the controller check runs before the game, and is told which console" {
-  # The console is what decides the control set the capture walks, so a gate
-  # that did not carry it would ask for the wrong buttons.
-  run danstick_seat_gate n64 "Zelda"
-  [ "$status" -eq 0 ]
-  grep -q -- "--platform n64" "$SEAT_LOG"
-  grep -q -- "--title Zelda" "$SEAT_LOG"
-}
-
-@test "no controller check installed still launches the game, and says so" {
-  # It ships with the picker, which is a separate package: the client depends
-  # on it the way it depends on danstick, which is to say not at all. Out loud,
-  # though -- a check that is quietly not there looks exactly like a check
-  # that ran and was happy.
-  rm -f "$FAKE_BIN/gotg-seat"
-  unset GOTG_SEAT
-  run --separate-stderr danstick_seat_gate n64 "Zelda"
-  [ "$status" -eq 0 ]
-  [ ! -f "$SEAT_LOG" ]
-  [[ "$stderr" == *"no gotg-seat here"* ]]
-}
-
-@test "the check is found beside the picker when it is not on PATH" {
-  # Nothing puts the picker's directory on PATH for a command nobody types,
-  # so "on PATH" alone would miss it on the machines it ships to.
-  local elsewhere="$TEST_TMP/profile/bin"
-  mkdir -p "$elsewhere"
-  mv "$FAKE_BIN/gotg-seat" "$elsewhere/gotg-seat"
-  printf '#!%s\nexit 0\n' "$(command -v bash)" >"$elsewhere/gotg-ui"
-  chmod +x "$elsewhere/gotg-ui"
-  unset GOTG_SEAT
-  PATH="$elsewhere:$PATH" run danstick_seat_gate n64 "Zelda"
-  [ "$status" -eq 0 ]
-  grep -q -- "--platform n64" "$SEAT_LOG"
-}
-
-@test "a controller check that fails does not stop the game" {
-  FAKE_SEAT_EXIT=3 run danstick_seat_gate n64 "Zelda"
-  [ "$status" -eq 0 ]
-}
-
-@test "the check can be turned off entirely" {
-  GOTG_SEAT_GATE=0 run danstick_seat_gate n64 "Zelda"
-  [ "$status" -eq 0 ]
-  [ ! -f "$SEAT_LOG" ]
-}
-
-@test "play asks about controllers before it runs the emulator" {
+@test "play readies danstick before it runs the emulator" {
   add_game n64 "usa.zelda.z64" "rom" "Zelda"
   gotg refresh
   export GOTG_ENV_DIR="$TEST_TMP/env"
@@ -416,7 +321,7 @@ EOF
 
   gotg play usa.zelda
   [ "$status" -eq 0 ]
-  grep -q -- "--platform n64" "$SEAT_LOG"
+  grep -q "danstick ensure-daemon" "$DANSTICK_LOG"
 }
 
 # --- danstick's configs, into the environment rather than the home ----------------
@@ -534,11 +439,11 @@ ryujinx_env() {
   [ ! -e "$EMIT_ARGS" ]
 }
 
-@test "a Steam launch meets the controller check first, with Steam's blindfold off" {
+@test "a Steam launch reaches the game with Steam's blindfold off" {
   # Steam is its own environment: a sparse PATH, SDL told to ignore the very
   # pads danstick publishes, and its overlay preloaded into everything. The
   # launcher it runs is the one `gotg steam add` writes, and this runs that
-  # launcher under those conditions and reads what reached the gate.
+  # launcher under those conditions and reads what reached the game.
   add_game n64 "usa.zelda.z64" "rom" "Zelda"
   gotg refresh
   export GOTG_ENV_DIR="$TEST_TMP/env"
@@ -549,6 +454,7 @@ ryujinx_env() {
   {
     printf '#!%s\n' "$(command -v bash)"
     printf 'echo game >>"$ORDER_LOG"\n'
+    printf 'printf "env SDL_GAMECONTROLLER_IGNORE_DEVICES=%%s LD_PRELOAD=%%s\\n" "${SDL_GAMECONTROLLER_IGNORE_DEVICES-unset}" "${LD_PRELOAD-unset}" >>"$SEAT_LOG"\n'
     printf 'echo "emulator ran"\n'
   } >"$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
   chmod +x "$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
@@ -573,14 +479,12 @@ ryujinx_env() {
   [ "$status" -eq 0 ]
   # Steam swallows stdout; the launcher keeps its own log.
   grep -q "emulator ran" "$xdg/gotg/logs/usa.zelda.log"
-  # The gate first, the game second.
-  [ "$(paste -sd, "$ORDER_LOG")" = "seat,game" ]
-  grep -q -- "--platform n64" "$SEAT_LOG"
+  [ "$(paste -sd, "$ORDER_LOG")" = "game" ]
   grep -q "env SDL_GAMECONTROLLER_IGNORE_DEVICES=unset LD_PRELOAD=unset" "$SEAT_LOG"
 }
 
-@test "the bindings are written again after the gate, from what it seated" {
-  # The ones play_prepare wrote were from before anyone held a button. On a
+@test "the bindings are written again once danstick has published" {
+  # The ones play_prepare wrote were from before the daemon was up. On a
   # real launch the Steam Controller was seated, published, and dead in the
   # game, because ares' port 1 named the raw Xbox pad the sandbox then hid.
   add_game n64 "usa.zelda.z64" "rom" "Zelda"
@@ -606,24 +510,26 @@ ryujinx_env() {
     printf 'echo "[]"\n'
   } >"$GOTG_PADS"
   chmod +x "$GOTG_PADS"
-  # The gate seats somebody: danstick publishes, as a claim would make it.
+  # The daemon publishes when it starts: its fixed slots exist from then.
   export GOTG_DANSTICK_RUNTIME="$TEST_TMP/danstick-rt"
   mkdir -p "$GOTG_DANSTICK_RUNTIME"
   {
     printf '#!%s\n' "$(command -v bash)"
-    printf 'echo seat >>"$ORDER_LOG"\n'
+    printf 'printf "danstick %%s\\n" "$*" >>"$DANSTICK_LOG"\n'
+    printf '[ "$1" = ensure-daemon ] || exit 0\n'
+    printf 'echo ready >>"$ORDER_LOG"\n'
     printf "cat '%s' >\"\$GOTG_DANSTICK_RUNTIME/env.sh\"\n" "$BATS_TEST_DIRNAME/fixtures/danstick-env-one-player.sh"
-  } >"$FAKE_BIN/gotg-seat"
-  chmod +x "$FAKE_BIN/gotg-seat"
+  } >"$FAKE_BIN/danstick"
+  chmod +x "$FAKE_BIN/danstick"
   mkdir -p "$TEST_TMP/data"
   cp "$(dirname "$GOTG_BIN")/../share/gotg/data/ares-pads.json" "$TEST_TMP/data/"
   export GOTG_DATA="$TEST_TMP/data"
 
   gotg play usa.zelda
   [ "$status" -eq 0 ]
-  # Before the gate, the gate, again after it, then the game.
-  [ "$(paste -sd, "$ORDER_LOG")" = "pads,seat,pads,game" ]
-  # Before the gate nothing was published, so the enumerator ran as it
+  # Before the daemon, the daemon, again after it, then the game.
+  [ "$(paste -sd, "$ORDER_LOG")" = "pads,ready,pads,game" ]
+  # Before the daemon nothing was published, so the enumerator ran as it
   # always has. After it, danstick's mapping in hand and hidapi off, or the
   # clone of a Steam Controller is not in the list at all.
   [ "$(grep -c '^pads ' "$SEAT_LOG")" -eq 2 ]
@@ -631,10 +537,7 @@ ryujinx_env() {
   [ "$(grep '^pads ' "$SEAT_LOG" | sed -n 2p)" = "pads hidapi=0 steam=0 config=set" ]
 }
 
-@test "the publish is waited for after the gate, not before it" {
-  # Waiting before the gate waited three seconds for a publish nobody could
-  # have caused yet, and warned that nothing was published over a launch
-  # about to seat somebody.
+@test "the publish is waited for, and a daemon that published is not warned about" {
   export GOTG_DANSTICK_RUNTIME="$TEST_TMP/danstick-rt"
   mkdir -p "$GOTG_DANSTICK_RUNTIME"
   export ORDER_LOG="$TEST_TMP/order"
@@ -643,19 +546,15 @@ ryujinx_env() {
 echo "\$*" >>"$DANSTICK_LOG"
 if [ "\$1" = ensure-daemon ]; then
   echo "no daemon running; starting one"; echo "daemon up, build test"
+  echo ready >>"$ORDER_LOG"
+  echo "export SDL_GAMECONTROLLERCONFIG=x" >"$GOTG_DANSTICK_RUNTIME/env.sh"
 fi
 exit 0
 EOF
-  # The gate is what publishes: this one writes env.sh, as a claim would.
-  {
-    printf '#!%s\n' "$(command -v bash)"
-    printf 'echo seat >>"$ORDER_LOG"\n'
-    printf 'echo "export SDL_GAMECONTROLLERCONFIG=x" >"$GOTG_DANSTICK_RUNTIME/env.sh"\n'
-  } >"$FAKE_BIN/gotg-seat"
-  chmod +x "$FAKE_BIN/danstick" "$FAKE_BIN/gotg-seat"
-  GOTG_DANSTICK_PUBLISH_WAIT=20 run --separate-stderr danstick_seat_gate n64 "Zelda"
+  chmod +x "$FAKE_BIN/danstick"
+  GOTG_DANSTICK_PUBLISH_WAIT=20 run --separate-stderr danstick_launch_ready
   [ "$status" -eq 0 ]
-  [ "$(paste -sd, "$ORDER_LOG")" = "seat" ]
+  [ "$(paste -sd, "$ORDER_LOG")" = "ready" ]
   [[ "$stderr" != *"published no controllers"* ]]
 }
 
@@ -795,7 +694,7 @@ EOF
   mkdir -p "$GOTG_DANSTICK_RUNTIME"
   echo "export SDL_GAMECONTROLLERCONFIG=03000000de2800000413,danstick Player 1,a:b0," \
     >"$GOTG_DANSTICK_RUNTIME/env.sh"
-  GOTG_SEAT_MET=1 danstick_seat_gate gamecube "Four Swords Adventures"
+  danstick_launch_ready
   [ "$SDL_JOYSTICK_HIDAPI_STEAM" = 0 ]
   [ "$SDL_JOYSTICK_HIDAPI" = 0 ]
 }
@@ -806,7 +705,7 @@ EOF
   export SDL_JOYSTICK_HIDAPI_STEAM=1
   export GOTG_DANSTICK_RUNTIME="$TEST_TMP/danstick-rt-nothing"
   mkdir -p "$GOTG_DANSTICK_RUNTIME"
-  GOTG_SEAT_MET=1 danstick_seat_gate gamecube "Four Swords Adventures"
+  danstick_launch_ready
   [ "$SDL_JOYSTICK_HIDAPI_STEAM" = 1 ]
 }
 

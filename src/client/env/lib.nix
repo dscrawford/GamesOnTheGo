@@ -252,7 +252,7 @@ let
   # and absent with it on. danstick's clone of a Steam Controller wears exactly
   # those ids, so the hint that makes a raw puck visible makes the seated one
   # invisible, and the step that binds Dolphin's GBAs wrote `danstick has
-  # published no pad for player 1; using keyboard`. So `danstick_seat_gate`
+  # published no pad for player 1; using keyboard`. So `danstick_launch_ready`
   # turns it off once clones are published, and this line must not overwrite
   # that: it is the answer for a launch that met no danstick at all.
   steamHidapi = ''export SDL_JOYSTICK_HIDAPI_STEAM="''${SDL_JOYSTICK_HIDAPI_STEAM:-1}"'';

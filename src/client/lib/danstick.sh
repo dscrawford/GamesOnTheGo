@@ -150,43 +150,6 @@ danstick_keeper_start() {
   ) &
 }
 
-# Where the launch-time controller check is, or nothing.
-#
-# On PATH first. Failing that, beside `gotg-ui`: they are built and installed
-# as one package, so a machine with the picker has the check even when only the
-# picker's directory made it onto PATH -- which is the ordinary case, because
-# nothing puts a second entry there for a command nobody types.
-danstick_seat_bin() {
-  local named="${GOTG_SEAT:-}" beside dir
-  if [[ -n "$named" ]]; then
-    printf '%s' "$named"
-    return 0
-  fi
-  if command -v gotg-seat >/dev/null 2>&1; then
-    printf 'gotg-seat'
-    return 0
-  fi
-  if beside="$(command -v gotg-ui 2>/dev/null)"; then
-    beside="$(dirname "$(readlink -f "$beside")")/gotg-seat"
-    if [[ -x "$beside" ]]; then
-      printf '%s' "$beside"
-      return 0
-    fi
-  fi
-  # The Nix profiles, by name, because a launch from Steam has none of them on
-  # PATH -- the same list the generated Steam launcher walks to find the picker
-  # itself. This is what "the check was skipped" actually was: not a machine
-  # without gotg-seat, but a PATH without the directory holding it, on the one
-  # launch path where nobody sees the warning that says so.
-  for dir in "$HOME/.nix-profile/bin" "$HOME/.local/state/nix/profile/bin" \
-    /nix/var/nix/profiles/default/bin; do
-    [[ -x "$dir/gotg-seat" ]] || continue
-    printf '%s' "$dir/gotg-seat"
-    return 0
-  done
-  return 1
-}
-
 # What Steam leaves in the environment of anything it starts, taken back out.
 #
 # Steam hands a game it launches SDL_GAMECONTROLLER_IGNORE_DEVICES naming the
@@ -304,45 +267,16 @@ danstick_identity_apply() {
   log "controllers will look like a $identity pad to this game"
 }
 
-# Ask about controllers before the game takes the screen.
+# danstick running and published before the game starts.
 #
-# Only ever asks when there is something to ask -- no controller seated, or one
-# that has never been mapped for this console -- and the check itself is a
-# socket round trip that costs nothing on a machine somebody has already set
-# up. The reason it is here rather than in the picker is that a game can be
-# started from a terminal, from Steam, or from the grid, and the controller is
-# missing in exactly the same way in all three.
-#
-# Absent is fine. gotg-seat ships with the picker, which is a separate package
-# and deliberately not something the client depends on: found on PATH it runs,
-# and not found it is skipped without a word. Failure is fine too -- it exits 0
-# by design, and this ignores its status anyway, because nothing about a
-# controller is a reason not to start a game somebody asked for.
-danstick_seat_gate() {
-  local platform="$1" title="${2:-}" seat
-  [[ "${GOTG_SEAT_GATE:-1}" != "0" ]] || return 0
-  # The daemon first, unseated; then the gate, which is where somebody holds
-  # a button; then the wait for what that published. The wait used to sit in
-  # danstick_ensure, before the gate -- three seconds of waiting for a publish
-  # nobody could have caused yet, and a warning that nothing was published
-  # printed over a launch that was about to seat somebody.
+# Nobody is asked anything here. Pairing happens over the game: the overlay
+# (gotg-killswitch) keeps danstick's `seating` open, so a pad joins by holding
+# a button whenever somebody picks one up, and a pad danstick has no buttons
+# for is walked there too. What a launch still owes the game is a daemon to
+# talk to and the pads it has published: the fixed slots exist from the moment
+# the daemon starts, and the bindings written after this read them.
+danstick_launch_ready() {
   danstick_ensure --no-wait
-
-  # The gate itself, unless the picker has already met it in its own window.
-  # Only the *asking* is skipped: the ensure above and the wait below belong
-  # to the launch either way, and skipping them was how Four Swords Adventures
-  # came up with player two on the keyboard -- the bindings were written from
-  # a pad list danstick had not finished publishing.
-  if [[ "${GOTG_SEAT_MET:-0}" == "1" ]]; then
-    log "controllers: the picker met the gate; not asking again"
-  elif ! seat="$(danstick_seat_bin)" || ! command -v "$seat" >/dev/null 2>&1; then
-    # Said out loud. A check that is quietly not there is indistinguishable
-    # from a check that ran and was happy, and the difference is a game
-    # starting with nothing to play it with.
-    warn "no gotg-seat here; starting without checking for a controller"
-  else
-    "$seat" --platform "$platform" --title "$title" || true
-  fi
 
   if [[ -n "$DANSTICK_MARKER" ]]; then
     danstick_wait_published "$DANSTICK_MARKER"
