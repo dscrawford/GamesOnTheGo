@@ -212,9 +212,12 @@ gotg saves status [<id>|--all]      # compare; writes nothing
 gotg saves push   [<id>|--all] [--force]
 gotg saves pull   [<id>|--all]
 gotg saves adopt  [<id>|--all] [--yes]   # import saves from before isolation
+gotg saves check  <id> [variant] [--json]       # conflict? which machine, and when
+gotg saves keep   <id> [variant] here|remote    # settle one
 ```
 
 - `play` pulls first when the service is ahead and nothing local changed.
+- **Both sides changed since they last matched** is a conflict. From the picker, starting that game shows both saves -- the machine each is on (its login name) and when it was last updated -- and the one you pick is kept; the other is kept aside, not deleted. From the command line: `gotg saves check`, then `gotg saves keep`.
 - A push against a newer server copy is refused (409) unless `--force`.
 - Local history: `~/.local/state/gotg/saves/local/`, last 3 (`GOTG_SAVES_KEEP`).
 - Wii U saves are not synced yet.

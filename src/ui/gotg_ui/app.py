@@ -37,6 +37,9 @@ from .menu import Menu
 from .nav import Nav
 from .prepare import Preparer, is_ready
 from .recent import Recent
+from .saves_choice import HERE, REMOTE, Choice
+from .saves_choice import check as check_saves
+from .saves_choice import when as saves_when
 from .storage import Storage, human
 from .variants import variants_for
 from .versions import forget as forget_versions
@@ -589,6 +592,56 @@ def draw_storage(screen, font_at, storage: Storage, typing: str | None) -> None:
     screen.blit(label, (margin, height - margin - label.get_height()))
 
 
+def draw_saves_choice(screen, font_at, choice: Choice | None, title: str) -> None:
+    """Two saves side by side: which machine each is on, and when it changed.
+
+    None is the moment before there is anything to choose -- the client is
+    still bundling and asking -- and says so rather than showing the grid.
+    """
+    width, height = screen.get_size()
+    screen.fill(BACKGROUND)
+    margin = height // 16
+    if choice is None:
+        said = font_at(30).render(f"Checking the saves for {title[:60]}…", True, TEXT)
+        screen.blit(said, ((width - said.get_width()) // 2, height // 2 - said.get_height()))
+        hint = font_at(18).render("B / Escape — back", True, TEXT_DIM)
+        screen.blit(hint, (margin, height - margin - hint.get_height()))
+        return
+    heading = font_at(34).render(f"Two different saves for {choice.game.title[:50]}", True, TEXT)
+    screen.blit(heading, ((width - heading.get_width()) // 2, margin))
+    lede = font_at(20).render(
+        "Both were played since they last matched. Keep one — the other is kept aside, not deleted.", True, TEXT_DIM
+    )
+    screen.blit(lede, ((width - lede.get_width()) // 2, margin + heading.get_height() + 12))
+
+    remote = choice.check.remote
+    cards = (
+        (HERE, "This machine", choice.check.here.device, choice.check.here.updated),
+        (REMOTE, "Saved on the service", remote.device if remote else "", remote.updated if remote else ""),
+    )
+    gap = width // 24
+    card_w = (width - 2 * margin - gap) // 2
+    card_h = height // 3
+    top = height // 2 - card_h // 2
+    for index, (side, label, device, updated) in enumerate(cards):
+        lit = choice.selected == side
+        left = margin + index * (card_w + gap)
+        box = pygame.Rect(left, top, card_w, card_h)
+        pygame.draw.rect(screen, TILE_SELECTED if lit else TILE, box, border_radius=12)
+        y = top + card_h // 8
+        for text, size, colour in (
+            (label, 22, TEXT_DIM if not lit else TEXT),
+            (device or "an unnamed machine", 36, TEXT),
+            (f"updated {saves_when(updated)}", 24, TEXT if lit else TEXT_DIM),
+        ):
+            line = font_at(size).render(text[:48], True, colour)
+            screen.blit(line, (left + (card_w - line.get_width()) // 2, y))
+            y += line.get_height() + card_h // 10
+    keys = "Left / Right — choose   ·   A / Enter — keep this one   ·   B / Escape — back"
+    hint = font_at(18).render(keys, True, TEXT_DIM)
+    screen.blit(hint, (margin, height - margin - hint.get_height()))
+
+
 def _draw_progress_bar(screen, font_at, y: int, margin: int, fraction: float | None, figures: str, what: str) -> int:
     """One bar with its figures under it; returns where the next thing goes."""
     width, height = screen.get_size()
@@ -816,6 +869,13 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     danstick_watch = DaemonWatch()
     # Where that asking happens, so the grid keeps drawing while it does.
     restarter = ThreadPoolExecutor(max_workers=1, thread_name_prefix="danstick-start")
+    # Before a game starts, which save it starts with: the client is asked on
+    # a worker (it bundles and hashes the saves), and a conflict opens a
+    # choice between the two. See saves_choice.py.
+    saves_asker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="saves-check")
+    checking: Future | None = None
+    starting: tuple | None = None  # (game, verb, variant, version) waiting on the check
+    choice: Choice | None = None
     restarting: Future | None = None
     # The space bar: tapped it opens the menu as it always did; held, danstick
     # seats the keyboard and the release is nothing. Decided on release.
@@ -831,6 +891,17 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # What happens when the loader succeeds: exec the verb, or come back here.
     after_prepare: str | None = None
     running = True
+
+    def start(game: Game, verb: str, variant: str | None, version: str | None) -> None:
+        """Hand the game to the client -- after asking which save it starts
+        with, for a play."""
+        nonlocal chosen, running, checking, starting
+        if verb != "play":
+            chosen = (game, verb, variant, version)
+            running = False
+            return
+        starting = (game, verb, variant, version)
+        checking = saves_asker.submit(check_saves, game, variant)
 
     def pick(game: Game | None, verb: str = "play", variant: str | None = None, version: str | None = None) -> None:
         nonlocal chosen, running, preparer, after_prepare, storage
@@ -875,8 +946,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
         # Readiness is per variant: a mod is its own environment, and the one
         # built for the plain game says nothing about whether this one is.
         if is_ready(game, variant):
-            chosen = (game, verb, variant, version)
-            running = False
+            start(game, verb, variant, version)
         else:
             preparer = Preparer(game, None, variant, version)
 
@@ -959,6 +1029,32 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             preparer.cancel()
                         preparer = None
                         prepare_failed = False
+                    continue
+
+                # Checking the saves, or choosing between two: A, B and a
+                # direction, nothing else.
+                if checking is not None or choice is not None:
+                    back = (
+                        event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_b)
+                    ) or pads.button(event) == pads.B
+                    if back:
+                        checking, choice, starting = None, None, None
+                        continue
+                    if choice is None:
+                        continue
+                    step = pads.direction(event)
+                    if event.type == pygame.KEYDOWN and event.key in (pygame.K_LEFT, pygame.K_RIGHT):
+                        step = (-1 if event.key == pygame.K_LEFT else 1, 0)
+                    if step and step[0]:
+                        choice = choice.move(step[0])
+                    elif (
+                        event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER)
+                    ) or pads.button(event) == pads.A:
+                        # Through the loader, which shows what the client says
+                        # as it pulls or pushes; the game starts when it is done.
+                        preparer = Preparer(choice.game, ["saves", "keep", choice.selected], choice.variant)
+                        after_prepare = "kept"
+                        choice = None
                     continue
 
                 # The storage screen owns its input: a list to walk, three
@@ -1267,6 +1363,22 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             if installs.poll():
                 browser.set_installed(installed_games())
                 forget_versions()
+            # The saves answer: a conflict is a choice, anything else starts
+            # the game. No answer at all (no client, no service, too slow)
+            # starts it too -- a launch is never held on a question.
+            if checking is not None and checking.done():
+                try:
+                    found = checking.result()
+                except Exception as error:  # noqa: BLE001 - a check must never stop a launch
+                    trace.say("saves-check-failed", why=str(error))
+                    found = None
+                checking = None
+                if starting is not None:
+                    game, verb, variant, version = starting
+                    if found is not None and found.conflict:
+                        choice = Choice.open(game, variant, version, found)
+                    else:
+                        chosen, running = starting, False
             # Completion first, drawing second: a finished steam-add clears
             # the preparer, and this same frame must already be the grid's.
             if preparer is not None and not prepare_failed and not preparer.running:
@@ -1279,9 +1391,13 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         # that is no longer there -- or not there yet.
                         forget_versions()
                         preparer = None
+                    elif after_prepare == "kept" and starting is not None:
+                        # A save kept: the game starts with it, and no second
+                        # question -- the two sides now agree.
+                        chosen, running, preparer = starting, False, None
                     else:
-                        chosen = (preparer.game, after_prepare, preparer.variant, preparer.version)
-                        running = False
+                        start(preparer.game, after_prepare, preparer.variant, preparer.version)
+                        preparer = None
                 else:
                     prepare_failed = True
             # Reconnected here rather than on a timer: connect() on an absent
@@ -1319,6 +1435,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     stage=preparer.stage if preparer.running else None,
                     elapsed=preparer.elapsed,
                 )
+            elif checking is not None or choice is not None:
+                draw_saves_choice(screen, font_at, choice, starting[0].title if starting else "")
             elif storage is not None:
                 draw_storage(screen, font_at, storage, storage_typing)
             elif panel is not None:
