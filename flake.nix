@@ -33,7 +33,7 @@
     # Pinned to a revision rather than following the branch, so that a launch
     # that worked yesterday is not changed by somebody else's commit today.
     danstick = {
-      url = "git+ssh://git@github.com/dscrawford/danstick?ref=main&rev=9112fb7a161267a1f94dcb033e2dec92f40e1dbf";
+      url = "git+ssh://git@github.com/dscrawford/danstick?ref=main&rev=c8c6a4f454b2ae8bbd17d2fc8bad9dddd64e859b";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
