@@ -67,7 +67,7 @@ store_save() {
   out="$(saves_tmp)/store-save.json"
 
   http="$(saves_api_curl -X PUT --data-binary "@$bundle" \
-    -H "X-Gotg-Parent: $parent" -H "X-Gotg-Device: $(device_id)" \
+    -H "X-Gotg-Parent: $parent" -H "X-Gotg-Device: $(device_name)" \
     -o "$out" -w '%{http_code}' \
     "$(saves_api_url)/saves/$attr$query")" ||
     die "could not reach the GOTG service at $(saves_api_url)"

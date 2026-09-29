@@ -55,6 +55,55 @@ device_id() {
   cat "$file"
 }
 
+# This machine as a person names it: the name its login carries (`gotg login`
+# writes api.json with it -- "daniel-deck", "daniel-desktop"), which is what
+# somebody choosing between two saves needs to read. The random id stands in
+# for a machine that was set up before logins had names.
+device_name() {
+  local file name=""
+  if [[ -n "${GOTG_DEVICE_NAME:-}" ]]; then
+    printf '%s' "$GOTG_DEVICE_NAME"
+    return 0
+  fi
+  file="$(saves_api_file 2>/dev/null)" || file=""
+  if [[ -n "$file" && -f "$file" ]]; then
+    name="$(jq -r '.name // empty' "$file" 2>/dev/null)" || name=""
+  fi
+  # Printable and short: it goes into a header and back out of the service.
+  name="$(printf '%s' "$name" | tr -cd '[:alnum:]._ -' | cut -c1-32)"
+  if [[ -n "$name" ]]; then
+    printf '%s' "$name"
+  else
+    device_id
+  fi
+}
+
+# When the saves here last changed, as an ISO time; empty for no saves.
+#
+# The newest file's own time, with one exception. A bundle is built with every
+# time zeroed (so the same files hash the same), and a pull lays the files down
+# with those times -- a save untouched since it arrived reads as 1970. Those do
+# not count, and a save that has not changed since the last sync is as old as
+# the generation it is: the journal keeps that generation's time.
+saves_local_updated() {
+  local attr="$1" manifest state globs=() newest=0 file mtime
+  manifest="$(saves_manifest "$attr")"
+  state="$(env_state_dir "$attr")"
+  mapfile -t globs < <(jq -r '.saves[]?' <<<"$manifest")
+  if [[ ${#globs[@]} -gt 0 && -d "$state" ]]; then
+    while IFS= read -r file; do
+      [[ -n "$file" ]] || continue
+      mtime="$(stat -c '%Y' "$state/$file" 2>/dev/null)" || continue
+      ((mtime > newest)) && newest="$mtime"
+    done < <(saves_member_list "$state" "${globs[@]}")
+  fi
+  if ((newest > 86400)); then
+    date -u -d "@$newest" +%Y-%m-%dT%H:%M:%SZ
+  else
+    saves_journal_get "$attr" base_written_at
+  fi
+}
+
 # ---------------------------------------------------------------- the journal
 
 # What this machine believes about the remote: the generation it descends from,

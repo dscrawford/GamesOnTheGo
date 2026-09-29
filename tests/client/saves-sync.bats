@@ -275,6 +275,109 @@ publish_raw() {
   [ "$(cat "$STATE/saves/zelda.ram")" = "from machine b" ]
 }
 
+# --- choosing between two saves ---------------------------------------------
+
+@test "a push is signed with the name this machine logged in as" {
+  jq '. + {name: "daniel-desktop"}' "$GOTG_CONFIG_DIR/api.json" >"$TEST_TMP/api.json"
+  cp "$TEST_TMP/api.json" "$GOTG_CONFIG_DIR/api.json"
+  write_save zelda.ram "from the desktop"
+  gotg saves push env-n64
+  [ "$(jq -r .device "$SAVES_DATA_DIR/legacy/env-n64/current.json")" = "daniel-desktop" ]
+}
+
+@test "check names a conflict, the machine each save is on, and when it changed" {
+  export GOTG_DEVICE_NAME=daniel-desktop
+  write_save zelda.ram "from the desktop"
+  gotg saves push env-n64
+
+  second_device
+  export GOTG_DEVICE_NAME=daniel-deck
+  gotg saves pull env-n64
+  write_save zelda.ram "the deck played on"
+  touch -d 2026-09-20T10:00:00Z "$STATE/saves/zelda.ram"
+  first_device
+  export GOTG_DEVICE_NAME=daniel-desktop
+  write_save zelda.ram "the desktop played on"
+  gotg saves push --force env-n64
+
+  second_device
+  export GOTG_DEVICE_NAME=daniel-deck
+  gotg saves check env-n64 --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .state <<<"$output")" = "conflict" ]
+  [ "$(jq -r .here.device <<<"$output")" = "daniel-deck" ]
+  [ "$(jq -r .here.updated <<<"$output")" = "2026-09-20T10:00:00Z" ]
+  [ "$(jq -r .remote.device <<<"$output")" = "daniel-desktop" ]
+  [ -n "$(jq -r .remote.updated <<<"$output")" ]
+}
+
+@test "check tells the one-sided cases apart, and a synced save is as old as its generation" {
+  write_save zelda.ram "one"
+  gotg saves check env-n64 --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .state <<<"$output")" = "here-only" ]
+
+  gotg saves push env-n64
+  gotg saves check env-n64 --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .state <<<"$output")" = "same" ]
+
+  second_device
+  gotg saves pull env-n64
+  # Pulled files carry the bundle's zeroed times; the save is as old as the
+  # generation it came from, not 1970.
+  gotg saves check env-n64 --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .state <<<"$output")" = "same" ]
+  [[ "$(jq -r .here.updated <<<"$output")" == 20* ]]
+  [[ "$(jq -r .here.updated <<<"$output")" != 1970* ]]
+
+  write_save zelda.ram "two"
+  gotg saves check env-n64 --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .state <<<"$output")" = "here-newer" ]
+  gotg saves push env-n64
+
+  first_device
+  gotg saves check env-n64 --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .state <<<"$output")" = "remote-newer" ]
+}
+
+@test "keeping this machine's save makes it the service's, and the other waits for retention" {
+  write_save zelda.ram "from machine a"
+  gotg saves push env-n64
+  second_device
+  write_save zelda.ram "from machine b"
+
+  gotg saves keep env-n64 here
+  [ "$status" -eq 0 ]
+  run -0 bash -c "ls $SAVES_DATA_DIR/legacy/env-n64/gen | wc -l"
+  [ "$output" -eq 2 ]
+  first_device
+  gotg saves pull env-n64
+  [ "$(cat "$STATE/saves/zelda.ram")" = "from machine b" ]
+}
+
+@test "keeping the service's save archives this machine's first" {
+  write_save zelda.ram "from machine a"
+  gotg saves push env-n64
+  second_device
+  write_save zelda.ram "from machine b"
+
+  gotg saves keep env-n64 remote
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STATE/saves/zelda.ram")" = "from machine a" ]
+  run -0 bash -c "ls $GOTG_SAVES_DIR/local/env-n64 2>/dev/null | wc -l"
+  [ "$output" -ge 1 ]
+}
+
+@test "keep asks which side" {
+  gotg saves keep env-n64
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"here|remote"* ]]
+}
+
 # --- what a launch does -----------------------------------------------------
 
 @test "booting a game takes the newest generation and places it itself" {

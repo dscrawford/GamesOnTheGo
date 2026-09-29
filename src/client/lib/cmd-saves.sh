@@ -19,6 +19,12 @@ usage: gotg saves <command> [args]
   status [<id>|--all]    compare this machine with the service; writes nothing
   push   [<id>|--all]    send this machine's saves         [--force]
   pull   [<id>|--all]    take the service's saves
+  check  <id> [variant]  where this machine and the service stand, and
+                         whether they conflict             [--json]
+  keep   <id> [variant] here|remote
+                         settle a conflict: keep this machine's saves (the
+                         service's generation is kept too) or the service's
+                         (what is here is archived first)
   adopt  [<id>|--all]    copy in saves from before the emulators were
                          told where to put them          [--yes]
 
@@ -43,6 +49,8 @@ cmd_saves() {
     status) saves_cmd_status "$@" ;;
     push) saves_cmd_push "$@" ;;
     pull) saves_cmd_pull "$@" ;;
+    check) saves_cmd_check "$@" ;;
+    keep) saves_cmd_keep "$@" ;;
     adopt) saves_cmd_adopt "$@" ;;
     help | --help | -h | "") saves_usage ;;
     *)
@@ -57,7 +65,7 @@ cmd_saves() {
 # through the catalog exactly as `play` does, so the two can never disagree
 # about which environment a game belongs to.
 saves_resolve() {
-  local want="${1:-}"
+  local want="${1:-}" variant="${2:-}"
   if [[ -z "$want" || "$want" == "--all" ]]; then
     local root name
     [[ -d "$GOTG_ROOTS_DIR" ]] || return 0
@@ -84,7 +92,7 @@ saves_resolve() {
   manifest_cached || manifest_ensure
   local game attr
   game="$(manifest_find "$want")"
-  attr="$(env_attr "$game")"
+  attr="$(env_attr "$game" "$variant")"
   # Say it out loud: several games can share one environment, so "pushing
   # usa.zelda" would be a small lie about what is being moved.
   log "$want runs in $attr, which is what saves belong to"
@@ -175,10 +183,10 @@ saves_status_one() {
     if [[ "$hash" != "$pushed" && "$hash" != "$base_hash" ]]; then
       changed="$C_WARN, changed since the last sync$C_RESET"
     fi
-    printf '  %slocal  %s %s file(s), %s, generation %s%s\n' \
+    printf '  %slocal  %s %s file(s), %s, generation %s, on %s, updated %s%s\n' \
       "$C_MUTED" "$C_RESET" \
       "$files" "$(human_size "$(stat -c '%s' "$tmp/status.tar.zst")")" "$base_gen" \
-      "$changed"
+      "$(device_name)" "$(saves_local_updated "$attr" || true)" "$changed"
   fi
 
   if ! saves_have_remote; then
@@ -273,11 +281,12 @@ saves_push_one() {
     exit 1
   fi
 
-  local gen
+  local gen at
   gen="$(jq -r '.generation' <<<"$meta")"
+  at="$(jq -r '.written_at // empty' <<<"$meta")"
   saves_journal_set "$attr" "$(jq -nc \
-    --argjson generation "$gen" --arg hash "$hash" \
-    '{base_generation: $generation, base_hash: $hash, pushed_hash: $hash}')"
+    --argjson generation "$gen" --arg hash "$hash" --arg at "$at" \
+    '{base_generation: $generation, base_hash: $hash, pushed_hash: $hash, base_written_at: $at}')"
   log "$attr: pushed generation $gen"
 }
 
@@ -294,12 +303,12 @@ saves_divergence() {
   : "${base_gen:=0}"
 
   die "$attr has moved on since this machine last synced.
-     remote  generation $rgen  from device $rdev  $(human_size "$rsize")  $rat
-     local   generation $base_gen  this device ($(device_id))  $(human_size "$(stat -c '%s' "$bundle")")  changed since the pull
+     remote  on $rdev  updated $rat  generation $rgen  $(human_size "$rsize")
+     here    on $(device_name)  updated $(saves_local_updated "$attr" || true)  changed since generation $base_gen  $(human_size "$(stat -c '%s' "$bundle")")
    Nothing was uploaded. Both sides are intact; choose one:
-     Take the remote (what is here is archived first):  gotg saves pull <id>
-     Take yours (the remote generation is kept):        gotg saves push --force <id>
-     Look before choosing:                              gotg saves status <id>"
+     Keep the remote's (what is here is archived first):  gotg saves keep <id> remote
+     Keep this machine's (the remote's is kept too):      gotg saves keep <id> here
+     Look before choosing:                                gotg saves check <id>"
 }
 
 saves_cmd_adopt() {
@@ -414,8 +423,135 @@ saves_pull_one() {
   saves_extract "$attr" "$tmp/pull.tar.zst"
 
   saves_journal_set "$attr" "$(jq -nc --argjson g "$rgen" --arg h "$rhash" --arg at "$(iso_now)" \
-    '{base_generation: $g, base_hash: $h, pushed_hash: $h, pulled_at: $at}')"
+    --arg written "$(jq -r '.written_at // empty' <<<"$latest")" \
+    '{base_generation: $g, base_hash: $h, pushed_hash: $h, pulled_at: $at, base_written_at: $written}')"
   log "$attr: now at generation $rgen"
+}
+
+# Where this machine and the service stand for one game, for a person -- or a
+# screen -- choosing between two saves.
+#
+#   same           nothing to choose: the two are the same save
+#   remote-newer   the service moved on and nothing here changed: a pull
+#   here-newer     this machine changed and the service did not: a push
+#   conflict       both moved on since they last agreed: somebody chooses
+#   here-only      nothing pushed yet
+#   remote-only    nothing here yet
+#   offline        no service configured, or it could not be asked
+#
+# `here` and `remote` each say which machine the save is on and when it was
+# last updated; the service's side names the machine that pushed it.
+saves_cmd_check() {
+  config_load
+  local want="" variant="" json="no" arg
+  for arg in "$@"; do
+    case "$arg" in
+      --json) json="yes" ;;
+      *) if [[ -z "$want" ]]; then want="$arg"; else variant="$arg"; fi ;;
+    esac
+  done
+  [[ -n "$want" ]] || die "which game? usage: gotg saves check <id> [variant] [--json]"
+
+  local attrs=() attr
+  mapfile -t attrs < <(saves_resolve "$want" "$variant")
+  for attr in "${attrs[@]}"; do
+    if [[ "$json" == "yes" ]]; then
+      saves_check_one "$attr"
+    else
+      saves_check_say "$(saves_check_one "$attr")"
+    fi
+  done
+}
+
+saves_check_one() {
+  local attr="$1" tmp hash="" files=0 size=0
+  tmp="$(saves_tmp)"
+  if saves_bundle "$attr" "$tmp/check.tar.zst" 2>/dev/null; then
+    hash="$(saves_hash "$tmp/check.tar.zst")"
+    files="$(saves_member_count "$attr")"
+    size="$(stat -c '%s' "$tmp/check.tar.zst")"
+  fi
+  local base_gen base_hash pushed changed="no"
+  base_gen="$(saves_journal_get "$attr" base_generation)"
+  base_hash="$(saves_journal_get "$attr" base_hash)"
+  pushed="$(saves_journal_get "$attr" pushed_hash)"
+  : "${base_gen:=0}"
+  [[ -n "$hash" && "$hash" != "$base_hash" && "$hash" != "$pushed" ]] && changed="yes"
+
+  local here
+  here="$(jq -nc --arg device "$(device_name)" --arg updated "$(saves_local_updated "$attr" || true)" \
+    --argjson generation "$base_gen" --argjson files "$files" --argjson size "$size" \
+    --arg changed "$changed" --arg hash "$hash" \
+    '{device: $device, updated: $updated, generation: $generation, files: $files,
+      size: $size, changed: ($changed == "yes"), present: ($hash != "")}')"
+
+  local latest rc=0 state remote="null"
+  if ! saves_have_remote; then
+    state="offline"
+  else
+    latest="$(store_meta "$attr" 2>/dev/null)" || rc=$?
+    if ((rc == 1)); then
+      state="$([[ -n "$hash" ]] && echo here-only || echo same)"
+    elif ((rc != 0)); then
+      state="offline"
+    else
+      local rgen rhash
+      rgen="$(jq -r '.generation' <<<"$latest")"
+      rhash="$(jq -r '.hash' <<<"$latest")"
+      remote="$(jq -c '{device: (.device // ""), updated: (.written_at // ""),
+        generation: .generation, size: (.size // 0)}' <<<"$latest")"
+      if [[ -z "$hash" ]]; then
+        state="remote-only"
+      elif [[ "$hash" == "$rhash" ]]; then
+        state="same"
+      elif ((rgen > base_gen)) && [[ "$changed" == "yes" ]]; then
+        state="conflict"
+      elif ((rgen > base_gen)); then
+        state="remote-newer"
+      elif [[ "$changed" == "yes" ]]; then
+        state="here-newer"
+      else
+        state="same"
+      fi
+    fi
+  fi
+  jq -nc --arg attr "$attr" --arg state "$state" --argjson here "$here" --argjson remote "$remote" \
+    '{attr: $attr, state: $state, here: $here, remote: $remote}'
+}
+
+saves_check_say() {
+  local c="$1"
+  printf '%s%s%s  %s\n' "$C_HEAD" "$(jq -r .attr <<<"$c")" "$C_RESET" "$(jq -r .state <<<"$c")"
+  jq -r '"  here    on \(.here.device)  updated \(if .here.updated == "" then "never" else .here.updated end)" +
+    (if .here.changed then "  (changed since the last sync)" else "" end)' <<<"$c"
+  jq -r 'if .remote == null then "  remote  nothing to compare with"
+    else "  remote  on \(if .remote.device == "" then "?" else .remote.device end)  updated \(.remote.updated)  generation \(.remote.generation)" end' <<<"$c"
+}
+
+# Settle it: keep this machine's saves, or the service's.
+saves_cmd_keep() {
+  config_load
+  local want="" variant="" side="" arg
+  for arg in "$@"; do
+    case "$arg" in
+      here | remote) side="$arg" ;;
+      *) if [[ -z "$want" ]]; then want="$arg"; else variant="$arg"; fi ;;
+    esac
+  done
+  [[ -n "$want" && -n "$side" ]] || die "usage: gotg saves keep <id> [variant] here|remote"
+  saves_have_remote || die "no remote configured. Point at one with: gotg saves setup <url>"
+
+  local attrs=() attr
+  mapfile -t attrs < <(saves_resolve "$want" "$variant")
+  for attr in "${attrs[@]}"; do
+    if [[ "$side" == "here" ]]; then
+      # The service's generation is not lost: it waits for retention.
+      saves_push_one "$attr" force
+    else
+      # What is here is archived before anything is written over it.
+      saves_pull_one "$attr"
+    fi
+  done
 }
 
 # Take the remote's save on the way into a game, but only when doing so cannot
