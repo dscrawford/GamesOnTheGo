@@ -295,6 +295,29 @@ impl Focused {
         {
             self.refused = true;
         }
+        // A stick is said as its axes; the menu steps on its directions, as
+        // a clone's stick reads (pressing.rs's AXIS_ON).
+        if let crate::events::Event::FocusStick { player, stick, x, y } = event {
+            if *player != self.player {
+                self.player = *player;
+                self.down.clear();
+            }
+            let on = crate::pressing::AXIS_ON;
+            let ways = [
+                ("left", *x <= -on),
+                ("right", *x >= on),
+                ("up", *y <= -on),
+                ("down", *y >= on),
+            ];
+            for (way, pushed) in ways {
+                let control = format!("{stick}stick_{way}");
+                if pushed {
+                    self.down.insert(control);
+                } else {
+                    self.down.remove(&control);
+                }
+            }
+        }
         if let crate::events::Event::Focus {
             player,
             control,
@@ -490,6 +513,23 @@ mod tests {
         menu.seats(room(1, 4));
         menu.seats(room(1, 4));
         assert_eq!(menu.tick(&held(&[]), 0.2), None);
+    }
+
+    #[test]
+    fn danstick_saying_a_stick_as_axes_is_a_direction_the_menu_steps_on() {
+        use crate::events::Event;
+        let mut focused = Focused::default();
+        let stick = |y: f32| Event::FocusStick {
+            player: 1,
+            stick: "left".into(),
+            x: 0.0,
+            y,
+        };
+        focused.apply(&stick(0.9));
+        assert!(focused.of(1).contains("leftstick_down"));
+        assert!(focused.of(2).is_empty(), "only the player it is about");
+        focused.apply(&stick(0.1));
+        assert!(focused.of(1).is_empty(), "back in the middle is let go");
     }
 
     #[test]

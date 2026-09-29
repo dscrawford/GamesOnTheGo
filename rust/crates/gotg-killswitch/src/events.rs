@@ -81,6 +81,13 @@ pub enum Event {
         control: String,
         down: bool,
     },
+    /// A stick on the pad a menu holds, as both its axes (-1..1, y down).
+    FocusStick {
+        player: i32,
+        stick: String,
+        x: f32,
+        y: f32,
+    },
     /// A raw input on the pad under the wizard: see [`pressing`].
     Input {
         player: i32,
@@ -190,12 +197,29 @@ pub fn parse(line: &[u8]) -> Option<Event> {
                 })
                 .unwrap_or_default(),
         },
-        Some("focus") => match root.get("control").and_then(Value::as_str) {
-            Some(control) if !control.is_empty() && control.len() <= 32 => Event::Focus {
+        Some("focus") => match (
+            root.get("control").and_then(Value::as_str),
+            root.get("stick").and_then(Value::as_str),
+        ) {
+            (Some(control), _) if !control.is_empty() && control.len() <= 32 => Event::Focus {
                 player: player_of(&root),
                 control: control.to_owned(),
                 down: flag(&root, "down"),
             },
+            (None, Some(stick @ ("left" | "right"))) => {
+                let axis = |name: &str| {
+                    root.get(name)
+                        .and_then(Value::as_f64)
+                        .filter(|v| v.is_finite())
+                        .map_or(0.0, |v| v.clamp(-1.0, 1.0) as f32)
+                };
+                Event::FocusStick {
+                    player: player_of(&root),
+                    stick: stick.to_owned(),
+                    x: axis("x"),
+                    y: axis("y"),
+                }
+            }
             _ => Event::Other,
         },
         Some("input") => match (
@@ -251,6 +275,7 @@ pub fn apply(event: &Event, pairing: &mut Pairing, now: f64, icon_of: &mut dyn F
         | Event::Finish { .. }
         | Event::Input { .. }
         | Event::Focus { .. }
+        | Event::FocusStick { .. }
         | Event::Error { .. }
         | Event::Other => {}
     }
@@ -474,7 +499,16 @@ mod tests {
             })
         );
         assert_eq!(
-            parsed(r#"{"event":"focus","player":2,"stick":"left","x":0.5}"#),
+            parsed(r#"{"event":"focus","player":2,"stick":"left","x":0.5,"y":-0.9}"#),
+            Some(Event::FocusStick {
+                player: 2,
+                stick: "left".into(),
+                x: 0.5,
+                y: -0.9
+            })
+        );
+        assert_eq!(
+            parsed(r#"{"event":"focus","player":2,"stick":"tail","x":0.5}"#),
             Some(Event::Other)
         );
     }
