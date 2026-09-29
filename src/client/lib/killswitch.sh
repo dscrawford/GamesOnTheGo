@@ -31,6 +31,24 @@ killswitch_bin() {
   command -v gotg-killswitch 2>/dev/null
 }
 
+# Which controller the overlay draws and walks for this game, and so which
+# walk danstick drives the clones from: the platform's console, except for an
+# environment whose game reads a modern pad itself -- a PC port asking for the
+# `xbox360` identity. DK64's recompilation reads A, B, X, Y, both bumpers, both
+# triggers and Back off an Xbox pad; told "n64", danstick drove the clone from
+# the N64 walk, which has no X, Y, right trigger or Select, and the game lost a
+# third of its controls along with the rebind chord. Such a game is played with
+# the generic pad, whose walk (or, with none, the pad's own layout) is the one
+# that fits it.
+killswitch_console() {
+  local attr="$1" platform="$2"
+  if [[ -n "$attr" && "$(danstick_identity "$attr")" == xbox360* ]]; then
+    printf 'generic'
+    return 0
+  fi
+  printf '%s' "$platform"
+}
+
 # Start the watcher for a process that is about to become the game.
 #
 # Called before the exec that turns this shell into the emulator, so the pid it

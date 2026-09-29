@@ -129,7 +129,7 @@ cmd_play() {
   pads_configure "$PLAY_ATTR" || warn "could not set controller bindings for $PLAY_ATTR"
 
   # "$$" survives the exec below, so what the watcher holds is the emulator.
-  killswitch_start "$$" "$(manifest_field "$PLAY_GAME" platform)"
+  killswitch_start "$$" "$(killswitch_console "$PLAY_ATTR" "$(manifest_field "$PLAY_GAME" platform)")"
   danstick_keeper_start "$$"
   danstick_exec "$(env_bin "$PLAY_ATTR")" "$PLAY_TARGET" "$@"
 }

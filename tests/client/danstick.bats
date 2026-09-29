@@ -601,6 +601,23 @@ pads_manifest() {
   [ "$output" = "xbox360" ]
 }
 
+@test "the overlay walks a port's pad as the generic one, not its console's" {
+  # DK64's recompilation reads an Xbox pad: told "n64", danstick drove its
+  # clone from the N64 walk -- no X, Y, right trigger or Select -- and a
+  # third of the game's controls went with the rebind chord.
+  source "$GOTG_LIB/killswitch.sh"
+  fake_env env-dk64
+  pads_manifest env-dk64 <<<'{"emulator":"ares","console":"Nintendo64","identity":"xbox360"}'
+  run killswitch_console env-dk64 n64
+  [ "$output" = "generic" ]
+  fake_env env-plain
+  pads_manifest env-plain <<<'{"emulator":"ares","console":"Nintendo64"}'
+  run killswitch_console env-plain n64
+  [ "$output" = "n64" ]
+  run killswitch_console "" n64
+  [ "$output" = "n64" ]
+}
+
 @test "Ryujinx never gets it, whatever the environment says" {
   # Every clone is 045e:028e under it and Ryujinx blanks the name CRC to
   # make its device id, so four players would land on one id and one seat.
