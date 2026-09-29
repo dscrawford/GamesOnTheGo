@@ -27,6 +27,7 @@ use gotg_killswitch::consoles::{self, CONSOLES};
 use gotg_killswitch::frame::{EMPTY_SEAT, Frame, MenuFrame, ROWS_MAX, Rebinding, Saying};
 use gotg_killswitch::killswitch::{Chord, Input, Pad};
 use gotg_killswitch::menu::{self, Focused, Menu, Row};
+use gotg_killswitch::native::Native;
 use gotg_killswitch::padlink::Link;
 use gotg_killswitch::painter::{self, Painter};
 use gotg_killswitch::pairing::Pairing;
@@ -549,6 +550,10 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
     let mut rebind = Rebind::default();
     let mut seating = Seating::new(pair_hold_seconds());
     let mut focused = Focused::default();
+    // The overlay's own controls, per seated player, and each player's two
+    // holds timed on them -- the exit's and the menu's.
+    let mut native = Native::default();
+    let mut native_holds: std::collections::HashMap<i32, (Pad, Pad, bool)> = std::collections::HashMap::new();
     let mut menu: Option<Menu> = None;
     let mut exiting = false;
     let mut seat_icons: std::collections::HashMap<String, u8> = std::collections::HashMap::new();
@@ -581,10 +586,24 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         if !was_linked && link.fd().is_some() && !options.overlay_only && !options.platform.is_empty() {
             link.send(&console.playing());
         }
-        link.pump(&mut pairing, &mut rebind, &mut seating, &mut focused, clock);
+        // And the watch on every seated pad's own controls, for the chords --
+        // leased to this connection too.
+        if link.fd().is_some()
+            && !options.overlay_only
+            && let Some(line) = native.wanted()
+        {
+            link.send(&line);
+        }
+        link.pump(
+            &mut pairing,
+            &mut rebind,
+            &mut [&mut seating, &mut focused, &mut native],
+            clock,
+        );
         if link.fd().is_none() {
             pairing.room(None);
             seating.lost();
+            native.lost();
         } else if let Some(line) = seating.wanted()
             && !link.send(&line)
         {
@@ -610,52 +629,76 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         // rather than of a controller.
         let mut progress = 0.0f64;
         let mut fire = false;
+        // Who asked for the menu this frame, and what they had down (the
+        // chord's own buttons, which the menu ignores until let go).
+        let mut asked: Option<(Option<i32>, std::collections::BTreeSet<String>)> = None;
         for watched in &mut pads.0 {
             // SAFETY: every watched pad is open.
             let input = unsafe { read_pad(watched.pad) };
             if options.overlay_only {
                 continue;
             }
-            fire |= watched.state.step(input, now);
-            if watched.menu.step(input, now) && options.draw && menu.is_none() && rebind.view(clock).is_none()
-            {
-                match watched.player {
-                    Some(owner) => {
-                        let rows = seat_rows(&rebind, &seating, &mut seat_icons);
-                        // SAFETY: every watched pad is open.
-                        let down = unsafe { read_held(watched.pad) }.controls;
-                        menu = Some(Menu::open(owner, rows, &down));
-                        focused.clear();
-                        send_focus(&mut link, &focused, owner, true);
-                        if !options.quiet {
-                            eprintln!("gotg-killswitch: menu down for player {owner}");
-                        }
-                    }
-                    None if !options.quiet => {
-                        eprintln!(
-                            "gotg-killswitch: menu held on a pad danstick has not seated; nothing to show"
-                        );
-                    }
-                    None => {}
+            // A seated pad's chords are its own controls, which danstick says
+            // (`native`); its clone carries the game's walk and is not read
+            // for them. A pad nobody seated is not held, and SDL reads it.
+            if native.active() && watched.player.is_some() {
+                continue;
+            }
+            let (fired, held, menu_fired) = chords(
+                input,
+                &mut watched.state,
+                &mut watched.menu,
+                &mut watched.announced,
+                now,
+                options,
+            );
+            fire |= fired;
+            progress = progress.max(held);
+            if menu_fired {
+                // SAFETY: every watched pad is open.
+                asked = Some((watched.player, unsafe { read_held(watched.pad) }.controls));
+            }
+        }
+        if native.active() && !options.overlay_only {
+            let seated: Vec<i32> = rebind.seated().iter().map(|seat| seat.player).collect();
+            native_holds.retain(|player, _| seated.contains(player));
+            for player in seated {
+                let (exit, menu_hold, announced) = native_holds.entry(player).or_insert_with(|| {
+                    (
+                        Pad::new(options.hold_ms),
+                        Pad::timing(Chord::Menu, MENU_HOLD_MS),
+                        false,
+                    )
+                });
+                let (fired, held, menu_fired) =
+                    chords(native.input(player), exit, menu_hold, announced, now, options);
+                fire |= fired;
+                progress = progress.max(held);
+                if menu_fired {
+                    asked = Some((Some(player), native.held(player)));
                 }
             }
-            // One line when a hold starts, so the log of a session that ended
-            // this way says why.
-            if !options.quiet && watched.state.holding() && !watched.announced {
-                watched.announced = true;
-                eprintln!("gotg-killswitch: kill switch held; {}ms to go", options.hold_ms);
+        }
+        if let Some((who, down)) = asked
+            && options.draw
+            && menu.is_none()
+            && rebind.view(clock).is_none()
+        {
+            match who {
+                Some(owner) => {
+                    let rows = seat_rows(&rebind, &seating, &mut seat_icons);
+                    menu = Some(Menu::open(owner, rows, &down));
+                    focused.clear();
+                    send_focus(&mut link, &focused, owner, true);
+                    if !options.quiet {
+                        eprintln!("gotg-killswitch: menu down for player {owner}");
+                    }
+                }
+                None if !options.quiet => {
+                    eprintln!("gotg-killswitch: menu held on a pad danstick has not seated; nothing to show");
+                }
+                None => {}
             }
-            if !watched.state.holding() {
-                watched.announced = false;
-            }
-            let held = if options.hold_ms > 0 {
-                watched.state.held_ms(now) as f64 / options.hold_ms as f64
-            } else if watched.state.holding() {
-                1.0
-            } else {
-                0.0
-            };
-            progress = progress.max(held);
         }
         let exit_progress = if fire { 1.0 } else { progress };
 
@@ -793,6 +836,38 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         }
     }
     painter.close();
+}
+
+/// One pad's two holds for one sample: whether the exit fired, how far through
+/// it is (0..1), and whether the menu's fired. The same for a pad read through
+/// SDL and a seated player read through danstick's `native`.
+fn chords(
+    input: Input,
+    exit: &mut Pad,
+    menu_hold: &mut Pad,
+    announced: &mut bool,
+    now: u64,
+    options: &Options,
+) -> (bool, f64, bool) {
+    let fired = exit.step(input, now);
+    let menu_fired = menu_hold.step(input, now);
+    // One line when a hold starts, so the log of a session that ended this
+    // way says why.
+    if !options.quiet && exit.holding() && !*announced {
+        *announced = true;
+        eprintln!("gotg-killswitch: kill switch held; {}ms to go", options.hold_ms);
+    }
+    if !exit.holding() {
+        *announced = false;
+    }
+    let held = if options.hold_ms > 0 {
+        exit.held_ms(now) as f64 / options.hold_ms as f64
+    } else if exit.holding() {
+        1.0
+    } else {
+        0.0
+    };
+    (fired, held, menu_fired)
 }
 
 /// `focus`, unless danstick has said it does not know it.

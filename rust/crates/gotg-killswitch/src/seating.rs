@@ -89,6 +89,12 @@ impl Seating {
     }
 }
 
+impl crate::events::Listen for Seating {
+    fn apply(&mut self, event: &crate::events::Event) {
+        Seating::apply(self, event);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

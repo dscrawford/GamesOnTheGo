@@ -81,6 +81,13 @@ pub enum Event {
         control: String,
         down: bool,
     },
+    /// One of a seated pad's own controls changed (danstick's `native`
+    /// watch): see [`crate::native`].
+    Native {
+        player: i32,
+        control: String,
+        down: bool,
+    },
     /// A stick on the pad a menu holds, as both its axes (-1..1, y down).
     FocusStick {
         player: i32,
@@ -133,6 +140,12 @@ fn player_of(object: &Map<String, Value>) -> i32 {
         Some(value) if (1.0..=64.0).contains(&value) => value as i32,
         _ => 0,
     }
+}
+
+/// Something that keeps its own account of danstick's events, beside the
+/// pairing picture and the rebind: seating, the menu's focus, the chords.
+pub trait Listen {
+    fn apply(&mut self, event: &Event);
 }
 
 /// One line, without its newline. None for anything that is not a JSON
@@ -222,6 +235,14 @@ pub fn parse(line: &[u8]) -> Option<Event> {
             }
             _ => Event::Other,
         },
+        Some("native") => match root.get("control").and_then(Value::as_str) {
+            Some(control) if !control.is_empty() && control.len() <= 32 => Event::Native {
+                player: player_of(&root),
+                control: control.to_owned(),
+                down: flag(&root, "down"),
+            },
+            _ => Event::Other,
+        },
         Some("input") => match (
             root.get("kind").and_then(Value::as_str).and_then(Kind::named),
             root.get("index").and_then(Value::as_f64),
@@ -276,6 +297,7 @@ pub fn apply(event: &Event, pairing: &mut Pairing, now: f64, icon_of: &mut dyn F
         | Event::Input { .. }
         | Event::Focus { .. }
         | Event::FocusStick { .. }
+        | Event::Native { .. }
         | Event::Error { .. }
         | Event::Other => {}
     }
@@ -511,6 +533,19 @@ mod tests {
             parsed(r#"{"event":"focus","player":2,"stick":"tail","x":0.5}"#),
             Some(Event::Other)
         );
+    }
+
+    #[test]
+    fn a_seated_pads_own_control_is_read() {
+        assert_eq!(
+            parsed(r#"{"event":"native","player":2,"control":"leftshoulder","down":true}"#),
+            Some(Event::Native {
+                player: 2,
+                control: "leftshoulder".into(),
+                down: true
+            })
+        );
+        assert_eq!(parsed(r#"{"event":"native","player":2}"#), Some(Event::Other));
     }
 
     #[test]

@@ -13,6 +13,7 @@ pub mod icons;
 pub mod killswitch;
 pub mod leaders;
 pub mod menu;
+pub mod native;
 pub mod overlay;
 pub mod padlink;
 pub mod painter;

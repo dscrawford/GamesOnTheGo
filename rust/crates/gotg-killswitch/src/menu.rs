@@ -350,6 +350,12 @@ impl Focused {
     }
 }
 
+impl crate::events::Listen for Focused {
+    fn apply(&mut self, event: &crate::events::Event) {
+        Focused::apply(self, event);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
