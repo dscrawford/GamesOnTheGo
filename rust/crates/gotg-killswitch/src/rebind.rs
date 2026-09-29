@@ -169,8 +169,16 @@ impl Rebind {
                 }
             }
             // A refusal while asking is this rebind's: danstick too old, or the
-            // seat gone. Once walking, an error is somebody else's command.
-            Event::Error { .. } if matches!(self.phase, Phase::Asked { .. }) => {
+            // seat gone. Once walking, an error is somebody else's command --
+            // and so, even while asking, is a danstick that does not know some
+            // other command. The menu's `focus` is refused by a daemon without
+            // it, and that refusal arrived just after the `map` a rebind from
+            // the menu sends: the bar said "Nothing changed" and went up while
+            // danstick walked the pad it had grabbed, every button dead until
+            // the game ended.
+            Event::Error { message }
+                if matches!(self.phase, Phase::Asked { .. }) && !about_another_command(message) =>
+            {
                 self.end(current, false, now);
             }
             _ => {}
@@ -231,6 +239,11 @@ impl Rebind {
             Phase::Ended { view, .. } => Some(view.clone()),
         }
     }
+}
+
+/// An `unknown command` about anything but `map`: not a refusal of a rebind.
+fn about_another_command(message: &str) -> bool {
+    message.starts_with("unknown command") && !message.contains("\"map\"")
 }
 
 #[cfg(test)]
@@ -462,6 +475,38 @@ mod tests {
             5.0,
         );
         assert_eq!(rebind.due(5.0), Some(2), "a different pad in that seat is");
+    }
+
+    #[test]
+    fn another_commands_refusal_does_not_end_a_rebind_being_asked_for() {
+        let mut rebind = Rebind::default();
+        rebind.start(1, "n64", "console:n64", 0.0);
+        rebind.apply(
+            &Event::Error {
+                message: "unknown command \"focus\"".into(),
+            },
+            0.1,
+        );
+        assert_eq!(rebind.view(0.2).and_then(|v| v.stored), None, "still asking");
+        rebind.apply(&step(1, "a", 0, 14), 0.3);
+        assert_eq!(
+            rebind.view(0.3).map(|v| v.control),
+            Some("a".into()),
+            "and the walk is drawn"
+        );
+        let mut too_old = Rebind::default();
+        too_old.start(1, "n64", "console:n64", 0.0);
+        too_old.apply(
+            &Event::Error {
+                message: "unknown command \"map\"".into(),
+            },
+            0.1,
+        );
+        assert_eq!(
+            too_old.view(0.2).and_then(|v| v.stored),
+            Some(false),
+            "map itself refused is"
+        );
     }
 
     #[test]

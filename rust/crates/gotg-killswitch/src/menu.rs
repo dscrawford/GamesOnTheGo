@@ -253,10 +253,17 @@ impl Menu {
 pub struct Focused {
     pub player: i32,
     pub down: BTreeSet<String>,
+    /// danstick said it does not know `focus`: it is not asked again.
+    pub refused: bool,
 }
 
 impl Focused {
     pub fn apply(&mut self, event: &crate::events::Event) {
+        if let crate::events::Event::Error { message } = event
+            && message == "unknown command \"focus\""
+        {
+            self.refused = true;
+        }
         if let crate::events::Event::Focus {
             player,
             control,

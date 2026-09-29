@@ -626,7 +626,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                         let down = unsafe { read_held(watched.pad) }.controls;
                         menu = Some(Menu::open(owner, rows, &down));
                         focused.clear();
-                        link.send(&focus_line(owner, true));
+                        send_focus(&mut link, &focused, owner, true);
                         if !options.quiet {
                             eprintln!("gotg-killswitch: menu down for player {owner}");
                         }
@@ -673,17 +673,17 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
             }
             match open.tick(&down, clock) {
                 Some(menu::Action::Close) => {
-                    link.send(&focus_line(owner, false));
+                    send_focus(&mut link, &focused, owner, false);
                     menu = None;
                     bar.want_over(false, clock, MENU_CLOSE_SECONDS);
                 }
                 Some(menu::Action::Exit) => {
-                    link.send(&focus_line(owner, false));
+                    send_focus(&mut link, &focused, owner, false);
                     menu = None;
                     exiting = true;
                 }
                 Some(menu::Action::Rebind(player)) => {
-                    link.send(&focus_line(owner, false));
+                    send_focus(&mut link, &focused, owner, false);
                     menu = None;
                     ask_for_rebind(
                         Some(player),
@@ -793,6 +793,13 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         }
     }
     painter.close();
+}
+
+/// `focus`, unless danstick has said it does not know it.
+fn send_focus(link: &mut Link, focused: &Focused, player: i32, open: bool) {
+    if !focused.refused {
+        link.send(&focus_line(player, open));
+    }
 }
 
 /// danstick's `focus`: hold `player`'s pad back from the game while the menu
