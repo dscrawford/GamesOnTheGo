@@ -123,6 +123,16 @@ impl Rebind {
             self.seated.clone_from(seated);
         }
         let Some(ours) = self.player() else { return };
+        // The pad being walked went away (switched off, out of range): its
+        // seat is empty. Nobody can finish a walk on it, so the panel does
+        // not wait for one.
+        if let (Event::State { seated, .. }, Phase::Walking(view)) = (event, &self.phase)
+            && !seated.iter().any(|seat| seat.player == ours)
+        {
+            let view = view.clone();
+            self.end(view, false, now);
+            return;
+        }
         if matches!(self.phase, Phase::Ended { .. }) {
             return;
         }
@@ -506,6 +516,33 @@ mod tests {
             too_old.view(0.2).and_then(|v| v.stored),
             Some(false),
             "map itself refused is"
+        );
+    }
+
+    #[test]
+    fn a_walk_whose_pad_went_away_ends_rather_than_waiting() {
+        let seat = |player: i32| Seat {
+            node: format!("e{player}"),
+            name: String::new(),
+            player,
+            mapped: true,
+        };
+        let state = |seated: Vec<Seat>| Event::State {
+            seated,
+            listening: Some(true),
+            status: "idle".into(),
+            slots: 4,
+        };
+        let mut rebind = Rebind::default();
+        rebind.start(2, "n64", "console:n64", 0.0);
+        rebind.apply(&step(2, "a", 0, 14), 0.1);
+        rebind.apply(&state(vec![seat(1), seat(2)]), 0.2);
+        assert_eq!(rebind.view(0.2).and_then(|v| v.stored), None, "still walking");
+        rebind.apply(&state(vec![seat(1)]), 0.3);
+        assert_eq!(
+            rebind.view(0.3).and_then(|v| v.stored),
+            Some(false),
+            "seat two emptied: over"
         );
     }
 

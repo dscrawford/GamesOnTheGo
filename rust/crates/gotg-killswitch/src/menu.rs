@@ -73,6 +73,12 @@ pub struct Menu {
     carried: Option<i32>,
     /// A said what it was for this press: a pick-up or an exit fired.
     a_used: bool,
+    /// The owner's pad has been seen in its seat, and then the seat emptied:
+    /// the pad was switched off or went out of range. Nobody can close the
+    /// menu from a pad that is gone, and while it is open danstick may be
+    /// holding that player -- so it closes itself.
+    owner_seen: bool,
+    owner_gone: bool,
     done: bool,
 }
 
@@ -110,7 +116,27 @@ impl Menu {
             b_since: None,
             carried: None,
             a_used: false,
+            owner_seen: false,
+            owner_gone: false,
             done: false,
+        }
+        .with_owner_checked()
+    }
+
+    fn with_owner_checked(mut self) -> Self {
+        self.check_owner();
+        self
+    }
+
+    fn check_owner(&mut self) {
+        let seated = usize::try_from(self.owner - 1)
+            .ok()
+            .and_then(|at| self.rows.get(at))
+            .is_some_and(|row| row.icon.is_some());
+        if seated {
+            self.owner_seen = true;
+        } else if self.owner_seen {
+            self.owner_gone = true;
         }
     }
 
@@ -119,6 +145,7 @@ impl Menu {
     pub fn seats(&mut self, rows: Vec<Row>) {
         self.rows = rows.into_iter().take(SEATS_MAX).collect();
         self.focus = self.focus.min(self.rows.len());
+        self.check_owner();
     }
 
     fn exit_row(&self) -> usize {
@@ -133,6 +160,10 @@ impl Menu {
     pub fn tick(&mut self, down: &BTreeSet<String>, now: f64) -> Option<Action> {
         if self.done {
             return None;
+        }
+        if self.owner_gone {
+            self.done = true;
+            return Some(Action::Close);
         }
         // The chord's own buttons count once they have been let go.
         self.ignored.retain(|control| down.contains(control));
@@ -438,6 +469,27 @@ mod tests {
         assert_eq!(menu.view(0.3).focus, 2, "seat three is empty");
         assert!(hold(&mut menu, &["a"], 0.3, 1.5).is_empty());
         assert_eq!(menu.tick(&held(&[]), 1.6), None);
+    }
+
+    #[test]
+    fn a_menu_whose_pad_went_away_closes_itself() {
+        let mut menu = opened(1);
+        assert_eq!(menu.tick(&held(&[]), 0.1), None);
+        // Player one's seat empties: the pad was switched off.
+        menu.seats(room(0, 4));
+        assert_eq!(menu.tick(&held(&[]), 0.2), Some(Action::Close));
+        assert_eq!(menu.tick(&held(&["a"]), 0.3), None, "and stays closed");
+    }
+
+    #[test]
+    fn a_seat_not_yet_reported_is_not_a_pad_gone() {
+        // Opened before danstick's first `state` says who is seated: nothing
+        // was ever seen there, so nothing has gone.
+        let mut menu = Menu::open(1, room(0, 4), &held(&[]));
+        assert_eq!(menu.tick(&held(&[]), 0.1), None);
+        menu.seats(room(1, 4));
+        menu.seats(room(1, 4));
+        assert_eq!(menu.tick(&held(&[]), 0.2), None);
     }
 
     #[test]
