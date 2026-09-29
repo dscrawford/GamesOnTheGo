@@ -186,9 +186,12 @@ from Steam or from a terminal -- and it keeps danstick's `seating` open
 (`seating.rs`: on each connection, and again when a `state` says danstick
 stopped listening with a seat free and no session open). A hold on any pad
 takes a seat and the bar draws it filling; a seat danstick has no buttons for
-is walked over the game (`rebind.rs` `due`); L+R+Select held three seconds
-walks one pad's buttons again, and the panel lights each control as it is
-pressed; a game with nobody seated says "No controllers connected".
+is walked over the game (`rebind.rs` `due`); L+R+A held a second brings the
+menu down for that player alone (`menu.rs`): the seats, a rebind (A; the panel
+lights each control as it is pressed), a reorder (A held, then up/down --
+danstick's `move`) and a held Exit that pushes the saves on the way out; B
+held closes it. While it is open danstick is asked to hold that pad back from
+the game (`focus`). A game with nobody seated says "No controllers connected".
 Every session — picker or game — starts with nobody seated; danstick's daemon
 is started `--fresh --follow <pid>` and ends with the session. Seats survive a
 launch because the daemon follows the picker's pid, which the game inherits
@@ -304,9 +307,10 @@ name-CRC, because SDL renames clones) and `keys.py`.
 - **The overlay over a game is the kill switch's painter.** `gotg-killswitch`
   (launched beside every game) watches the exit chord and danstick's socket;
   a bar comes down for a pad joining and for the exit hold, and further --
-  the game's controller drawn, the asked-for button ringed -- for L + R +
-  Select held 3 s, which has danstick walk that pad's buttons again (`map`,
-  no session: only that pad is grabbed, its clone held back from the game). Drawing is a
+  the game's controller drawn, the asked-for button ringed -- for a rebind
+  from the menu (L + R + A held 1 s), which has danstick walk that pad's
+  buttons again (`map`, no session: only that pad is grabbed, its clone held
+  back from the game). Drawing is a
   separate process -- `gotg-killswitch --paint`, fed ~100-byte frames over a
   non-blocking pipe -- because a display call that stalls (a round trip, a
   vsynced present, a connect) in the chord's own loop was a kill switch that

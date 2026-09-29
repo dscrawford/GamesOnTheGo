@@ -1,7 +1,7 @@
 # Controller artwork
 
 One SVG per console, each carrying an `anchor-<input>` circle for every button:
-the controller the overlay draws when a pad's buttons are walked (L+R+Select,
+the controller the overlay draws when a pad's buttons are walked (a rebind from the overlay's menu,
 or a pad danstick has no buttons for). gotg-killswitch embeds these at build time
 (`rust/crates/gotg-killswitch/build.rs`) and puts a label and a line on each
 anchored control.
