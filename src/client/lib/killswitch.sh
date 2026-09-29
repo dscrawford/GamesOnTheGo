@@ -55,7 +55,7 @@ killswitch_console() {
 # is given is the pid the emulator will have — the same process, after exec,
 # which is also its process group's leader under both Steam and a terminal.
 killswitch_start() {
-  local pid="$1" platform="${2:-}" bin hold
+  local pid="$1" platform="${2:-}" attr="${3:-}" bin hold
   [[ "${GOTG_KILLSWITCH:-1}" != "0" ]] || return 0
   hold="$(killswitch_hold_ms)"
 
@@ -80,6 +80,12 @@ killswitch_start() {
   local -a console=()
   [[ ! "$platform" =~ ^[A-Za-z0-9_-]+$ ]] || console=(--platform "$platform")
 
-  "$bin" --pid "$pid" --hold-ms "$hold" ${console[@]+"${console[@]}"} ${picture[@]+"${picture[@]}"} &
-  log "${C_DIM}hold L + R and Start for $((hold / 1000))s to stop the game${C_RESET}"
+  # Whose saves go up when the menu's Exit stops the game, and the client
+  # that sends them -- this one, by the path it runs from.
+  local -a saves=()
+  [[ -z "$attr" || -z "${GOTG_ROOT:-}" ]] || saves=(--saves "$attr" --client "$GOTG_ROOT/bin/gotg")
+
+  "$bin" --pid "$pid" --hold-ms "$hold" ${console[@]+"${console[@]}"} ${picture[@]+"${picture[@]}"} \
+    ${saves[@]+"${saves[@]}"} &
+  log "${C_DIM}hold L + R and A for a second for the menu; L + R and Start for $((hold / 1000))s stops the game${C_RESET}"
 }

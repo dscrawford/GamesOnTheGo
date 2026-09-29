@@ -137,7 +137,16 @@ wait_for_watcher() {
 @test "the launch says how to use it" {
   fake_watcher
   gotg play usa.zelda
-  [[ "$stderr" == *"hold L + R and Start for 3s"* ]]
+  [[ "$stderr" == *"L + R and A for a second for the menu"* ]]
+  [[ "$stderr" == *"L + R and Start for 3s stops the game"* ]]
+}
+
+@test "the watcher is told whose saves to push when the menu stops the game" {
+  fake_watcher
+  gotg play usa.zelda
+  wait_for_watcher
+  [[ "$(cat "$WATCHER_LOG")" == *"--saves env-n64"* ]]
+  [[ "$(cat "$WATCHER_LOG")" == *"--client /"*"/bin/gotg"* ]]
 }
 
 @test "GOTG_KILLSWITCH=0 turns it off and the game still runs" {

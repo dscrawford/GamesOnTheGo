@@ -18,7 +18,7 @@
 //! a texture. What goes over a drawing (the tick) is a second mesh.
 
 use crate::consoles::CONSOLES;
-use crate::frame::Rebinding;
+use crate::frame::{EMPTY_SEAT, MenuFrame, Rebinding, Saying};
 use crate::leaders;
 use crate::shapes::{Colour, Mesh};
 use crate::text;
@@ -59,6 +59,10 @@ pub struct Scene<'a> {
     pub panel_height: f32,
     /// A controller being rebound, if one is.
     pub rebind: Option<Rebinding>,
+    /// The menu, if somebody has it down.
+    pub menu: Option<MenuFrame>,
+    /// Something the bar says on its own.
+    pub saying: Saying,
     /// danstick has nobody seated and nobody joining.
     pub nobody: bool,
 }
@@ -651,6 +655,183 @@ fn build_nobody(scene: &Scene, top: f32, drawing: &mut Drawing) {
     }
 }
 
+/// What the bar says while a game stopped from the menu is saving.
+pub const SAVING: &str = "Saving your game…";
+
+/// A line (and perhaps a second, dimmer one) in a card as wide as the words.
+fn build_words(scene: &Scene, top: f32, first: &str, second: Option<&str>, drawing: &mut Drawing) {
+    let bar = scene.bar_height;
+    let cx = scene.width as f32 / 2.0;
+    let (big, small) = (bar * 0.3, bar * 0.19);
+    let wide = text::width(first, big).max(second.map_or(0.0, |s| text::width(s, small)));
+    card(
+        &mut drawing.under,
+        cx,
+        top,
+        (wide + bar).min(scene.width as f32),
+        bar,
+    );
+    let lines: &[(&str, f32, f32, [u8; 3])] = match second {
+        Some(second) => &[
+            (first, big, 0.4, theme::TEXT),
+            (second, small, 0.72, theme::TEXT_DIM),
+        ],
+        None => &[(first, big, 0.5, theme::TEXT)],
+    };
+    for &(words, size, y, colour) in lines {
+        drawing.labels.push(Label {
+            text: words.to_owned(),
+            x: cx,
+            y: top + bar * y,
+            size,
+            colour: Colour::rgb(colour, 1.0),
+            align: Align::Centre,
+        });
+    }
+}
+
+/// What the menu's footer says.
+pub const MENU_KEYS: &str = "A  rebind      hold A  move      hold B  close";
+
+/// The menu: the seats, each with its controller, and Exit under them. The
+/// row under the cursor is lit; a controller being carried is lit in its
+/// seat's colour; a hold under way fills a ring at the row's end.
+fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) {
+    let panel = scene.panel_height;
+    let width = scene.width as f32;
+    let cx = width / 2.0;
+    let card_w = (panel * 1.3).min(width * 0.94);
+    card(&mut drawing.under, cx, top, card_w, panel);
+    let dim = Colour::rgb(theme::TEXT_DIM, 1.0);
+    drawing.labels.push(Label {
+        text: "Controllers".to_owned(),
+        x: cx,
+        y: top + panel * 0.09,
+        size: panel * 0.07,
+        colour: Colour::rgb(theme::TEXT, 1.0),
+        align: Align::Centre,
+    });
+    drawing.labels.push(Label {
+        text: format!("Player {}'s menu", menu.owner),
+        x: cx,
+        y: top + panel * 0.16,
+        size: panel * 0.04,
+        colour: player_colour(menu.owner),
+        align: Align::Centre,
+    });
+    let seats = (menu.rows as usize).min(menu.icons.len());
+    let rows = seats + 1;
+    let row_h = (panel * 0.62 / rows as f32).min(panel * 0.12);
+    let first = top + panel * 0.24;
+    let (left, row_w) = (cx - card_w * 0.42, card_w * 0.84);
+    for row in 0..rows {
+        let cy = first + (row as f32 + 0.5) * row_h;
+        let focused = menu.focus as usize == row;
+        let exit = row == seats;
+        let seat = row as i32 + 1;
+        let carried = !exit && menu.carried == seat;
+        if focused || carried {
+            let lit = if carried {
+                player_colour(seat).with_alpha(0.35)
+            } else if exit {
+                RED.with_alpha(0.22)
+            } else {
+                dim.with_alpha(0.18)
+            };
+            drawing
+                .under
+                .rect(left, cy - row_h * 0.45, row_w, row_h * 0.9, lit);
+        }
+        let size = row_h * 0.42;
+        if exit {
+            drawing.labels.push(Label {
+                text: "Exit game".to_owned(),
+                x: cx,
+                y: cy,
+                size,
+                colour: if focused { RED } else { dim },
+                align: Align::Centre,
+            });
+        } else {
+            let icon = menu.icons[row];
+            let seated = icon != EMPTY_SEAT;
+            drawing.labels.push(Label {
+                text: format!("Player {seat}"),
+                x: left + row_h * 0.4,
+                y: cy,
+                size,
+                colour: if seated { player_colour(seat) } else { dim },
+                align: Align::Left,
+            });
+            if seated {
+                drawing.sprites.push(Sprite {
+                    icon,
+                    cx: cx + card_w * 0.12,
+                    cy,
+                    height: row_h * 0.72,
+                    colour: player_colour(seat),
+                    revealed: 1.0,
+                    under: Colour::rgb(theme::EMPTY, 1.0),
+                    picture: false,
+                });
+            } else {
+                drawing.labels.push(Label {
+                    text: "empty".to_owned(),
+                    x: cx + card_w * 0.12,
+                    y: cy,
+                    size: size * 0.8,
+                    colour: dim.with_alpha(0.6),
+                    align: Align::Centre,
+                });
+            }
+        }
+        if focused && menu.a_fill > 0.0 {
+            let (rx, radius) = (left + row_w - row_h * 0.45, row_h * 0.26);
+            let ink = if exit { RED } else { player_colour(seat) };
+            drawing.over.arc(
+                rx,
+                cy,
+                radius,
+                radius * 0.3,
+                0.0,
+                1.0,
+                ink.with_alpha(0.25),
+                FEATHER,
+            );
+            drawing
+                .over
+                .arc(rx, cy, radius, radius * 0.3, 0.0, menu.a_fill, ink, FEATHER);
+        }
+    }
+    let keys_y = top + panel * 0.93;
+    let keys_size = panel * 0.036;
+    drawing.labels.push(Label {
+        text: MENU_KEYS.to_owned(),
+        x: cx,
+        y: keys_y,
+        size: keys_size,
+        colour: dim,
+        align: Align::Centre,
+    });
+    if menu.b_fill > 0.0 {
+        let rx = cx + text::width(MENU_KEYS, keys_size) / 2.0 + keys_size * 1.2;
+        let radius = keys_size * 0.55;
+        drawing.over.arc(
+            rx,
+            keys_y,
+            radius,
+            radius * 0.3,
+            0.0,
+            1.0,
+            dim.with_alpha(0.3),
+            FEATHER,
+        );
+        drawing
+            .over
+            .arc(rx, keys_y, radius, radius * 0.3, 0.0, menu.b_fill, dim, FEATHER);
+    }
+}
+
 /// Whether control `id` of the console is down on the seat being rebound.
 fn pressed(rebind: &Rebinding, id: usize) -> bool {
     id < 64 && rebind.pressed & (1 << id) != 0
@@ -669,10 +850,20 @@ pub fn build(scene: &Scene, drawing: &mut Drawing) {
         build_rebind(scene, &rebind, top, drawing);
         return;
     }
+    // The menu is the same panel, for the player who asked for it.
+    if let Some(menu) = scene.menu.filter(|_| scene.exit_progress <= 0.0) {
+        let top = -scene.panel_height * (1.0 - scene.position as f32);
+        build_menu(scene, &menu, top, drawing);
+        return;
+    }
     let bar = scene.bar_height;
     let width = scene.width as f32;
     let top = -bar * (1.0 - scene.position as f32);
     let count = scene.joined.len() + scene.fractions.len();
+    if scene.saying == Saying::Saving && scene.exit_progress <= 0.0 {
+        build_words(scene, top, SAVING, None, drawing);
+        return;
+    }
     if scene.nobody && count == 0 && scene.exit_progress <= 0.0 {
         build_nobody(scene, top, drawing);
         return;
@@ -1044,6 +1235,72 @@ mod tests {
             nobody: false,
             ..down(0.0)
         }));
+    }
+
+    fn menu(focus: u32, a_fill: f32) -> Scene<'static> {
+        Scene {
+            panel_height: panel_height(800),
+            menu: Some(MenuFrame {
+                owner: 1,
+                rows: 4,
+                icons: [
+                    2, 5, EMPTY_SEAT, EMPTY_SEAT, EMPTY_SEAT, EMPTY_SEAT, EMPTY_SEAT, EMPTY_SEAT,
+                ],
+                focus,
+                carried: 0,
+                a_fill,
+                b_fill: 0.0,
+            }),
+            ..down(0.0)
+        }
+    }
+
+    #[test]
+    fn the_menu_lists_every_seat_and_exit_with_the_pads_in_them() {
+        let mut drawing = Drawing::default();
+        build(&menu(0, 0.0), &mut drawing);
+        let texts: Vec<&str> = drawing.labels.iter().map(|l| l.text.as_str()).collect();
+        for want in [
+            "Controllers",
+            "Player 1",
+            "Player 2",
+            "Player 3",
+            "Player 4",
+            "Exit game",
+            MENU_KEYS,
+        ] {
+            assert!(texts.contains(&want), "{want} missing from {texts:?}");
+        }
+        assert_eq!(drawing.sprites.len(), 2, "two seated pads, two drawings");
+        assert_eq!(texts.iter().filter(|t| **t == "empty").count(), 2);
+    }
+
+    #[test]
+    fn exit_under_the_cursor_is_red_and_its_hold_fills() {
+        let mut drawing = Drawing::default();
+        build(&menu(4, 0.5), &mut drawing);
+        let exit = drawing
+            .labels
+            .iter()
+            .find(|l| l.text == "Exit game")
+            .expect("exit");
+        assert_eq!(exit.colour, RED);
+        assert!(!drawing.over.vertices.is_empty(), "the hold's ring");
+        build(&menu(0, 0.0), &mut drawing);
+        assert!(drawing.over.vertices.is_empty(), "no hold, no ring");
+    }
+
+    #[test]
+    fn a_game_saving_on_its_way_out_says_so() {
+        let mut drawing = Drawing::default();
+        build(
+            &Scene {
+                saying: Saying::Saving,
+                ..down(0.0)
+            },
+            &mut drawing,
+        );
+        assert!(drawing.labels.iter().any(|l| l.text == SAVING));
     }
 
     #[test]

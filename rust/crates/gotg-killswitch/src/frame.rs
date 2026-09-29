@@ -16,9 +16,40 @@ use crate::pairing::{HOLDS_MAX, Hold, JOINED_MAX};
 /// "GOSV", so a torn or foreign read is refused.
 pub const MAGIC: u32 = 0x5653_4f47;
 
-/// Bytes on the pipe: six words, the five arrays a word per entry, then
-/// the rebind's thirteen words.
-pub const SIZE: usize = 4 * (6 + HOLDS_MAX * 3 + JOINED_MAX * 2 + REBIND_WORDS);
+/// Bytes on the pipe: six words, the five arrays a word per entry, the
+/// rebind's thirteen words, the menu's, and one for what the bar is saying.
+pub const SIZE: usize = 4 * (6 + HOLDS_MAX * 3 + JOINED_MAX * 2 + REBIND_WORDS + MENU_WORDS + 1);
+
+const MENU_WORDS: usize = 6 + ROWS_MAX;
+
+/// Seats a menu frame lists.
+pub const ROWS_MAX: usize = crate::menu::SEATS_MAX;
+
+/// A seat with nobody in it, where a drawing would be.
+pub const EMPTY_SEAT: u8 = u8::MAX;
+
+/// The menu as the bar draws it: whose it is, the seats (a drawing each, or
+/// EMPTY_SEAT), the row under the cursor (rows past the seats are Exit), the
+/// seat being carried (0 none), and the two holds' fills.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MenuFrame {
+    pub owner: i32,
+    pub rows: u32,
+    pub icons: [u8; ROWS_MAX],
+    pub focus: u32,
+    pub carried: i32,
+    pub a_fill: f32,
+    pub b_fill: f32,
+}
+
+/// What the bar says in words when it says something on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Saying {
+    #[default]
+    Nothing,
+    /// The game has been stopped from the menu and its saves are on their way.
+    Saving,
+}
 
 const REBIND_WORDS: usize = 13;
 
@@ -59,6 +90,9 @@ pub struct Frame {
     joined_count: usize,
     /// On the wire as player 0 when there is none.
     pub rebind: Option<Rebinding>,
+    /// On the wire as owner 0 when there is none.
+    pub menu: Option<MenuFrame>,
+    pub saying: Saying,
     /// danstick has nobody seated and nobody joining.
     pub nobody: bool,
 }
@@ -89,6 +123,16 @@ impl Frame {
     /// This frame, saying whether nobody is seated.
     pub fn with_nobody(self, nobody: bool) -> Self {
         Self { nobody, ..self }
+    }
+
+    /// This frame, with the menu on it.
+    pub fn with_menu(self, menu: Option<MenuFrame>) -> Self {
+        Self { menu, ..self }
+    }
+
+    /// This frame, saying something.
+    pub fn with_saying(self, saying: Saying) -> Self {
+        Self { saying, ..self }
     }
 
     /// This frame, with a rebind on it.
@@ -167,6 +211,29 @@ impl Frame {
         put((rebind.pressed as u32).to_ne_bytes());
         put(((rebind.pressed >> 32) as u32).to_ne_bytes());
         rebind.sticks.iter().for_each(|value| put(value.to_ne_bytes()));
+        let menu = self.menu.unwrap_or(MenuFrame {
+            owner: 0,
+            rows: 0,
+            icons: [EMPTY_SEAT; ROWS_MAX],
+            focus: 0,
+            carried: 0,
+            a_fill: 0.0,
+            b_fill: 0.0,
+        });
+        put(menu.owner.to_ne_bytes());
+        put(menu.rows.to_ne_bytes());
+        put(menu.focus.to_ne_bytes());
+        put(menu.carried.to_ne_bytes());
+        put(menu.a_fill.to_ne_bytes());
+        put(menu.b_fill.to_ne_bytes());
+        menu.icons
+            .iter()
+            .for_each(|&icon| put(u32::from(icon).to_ne_bytes()));
+        put(match self.saying {
+            Saying::Nothing => 0u32,
+            Saying::Saving => 1,
+        }
+        .to_ne_bytes());
         out
     }
 
@@ -186,7 +253,30 @@ impl Frame {
         let joined = holds + 3 * HOLDS_MAX;
         let rebind = joined + 2 * JOINED_MAX;
         let player = i32::from_ne_bytes(word(rebind));
+        let menu = rebind + REBIND_WORDS;
+        let owner = i32::from_ne_bytes(word(menu));
+        let fill = |i: usize| {
+            let value = f32::from_ne_bytes(word(i));
+            if value.is_finite() {
+                value.clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
+        };
         Some(Self {
+            menu: (owner > 0).then(|| MenuFrame {
+                owner,
+                rows: u32::from_ne_bytes(word(menu + 1)).min(ROWS_MAX as u32),
+                focus: u32::from_ne_bytes(word(menu + 2)).min(ROWS_MAX as u32),
+                carried: i32::from_ne_bytes(word(menu + 3)),
+                a_fill: fill(menu + 4),
+                b_fill: fill(menu + 5),
+                icons: std::array::from_fn(|i| icon(menu + 6 + i)),
+            }),
+            saying: match u32::from_ne_bytes(word(menu + MENU_WORDS)) {
+                1 => Saying::Saving,
+                _ => Saying::Nothing,
+            },
             rebind: (player > 0).then(|| Rebinding {
                 player,
                 console: u32::from_ne_bytes(word(rebind + 1)),
@@ -274,6 +364,21 @@ mod tests {
         let none = Frame::pack(1.0, 0.0, &[], &[]);
         assert_eq!(Frame::decode(&none.encode()).map(|f| f.rebind), Some(None));
         assert_eq!(Frame::decode(&none.encode()).map(|f| f.nobody), Some(false));
+        let menu = MenuFrame {
+            owner: 2,
+            rows: 4,
+            icons: [
+                3, 5, EMPTY_SEAT, EMPTY_SEAT, EMPTY_SEAT, EMPTY_SEAT, EMPTY_SEAT, EMPTY_SEAT,
+            ],
+            focus: 4,
+            carried: 0,
+            a_fill: 0.5,
+            b_fill: 0.0,
+        };
+        let with_menu = none.with_menu(Some(menu)).with_saying(Saying::Saving);
+        let back = Frame::decode(&with_menu.encode()).expect("a frame");
+        assert_eq!((back.menu, back.saying), (Some(menu), Saying::Saving));
+        assert_eq!(Frame::decode(&none.encode()).map(|f| f.menu), Some(None));
         let nobody = none.with_nobody(true);
         assert_eq!(Frame::decode(&nobody.encode()).map(|f| f.nobody), Some(true));
         let wild = Frame {

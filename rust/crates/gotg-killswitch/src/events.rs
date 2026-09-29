@@ -75,6 +75,12 @@ pub enum Event {
         /// What the walk has bound so far, each control once.
         captured: Vec<Binding>,
     },
+    /// A control on the pad a menu holds (danstick's `focus`): see [`crate::menu`].
+    Focus {
+        player: i32,
+        control: String,
+        down: bool,
+    },
     /// A raw input on the pad under the wizard: see [`pressing`].
     Input {
         player: i32,
@@ -184,6 +190,14 @@ pub fn parse(line: &[u8]) -> Option<Event> {
                 })
                 .unwrap_or_default(),
         },
+        Some("focus") => match root.get("control").and_then(Value::as_str) {
+            Some(control) if !control.is_empty() && control.len() <= 32 => Event::Focus {
+                player: player_of(&root),
+                control: control.to_owned(),
+                down: flag(&root, "down"),
+            },
+            _ => Event::Other,
+        },
         Some("input") => match (
             root.get("kind").and_then(Value::as_str).and_then(Kind::named),
             root.get("index").and_then(Value::as_f64),
@@ -236,6 +250,7 @@ pub fn apply(event: &Event, pairing: &mut Pairing, now: f64, icon_of: &mut dyn F
         Event::Mapping { .. }
         | Event::Finish { .. }
         | Event::Input { .. }
+        | Event::Focus { .. }
         | Event::Error { .. }
         | Event::Other => {}
     }
@@ -446,6 +461,22 @@ mod tests {
         ] {
             assert_eq!(parsed(odd), Some(Event::Other), "{odd}");
         }
+    }
+
+    #[test]
+    fn a_held_players_controls_are_read_and_a_stick_or_nonsense_is_not() {
+        assert_eq!(
+            parsed(r#"{"event":"focus","player":2,"control":"a","down":true}"#),
+            Some(Event::Focus {
+                player: 2,
+                control: "a".into(),
+                down: true
+            })
+        );
+        assert_eq!(
+            parsed(r#"{"event":"focus","player":2,"stick":"left","x":0.5}"#),
+            Some(Event::Other)
+        );
     }
 
     #[test]

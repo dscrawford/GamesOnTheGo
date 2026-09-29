@@ -13,6 +13,7 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 
 use crate::events;
+use crate::menu::Focused;
 use crate::pairing::Pairing;
 use crate::rebind::Rebind;
 use crate::seating::Seating;
@@ -107,6 +108,7 @@ impl Link {
         pairing: &mut Pairing,
         rebind: &mut Rebind,
         seating: &mut Seating,
+        focused: &mut Focused,
         now: f64,
     ) -> usize {
         let mut applied = 0;
@@ -120,7 +122,7 @@ impl Link {
                     self.close();
                     break;
                 }
-                Ok(got) => applied += self.feed(&chunk[..got], pairing, rebind, seating, now),
+                Ok(got) => applied += self.feed(&chunk[..got], pairing, rebind, seating, focused, now),
                 Err(error) if error.kind() == ErrorKind::WouldBlock => break,
                 Err(error) if error.kind() == ErrorKind::Interrupted => {}
                 Err(_) => {
@@ -140,6 +142,7 @@ impl Link {
         pairing: &mut Pairing,
         rebind: &mut Rebind,
         seating: &mut Seating,
+        focused: &mut Focused,
         now: f64,
     ) -> usize {
         let mut applied = 0;
@@ -147,7 +150,7 @@ impl Link {
             let take = bytes.len().min(BUFFER - self.buffer.len());
             self.buffer.extend_from_slice(&bytes[..take]);
             bytes = &bytes[take..];
-            applied += self.drain(pairing, rebind, seating, now);
+            applied += self.drain(pairing, rebind, seating, focused, now);
         }
         applied
     }
@@ -157,6 +160,7 @@ impl Link {
         pairing: &mut Pairing,
         rebind: &mut Rebind,
         seating: &mut Seating,
+        focused: &mut Focused,
         now: f64,
     ) -> usize {
         let (icons, resolve) = (&mut self.icons, self.resolve);
@@ -187,6 +191,7 @@ impl Link {
                 events::apply(&event, pairing, now, &mut icon_of);
                 rebind.apply(&event, now);
                 seating.apply(&event);
+                focused.apply(&event);
                 applied += 1;
             }
             start += at + 1;
@@ -310,6 +315,7 @@ mod tests {
             &mut pairing(),
             &mut Rebind::default(),
             &mut Seating::new(1.5),
+            &mut Focused::default(),
             10.0,
         )
     }
@@ -326,6 +332,7 @@ mod tests {
                 &mut p,
                 &mut Rebind::default(),
                 &mut Seating::new(1.5),
+                &mut Focused::default(),
                 10.0
             ),
             0,
@@ -337,6 +344,7 @@ mod tests {
                 &mut p,
                 &mut Rebind::default(),
                 &mut Seating::new(1.5),
+                &mut Focused::default(),
                 10.0
             ),
             1,
@@ -354,6 +362,7 @@ mod tests {
             &mut p,
             &mut Rebind::default(),
             &mut Seating::new(1.5),
+            &mut Focused::default(),
             10.0,
         );
         let after = "\n{\"event\":\"progress\",\"frac\":0.3,\"node\":\"n\"}\n";
@@ -363,6 +372,7 @@ mod tests {
                 &mut p,
                 &mut Rebind::default(),
                 &mut Seating::new(1.5),
+                &mut Focused::default(),
                 10.0
             ),
             1,
@@ -380,6 +390,7 @@ mod tests {
                 &mut p,
                 &mut Rebind::default(),
                 &mut Seating::new(1.5),
+                &mut Focused::default(),
                 10.0
             ),
             0
@@ -391,6 +402,7 @@ mod tests {
                 &mut p,
                 &mut Rebind::default(),
                 &mut Seating::new(1.5),
+                &mut Focused::default(),
                 10.0
             ),
             1
@@ -411,6 +423,7 @@ mod tests {
                 &mut pairing(),
                 &mut Rebind::default(),
                 &mut Seating::new(1.5),
+                &mut Focused::default(),
                 10.0
             ),
             1
@@ -449,6 +462,7 @@ mod tests {
                 &mut pairing(),
                 &mut Rebind::default(),
                 &mut Seating::new(1.5),
+                &mut Focused::default(),
                 10.0
             ),
             1,
@@ -512,6 +526,7 @@ mod tests {
                 &mut pairing(),
                 &mut Rebind::default(),
                 &mut Seating::new(1.5),
+                &mut Focused::default(),
                 10.0
             ),
             0
@@ -546,6 +561,7 @@ mod tests {
                 &mut p,
                 &mut Rebind::default(),
                 &mut Seating::new(1.5),
+                &mut Focused::default(),
                 10.0,
             );
         }
@@ -557,6 +573,7 @@ mod tests {
             &mut p,
             &mut Rebind::default(),
             &mut Seating::new(1.5),
+            &mut Focused::default(),
             10.0,
         );
         assert_eq!(
@@ -579,6 +596,7 @@ mod tests {
             &mut p,
             &mut Rebind::default(),
             &mut Seating::new(1.5),
+            &mut Focused::default(),
             10.0,
         );
         let holds = p.now(10.0);
@@ -591,6 +609,7 @@ mod tests {
             &mut p,
             &mut Rebind::default(),
             &mut Seating::new(1.5),
+            &mut Focused::default(),
             10.1,
         );
         assert!(p.now(10.1).is_empty(), "the hold that took the seat is over");
@@ -618,7 +637,13 @@ mod tests {
         daemon
             .write_all(b"{\"event\":\"mapping\",\"player\":1,\"control\":\"b\",\"index\":1,\"total\":14}\n")
             .expect("danstick writes");
-        link.pump(&mut pairing(), &mut rebind, &mut Seating::new(1.5), 10.2);
+        link.pump(
+            &mut pairing(),
+            &mut rebind,
+            &mut Seating::new(1.5),
+            &mut Focused::default(),
+            10.2,
+        );
         assert_eq!(rebind.view(10.2).map(|v| v.control), Some("b".into()));
     }
 

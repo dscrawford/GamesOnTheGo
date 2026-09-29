@@ -18,6 +18,8 @@ pub struct Input {
     pub start: bool,
     /// Select, Back, Minus, View: the button left of centre.
     pub back: bool,
+    /// The bottom face button: A on an Xbox pad, B on a Nintendo one.
+    pub a: bool,
 }
 
 /// Which of the two holds a [`Pad`] is timing.
@@ -25,9 +27,9 @@ pub struct Input {
 pub enum Chord {
     /// Both shoulders and Start: the game stops.
     Exit,
-    /// Both shoulders and Select: the pad's buttons are walked again in
-    /// danstick, over the game, for this pad alone.
-    Rebind,
+    /// Both shoulders and A: the overlay's menu comes down, for this pad's
+    /// player -- the controllers, a rebind, the order, a held exit.
+    Menu,
 }
 
 impl Input {
@@ -35,12 +37,13 @@ impl Input {
     /// Two shoulders is a grip somebody could stumble into; two shoulders
     /// and Start, held past three seconds, is not -- which is the entire
     /// brief for a control that must never fire by accident and must exist
-    /// on every pad. With Start *and* Select down it is neither: holding
-    /// everything is not a choice between quitting and rebinding.
+    /// on every pad. Start with A still down is the exit, not the menu --
+    /// L+R+A+Start is what somebody reaching for "quit" actually held -- and
+    /// Start with Select is neither.
     fn chord(self, chord: Chord) -> bool {
         let (want, other) = match chord {
             Chord::Exit => (self.start, self.back),
-            Chord::Rebind => (self.back, self.start),
+            Chord::Menu => (self.a, self.start || self.back),
         };
         self.left && self.right && want && !other
     }
@@ -124,18 +127,21 @@ mod tests {
         right: false,
         start: false,
         back: false,
+        a: false,
     };
     const CHORD: Input = Input {
         left: true,
         right: true,
         start: true,
         back: false,
+        a: false,
     };
-    const REBIND: Input = Input {
+    const MENU: Input = Input {
         left: true,
         right: true,
         start: false,
-        back: true,
+        back: false,
+        a: true,
     };
 
     /// Holding from t=0, sampled every `step` ms like the real loop: when it
@@ -184,24 +190,28 @@ mod tests {
                 right: true,
                 start: false,
                 back: false,
+                a: false,
             }, // the resting grip
             Input {
                 left: true,
                 right: false,
                 start: true,
                 back: false,
+                a: false,
             },
             Input {
                 left: false,
                 right: true,
                 start: true,
                 back: false,
+                a: false,
             },
             Input {
                 left: false,
                 right: false,
                 start: true,
                 back: false,
+                a: false,
             }, // Start alone pauses half these games
         ];
         for partial in partials {
@@ -260,36 +270,34 @@ mod tests {
     }
 
     #[test]
-    fn select_in_place_of_start_is_the_rebind_hold_not_the_exit() {
+    fn a_in_place_of_start_is_the_menu_not_the_exit() {
         let mut exit = Pad::new(3000);
-        let mut rebind = Pad::timing(Chord::Rebind, 3000);
-        let exited = (0..=6000).step_by(50).any(|now| exit.step(REBIND, now));
-        let asked = (0..=6000)
+        let mut menu = Pad::timing(Chord::Menu, 1000);
+        let exited = (0..=6000).step_by(50).any(|now| exit.step(MENU, now));
+        let opened: Vec<u64> = (0..=6000)
             .step_by(50)
-            .filter(|&now| rebind.step(REBIND, now))
-            .count();
-        assert!(!exited, "Select is not Start: the game keeps running");
-        assert_eq!(asked, 1, "the rebind fires once, at three seconds");
-        let mut rebind = Pad::timing(Chord::Rebind, 3000);
+            .filter(|&now| menu.step(MENU, now))
+            .collect();
+        assert!(!exited, "A is not Start: the game keeps running");
+        assert_eq!(opened, [1000], "the menu opens once, at a second");
+        let mut menu = Pad::timing(Chord::Menu, 1000);
         assert!(
-            !(0..=6000).step_by(50).any(|now| rebind.step(CHORD, now)),
-            "and Start is not Select"
+            !(0..=6000).step_by(50).any(|now| menu.step(CHORD, now)),
+            "and Start is not A"
         );
     }
 
     #[test]
-    fn holding_start_and_select_together_is_neither() {
-        let everything = Input {
-            start: true,
-            ..REBIND
-        };
-        for chord in [Chord::Exit, Chord::Rebind] {
-            let mut pad = Pad::timing(chord, 3000);
-            assert!(
-                !(0..=6000).step_by(50).any(|now| pad.step(everything, now)),
-                "{chord:?} fired with both buttons down"
-            );
+    fn start_with_a_still_down_is_the_exit_and_not_the_menu() {
+        let everything = Input { start: true, ..MENU };
+        for chord in [Chord::Exit, Chord::Menu] {
+            let mut pad = Pad::timing(chord, 1000);
+            let fired = (0..=6000).step_by(50).any(|now| pad.step(everything, now));
+            assert_eq!(fired, chord == Chord::Exit, "{chord:?}");
         }
+        let with_select = Input { back: true, ..MENU };
+        let mut menu = Pad::timing(Chord::Menu, 1000);
+        assert!(!(0..=6000).step_by(50).any(|now| menu.step(with_select, now)));
     }
 
     #[test]

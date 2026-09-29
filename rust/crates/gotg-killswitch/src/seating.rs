@@ -43,6 +43,11 @@ impl Seating {
         }
     }
 
+    /// The seats danstick has.
+    pub fn slots(&self) -> i32 {
+        self.slots
+    }
+
     /// The connection went: whatever answers next remembers nothing.
     pub fn lost(&mut self) {
         self.asked = false;

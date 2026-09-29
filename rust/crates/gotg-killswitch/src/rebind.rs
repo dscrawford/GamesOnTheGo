@@ -210,6 +210,11 @@ impl Rebind {
         Some(seat.player)
     }
 
+    /// Who is seated, as danstick's last `state` said.
+    pub fn seated(&self) -> &[Seat] {
+        &self.seated
+    }
+
     /// What to draw now, or None when nothing is being rebound.
     pub fn view(&mut self, now: f64) -> Option<View> {
         self.expire(now);

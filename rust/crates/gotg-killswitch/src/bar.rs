@@ -8,8 +8,10 @@
 
 #[derive(Debug, Clone)]
 pub struct Bar {
-    /// A full slide, top to bottom.
+    /// A full slide, top to bottom, as the bar usually moves.
     slide_seconds: f64,
+    /// This slide's: the usual one, or a slower one asked for by `want_over`.
+    this_slide: f64,
     /// When the direction last changed, and where it was then.
     changed: f64,
     from: f64,
@@ -20,6 +22,7 @@ impl Bar {
     pub fn new(slide_seconds: f64) -> Self {
         Self {
             slide_seconds: slide_seconds.max(0.0),
+            this_slide: slide_seconds.max(0.0),
             changed: 0.0,
             from: 0.0,
             down: false,
@@ -33,7 +36,7 @@ impl Bar {
     /// 0..1 through the current slide.
     fn progress(&self, now: f64) -> f64 {
         // A slide's worth of the distance left.
-        let span = self.slide_seconds * (self.target() - self.from).abs();
+        let span = self.this_slide * (self.target() - self.from).abs();
         if span <= 0.0 {
             return 1.0;
         }
@@ -43,12 +46,21 @@ impl Bar {
     /// Where the bar should be going. Changing direction mid-slide keeps its
     /// place.
     pub fn want(&mut self, down: bool, now: f64) {
+        let usual = self.slide_seconds;
+        self.want_over(down, now, usual);
+    }
+
+    /// The same, with a full slide taking `seconds` this once: the menu goes
+    /// away slowly, so closing it reads as closing rather than as vanishing.
+    /// A slide already under way keeps the speed it started with.
+    pub fn want_over(&mut self, down: bool, now: f64, seconds: f64) {
         if down == self.down {
             return;
         }
         self.from = self.position(now);
         self.down = down;
         self.changed = now;
+        self.this_slide = seconds.max(0.0);
     }
 
     /// How far down it is: 0 out of sight, 1 all the way down. Smoothstep, so
@@ -76,6 +88,24 @@ mod tests {
 
     fn near(a: f64, b: f64, tolerance: f64) -> bool {
         (a - b).abs() <= tolerance
+    }
+
+    #[test]
+    fn a_slow_slide_up_takes_the_time_it_was_asked_for_and_the_next_is_usual_again() {
+        let mut bar = Bar::new(0.2);
+        bar.want(true, 0.0);
+        assert!(near(bar.position(0.2), 1.0, 1e-9));
+        bar.want_over(false, 1.0, 1.0);
+        assert!(
+            near(bar.position(1.5), 0.5, 0.01),
+            "half way up after half a second"
+        );
+        assert!(!bar.gone(1.9) && bar.gone(2.0));
+        bar.want(true, 3.0);
+        assert!(
+            near(bar.position(3.2), 1.0, 1e-9),
+            "and the next slide is the usual one"
+        );
     }
 
     #[test]
