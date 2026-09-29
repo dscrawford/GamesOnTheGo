@@ -531,7 +531,14 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         let clock = seconds_now();
         // Linked whether or not anything is drawn: somebody joining is not
         // a picture, and without the overlay nothing else keeps seating open.
+        let was_linked = link.fd().is_some();
         link.tick(clock);
+        // Beside a game, on each new connection: what is being played, so
+        // danstick drives every clone from this console's walk. Leased to this
+        // connection, so it is sent again whenever the connection is new.
+        if !was_linked && link.fd().is_some() && !options.overlay_only && !options.platform.is_empty() {
+            link.send(&console.playing());
+        }
         link.pump(&mut pairing, &mut rebind, &mut seating, clock);
         if link.fd().is_none() {
             pairing.room(None);

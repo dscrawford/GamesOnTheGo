@@ -48,9 +48,18 @@ pub fn for_platform(platform: &str) -> usize {
 }
 
 impl Console {
-    /// danstick's scope for "every game on this console", as the gate asks.
+    /// danstick's scope for "every game on this console": where a walk for it
+    /// is stored.
     pub fn scope(&self) -> String {
         format!("console:{}", self.layout)
+    }
+
+    /// The line that tells danstick this console is being played, so every
+    /// clone is driven by its walk rather than the default's. Leased: it lasts
+    /// as long as the connection that sent it -- the overlay's, which lasts as
+    /// long as the game -- and danstick puts back what it found when that goes.
+    pub fn playing(&self) -> String {
+        serde_json::json!({"cmd": "scope", "console": self.layout, "lease": true}).to_string()
     }
 
     /// The control danstick is asking for, by its id.
@@ -107,7 +116,16 @@ mod tests {
     }
 
     #[test]
-    fn the_scope_is_the_one_the_gate_asks_for() {
+    fn what_is_being_played_is_leased_for_the_consoles_layout() {
+        let sent: serde_json::Value = serde_json::from_str(&named("n64").playing()).expect("json");
+        assert_eq!(
+            sent,
+            serde_json::json!({"cmd": "scope", "console": "n64", "lease": true})
+        );
+    }
+
+    #[test]
+    fn the_scope_is_the_one_a_walk_is_stored_under() {
         assert_eq!(named("n64").scope(), "console:n64");
     }
 
