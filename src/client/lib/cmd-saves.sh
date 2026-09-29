@@ -72,7 +72,10 @@ saves_resolve() {
     for root in "$GOTG_ROOTS_DIR"/*; do
       [[ -e "$root" ]] || continue
       name="$(basename "$root")"
-      [[ "$name" == env-* ]] || continue
+      # An environment's name, and nothing else in here: the build-key file
+      # beside every root (`env-n64.by`) starts with env- too, and asking
+      # its manifest was one "invalid environment name" per environment.
+      [[ "$name" =~ $GOTG_ATTR_RE ]] || continue
       [[ -f "$(env_saves_manifest "$name")" ]] || continue
       printf '%s\n' "$name"
     done

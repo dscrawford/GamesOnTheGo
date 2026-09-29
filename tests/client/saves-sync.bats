@@ -214,6 +214,16 @@ publish_raw() {
   [[ "$output" == *"unreachable"* ]]
 }
 
+@test "status reads only environments, not the build keys beside them" {
+  # Every root has a `<attr>.by` beside it; each one used to be an
+  # "invalid environment name" error in the middle of the report.
+  printf 'key\n' >"$GOTG_ROOTS_DIR/env-n64.by"
+  gotg saves status
+  [ "$status" -eq 0 ]
+  [[ "$stderr" != *"invalid environment name"* ]]
+  [[ "$output$stderr" == *"env-n64"* ]]
+}
+
 @test "status works with no service configured at all" {
   rm -f "$GOTG_CONFIG_DIR/api.json"
   write_save zelda.ram
