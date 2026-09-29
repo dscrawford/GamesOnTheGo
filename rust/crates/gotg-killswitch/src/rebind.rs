@@ -60,6 +60,7 @@ pub struct Rebind {
     held: Held,
     /// Who is seated, as the last `state` said.
     seated: Vec<Seat>,
+    ports_off: Vec<i32>,
     /// Pads already walked unasked this session, by seat and node: one
     /// that was let go without saving is not asked again -- the chord is
     /// still there -- or the panel would come back for ever.
@@ -73,6 +74,7 @@ impl Default for Rebind {
             captured: Vec::new(),
             held: Held::default(),
             seated: Vec::new(),
+            ports_off: Vec::new(),
             offered: BTreeSet::new(),
         }
     }
@@ -119,8 +121,12 @@ impl Rebind {
     /// One danstick event. Only this rebind's player's, and only while one is
     /// on: somebody else's wizard at the picker is not ours to draw.
     pub fn apply(&mut self, event: &Event, now: f64) {
-        if let Event::State { seated, .. } = event {
+        if let Event::State {
+            seated, ports_off, ..
+        } = event
+        {
             self.seated.clone_from(seated);
+            self.ports_off.clone_from(ports_off);
         }
         let Some(ours) = self.player() else { return };
         // The pad being walked went away (switched off, out of range): its
@@ -231,6 +237,11 @@ impl Rebind {
     /// Who is seated, as danstick's last `state` said.
     pub fn seated(&self) -> &[Seat] {
         &self.seated
+    }
+
+    /// The seats whose game port is off, as the last `state` said.
+    pub fn ports_off(&self) -> &[i32] {
+        &self.ports_off
     }
 
     /// What to draw now, or None when nothing is being rebound.
@@ -456,6 +467,7 @@ mod tests {
                 listening: Some(true),
                 status: "idle".into(),
                 slots: 4,
+                ports_off: vec![],
             },
             0.0,
         );
@@ -481,6 +493,7 @@ mod tests {
                 listening: Some(true),
                 status: "idle".into(),
                 slots: 4,
+                ports_off: vec![],
             },
             5.0,
         );
@@ -532,6 +545,7 @@ mod tests {
             listening: Some(true),
             status: "idle".into(),
             slots: 4,
+            ports_off: vec![],
         };
         let mut rebind = Rebind::default();
         rebind.start(2, "n64", "console:n64", 0.0);

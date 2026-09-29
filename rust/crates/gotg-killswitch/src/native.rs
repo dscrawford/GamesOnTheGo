@@ -174,6 +174,7 @@ mod tests {
             listening: Some(true),
             status: "idle".into(),
             slots: 4,
+            ports_off: vec![],
         });
         assert_eq!(native.input(2), Input::default());
     }

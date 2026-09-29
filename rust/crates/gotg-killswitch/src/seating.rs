@@ -61,6 +61,7 @@ impl Seating {
                 listening,
                 status,
                 slots,
+                ..
             } => {
                 if *slots > 0 {
                     self.slots = *slots;
@@ -113,6 +114,7 @@ mod tests {
             listening,
             status: status.into(),
             slots: 4,
+            ports_off: vec![],
         }
     }
 
@@ -167,6 +169,7 @@ mod tests {
             listening: Some(false),
             status: "idle".into(),
             slots: 2,
+            ports_off: vec![],
         });
         assert_eq!(asked(seating.wanted())["players"], 2);
     }

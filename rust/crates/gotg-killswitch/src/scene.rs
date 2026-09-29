@@ -691,7 +691,7 @@ fn build_words(scene: &Scene, top: f32, first: &str, second: Option<&str>, drawi
 }
 
 /// What the menu's footer says.
-pub const MENU_KEYS: &str = "A  rebind      hold A  move      hold B  close";
+pub const MENU_KEYS: &str = "A  rebind      hold A  move      Y  game on/off      hold B  close";
 
 /// The menu: the seats, each with its controller, and Exit under them. The
 /// row under the cursor is lit; a controller being carried is lit in its
@@ -755,6 +755,7 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
         } else {
             let icon = menu.icons[row];
             let seated = icon != EMPTY_SEAT;
+            let off = seated && menu.off & (1 << row) != 0;
             drawing.labels.push(Label {
                 text: format!("Player {seat}"),
                 x: left + row_h * 0.4,
@@ -769,11 +770,21 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
                     cx: cx + card_w * 0.12,
                     cy,
                     height: row_h * 0.72,
-                    colour: player_colour(seat),
+                    colour: player_colour(seat).with_alpha(if off { 0.35 } else { 1.0 }),
                     revealed: 1.0,
                     under: Colour::rgb(theme::EMPTY, 1.0),
                     picture: false,
                 });
+                if off {
+                    drawing.labels.push(Label {
+                        text: "game off".to_owned(),
+                        x: left + row_w - row_h * 0.9,
+                        y: cy,
+                        size: size * 0.75,
+                        colour: RED,
+                        align: Align::Right,
+                    });
+                }
             } else {
                 drawing.labels.push(Label {
                     text: "empty".to_owned(),
@@ -1250,6 +1261,7 @@ mod tests {
                 carried: 0,
                 a_fill,
                 b_fill: 0.0,
+                off: 0b10,
             }),
             ..down(0.0)
         }
@@ -1273,6 +1285,11 @@ mod tests {
         }
         assert_eq!(drawing.sprites.len(), 2, "two seated pads, two drawings");
         assert_eq!(texts.iter().filter(|t| **t == "empty").count(), 2);
+        assert_eq!(
+            texts.iter().filter(|t| **t == "game off").count(),
+            1,
+            "seat two's port is off"
+        );
     }
 
     #[test]

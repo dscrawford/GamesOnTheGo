@@ -10,6 +10,9 @@
 //!   seated controller walks its buttons again (`map`). A held A picks it up;
 //!   up and down carry it to another seat -- danstick swaps it with whoever is
 //!   there (`move`) -- and letting go puts it down.
+//!   Y switches that seat's game port off or on (danstick's `port`): off, the
+//!   game hears nothing from that pad while its player keeps their seat and
+//!   can still open this menu.
 //! - **Exit**, which takes A held for a second: the game is stopped, and its
 //!   saves pushed on the way out.
 //!
@@ -48,12 +51,19 @@ pub enum Action {
         player: i32,
         to: i32,
     },
+    /// Seat `player`'s game port on (`open`) or off.
+    Port {
+        player: i32,
+        open: bool,
+    },
 }
 
 /// One row of the list: a seat, and the drawing of the pad in it (None empty).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Row {
     pub icon: Option<u8>,
+    /// The game does not hear this seat (its port is off).
+    pub off: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -177,6 +187,7 @@ impl Menu {
         let down_pressed = pressed(&DOWN, &self.last);
         let a_down = live.iter().any(|c| *c == "a");
         let b_down = live.iter().any(|c| *c == "b");
+        let y_pressed = pressed(&["y"], &self.last);
         self.last = down.clone();
 
         let mut action = None;
@@ -212,6 +223,14 @@ impl Menu {
                 // A hold that was under the old row is not under the new one.
                 self.a_since = self.a_since.map(|_| now);
             }
+        }
+        // Y: the seat's game port, off or on.
+        if y_pressed && self.carried.is_none() && action.is_none() && self.seated(self.focus) {
+            let off = self.rows[self.focus].off;
+            action = Some(Action::Port {
+                player: self.focus as i32 + 1,
+                open: off,
+            });
         }
         // A: a tap rebinds, a hold picks up (on a seat) or exits (on Exit).
         match (a_down, self.a_since) {
@@ -368,6 +387,7 @@ mod tests {
         (0..slots)
             .map(|at| Row {
                 icon: (at < seated).then_some(at as u8),
+                off: false,
             })
             .collect()
     }
@@ -536,6 +556,41 @@ mod tests {
         assert!(focused.of(2).is_empty(), "only the player it is about");
         focused.apply(&stick(0.1));
         assert!(focused.of(1).is_empty(), "back in the middle is let go");
+    }
+
+    #[test]
+    fn y_switches_a_seats_game_port_off_and_back_on() {
+        let mut menu = opened(1);
+        assert_eq!(
+            menu.tick(&held(&["y"]), 0.1),
+            Some(Action::Port {
+                player: 1,
+                open: false
+            })
+        );
+        assert_eq!(menu.tick(&held(&["y"]), 0.15), None, "a press, not a repeat");
+        menu.tick(&held(&[]), 0.2);
+        let mut rows = room(2, 4);
+        rows[0].off = true;
+        menu.seats(rows);
+        assert_eq!(
+            menu.tick(&held(&["y"]), 0.3),
+            Some(Action::Port {
+                player: 1,
+                open: true
+            }),
+            "an off seat is switched back on"
+        );
+        menu.tick(&held(&[]), 0.35);
+        for t in [0.4, 0.5] {
+            menu.tick(&held(&["dpdown"]), t);
+            menu.tick(&held(&[]), t + 0.02);
+        }
+        assert_eq!(
+            menu.tick(&held(&["y"]), 0.6),
+            None,
+            "an empty seat has no port to switch"
+        );
     }
 
     #[test]

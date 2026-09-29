@@ -63,6 +63,8 @@ pub enum Event {
         status: String,
         /// Seats danstick has; 0 when it does not say.
         slots: i32,
+        /// Seats whose game port is off (`port`): the game does not hear them.
+        ports_off: Vec<i32>,
     },
     /// A step of the mapping wizard, or its end (`done`).
     Mapping {
@@ -190,6 +192,19 @@ pub fn parse(line: &[u8]) -> Option<Event> {
             listening: root.get("seating").and_then(Value::as_bool),
             status: text(&root, "state"),
             slots: count(&root, "slots"),
+            ports_off: root
+                .get("ports_off")
+                .and_then(Value::as_array)
+                .map(|seats| {
+                    seats
+                        .iter()
+                        .filter_map(Value::as_f64)
+                        .filter(|n| (1.0..=64.0).contains(n))
+                        .map(|n| n as i32)
+                        .take(SEATED_MAX)
+                        .collect()
+                })
+                .unwrap_or_default(),
         },
         Some("mapping") => Event::Mapping {
             player: player_of(&root),
@@ -394,7 +409,8 @@ mod tests {
                 seated: vec![],
                 listening: None,
                 status: String::new(),
-                slots: 0
+                slots: 0,
+                ports_off: vec![]
             })
         );
     }
@@ -546,6 +562,14 @@ mod tests {
             })
         );
         assert_eq!(parsed(r#"{"event":"native","player":2}"#), Some(Event::Other));
+    }
+
+    #[test]
+    fn the_seats_the_game_does_not_hear_are_read() {
+        assert!(matches!(
+            parsed(r#"{"event":"state","players":[],"ports_off":[3,1,"x",99]}"#),
+            Some(Event::State { ref ports_off, .. }) if *ports_off == [3, 1]
+        ));
     }
 
     #[test]

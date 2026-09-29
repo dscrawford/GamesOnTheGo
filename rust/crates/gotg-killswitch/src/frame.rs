@@ -20,7 +20,7 @@ pub const MAGIC: u32 = 0x5653_4f47;
 /// rebind's thirteen words, the menu's, and one for what the bar is saying.
 pub const SIZE: usize = 4 * (6 + HOLDS_MAX * 3 + JOINED_MAX * 2 + REBIND_WORDS + MENU_WORDS + 1);
 
-const MENU_WORDS: usize = 6 + ROWS_MAX;
+const MENU_WORDS: usize = 7 + ROWS_MAX;
 
 /// Seats a menu frame lists.
 pub const ROWS_MAX: usize = crate::menu::SEATS_MAX;
@@ -40,6 +40,8 @@ pub struct MenuFrame {
     pub carried: i32,
     pub a_fill: f32,
     pub b_fill: f32,
+    /// A bit per seat, seat 1 lowest: the game does not hear it.
+    pub off: u32,
 }
 
 /// What the bar says in words when it says something on its own.
@@ -219,6 +221,7 @@ impl Frame {
             carried: 0,
             a_fill: 0.0,
             b_fill: 0.0,
+            off: 0,
         });
         put(menu.owner.to_ne_bytes());
         put(menu.rows.to_ne_bytes());
@@ -229,6 +232,7 @@ impl Frame {
         menu.icons
             .iter()
             .for_each(|&icon| put(u32::from(icon).to_ne_bytes()));
+        put(menu.off.to_ne_bytes());
         put(match self.saying {
             Saying::Nothing => 0u32,
             Saying::Saving => 1,
@@ -272,6 +276,7 @@ impl Frame {
                 a_fill: fill(menu + 4),
                 b_fill: fill(menu + 5),
                 icons: std::array::from_fn(|i| icon(menu + 6 + i)),
+                off: u32::from_ne_bytes(word(menu + 6 + ROWS_MAX)),
             }),
             saying: match u32::from_ne_bytes(word(menu + MENU_WORDS)) {
                 1 => Saying::Saving,
@@ -374,6 +379,7 @@ mod tests {
             carried: 0,
             a_fill: 0.5,
             b_fill: 0.0,
+            off: 0b10,
         };
         let with_menu = none.with_menu(Some(menu)).with_saying(Saying::Saving);
         let back = Frame::decode(&with_menu.encode()).expect("a frame");

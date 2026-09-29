@@ -740,6 +740,13 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                 Some(menu::Action::Move { player, to }) => {
                     link.send(&serde_json::json!({"cmd": "move", "player": player, "to": to}).to_string());
                 }
+                // Leased to this connection: whatever it switched off comes
+                // back on if the overlay goes.
+                Some(menu::Action::Port { player, open }) => {
+                    link.send(
+                        &serde_json::json!({"cmd": "port", "player": player, "open": open}).to_string(),
+                    );
+                }
                 None => {}
             }
         }
@@ -906,6 +913,7 @@ fn seat_rows(
                     .entry(key)
                     .or_insert_with(|| gotg_killswitch::icons::resolve(&seat.node, &seat.name))
             }),
+            off: rebind.ports_off().contains(&player),
         })
         .collect()
 }
@@ -913,9 +921,13 @@ fn seat_rows(
 /// The menu as a frame carries it.
 fn menu_frame(view: &menu::View) -> MenuFrame {
     let mut icons = [EMPTY_SEAT; ROWS_MAX];
+    let mut off = 0u32;
     for (at, row) in view.rows.iter().take(ROWS_MAX).enumerate() {
         // A drawing numbered like the empty marker would read as empty.
         icons[at] = row.icon.map_or(EMPTY_SEAT, |icon| icon.min(EMPTY_SEAT - 1));
+        if row.off {
+            off |= 1 << at;
+        }
     }
     MenuFrame {
         owner: view.owner,
@@ -925,6 +937,7 @@ fn menu_frame(view: &menu::View) -> MenuFrame {
         carried: view.carried.unwrap_or(0),
         a_fill: view.a_fill,
         b_fill: view.b_fill,
+        off,
     }
 }
 
