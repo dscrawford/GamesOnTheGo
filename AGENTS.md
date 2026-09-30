@@ -187,8 +187,9 @@ from Steam or from a terminal -- and it keeps danstick's `seating` open
 stopped listening with a seat free and no session open). A hold on any pad
 takes a seat and the bar draws it filling; a seat danstick has no buttons for
 is walked over the game (`rebind.rs` `due`); L+R+A held a second brings the
-menu down for that player alone (`menu.rs`): the seats, a rebind (A; the panel
-lights each control as it is pressed), a reorder (A held, then up/down --
+menu down for that player alone (`menu.rs`): the seats as one line of
+controller icons, whose order is the player number, a rebind (A; the panel
+lights each control as it is pressed), a reorder (A held, then left/right --
 danstick's `move`), a seat's game port off or on (Y -- `port`, leased) and a held Exit that pushes the saves on the way out; B
 held closes it. While it is open danstick is asked to hold that pad back from
 the game (`focus`). A game with nobody seated says "No controllers connected".
