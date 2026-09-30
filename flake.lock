@@ -8,17 +8,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1790737343,
-        "narHash": "sha256-XF1zPJDsG/sjJaKkY8gVOLrrNGwbez/dWVk/95XrvsI=",
+        "lastModified": 1790787092,
+        "narHash": "sha256-HQ5ZOFpkML/qyTbCLz8Xnz01t+vm1PMzN0e2FN2u474=",
         "ref": "main",
-        "rev": "b5aaf6d5f0dce8a6ae50a0137be2ae919e96a50e",
-        "revCount": 227,
+        "rev": "33f5a082bf117a855b1458b2f04f8a1c6bbfc069",
+        "revCount": 228,
         "type": "git",
         "url": "ssh://git@github.com/dscrawford/danstick"
       },
       "original": {
         "ref": "main",
-        "rev": "b5aaf6d5f0dce8a6ae50a0137be2ae919e96a50e",
+        "rev": "33f5a082bf117a855b1458b2f04f8a1c6bbfc069",
         "type": "git",
         "url": "ssh://git@github.com/dscrawford/danstick"
       }
