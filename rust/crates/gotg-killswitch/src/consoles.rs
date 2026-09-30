@@ -153,6 +153,19 @@ mod tests {
     }
 
     #[test]
+    fn the_generic_pads_sticks_are_walked_and_drawn() {
+        // A PC port's walk: danstick's generic layout ends with both sticks.
+        let generic = named("generic");
+        for side in ["left", "right"] {
+            for way in ["up", "down", "left", "right"] {
+                let half = format!("{side}stick_{way}");
+                let control = generic.control(&half).map(|at| generic.controls[at]);
+                assert!(control.is_some_and(|c| c.anchor.is_some()), "{half}: {control:?}");
+            }
+        }
+    }
+
+    #[test]
     fn every_consoles_drawing_renders_in_colour() {
         for (at, console) in CONSOLES.iter().enumerate() {
             let (width, pixels) =

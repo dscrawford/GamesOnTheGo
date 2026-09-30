@@ -1098,7 +1098,7 @@ mod tests {
     fn every_label_stays_above_the_words_under_the_drawing() {
         // A GameCube pad has eleven labels down one side: its rail ran into
         // "Press D-pad up" and the finish ring beside it.
-        for platform in ["n64", "gamecube", "switch", "snes"] {
+        for platform in ["n64", "gamecube", "switch", "snes", "no-such-platform"] {
             let console = crate::consoles::for_platform(platform);
             let mut drawing = Drawing::default();
             build(
