@@ -781,7 +781,31 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                 || menu.is_some();
             let frame = Frame::pack(bar.position(clock), exit_progress, &holds, &joined)
                 .with_nobody(pairing.nobody(clock))
-                .with_menu(menu.as_ref().map(|open| menu_frame(&open.view(clock))))
+                .with_menu(menu.as_ref().map(|open| {
+                    let view = open.view(clock);
+                    // Everybody can try their buttons on the game's controller:
+                    // each seat's clone as the game reads it, and the owner --
+                    // held back from the game while the menu is theirs -- as
+                    // danstick says they press.
+                    let pressed = std::array::from_fn(|at| {
+                        let player = at as i32 + 1;
+                        let held = if player == view.owner {
+                            Held {
+                                controls: focused.of(player),
+                                sticks: [0.0; 4],
+                            }
+                        } else {
+                            pads.0
+                                .iter()
+                                .find(|watched| watched.player == Some(player))
+                                // SAFETY: every watched pad is open.
+                                .map(|watched| unsafe { read_held(watched.pad) })
+                                .unwrap_or_default()
+                        };
+                        held.bits(console.controls.iter().map(|control| control.id))
+                    });
+                    menu_frame(&view, console_index, pressed)
+                }))
                 .with_saying(if exiting { Saying::Saving } else { Saying::Nothing })
                 .with_rebind(rebinding.map(|view| {
                     // danstick's word while it walks; the seat's clone after.
@@ -919,7 +943,7 @@ fn seat_rows(
 }
 
 /// The menu as a frame carries it.
-fn menu_frame(view: &menu::View) -> MenuFrame {
+fn menu_frame(view: &menu::View, console: usize, pressed: [u64; ROWS_MAX]) -> MenuFrame {
     let mut icons = [EMPTY_SEAT; ROWS_MAX];
     let mut off = 0u32;
     for (at, row) in view.rows.iter().take(ROWS_MAX).enumerate() {
@@ -938,6 +962,8 @@ fn menu_frame(view: &menu::View) -> MenuFrame {
         a_fill: view.a_fill,
         b_fill: view.b_fill,
         off,
+        console: console as u32,
+        pressed,
     }
 }
 

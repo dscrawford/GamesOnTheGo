@@ -20,7 +20,9 @@ pub const MAGIC: u32 = 0x5653_4f47;
 /// rebind's thirteen words, the menu's, and one for what the bar is saying.
 pub const SIZE: usize = 4 * (6 + HOLDS_MAX * 3 + JOINED_MAX * 2 + REBIND_WORDS + MENU_WORDS + 1);
 
-const MENU_WORDS: usize = 7 + ROWS_MAX;
+/// Owner, rows, focus, carried, two fills, the icons, the off mask, the
+/// console, and each seat's presses in two words.
+const MENU_WORDS: usize = 8 + ROWS_MAX + 2 * ROWS_MAX;
 
 /// Seats a menu frame lists.
 pub const ROWS_MAX: usize = crate::menu::SEATS_MAX;
@@ -42,6 +44,10 @@ pub struct MenuFrame {
     pub b_fill: f32,
     /// A bit per seat, seat 1 lowest: the game does not hear it.
     pub off: u32,
+    /// The game's controller, drawn for everybody to try their buttons on.
+    pub console: u32,
+    /// Per seat, the console's controls it has down, a bit each in order.
+    pub pressed: [u64; ROWS_MAX],
 }
 
 /// What the bar says in words when it says something on its own.
@@ -222,6 +228,8 @@ impl Frame {
             a_fill: 0.0,
             b_fill: 0.0,
             off: 0,
+            console: 0,
+            pressed: [0; ROWS_MAX],
         });
         put(menu.owner.to_ne_bytes());
         put(menu.rows.to_ne_bytes());
@@ -233,6 +241,11 @@ impl Frame {
             .iter()
             .for_each(|&icon| put(u32::from(icon).to_ne_bytes()));
         put(menu.off.to_ne_bytes());
+        put(menu.console.to_ne_bytes());
+        for pressed in menu.pressed {
+            put((pressed as u32).to_ne_bytes());
+            put(((pressed >> 32) as u32).to_ne_bytes());
+        }
         put(match self.saying {
             Saying::Nothing => 0u32,
             Saying::Saving => 1,
@@ -277,6 +290,12 @@ impl Frame {
                 b_fill: fill(menu + 5),
                 icons: std::array::from_fn(|i| icon(menu + 6 + i)),
                 off: u32::from_ne_bytes(word(menu + 6 + ROWS_MAX)),
+                console: u32::from_ne_bytes(word(menu + 7 + ROWS_MAX)),
+                pressed: std::array::from_fn(|i| {
+                    let at = menu + 8 + ROWS_MAX + 2 * i;
+                    u64::from(u32::from_ne_bytes(word(at)))
+                        | u64::from(u32::from_ne_bytes(word(at + 1))) << 32
+                }),
             }),
             saying: match u32::from_ne_bytes(word(menu + MENU_WORDS)) {
                 1 => Saying::Saving,
@@ -380,6 +399,8 @@ mod tests {
             a_fill: 0.5,
             b_fill: 0.0,
             off: 0b10,
+            console: 3,
+            pressed: [0b101, 1 << 40, 0, 0, 0, 0, 0, 0],
         };
         let with_menu = none.with_menu(Some(menu)).with_saying(Saying::Saving);
         let back = Frame::decode(&with_menu.encode()).expect("a frame");

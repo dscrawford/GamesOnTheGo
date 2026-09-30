@@ -693,25 +693,33 @@ fn build_words(scene: &Scene, top: f32, first: &str, second: Option<&str>, drawi
 /// What the menu's footer says.
 pub const MENU_KEYS: &str = "A  rebind      hold A  move      Y  game on/off      hold B  close";
 
-/// The menu: the controllers in a line -- where one stands is its player
-/// number, and its colour says the same -- and Exit under them. The place
-/// under the cursor is lit; a controller being carried is lifted and lit in
-/// its seat's colour; a hold under way fills a ring under it.
+/// The menu: the controllers in a line along the top -- where one stands is
+/// its player number, and its colour says the same -- the game's controller
+/// under them for everybody to try their buttons on, and Exit under that.
+/// A press is marked by the presser's own controller, small and in their
+/// colour, beside the button: two players on one button stand side by side.
 fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) {
-    let panel = scene.panel_height * 0.62;
+    let panel = scene.panel_height;
     let width = scene.width as f32;
     let cx = width / 2.0;
     let seats = (menu.rows as usize).min(menu.icons.len());
-    let keys_size = panel * 0.058;
-    let slot = panel * 0.5;
-    let card_w = (slot * seats as f32 + slot)
+    let keys_size = panel * 0.036;
+    let console = CONSOLES.get(menu.console as usize);
+    // As tall as fits between the line and Exit, unless that is too wide.
+    let aspect = console.map_or(1.6, |console| console.aspect);
+    let pad_w = (panel * 0.62 * aspect).min(panel * 1.25);
+    let pad_h = pad_w / aspect;
+    let slot = panel * 0.13;
+    let card_w = (pad_w + panel * 0.3)
+        .max(slot * seats as f32 + slot)
         .max(text::width(MENU_KEYS, keys_size) + keys_size * 5.0)
         .min(width * 0.94);
     let slot = slot.min(card_w * 0.92 / seats.max(1) as f32);
     card(&mut drawing.under, cx, top, card_w, panel);
     let dim = Colour::rgb(theme::TEXT_DIM, 1.0);
-    let icons_y = top + panel * 0.34;
-    let exit_y = top + panel * 0.71;
+    let icons_y = top + panel * 0.1;
+    let pad_y = top + panel * 0.5;
+    let exit_y = top + panel * 0.85;
     let exit_row = seats;
     let first = cx - slot * seats as f32 / 2.0;
     let fill_ring = |over: &mut Mesh, x: f32, y: f32, radius: f32, ink: Colour| {
@@ -776,8 +784,8 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
             drawing.labels.push(Label {
                 text: "game off".to_owned(),
                 x,
-                y: y + slot * 0.38,
-                size: slot * 0.12,
+                y: y + slot * 0.42,
+                size: slot * 0.16,
                 colour: RED,
                 align: Align::Centre,
             });
@@ -792,8 +800,11 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
             );
         }
     }
+    if let Some(console) = console {
+        build_tester(menu, console, (cx, pad_y, pad_w, pad_h), panel * 0.05, drawing);
+    }
     let on_exit = menu.focus as usize == exit_row;
-    let exit_size = panel * 0.085;
+    let exit_size = panel * 0.05;
     let exit_w = text::width("Exit game", exit_size);
     if on_exit {
         let (w, h) = (exit_w + exit_size * 4.0, exit_size * 1.8);
@@ -818,7 +829,7 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
             RED,
         );
     }
-    let keys_y = top + panel * 0.9;
+    let keys_y = top + panel * 0.94;
     drawing.labels.push(Label {
         text: MENU_KEYS.to_owned(),
         x: cx,
@@ -843,6 +854,60 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
         drawing
             .over
             .arc(rx, keys_y, radius, radius * 0.3, 0.0, menu.b_fill, dim, FEATHER);
+    }
+}
+
+/// The game's controller, and beside each button somebody has down, the
+/// controller of each seat pressing it -- the first just right of the button,
+/// the next beside that. `place` is the drawing's centre and size; `marker`
+/// how tall a presser's controller is drawn.
+fn build_tester(
+    menu: &MenuFrame,
+    console: &crate::consoles::Console,
+    place: (f32, f32, f32, f32),
+    marker: f32,
+    drawing: &mut Drawing,
+) {
+    let (cx, cy, drawn_width, height) = place;
+    drawing.sprites.push(Sprite {
+        icon: u8::try_from(menu.console).unwrap_or(0),
+        cx,
+        cy,
+        height,
+        // Untinted: the vertex colour multiplies the drawing's own.
+        colour: Colour {
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
+            a: 1.0,
+        },
+        revealed: 1.0,
+        under: Colour::rgb(theme::EMPTY, 1.0),
+        picture: true,
+    });
+    let seats = (menu.rows as usize).min(menu.icons.len());
+    for (id, control) in console.controls.iter().enumerate().take(64) {
+        let Some((u, v)) = control.anchor else {
+            continue;
+        };
+        let (x, y) = (
+            cx - drawn_width / 2.0 + u * drawn_width,
+            cy - height / 2.0 + v * height,
+        );
+        let pressers =
+            (0..seats).filter(|&at| menu.icons[at] != EMPTY_SEAT && menu.pressed[at] & 1 << id != 0);
+        for (nth, at) in pressers.enumerate() {
+            drawing.sprites.push(Sprite {
+                icon: menu.icons[at],
+                cx: x + marker * (0.75 + 1.05 * nth as f32),
+                cy: y - marker * 0.45,
+                height: marker,
+                colour: player_colour(at as i32 + 1),
+                revealed: 1.0,
+                under: Colour::rgb(theme::EMPTY, 1.0),
+                picture: false,
+            });
+        }
     }
 }
 
@@ -1265,6 +1330,8 @@ mod tests {
                 a_fill,
                 b_fill: 0.0,
                 off: 0b100,
+                console: 0,
+                pressed: [0; crate::frame::ROWS_MAX],
             }),
             ..down(0.0)
         }
@@ -1280,13 +1347,15 @@ mod tests {
             ["game off", "Exit game", MENU_KEYS],
             "no \"Player N\" to read"
         );
-        let xs: Vec<f32> = drawing.sprites.iter().map(|s| s.cx).collect();
-        assert_eq!(xs.len(), 2, "two seated pads, two drawings");
-        assert!(xs[0] < xs[1], "player one left of player three");
+        let pads: Vec<&Sprite> = drawing.sprites.iter().filter(|s| !s.picture).collect();
+        assert_eq!(pads.len(), 2, "two seated pads, two drawings");
         assert!(
-            (drawing.sprites[0].cy - drawing.sprites[1].cy).abs() < 0.01,
-            "one line"
+            drawing.sprites.iter().any(|s| s.picture),
+            "and the game's controller"
         );
+        let xs: Vec<f32> = pads.iter().map(|s| s.cx).collect();
+        assert!(xs[0] < xs[1], "player one left of player three");
+        assert!((pads[0].cy - pads[1].cy).abs() < 0.01, "one line");
         let gap = xs[1] - xs[0];
         let slot = gap / 2.0;
         assert!(slot > 0.0, "the empty second seat keeps its place between them");
@@ -1295,6 +1364,41 @@ mod tests {
             (off.x - xs[1]).abs() < 0.01,
             "under player three, whose port is off"
         );
+    }
+
+    #[test]
+    fn a_press_is_marked_by_the_pressers_controller_beside_the_button() {
+        let (console, _) = n64();
+        let a = CONSOLES[console as usize].control("a").expect("an N64 has A");
+        let mut scene = menu(0, 0.0);
+        let frame = scene.menu.as_mut().expect("menu");
+        frame.console = console;
+        // Players one and three both on A; nobody else pressing anything.
+        frame.pressed[0] = 1 << a;
+        frame.pressed[2] = 1 << a;
+        let mut drawing = Drawing::default();
+        build(&scene, &mut drawing);
+        let line_y = drawing.sprites.iter().find(|s| !s.picture).expect("the line").cy;
+        let marks: Vec<&Sprite> = drawing
+            .sprites
+            .iter()
+            .filter(|s| !s.picture && (s.cy - line_y).abs() > 1.0)
+            .collect();
+        assert_eq!(marks.len(), 2, "one mark per presser");
+        assert_eq!(
+            (marks[0].icon, marks[1].icon),
+            (2, 5),
+            "each their own controller"
+        );
+        assert_eq!(marks[0].colour, player_colour(1));
+        assert_eq!(marks[1].colour, player_colour(3));
+        assert!(
+            (marks[0].cy - marks[1].cy).abs() < 0.01 && marks[0].cx < marks[1].cx,
+            "side by side"
+        );
+        // Nobody pressing: nothing beside any button.
+        build(&menu(0, 0.0), &mut drawing);
+        assert_eq!(drawing.sprites.iter().filter(|s| !s.picture).count(), 2);
     }
 
     #[test]
