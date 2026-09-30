@@ -691,7 +691,8 @@ fn build_words(scene: &Scene, top: f32, first: &str, second: Option<&str>, drawi
 }
 
 /// What the menu's footer says.
-pub const MENU_KEYS: &str = "A  rebind      hold A  move      Y  game on/off      hold B  close";
+pub const MENU_KEYS: &str =
+    "A  rebind      hold A  move      X  remove      Y  game on/off      hold B  close";
 
 /// The menu: the controllers in a line along the top -- where one stands is
 /// its player number, and its colour says the same -- the game's controller

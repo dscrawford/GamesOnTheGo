@@ -13,6 +13,8 @@
 //!   (`map`). A held A picks it up; left and right carry it to another seat --
 //!   danstick swaps it with whoever is there (`move`) -- and letting go puts
 //!   it down.
+//!   X takes a controller out of its seat (danstick's `unseat`): the pad is
+//!   let go, and held again to come back.
 //!   Y switches that seat's game port off or on (danstick's `port`): off, the
 //!   game hears nothing from that pad while its player keeps their seat and
 //!   can still open this menu.
@@ -56,6 +58,8 @@ pub enum Action {
         player: i32,
         to: i32,
     },
+    /// The controller in seat `player` gives up its seat.
+    Remove(i32),
     /// Seat `player`'s game port on (`open`) or off.
     Port {
         player: i32,
@@ -170,6 +174,14 @@ impl Menu {
         }
     }
 
+    /// danstick says the owner's pad went away, which may be before its seat
+    /// empties -- or never, if the seat is kept for the pad's return.
+    pub fn pad_gone(&mut self, player: i32) {
+        if player == self.owner {
+            self.owner_gone = true;
+        }
+    }
+
     fn exit_row(&self) -> usize {
         self.rows.len()
     }
@@ -202,6 +214,7 @@ impl Menu {
         let a_down = live.iter().any(|c| *c == "a");
         let b_down = live.iter().any(|c| *c == "b");
         let y_pressed = pressed(&["y"], &self.last);
+        let x_pressed = pressed(&["x"], &self.last);
         self.last = down.clone();
 
         let mut action = None;
@@ -254,6 +267,9 @@ impl Menu {
                 player: self.focus() as i32 + 1,
                 open: off,
             });
+        }
+        if x_pressed && self.carried.is_none() && action.is_none() && self.seated(self.focus()) {
+            action = Some(Action::Remove(self.focus() as i32 + 1));
         }
         // A: a tap rebinds, a hold picks up (on a seat) or exits (on Exit).
         match (a_down, self.a_since) {
@@ -586,6 +602,24 @@ mod tests {
         menu.seats(room(0, 4));
         assert_eq!(menu.tick(&held(&[]), 0.2), Some(Action::Close));
         assert_eq!(menu.tick(&held(&["a"]), 0.3), None, "and stays closed");
+    }
+
+    #[test]
+    fn a_menu_closes_when_danstick_says_its_pad_went_though_the_seat_is_kept() {
+        let mut menu = opened(2);
+        menu.pad_gone(1);
+        assert_eq!(menu.tick(&held(&[]), 0.1), None, "somebody else's pad");
+        menu.pad_gone(2);
+        assert_eq!(menu.tick(&held(&[]), 0.2), Some(Action::Close));
+    }
+
+    #[test]
+    fn x_takes_a_controller_out_of_its_seat() {
+        let mut menu = opened(1);
+        assert_eq!(menu.tick(&held(&["x"]), 0.1), Some(Action::Remove(1)));
+        assert_eq!(menu.tick(&held(&["x"]), 0.15), None, "a press, not a repeat");
+        tap(&mut menu, "dpdown", 0.2);
+        assert_eq!(menu.tick(&held(&["x"]), 0.3), None, "Exit is nobody's seat");
     }
 
     #[test]

@@ -24,6 +24,7 @@ use std::time::Duration;
 use gotg_killswitch::bar::Bar;
 use gotg_killswitch::clones;
 use gotg_killswitch::consoles::{self, CONSOLES};
+use gotg_killswitch::departures::Departures;
 use gotg_killswitch::frame::{EMPTY_SEAT, Frame, MenuFrame, ROWS_MAX, Rebinding, Saying};
 use gotg_killswitch::killswitch::{Chord, Input, Pad};
 use gotg_killswitch::menu::{self, Focused, Menu, Row};
@@ -553,6 +554,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
     // The overlay's own controls, per seated player, and each player's two
     // holds timed on them -- the exit's and the menu's.
     let mut native = Native::default();
+    let mut departures = Departures::default();
     let mut native_holds: std::collections::HashMap<i32, (Pad, Pad, bool)> = std::collections::HashMap::new();
     let mut menu: Option<Menu> = None;
     let mut exiting = false;
@@ -597,7 +599,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         link.pump(
             &mut pairing,
             &mut rebind,
-            &mut [&mut seating, &mut focused, &mut native],
+            &mut [&mut seating, &mut focused, &mut native, &mut departures],
             clock,
         );
         if link.fd().is_none() {
@@ -608,6 +610,13 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
             && !link.send(&line)
         {
             seating.lost();
+        }
+        // A pad that went away takes its seat with it, in the picker too.
+        while let Some(line) = departures.wanted() {
+            if !options.quiet {
+                eprintln!("gotg-killswitch: a controller went away; {line}");
+            }
+            link.send(&line);
         }
         if let Some(player) = rebind
             .due(clock)
@@ -709,6 +718,9 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         if let Some(open) = menu.as_mut() {
             open.seats(seat_rows(&rebind, &seating, &mut seat_icons));
             let owner = open.owner;
+            if departures.gone(owner) {
+                open.pad_gone(owner);
+            }
             let mut down = focused.of(owner);
             if let Some(watched) = pads.0.iter().find(|w| w.player == Some(owner)) {
                 // SAFETY: every watched pad is open.
@@ -736,6 +748,9 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                         clock,
                         options.quiet,
                     );
+                }
+                Some(menu::Action::Remove(player)) => {
+                    link.send(&serde_json::json!({"cmd": "unseat", "player": player}).to_string());
                 }
                 Some(menu::Action::Move { player, to }) => {
                     link.send(&serde_json::json!({"cmd": "move", "player": player, "to": to}).to_string());

@@ -192,9 +192,13 @@ controller icons, whose order is the player number; the game's controller
 under them, where each press is marked by the presser's own icon in their
 colour beside the button, so everybody can try their controls; a rebind (A; the panel
 lights each control as it is pressed), a reorder (A held, then left/right --
-danstick's `move`), a seat's game port off or on (Y -- `port`, leased) and a held Exit that pushes the saves on the way out; B
+danstick's `move`), a controller taken out of its seat (X -- `unseat`), a
+seat's game port off or on (Y -- `port`, leased) and a held Exit that pushes the saves on the way out; B
 held closes it. While it is open danstick is asked to hold that pad back from
-the game (`focus`). A game with nobody seated says "No controllers connected".
+the game (`focus`). A pad that goes away (switched off, a flat battery) gives
+up its seat: danstick keeps it for the pad's return, so the overlay asks for
+it back on the `controller` `removed` event (`departures.rs`), and a menu
+that pad opened closes. A game with nobody seated says "No controllers connected".
 Every session — picker or game — starts with nobody seated; danstick's daemon
 is started `--fresh --follow <pid>` and ends with the session. Seats survive a
 launch because the daemon follows the picker's pid, which the game inherits

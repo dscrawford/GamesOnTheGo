@@ -109,6 +109,13 @@ pub enum Event {
         player: i32,
         frac: f64,
     },
+    /// A seated pad came or went (danstick's `controller` event). A pad that
+    /// goes keeps its seat for its return, unless `unseated` is why.
+    Controller {
+        player: i32,
+        removed: bool,
+        unseated: bool,
+    },
     /// danstick refused a command.
     Error {
         message: String,
@@ -277,6 +284,14 @@ pub fn parse(line: &[u8]) -> Option<Event> {
             player: player_of(&root),
             frac: root.get("frac").and_then(Value::as_f64).unwrap_or(0.0),
         },
+        Some("controller") => match root.get("action").and_then(Value::as_str) {
+            Some(action @ ("added" | "removed")) => Event::Controller {
+                player: player_of(&root),
+                removed: action == "removed",
+                unseated: text(&root, "reason") == "unseated",
+            },
+            _ => Event::Other,
+        },
         Some("error") => Event::Error {
             message: text(&root, "message"),
         },
@@ -313,6 +328,7 @@ pub fn apply(event: &Event, pairing: &mut Pairing, now: f64, icon_of: &mut dyn F
         | Event::Focus { .. }
         | Event::FocusStick { .. }
         | Event::Native { .. }
+        | Event::Controller { .. }
         | Event::Error { .. }
         | Event::Other => {}
     }
@@ -322,6 +338,33 @@ pub fn apply(event: &Event, pairing: &mut Pairing, now: f64, icon_of: &mut dyn F
 mod tests {
     use super::*;
     use crate::pairing::Pairing;
+
+    #[test]
+    fn a_controller_coming_or_going_is_read_with_why() {
+        let went = |player, removed, unseated| {
+            Some(Event::Controller {
+                player,
+                removed,
+                unseated,
+            })
+        };
+        assert_eq!(
+            parsed(r#"{"event":"controller","action":"removed","player":2,"roster":[]}"#),
+            went(2, true, false)
+        );
+        assert_eq!(
+            parsed(r#"{"event":"controller","action":"removed","player":2,"reason":"unseated"}"#),
+            went(2, true, true)
+        );
+        assert_eq!(
+            parsed(r#"{"event":"controller","action":"added","player":1}"#),
+            went(1, false, false)
+        );
+        assert_eq!(
+            parsed(r#"{"event":"controller","action":"unconfigured","player":0}"#),
+            Some(Event::Other)
+        );
+    }
 
     fn parsed(line: &str) -> Option<Event> {
         parse(line.as_bytes())
