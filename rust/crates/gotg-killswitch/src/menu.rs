@@ -1,6 +1,6 @@
 //! The overlay's menu: the seated controllers, a rebind, the order, a held exit.
 //!
-//! Brought down by L + R + A held for a second on one pad, and driven by that
+//! Brought down by L + R + A held for half a second on one pad, and driven by that
 //! pad alone -- the player who asked. Two people fighting over one cursor is a
 //! problem for later; for now anybody else's presses are not read at all.
 //!
@@ -18,10 +18,16 @@
 //!   Y switches that seat's game port off or on (danstick's `port`): off, the
 //!   game hears nothing from that pad while its player keeps their seat and
 //!   can still open this menu.
-//! - **Exit**, below the line (down to it, up back), which takes A held for a second: the game is stopped, and its
-//!   saves pushed on the way out.
+//! - **The game's controller**, below the line, where every seated player's
+//!   presses show as they happen. The owner's presses drive this menu, so
+//!   theirs show only once A on it has started a test: from then everything
+//!   they press is theirs to try, B included, until Select held for half a
+//!   second hands the menu back.
+//! - **Exit**, below that, which takes A held for half a second: the game is
+//!   stopped, and its saves pushed on the way out.
 //!
-//! B held for a second closes it, and the bar slides away over a second.
+//! Down and up step between the three. B held for half a second closes the
+//! menu, and the bar slides away over a second.
 //!
 //! A button already down when the menu opened -- the A of the chord that
 //! opened it -- is not a press until it has been let go, or the chord's own A
@@ -36,9 +42,11 @@ use std::collections::BTreeSet;
 /// Held this long on a seated controller, A picks it up rather than rebinding.
 pub const GRAB_SECONDS: f64 = 0.5;
 /// Held this long on Exit, A stops the game.
-pub const EXIT_SECONDS: f64 = 1.0;
+pub const EXIT_SECONDS: f64 = 0.5;
 /// Held this long anywhere, B closes the menu.
-pub const CLOSE_SECONDS: f64 = 1.0;
+pub const CLOSE_SECONDS: f64 = 0.5;
+/// Held this long while testing, Select gives the menu back.
+pub const TEST_EXIT_SECONDS: f64 = 0.5;
 /// Seats listed at most: a frame's worth.
 pub const SEATS_MAX: usize = 8;
 
@@ -67,6 +75,14 @@ pub enum Action {
     },
 }
 
+/// Where the cursor is, top to bottom.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stop {
+    Line,
+    Tester,
+    Exit,
+}
+
 /// One seat of the line, and the drawing of the pad in it (None empty).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Row {
@@ -81,10 +97,13 @@ pub struct Menu {
     pub owner: i32,
     /// The line, seat 1 first, up to the last seated controller.
     rows: Vec<Row>,
-    /// The seat the cursor is on in the line (0-based), kept while it is on
-    /// Exit so up comes back to it.
+    /// The seat the cursor is on in the line (0-based), kept while it is
+    /// below so up comes back to it.
     along: usize,
-    on_exit: bool,
+    stop: Stop,
+    /// The owner is trying their buttons: none of them drive the menu.
+    testing: bool,
+    back_since: Option<f64>,
     /// Down when the menu opened, and not yet let go.
     ignored: BTreeSet<String>,
     last: BTreeSet<String>,
@@ -113,8 +132,10 @@ pub struct View {
     /// 0..1 through the hold under the cursor: picking up on a seat, or
     /// the exit.
     pub a_fill: f32,
-    /// 0..1 through the hold that closes.
+    /// 0..1 through the hold that closes -- or, while testing, through the
+    /// Select hold that stops the test.
     pub b_fill: f32,
+    pub testing: bool,
 }
 
 impl Menu {
@@ -126,7 +147,9 @@ impl Menu {
             owner,
             rows: line(rows),
             along: usize::try_from(owner - 1).unwrap_or(0),
-            on_exit: false,
+            stop: Stop::Line,
+            testing: false,
+            back_since: None,
             ignored: down.clone(),
             last: down.clone(),
             a_since: None,
@@ -164,14 +187,19 @@ impl Menu {
         self.check_owner();
     }
 
-    /// Where the cursor is: a seat of the line, or `rows.len()` for Exit --
-    /// which is also where it is while nobody has been reported seated.
+    /// Where the cursor is: a seat of the line, `rows.len()` for the game's
+    /// controller -- which is also where it is while nobody has been reported
+    /// seated -- or one past that for Exit.
     fn focus(&self) -> usize {
-        if self.on_exit || self.rows.is_empty() {
-            self.rows.len()
-        } else {
-            self.along.min(self.rows.len() - 1)
+        match self.stop {
+            Stop::Line if !self.rows.is_empty() => self.along.min(self.rows.len() - 1),
+            Stop::Line | Stop::Tester => self.tester_row(),
+            Stop::Exit => self.exit_row(),
         }
+    }
+
+    fn tester_row(&self) -> usize {
+        self.rows.len()
     }
 
     /// danstick says the owner's pad went away, which may be before its seat
@@ -183,7 +211,7 @@ impl Menu {
     }
 
     fn exit_row(&self) -> usize {
-        self.rows.len()
+        self.rows.len() + 1
     }
 
     fn seated(&self, at: usize) -> bool {
@@ -201,6 +229,10 @@ impl Menu {
         }
         // The chord's own buttons count once they have been let go.
         self.ignored.retain(|control| down.contains(control));
+        if self.testing {
+            self.test(down, now);
+            return None;
+        }
         let live: BTreeSet<&String> = down.iter().filter(|c| !self.ignored.contains(*c)).collect();
         let pressed = |names: &[&str], last: &BTreeSet<String>| {
             names
@@ -245,15 +277,20 @@ impl Menu {
             }
         } else if self.carried.is_none() {
             let was = self.focus();
-            if step != 0 && !self.on_exit && !self.rows.is_empty() {
+            if step != 0 && self.stop == Stop::Line && !self.rows.is_empty() {
                 let last = self.rows.len() as i32 - 1;
                 self.along = (self.focus() as i32 + step).clamp(0, last) as usize;
             }
-            // Down to Exit, up back to the line.
             if down_pressed {
-                self.on_exit = true;
+                self.stop = match self.stop {
+                    Stop::Line => Stop::Tester,
+                    Stop::Tester | Stop::Exit => Stop::Exit,
+                };
             } else if up {
-                self.on_exit = false;
+                self.stop = match self.stop {
+                    Stop::Exit => Stop::Tester,
+                    Stop::Tester | Stop::Line => Stop::Line,
+                };
             }
             // A hold that was under the old place is not under the new one.
             if self.focus() != was {
@@ -290,6 +327,11 @@ impl Menu {
                 }
             }
             (false, Some(_)) => {
+                if !self.a_used && self.focus() == self.tester_row() {
+                    self.a_since = None;
+                    self.start_test(down);
+                    return action;
+                }
                 let tapped = !self.a_used && self.carried.is_none() && self.seated(self.focus());
                 self.a_since = None;
                 self.carried = None;
@@ -301,6 +343,31 @@ impl Menu {
             _ => {}
         }
         action
+    }
+
+    /// The owner's buttons are theirs to try: nothing is read but Select,
+    /// held to stop.
+    fn start_test(&mut self, down: &BTreeSet<String>) {
+        self.testing = true;
+        self.b_since = None;
+        self.back_since = None;
+        self.ignored = down.clone();
+    }
+
+    fn test(&mut self, down: &BTreeSet<String>, now: f64) {
+        let back = down.contains("back") && !self.ignored.contains("back");
+        match (back, self.back_since) {
+            (true, None) => self.back_since = Some(now),
+            (true, Some(since)) if now - since >= TEST_EXIT_SECONDS => {
+                self.testing = false;
+                self.back_since = None;
+                // Nothing held through the test presses anything after it.
+                self.ignored = down.clone();
+            }
+            (false, _) => self.back_since = None,
+            _ => {}
+        }
+        self.last = down.clone();
     }
 
     pub fn view(&self, now: f64) -> View {
@@ -326,10 +393,17 @@ impl Menu {
             rows: self.rows.clone(),
             focus: self.focus(),
             carried: self.carried,
-            a_fill,
-            b_fill: self.b_since.map_or(0.0, |since| {
-                ((now - since) / CLOSE_SECONDS).clamp(0.0, 1.0) as f32
-            }),
+            a_fill: if self.testing { 0.0 } else { a_fill },
+            b_fill: if self.testing {
+                self.back_since.map_or(0.0, |since| {
+                    ((now - since) / TEST_EXIT_SECONDS).clamp(0.0, 1.0) as f32
+                })
+            } else {
+                self.b_since.map_or(0.0, |since| {
+                    ((now - since) / CLOSE_SECONDS).clamp(0.0, 1.0) as f32
+                })
+            },
+            testing: self.testing,
         }
     }
 }
@@ -352,6 +426,8 @@ fn line(rows: Vec<Row>) -> Vec<Row> {
 pub struct Focused {
     pub player: i32,
     pub down: BTreeSet<String>,
+    /// Left stick x, y, right stick x, y: -1..1, y down.
+    pub sticks: [f32; 4],
     /// danstick said it does not know `focus`: it is not asked again.
     pub refused: bool,
 }
@@ -368,8 +444,11 @@ impl Focused {
         if let crate::events::Event::FocusStick { player, stick, x, y } = event {
             if *player != self.player {
                 self.player = *player;
-                self.down.clear();
+                self.clear();
             }
+            let at = if stick == "right" { 2 } else { 0 };
+            self.sticks[at] = *x;
+            self.sticks[at + 1] = *y;
             let on = crate::pressing::AXIS_ON;
             let ways = [
                 ("left", *x <= -on),
@@ -394,7 +473,7 @@ impl Focused {
         {
             if *player != self.player {
                 self.player = *player;
-                self.down.clear();
+                self.clear();
             }
             if *down {
                 self.down.insert(control.clone());
@@ -413,8 +492,21 @@ impl Focused {
         }
     }
 
+    /// `owner`'s pad as the controller test draws it.
+    pub fn held(&self, owner: i32) -> crate::pressing::Held {
+        crate::pressing::Held {
+            controls: self.of(owner),
+            sticks: if self.player == owner {
+                self.sticks
+            } else {
+                [0.0; 4]
+            },
+        }
+    }
+
     pub fn clear(&mut self) {
         self.down.clear();
+        self.sticks = [0.0; 4];
     }
 }
 
@@ -551,29 +643,60 @@ mod tests {
     }
 
     #[test]
-    fn down_is_exit_and_up_is_back_to_the_same_controller() {
+    fn down_is_the_controller_then_exit_and_up_is_back_to_the_same_seat() {
         let mut menu = opened(1);
         tap(&mut menu, "dpright", 0.1);
         tap(&mut menu, "dpdown", 0.2);
-        assert_eq!(menu.view(0.3).focus, 2, "past the two seats: Exit");
-        tap(&mut menu, "dpleft", 0.3);
-        assert_eq!(menu.view(0.4).focus, 2, "left and right are the line's");
-        tap(&mut menu, "dpup", 0.4);
-        assert_eq!(menu.view(0.5).focus, 1, "back on player two");
+        assert_eq!(
+            menu.view(0.3).focus,
+            2,
+            "past the two seats: the game's controller"
+        );
+        tap(&mut menu, "dpdown", 0.3);
+        assert_eq!(menu.view(0.4).focus, 3, "and Exit under it");
+        tap(&mut menu, "dpleft", 0.4);
+        assert_eq!(menu.view(0.5).focus, 3, "left and right are the line's");
+        tap(&mut menu, "dpup", 0.5);
+        tap(&mut menu, "dpup", 0.6);
+        assert_eq!(menu.view(0.7).focus, 1, "back on player two");
     }
 
     #[test]
-    fn exit_takes_a_held_for_a_second_and_a_tap_does_nothing() {
+    fn a_on_the_controller_tests_it_until_select_is_held_half_a_second() {
         let mut menu = opened(1);
         tap(&mut menu, "dpdown", 0.1);
+        tap(&mut menu, "a", 0.2);
+        assert!(menu.view(0.3).testing);
+        // Everything is the owner's to try: B held does not close, arrows do
+        // not move, A does not rebind.
+        assert!(hold(&mut menu, &["b"], 0.3, 1.5).is_empty());
+        tap(&mut menu, "dpdown", 1.6);
+        tap(&mut menu, "a", 1.7);
+        assert_eq!(menu.view(1.8).focus, 2);
+        assert!(hold(&mut menu, &["back"], 2.0, 2.3).is_empty());
+        menu.tick(&held(&[]), 2.35);
+        assert!(menu.view(2.4).testing, "a short Select is a button to try");
+        hold(&mut menu, &["back", "b"], 2.5, 3.1);
+        assert!(!menu.view(3.1).testing, "held half a second, the menu is back");
+        assert!(
+            hold(&mut menu, &["back", "b"], 3.2, 4.5).is_empty(),
+            "a B held through the end of the test is not a close"
+        );
+    }
+
+    #[test]
+    fn exit_takes_a_held_for_half_a_second_and_a_tap_does_nothing() {
+        let mut menu = opened(1);
+        tap(&mut menu, "dpdown", 0.1);
+        tap(&mut menu, "dpdown", 0.15);
         hold(&mut menu, &["a"], 0.7, 0.8);
         assert_eq!(menu.tick(&held(&[]), 0.85), None, "a tap on Exit is nothing");
         let fired = hold(&mut menu, &["a"], 1.0, 2.1);
-        assert_eq!(fired, [Action::Exit], "held a second, it exits once");
+        assert_eq!(fired, [Action::Exit], "held half a second, it exits once");
     }
 
     #[test]
-    fn b_held_for_a_second_closes_and_a_tap_does_not() {
+    fn b_held_for_half_a_second_closes_and_a_tap_does_not() {
         let mut menu = opened(1);
         hold(&mut menu, &["b"], 0.1, 0.3);
         menu.tick(&held(&[]), 0.35);
@@ -645,6 +768,11 @@ mod tests {
         };
         focused.apply(&stick(0.9));
         assert!(focused.of(1).contains("leftstick_down"));
+        assert_eq!(
+            focused.held(1).sticks,
+            [0.0, 0.9, 0.0, 0.0],
+            "and where, for the test's dot"
+        );
         assert!(focused.of(2).is_empty(), "only the player it is about");
         focused.apply(&stick(0.1));
         assert!(focused.of(1).is_empty(), "back in the middle is let go");

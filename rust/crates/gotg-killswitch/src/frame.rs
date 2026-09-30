@@ -21,8 +21,8 @@ pub const MAGIC: u32 = 0x5653_4f47;
 pub const SIZE: usize = 4 * (6 + HOLDS_MAX * 3 + JOINED_MAX * 2 + REBIND_WORDS + MENU_WORDS + 1);
 
 /// Owner, rows, focus, carried, two fills, the icons, the off mask, the
-/// console, and each seat's presses in two words.
-const MENU_WORDS: usize = 8 + ROWS_MAX + 2 * ROWS_MAX;
+/// console, each seat's presses in two words and sticks in one, and testing.
+const MENU_WORDS: usize = 9 + ROWS_MAX + 2 * ROWS_MAX + ROWS_MAX;
 
 /// Seats a menu frame lists.
 pub const ROWS_MAX: usize = crate::menu::SEATS_MAX;
@@ -31,7 +31,8 @@ pub const ROWS_MAX: usize = crate::menu::SEATS_MAX;
 pub const EMPTY_SEAT: u8 = u8::MAX;
 
 /// The menu as the bar draws it: whose it is, the seats (a drawing each, or
-/// EMPTY_SEAT), the row under the cursor (rows past the seats are Exit), the
+/// EMPTY_SEAT), where the cursor is (a seat; `rows` the game's controller;
+/// one past it Exit), the
 /// seat being carried (0 none), and the two holds' fills.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MenuFrame {
@@ -48,6 +49,23 @@ pub struct MenuFrame {
     pub console: u32,
     /// Per seat, the console's controls it has down, a bit each in order.
     pub pressed: [u64; ROWS_MAX],
+    /// Per seat, left stick x, y, right stick x, y: -1..1, y down.
+    pub sticks: [[f32; 4]; ROWS_MAX],
+    /// The owner is trying their buttons rather than driving the menu.
+    pub testing: bool,
+}
+
+/// Four stick axes in a word, a signed byte each: a dot on a ring a few
+/// dozen pixels wide cannot show finer than that.
+fn pack_sticks(sticks: [f32; 4]) -> u32 {
+    sticks.iter().enumerate().fold(0, |word, (at, axis)| {
+        let byte = (axis.clamp(-1.0, 1.0) * 127.0).round() as i8 as u8;
+        word | u32::from(byte) << (8 * at)
+    })
+}
+
+fn unpack_sticks(word: u32) -> [f32; 4] {
+    std::array::from_fn(|at| f32::from((word >> (8 * at)) as u8 as i8) / 127.0)
 }
 
 /// What the bar says in words when it says something on its own.
@@ -230,6 +248,8 @@ impl Frame {
             off: 0,
             console: 0,
             pressed: [0; ROWS_MAX],
+            sticks: [[0.0; 4]; ROWS_MAX],
+            testing: false,
         });
         put(menu.owner.to_ne_bytes());
         put(menu.rows.to_ne_bytes());
@@ -246,6 +266,10 @@ impl Frame {
             put((pressed as u32).to_ne_bytes());
             put(((pressed >> 32) as u32).to_ne_bytes());
         }
+        for sticks in menu.sticks {
+            put(pack_sticks(sticks).to_ne_bytes());
+        }
+        put(u32::from(menu.testing).to_ne_bytes());
         put(match self.saying {
             Saying::Nothing => 0u32,
             Saying::Saving => 1,
@@ -284,7 +308,7 @@ impl Frame {
             menu: (owner > 0).then(|| MenuFrame {
                 owner,
                 rows: u32::from_ne_bytes(word(menu + 1)).min(ROWS_MAX as u32),
-                focus: u32::from_ne_bytes(word(menu + 2)).min(ROWS_MAX as u32),
+                focus: u32::from_ne_bytes(word(menu + 2)).min(ROWS_MAX as u32 + 1),
                 carried: i32::from_ne_bytes(word(menu + 3)),
                 a_fill: fill(menu + 4),
                 b_fill: fill(menu + 5),
@@ -296,6 +320,10 @@ impl Frame {
                     u64::from(u32::from_ne_bytes(word(at)))
                         | u64::from(u32::from_ne_bytes(word(at + 1))) << 32
                 }),
+                sticks: std::array::from_fn(|i| {
+                    unpack_sticks(u32::from_ne_bytes(word(menu + 8 + 3 * ROWS_MAX + i)))
+                }),
+                testing: u32::from_ne_bytes(word(menu + 8 + 4 * ROWS_MAX)) != 0,
             }),
             saying: match u32::from_ne_bytes(word(menu + MENU_WORDS)) {
                 1 => Saying::Saving,
@@ -401,6 +429,17 @@ mod tests {
             off: 0b10,
             console: 3,
             pressed: [0b101, 1 << 40, 0, 0, 0, 0, 0, 0],
+            sticks: [
+                [0.0; 4],
+                [-1.0, 1.0, 0.0, 0.0],
+                [0.0; 4],
+                [0.0; 4],
+                [0.0; 4],
+                [0.0; 4],
+                [0.0; 4],
+                [0.0; 4],
+            ],
+            testing: true,
         };
         let with_menu = none.with_menu(Some(menu)).with_saying(Saying::Saving);
         let back = Frame::decode(&with_menu.encode()).expect("a frame");

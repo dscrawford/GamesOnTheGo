@@ -186,15 +186,18 @@ from Steam or from a terminal -- and it keeps danstick's `seating` open
 (`seating.rs`: on each connection, and again when a `state` says danstick
 stopped listening with a seat free and no session open). A hold on any pad
 takes a seat and the bar draws it filling; a seat danstick has no buttons for
-is walked over the game (`rebind.rs` `due`); L+R+A held a second brings the
+is walked over the game (`rebind.rs` `due`); L+R+A held half a second brings the
 menu down for that player alone (`menu.rs`): the seats as one line of
 controller icons, whose order is the player number; the game's controller
-under them, where each press is marked by the presser's own icon in their
-colour beside the button, so everybody can try their controls; a rebind (A; the panel
+under them with its buttons named, where each press puts the presser's own
+icon in their colour beside the button's name and each stick is a dot per
+player in its ring (an N64's C buttons stay buttons), so everybody can try
+their controls -- the owner too, after A on it, until Select is held half a
+second; a rebind (A; the panel
 lights each control as it is pressed), a reorder (A held, then left/right --
 danstick's `move`), a controller taken out of its seat (X -- `unseat`), a
 seat's game port off or on (Y -- `port`, leased) and a held Exit that pushes the saves on the way out; B
-held closes it. While it is open danstick is asked to hold that pad back from
+held closes it. Every hold in the menu is half a second. While it is open danstick is asked to hold that pad back from
 the game (`focus`). A pad that goes away (switched off, a flat battery) gives
 up its seat: danstick keeps it for the pad's return, so the overlay asks for
 it back on the `controller` `removed` event (`departures.rs`), and a menu
@@ -315,7 +318,7 @@ name-CRC, because SDL renames clones) and `keys.py`.
   (launched beside every game) watches the exit chord and danstick's socket;
   a bar comes down for a pad joining and for the exit hold, and further --
   the game's controller drawn, the asked-for button ringed -- for a rebind
-  from the menu (L + R + A held 1 s), which has danstick walk that pad's
+  from the menu (L + R + A held 0.5 s), which has danstick walk that pad's
   buttons again (`map`, no session: only that pad is grabbed, its clone held
   back from the game). Drawing is a
   separate process -- `gotg-killswitch --paint`, fed ~100-byte frames over a

@@ -61,7 +61,7 @@ const FRAME_MS: u64 = 16;
 /// nobody holds a trigger at 40% for three seconds by accident.
 const TRIGGER_ON: i16 = 16384;
 /// L + R + A held this long brings the menu down.
-const MENU_HOLD_MS: u64 = 1000;
+const MENU_HOLD_MS: u64 = 500;
 /// Closing the menu, the bar goes up over this long.
 const MENU_CLOSE_SECONDS: f64 = 1.0;
 /// The longest the saves are waited on after the menu's Exit.
@@ -83,11 +83,13 @@ triggers) and Start are held together for the hold time, the process
 is asked to stop, and killed if it will not. Exits on its own when
 that process is gone.
 
-Both shoulders and A, held a second, bring the menu down for that
+Both shoulders and A, held half a second, bring the menu down for that
 controller's player: the seated controllers (A rebinds one, A held
-moves it to another seat), and Exit (A held a second) -- which stops
-the game and, with --saves and --client, runs `CLIENT saves push ENV`
-on the way out. B held a second closes it.
+moves it to another seat), the game's controller for everybody to try
+their buttons on (A starts the owner's own test, Select held half a
+second ends it), and Exit (A held half a second) -- which stops the game
+and, with --saves and --client, runs `CLIENT saves push ENV` on the way
+out. B held half a second closes it.
 
 A bar comes down over the game while the hold runs, and while a
 controller is holding a button to join danstick -- unless --no-overlay
@@ -799,15 +801,17 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                 .with_menu(menu.as_ref().map(|open| {
                     let view = open.view(clock);
                     // Everybody can try their buttons on the game's controller:
-                    // each seat's clone as the game reads it, and the owner --
-                    // held back from the game while the menu is theirs -- as
-                    // danstick says they press.
-                    let pressed = std::array::from_fn(|at| {
+                    // each seat's clone as the game reads it. The owner's pad
+                    // is held back from the game while the menu is theirs, and
+                    // drives it, so theirs show from danstick's word, and only
+                    // while they are testing.
+                    let held: [Held; ROWS_MAX] = std::array::from_fn(|at| {
                         let player = at as i32 + 1;
-                        let held = if player == view.owner {
-                            Held {
-                                controls: focused.of(player),
-                                sticks: [0.0; 4],
+                        if player == view.owner {
+                            if view.testing {
+                                focused.held(player)
+                            } else {
+                                Held::default()
                             }
                         } else {
                             pads.0
@@ -816,10 +820,9 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                                 // SAFETY: every watched pad is open.
                                 .map(|watched| unsafe { read_held(watched.pad) })
                                 .unwrap_or_default()
-                        };
-                        held.bits(console.controls.iter().map(|control| control.id))
+                        }
                     });
-                    menu_frame(&view, console_index, pressed)
+                    menu_frame(&view, console_index, console, &held)
                 }))
                 .with_saying(if exiting { Saying::Saving } else { Saying::Nothing })
                 .with_rebind(rebinding.map(|view| {
@@ -958,7 +961,12 @@ fn seat_rows(
 }
 
 /// The menu as a frame carries it.
-fn menu_frame(view: &menu::View, console: usize, pressed: [u64; ROWS_MAX]) -> MenuFrame {
+fn menu_frame(
+    view: &menu::View,
+    console_index: usize,
+    console: &consoles::Console,
+    held: &[Held; ROWS_MAX],
+) -> MenuFrame {
     let mut icons = [EMPTY_SEAT; ROWS_MAX];
     let mut off = 0u32;
     for (at, row) in view.rows.iter().take(ROWS_MAX).enumerate() {
@@ -977,8 +985,10 @@ fn menu_frame(view: &menu::View, console: usize, pressed: [u64; ROWS_MAX]) -> Me
         a_fill: view.a_fill,
         b_fill: view.b_fill,
         off,
-        console: console as u32,
-        pressed,
+        console: console_index as u32,
+        pressed: std::array::from_fn(|at| held[at].bits(console.controls.iter().map(|control| control.id))),
+        sticks: std::array::from_fn(|at| held[at].sticks),
+        testing: view.testing,
     }
 }
 

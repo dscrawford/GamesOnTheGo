@@ -266,8 +266,20 @@ struct RebindLayout {
 
 fn rebind_layout(scene: &Scene, rebind: &Rebinding, top: f32) -> RebindLayout {
     let panel = scene.panel_height;
+    labelled_layout(
+        scene,
+        rebind.console,
+        (top + panel * 0.05, top + panel * RAIL_BOTTOM),
+        0.0,
+    )
+}
+
+/// A console's drawing with its labels on rails either side, fitted between
+/// `band`'s top and bottom, with `extra` more room past each rail.
+fn labelled_layout(scene: &Scene, console: u32, band: (f32, f32), extra: f32) -> RebindLayout {
+    let panel = scene.panel_height;
     let screen = scene.width as f32;
-    let console = CONSOLES.get(rebind.console as usize);
+    let console = CONSOLES.get(console as usize);
     let aspect = console.map_or(1.6, |console| console.aspect);
     let label_size = panel * 0.045;
     // The longest label a rail holds sets how far the card reaches past the
@@ -282,18 +294,18 @@ fn rebind_layout(scene: &Scene, rebind: &Rebinding, top: f32) -> RebindLayout {
                 .fold(0.0, f32::max)
         })
         .unwrap_or(0.0);
-    let beside = |drawn: f32| drawn * leaders::GUTTER_FRACTION + longest + label_size * 1.5;
+    let beside = |drawn: f32| drawn * leaders::GUTTER_FRACTION + longest + label_size * 1.5 + extra;
     // The labels may reach 18% of the drawing's height past it at either end
     // (leaders::place's band); that whole band sits between the card's top
     // and the words under it, so a pad with a long rail cannot run into them.
-    let band_top = top + panel * 0.05;
-    let band_bottom = top + panel * RAIL_BOTTOM;
+    let (band_top, band_bottom) = band;
     let mut height = (panel * 0.6).min((band_bottom - band_top) / 1.36);
     let mut drawn_width = height * aspect;
     let most = screen * 0.96;
     if drawn_width + 2.0 * beside(drawn_width) > most {
         // Too wide for the screen: a smaller drawing, labels kept readable.
-        drawn_width = ((most - 2.0 * (longest + label_size * 1.5)) / (1.0 + 2.0 * leaders::GUTTER_FRACTION))
+        drawn_width = ((most - 2.0 * (longest + label_size * 1.5 + extra))
+            / (1.0 + 2.0 * leaders::GUTTER_FRACTION))
             .max(panel * 0.2);
         height = drawn_width / aspect;
     }
@@ -423,6 +435,86 @@ fn draw_ring(mesh: &mut Mesh, ring: &Ring, at: (f32, f32), ink: Colour, player: 
     }
 }
 
+/// A console's drawing's labels: every control it shows that is not part of
+/// a stick drawn as a ring, down a rail on its side with a line to its
+/// button -- the picker's controller screen. `lit` says which are lit, and
+/// in what colour. The labels as placed, and the rings, for the caller to
+/// draw its own way.
+fn labelled(
+    console: &crate::consoles::Console,
+    layout: &RebindLayout,
+    lit: &dyn Fn(usize) -> Option<Colour>,
+    drawing: &mut Drawing,
+) -> (Vec<leaders::Placed>, Vec<Ring>) {
+    let (cx, cy, height, drawn_width) = (layout.cx, layout.cy, layout.height, layout.drawn_width);
+    let at = |(u, v): (f32, f32)| {
+        (
+            cx - drawn_width / 2.0 + u * drawn_width,
+            cy - height / 2.0 + v * height,
+        )
+    };
+    let (sticks, taken) = rings(console, &at, height);
+    let anchors: Vec<leaders::Anchor> = console
+        .controls
+        .iter()
+        .enumerate()
+        .filter(|(id, _)| !taken.contains(id))
+        .filter_map(|(id, control)| {
+            let (x, y) = at(control.anchor?);
+            Some(leaders::Anchor { id, x, y })
+        })
+        .collect();
+    let label_height = layout.label_size * 1.3;
+    let diagram = (cx - drawn_width / 2.0, cy - height / 2.0, drawn_width, height);
+    let pinned = |id: usize| pinned_side(console.controls[id].id);
+    let placed = leaders::place(&anchors, diagram, label_height, &pinned);
+    for placed in &placed {
+        let control = console.controls[placed.anchor.id];
+        let lit = lit(placed.anchor.id);
+        let ink = lit.unwrap_or(Colour::rgb(theme::TEXT_DIM, 0.9));
+        drawing.lines.line(
+            placed.from.0,
+            placed.from.1,
+            placed.to.0,
+            placed.to.1,
+            if lit.is_some() { 2.5 } else { 1.25 },
+            ink.with_alpha(if lit.is_some() { 1.0 } else { 0.55 }),
+            FEATHER,
+        );
+        // A dot on the button, where the line starts: the picker's.
+        drawing.lines.disc(
+            placed.from.0,
+            placed.from.1,
+            (layout.label_size * 0.14).max(2.0),
+            ink.with_alpha(if lit.is_some() { 1.0 } else { 0.8 }),
+            FEATHER,
+        );
+        drawing.labels.push(Label {
+            text: control.label.to_owned(),
+            x: label_x(placed),
+            y: placed.to.1,
+            size: layout.label_size,
+            colour: lit.unwrap_or(Colour::rgb(theme::TEXT_DIM, 1.0)),
+            align: if placed.side == leaders::Side::Left {
+                Align::Right
+            } else {
+                Align::Left
+            },
+        });
+    }
+    (placed, sticks)
+}
+
+/// Where a placed label's text is anchored: just off the end of its leader.
+fn label_x(placed: &leaders::Placed) -> f32 {
+    placed.to.0
+        + if placed.side == leaders::Side::Left {
+            -6.0
+        } else {
+            6.0
+        }
+}
+
 /// A controller being rebound: its drawing, the button being asked for
 /// ringed in the seat's colour, a dot a step under it, and the ring that
 /// fills while the early finish is held.
@@ -460,75 +552,12 @@ fn build_rebind(scene: &Scene, rebind: &Rebinding, top: f32, drawing: &mut Drawi
     // a line to its button -- the picker's controller screen -- the one being
     // asked for lit in the seat's colour.
     if let Some(console) = console {
-        let at = |(u, v): (f32, f32)| {
-            (
-                cx - drawn_width / 2.0 + u * drawn_width,
-                cy - height / 2.0 + v * height,
-            )
-        };
-        let (sticks, taken) = rings(console, &at, height);
-        let anchors: Vec<leaders::Anchor> = console
-            .controls
-            .iter()
-            .enumerate()
-            .filter(|(id, _)| !taken.contains(id))
-            .filter_map(|(id, control)| {
-                let (x, y) = at(control.anchor?);
-                Some(leaders::Anchor { id, x, y })
-            })
-            .collect();
-        let label_height = layout.label_size * 1.3;
-        let diagram = (cx - drawn_width / 2.0, cy - height / 2.0, drawn_width, height);
-        let pinned = |id: usize| pinned_side(console.controls[id].id);
-        for placed in leaders::place(&anchors, diagram, label_height, &pinned) {
-            let control = console.controls[placed.anchor.id];
+        let lit = |id: usize| {
             // Asked for, or under a thumb right now: both are this seat's.
-            let lit = (rebind.ended == 0 && usize::try_from(rebind.control).ok() == Some(placed.anchor.id))
-                || pressed(rebind, placed.anchor.id);
-            let ink = if lit {
-                colour
-            } else {
-                Colour::rgb(theme::TEXT_DIM, 0.9)
-            };
-            drawing.lines.line(
-                placed.from.0,
-                placed.from.1,
-                placed.to.0,
-                placed.to.1,
-                if lit { 2.5 } else { 1.25 },
-                ink.with_alpha(if lit { 1.0 } else { 0.55 }),
-                FEATHER,
-            );
-            // A dot on the button, where the line starts: the picker's.
-            drawing.lines.disc(
-                placed.from.0,
-                placed.from.1,
-                (layout.label_size * 0.14).max(2.0),
-                ink.with_alpha(if lit { 1.0 } else { 0.8 }),
-                FEATHER,
-            );
-            drawing.labels.push(Label {
-                text: control.label.to_owned(),
-                x: placed.to.0
-                    + if placed.side == leaders::Side::Left {
-                        -6.0
-                    } else {
-                        6.0
-                    },
-                y: placed.to.1,
-                size: layout.label_size,
-                colour: if lit {
-                    colour
-                } else {
-                    Colour::rgb(theme::TEXT_DIM, 1.0)
-                },
-                align: if placed.side == leaders::Side::Left {
-                    Align::Right
-                } else {
-                    Align::Left
-                },
-            });
-        }
+            ((rebind.ended == 0 && usize::try_from(rebind.control).ok() == Some(id)) || pressed(rebind, id))
+                .then_some(colour)
+        };
+        let (_, sticks) = labelled(console, &layout, &lit, drawing);
         for ring in &sticks {
             // Lit while one of its directions is asked for or pushed.
             let lit = console.controls.iter().enumerate().any(|(id, control)| {
@@ -690,40 +719,56 @@ fn build_words(scene: &Scene, top: f32, first: &str, second: Option<&str>, drawi
     }
 }
 
-/// What the menu's footer says.
+/// What the menu's footer says, by where the cursor is.
 pub const MENU_KEYS: &str =
     "A  rebind      hold A  move      X  remove      Y  game on/off      hold B  close";
+pub const TESTER_KEYS: &str = "A  try your buttons      hold B  close";
+pub const TESTING_KEYS: &str = "hold Select  stop trying";
+pub const EXIT_KEYS: &str = "hold A  exit      hold B  close";
+
+/// Where the menu's parts sit, as fractions of the panel.
+const LINE_AT: f32 = 0.08;
+const TESTER_BAND: (f32, f32) = (0.15, 0.82);
+const EXIT_AT: f32 = 0.86;
+const KEYS_AT: f32 = 0.94;
 
 /// The menu: the controllers in a line along the top -- where one stands is
 /// its player number, and its colour says the same -- the game's controller
 /// under them for everybody to try their buttons on, and Exit under that.
-/// A press is marked by the presser's own controller, small and in their
-/// colour, beside the button: two players on one button stand side by side.
 fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) {
     let panel = scene.panel_height;
     let width = scene.width as f32;
     let cx = width / 2.0;
     let seats = (menu.rows as usize).min(menu.icons.len());
-    let keys_size = panel * 0.036;
-    let console = CONSOLES.get(menu.console as usize);
-    // As tall as fits between the line and Exit, unless that is too wide.
-    let aspect = console.map_or(1.6, |console| console.aspect);
-    let pad_w = (panel * 0.62 * aspect).min(panel * 1.25);
-    let pad_h = pad_w / aspect;
-    let slot = panel * 0.13;
-    let card_w = (pad_w + panel * 0.3)
+    let keys_size = panel * 0.034;
+    let tester_row = seats;
+    let exit_row = seats + 1;
+    let keys = if menu.testing {
+        TESTING_KEYS
+    } else if menu.focus as usize == tester_row {
+        TESTER_KEYS
+    } else if menu.focus as usize == exit_row {
+        EXIT_KEYS
+    } else {
+        MENU_KEYS
+    };
+    let label_size = panel * 0.04;
+    let marker = label_size * 1.3;
+    let layout = labelled_layout(
+        scene,
+        menu.console,
+        (top + panel * TESTER_BAND.0, top + panel * TESTER_BAND.1),
+        marker * 2.4,
+    );
+    let slot = panel * 0.11;
+    let card_w = layout
+        .card_width
         .max(slot * seats as f32 + slot)
         .max(text::width(MENU_KEYS, keys_size) + keys_size * 5.0)
-        .min(width * 0.94);
-    let slot = slot.min(card_w * 0.92 / seats.max(1) as f32);
+        .min(width * 0.96);
     card(&mut drawing.under, cx, top, card_w, panel);
     let dim = Colour::rgb(theme::TEXT_DIM, 1.0);
-    let icons_y = top + panel * 0.1;
-    let pad_y = top + panel * 0.5;
-    let exit_y = top + panel * 0.85;
-    let exit_row = seats;
-    let first = cx - slot * seats as f32 / 2.0;
-    let fill_ring = |over: &mut Mesh, x: f32, y: f32, radius: f32, ink: Colour| {
+    let fill_ring = |over: &mut Mesh, x: f32, y: f32, radius: f32, fill: f32, ink: Colour| {
         over.arc(
             x,
             y,
@@ -734,78 +779,25 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
             ink.with_alpha(0.25),
             FEATHER,
         );
-        over.arc(x, y, radius, radius * 0.3, 0.0, menu.a_fill, ink, FEATHER);
+        over.arc(x, y, radius, radius * 0.3, 0.0, fill, ink, FEATHER);
     };
-    for at in 0..seats {
-        let seat = at as i32 + 1;
-        let x = first + (at as f32 + 0.5) * slot;
-        let focused = menu.focus as usize == at;
-        let carried = menu.carried == seat;
-        let lift = if carried { slot * 0.08 } else { 0.0 };
-        let y = icons_y - lift;
-        if focused || carried {
-            let lit = if carried {
-                player_colour(seat).with_alpha(0.35)
-            } else {
-                dim.with_alpha(0.18)
-            };
-            let side = slot * 0.9;
-            drawing
-                .under
-                .rect(x - side / 2.0, y - side / 2.0, side, side, lit);
-        }
-        let icon = menu.icons[at];
-        if icon == EMPTY_SEAT {
-            // A gap before a later controller: its place, faintly.
-            let radius = slot * 0.08;
-            drawing.over.arc(
-                x,
-                y,
-                radius,
-                radius * 0.25,
-                0.0,
-                1.0,
-                dim.with_alpha(0.5),
-                FEATHER,
-            );
-            continue;
-        }
-        let off = menu.off & (1 << at) != 0;
-        drawing.sprites.push(Sprite {
-            icon,
-            cx: x,
-            cy: y,
-            height: slot * 0.64,
-            colour: player_colour(seat).with_alpha(if off { 0.35 } else { 1.0 }),
-            revealed: 1.0,
-            under: Colour::rgb(theme::EMPTY, 1.0),
-            picture: false,
-        });
-        if off {
-            drawing.labels.push(Label {
-                text: "game off".to_owned(),
-                x,
-                y: y + slot * 0.42,
-                size: slot * 0.16,
-                colour: RED,
-                align: Align::Centre,
-            });
-        }
-        if focused && menu.a_fill > 0.0 {
-            fill_ring(
-                &mut drawing.over,
-                x + slot * 0.33,
-                y - slot * 0.33,
-                slot * 0.07,
-                player_colour(seat),
-            );
-        }
+    build_line(menu, (cx, top + panel * LINE_AT), slot, drawing);
+    if menu.focus as usize == tester_row || menu.testing {
+        // The test is the owner's while it runs: lit in their colour.
+        let lit = if menu.testing {
+            player_colour(menu.owner).with_alpha(0.14)
+        } else {
+            dim.with_alpha(0.1)
+        };
+        let (w, h) = (layout.card_width.min(card_w) - label_size, layout.height * 1.4);
+        drawing.under.rect(cx - w / 2.0, layout.cy - h / 2.0, w, h, lit);
     }
-    if let Some(console) = console {
-        build_tester(menu, console, (cx, pad_y, pad_w, pad_h), panel * 0.05, drawing);
+    if let Some(console) = CONSOLES.get(menu.console as usize) {
+        build_tester(menu, console, &layout, marker, drawing);
     }
-    let on_exit = menu.focus as usize == exit_row;
-    let exit_size = panel * 0.05;
+    let on_exit = menu.focus as usize == exit_row && !menu.testing;
+    let exit_size = panel * 0.045;
+    let exit_y = top + panel * EXIT_AT;
     let exit_w = text::width("Exit game", exit_size);
     if on_exit {
         let (w, h) = (exit_w + exit_size * 4.0, exit_size * 1.8);
@@ -822,17 +814,12 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
         align: Align::Centre,
     });
     if on_exit && menu.a_fill > 0.0 {
-        fill_ring(
-            &mut drawing.over,
-            cx + exit_w / 2.0 + exit_size * 0.8,
-            exit_y,
-            exit_size * 0.35,
-            RED,
-        );
+        let x = cx + exit_w / 2.0 + exit_size * 0.8;
+        fill_ring(&mut drawing.over, x, exit_y, exit_size * 0.35, menu.a_fill, RED);
     }
-    let keys_y = top + panel * 0.94;
+    let keys_y = top + panel * KEYS_AT;
     drawing.labels.push(Label {
-        text: MENU_KEYS.to_owned(),
+        text: keys.to_owned(),
         x: cx,
         y: keys_y,
         size: keys_size,
@@ -840,41 +827,111 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
         align: Align::Centre,
     });
     if menu.b_fill > 0.0 {
-        let rx = cx + text::width(MENU_KEYS, keys_size) / 2.0 + keys_size * 1.2;
-        let radius = keys_size * 0.55;
-        drawing.over.arc(
-            rx,
-            keys_y,
-            radius,
-            radius * 0.3,
-            0.0,
-            1.0,
-            dim.with_alpha(0.3),
-            FEATHER,
-        );
-        drawing
-            .over
-            .arc(rx, keys_y, radius, radius * 0.3, 0.0, menu.b_fill, dim, FEATHER);
+        let x = cx + text::width(keys, keys_size) / 2.0 + keys_size * 1.2;
+        fill_ring(&mut drawing.over, x, keys_y, keys_size * 0.55, menu.b_fill, dim);
     }
 }
 
-/// The game's controller, and beside each button somebody has down, the
-/// controller of each seat pressing it -- the first just right of the button,
-/// the next beside that. `place` is the drawing's centre and size; `marker`
-/// how tall a presser's controller is drawn.
+/// The seats, small, in a line centred on `at`: where one stands is its
+/// player number. The one under the cursor is lit, one being carried is
+/// lifted and lit in its seat's colour, a gap before a later controller is
+/// a faint ring, and a seat the game does not hear is dimmed.
+fn build_line(menu: &MenuFrame, at: (f32, f32), slot: f32, drawing: &mut Drawing) {
+    let seats = (menu.rows as usize).min(menu.icons.len());
+    let dim = Colour::rgb(theme::TEXT_DIM, 1.0);
+    let first = at.0 - slot * seats as f32 / 2.0;
+    for seat_at in 0..seats {
+        let seat = seat_at as i32 + 1;
+        let x = first + (seat_at as f32 + 0.5) * slot;
+        let focused = menu.focus as usize == seat_at && !menu.testing;
+        let carried = menu.carried == seat;
+        let y = at.1 - if carried { slot * 0.08 } else { 0.0 };
+        if focused || carried {
+            let lit = if carried {
+                player_colour(seat).with_alpha(0.35)
+            } else {
+                dim.with_alpha(0.18)
+            };
+            let side = slot * 0.9;
+            drawing
+                .under
+                .rect(x - side / 2.0, y - side / 2.0, side, side, lit);
+        }
+        let icon = menu.icons[seat_at];
+        if icon == EMPTY_SEAT {
+            let radius = slot * 0.08;
+            drawing.over.arc(
+                x,
+                y,
+                radius,
+                radius * 0.25,
+                0.0,
+                1.0,
+                dim.with_alpha(0.5),
+                FEATHER,
+            );
+            continue;
+        }
+        let off = menu.off & (1 << seat_at) != 0;
+        drawing.sprites.push(Sprite {
+            icon,
+            cx: x,
+            cy: y,
+            height: slot * 0.64,
+            colour: player_colour(seat).with_alpha(if off { 0.35 } else { 1.0 }),
+            revealed: 1.0,
+            under: Colour::rgb(theme::EMPTY, 1.0),
+            picture: false,
+        });
+        if off {
+            drawing.labels.push(Label {
+                text: "game off".to_owned(),
+                x: x + slot * 0.5,
+                y: y + slot * 0.3,
+                size: slot * 0.16,
+                colour: RED,
+                align: Align::Right,
+            });
+        }
+        if focused && menu.a_fill > 0.0 {
+            let (rx, ry, radius) = (x + slot * 0.33, y - slot * 0.33, slot * 0.07);
+            let ink = player_colour(seat);
+            drawing.over.arc(
+                rx,
+                ry,
+                radius,
+                radius * 0.3,
+                0.0,
+                1.0,
+                ink.with_alpha(0.25),
+                FEATHER,
+            );
+            drawing
+                .over
+                .arc(rx, ry, radius, radius * 0.3, 0.0, menu.a_fill, ink, FEATHER);
+        }
+    }
+}
+
+/// The game's controller with its buttons named, for everybody to try:
+/// beside the name of a button somebody has down, that person's own
+/// controller, small and in their colour -- two on one button side by side,
+/// outwards from the name. A stick is a ring with a dot per player who has
+/// it off-centre, where they have it; nobody's, and a dim dot marks the
+/// middle. A group bound as a stick that is buttons in the hand (an N64's C
+/// buttons) is named and marked as buttons.
 fn build_tester(
     menu: &MenuFrame,
     console: &crate::consoles::Console,
-    place: (f32, f32, f32, f32),
+    layout: &RebindLayout,
     marker: f32,
     drawing: &mut Drawing,
 ) {
-    let (cx, cy, drawn_width, height) = place;
     drawing.sprites.push(Sprite {
         icon: u8::try_from(menu.console).unwrap_or(0),
-        cx,
-        cy,
-        height,
+        cx: layout.cx,
+        cy: layout.cy,
+        height: layout.height,
         // Untinted: the vertex colour multiplies the drawing's own.
         colour: Colour {
             r: 1.0,
@@ -886,28 +943,78 @@ fn build_tester(
         under: Colour::rgb(theme::EMPTY, 1.0),
         picture: true,
     });
-    let seats = (menu.rows as usize).min(menu.icons.len());
-    for (id, control) in console.controls.iter().enumerate().take(64) {
-        let Some((u, v)) = control.anchor else {
-            continue;
+    let seats: Vec<usize> = (0..(menu.rows as usize).min(menu.icons.len()))
+        .filter(|&at| menu.icons[at] != EMPTY_SEAT)
+        .collect();
+    let pressers = |id: usize| -> Vec<usize> {
+        seats
+            .iter()
+            .copied()
+            .filter(|&at| id < 64 && menu.pressed[at] & 1 << id != 0)
+            .collect()
+    };
+    let lit = |id: usize| (!pressers(id).is_empty()).then_some(Colour::rgb(theme::TEXT, 1.0));
+    let (placed, rings) = labelled(console, layout, &lit, drawing);
+    for placed in &placed {
+        let words = text::width(console.controls[placed.anchor.id].label, layout.label_size);
+        let outward = if placed.side == leaders::Side::Left {
+            -1.0
+        } else {
+            1.0
         };
-        let (x, y) = (
-            cx - drawn_width / 2.0 + u * drawn_width,
-            cy - height / 2.0 + v * height,
-        );
-        let pressers =
-            (0..seats).filter(|&at| menu.icons[at] != EMPTY_SEAT && menu.pressed[at] & 1 << id != 0);
-        for (nth, at) in pressers.enumerate() {
+        let edge = label_x(placed) + outward * words;
+        for (nth, at) in pressers(placed.anchor.id).into_iter().enumerate() {
             drawing.sprites.push(Sprite {
                 icon: menu.icons[at],
-                cx: x + marker * (0.75 + 1.05 * nth as f32),
-                cy: y - marker * 0.45,
+                cx: edge + outward * marker * (0.75 + 1.1 * nth as f32),
+                cy: placed.to.1,
                 height: marker,
                 colour: player_colour(at as i32 + 1),
                 revealed: 1.0,
                 under: Colour::rgb(theme::EMPTY, 1.0),
                 picture: false,
             });
+        }
+    }
+    let stroke = 2.0;
+    for ring in &rings {
+        // Wider than the rebind's: several dots have to be told apart in it.
+        let ring = &Ring {
+            radius: ring.radius * 1.5,
+            ..*ring
+        };
+        let ink = Colour::rgb(theme::TEXT, 0.85);
+        let pushed: Vec<(usize, (f32, f32))> = seats
+            .iter()
+            .map(|&at| {
+                (
+                    at,
+                    (
+                        menu.sticks[at][ring.stick * 2],
+                        menu.sticks[at][ring.stick * 2 + 1],
+                    ),
+                )
+            })
+            .filter(|(_, (x, y))| x.hypot(*y) > crate::pressing::STICK_DEAD)
+            .collect();
+        // The ring and the dim middle, drawn as a stick nobody has touched.
+        draw_ring(&mut drawing.lines, ring, (0.0, 0.0), ink, ink, stroke);
+        let dot = (ring.radius * 0.2).max(4.0);
+        for (at, (x, y)) in pushed {
+            let reach = ring.radius - dot;
+            // A square gate's corner is past the circle: kept on the ring.
+            let (x, y) = if x.hypot(y) > 1.0 {
+                (x / x.hypot(y), y / x.hypot(y))
+            } else {
+                (x, y)
+            };
+            drawing.lines.disc(
+                ring.cx + x * reach,
+                ring.cy + y * reach,
+                dot,
+                player_colour(at as i32 + 1),
+                FEATHER,
+            );
         }
     }
 }
@@ -1333,6 +1440,8 @@ mod tests {
                 off: 0b100,
                 console: 0,
                 pressed: [0; crate::frame::ROWS_MAX],
+                sticks: [[0.0; 4]; crate::frame::ROWS_MAX],
+                testing: false,
             }),
             ..down(0.0)
         }
@@ -1343,9 +1452,11 @@ mod tests {
         let mut drawing = Drawing::default();
         build(&menu(0, 0.0), &mut drawing);
         let texts: Vec<&str> = drawing.labels.iter().map(|l| l.text.as_str()).collect();
-        assert_eq!(
-            texts,
-            ["game off", "Exit game", MENU_KEYS],
+        for want in ["game off", "Exit game", MENU_KEYS, "A (bottom face)"] {
+            assert!(texts.contains(&want), "{want} missing from {texts:?}");
+        }
+        assert!(
+            !texts.iter().any(|t| t.starts_with("Player")),
             "no \"Player N\" to read"
         );
         let pads: Vec<&Sprite> = drawing.sprites.iter().filter(|s| !s.picture).collect();
@@ -1362,7 +1473,7 @@ mod tests {
         assert!(slot > 0.0, "the empty second seat keeps its place between them");
         let off = drawing.labels.iter().find(|l| l.text == "game off").expect("off");
         assert!(
-            (off.x - xs[1]).abs() < 0.01,
+            (off.x - xs[1]).abs() < slot / 2.0 + 0.01,
             "under player three, whose port is off"
         );
     }
@@ -1379,12 +1490,7 @@ mod tests {
         frame.pressed[2] = 1 << a;
         let mut drawing = Drawing::default();
         build(&scene, &mut drawing);
-        let line_y = drawing.sprites.iter().find(|s| !s.picture).expect("the line").cy;
-        let marks: Vec<&Sprite> = drawing
-            .sprites
-            .iter()
-            .filter(|s| !s.picture && (s.cy - line_y).abs() > 1.0)
-            .collect();
+        let marks = marks(&drawing);
         assert_eq!(marks.len(), 2, "one mark per presser");
         assert_eq!(
             (marks[0].icon, marks[1].icon),
@@ -1393,19 +1499,71 @@ mod tests {
         );
         assert_eq!(marks[0].colour, player_colour(1));
         assert_eq!(marks[1].colour, player_colour(3));
+        let label = drawing.labels.iter().find(|l| l.text == "A").expect("A is named");
+        assert_eq!(label.colour, Colour::rgb(theme::TEXT, 1.0), "and lit");
         assert!(
-            (marks[0].cy - marks[1].cy).abs() < 0.01 && marks[0].cx < marks[1].cx,
-            "side by side"
+            (marks[0].cy - label.y).abs() < 0.01 && (marks[1].cy - label.y).abs() < 0.01,
+            "beside its name"
         );
+        let (near, far) = ((marks[0].cx - label.x).abs(), (marks[1].cx - label.x).abs());
+        assert!(near < far, "the second outwards from the first");
         // Nobody pressing: nothing beside any button.
         build(&menu(0, 0.0), &mut drawing);
         assert_eq!(drawing.sprites.iter().filter(|s| !s.picture).count(), 2);
     }
 
+    /// The controllers drawn beside a button: every small pad off the line.
+    fn marks(drawing: &Drawing) -> Vec<&Sprite> {
+        let line_y = drawing.sprites.iter().find(|s| !s.picture).expect("the line").cy;
+        drawing
+            .sprites
+            .iter()
+            .filter(|s| !s.picture && (s.cy - line_y).abs() > 1.0)
+            .collect()
+    }
+
+    #[test]
+    fn an_n64s_c_buttons_are_buttons_and_its_stick_a_dot() {
+        let (console, _) = n64();
+        let n64 = &CONSOLES[console as usize];
+        let c_up = n64.control("rightstick_up").expect("C-up is the right stick's");
+        let mut scene = menu(0, 0.0);
+        let frame = scene.menu.as_mut().expect("menu");
+        frame.console = console;
+        frame.pressed[0] = 1 << c_up;
+        let mut drawing = Drawing::default();
+        build(&scene, &mut drawing);
+        let label = drawing
+            .labels
+            .iter()
+            .find(|l| l.text == n64.controls[c_up].label)
+            .expect("C-up is named, not drawn as a ring");
+        let marks = marks(&drawing);
+        assert_eq!(marks.len(), 1);
+        assert!((marks[0].cy - label.y).abs() < 0.01, "marked beside its name");
+        // The control stick is a ring: its halves are not named, and moving
+        // it draws a dot in the mover's colour.
+        assert!(
+            !drawing
+                .labels
+                .iter()
+                .any(|l| l.text == n64.controls[n64.control("leftstick_up").expect("stick")].label)
+        );
+        let still = drawing.lines.vertices.len();
+        scene.menu.as_mut().expect("menu").sticks[2] = [0.8, -0.3, 0.0, 0.0];
+        build(&scene, &mut drawing);
+        assert!(drawing.lines.vertices.len() > still, "player three's dot");
+        let wanted = player_colour(3);
+        assert!(
+            drawing.lines.vertices.iter().any(|v| v.colour == wanted),
+            "in player three's colour"
+        );
+    }
+
     #[test]
     fn exit_under_the_cursor_is_red_and_its_hold_fills() {
         let mut drawing = Drawing::default();
-        build(&menu(3, 0.5), &mut drawing);
+        build(&menu(4, 0.5), &mut drawing);
         let exit = drawing
             .labels
             .iter()
@@ -1413,7 +1571,7 @@ mod tests {
             .expect("exit");
         assert_eq!(exit.colour, RED);
         let held = drawing.over.vertices.len();
-        build(&menu(3, 0.0), &mut drawing);
+        build(&menu(4, 0.0), &mut drawing);
         assert!(drawing.over.vertices.len() < held, "no hold, no ring");
     }
 
