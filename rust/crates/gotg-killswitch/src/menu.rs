@@ -19,10 +19,10 @@
 //!   game hears nothing from that pad while its player keeps their seat and
 //!   can still open this menu.
 //! - **The game's controller**, below the line, where every seated player's
-//!   presses show as they happen. The owner's presses drive this menu, so
-//!   theirs show only once A on it has started a test: from then everything
-//!   they press is theirs to try, B included, until Select held for half a
-//!   second hands the menu back.
+//!   presses show as they happen, the owner's included. The owner's presses
+//!   also drive this menu; A on the controller starts a test, and from then
+//!   everything they press is only theirs to try, B included, until Select
+//!   held for half a second hands the menu back.
 //! - **Exit**, below that, which takes A held for half a second: the game is
 //!   stopped, and its saves pushed on the way out.
 //!

@@ -192,8 +192,8 @@ controller icons, whose order is the player number; the game's controller
 under them with its buttons named, where each press puts the presser's own
 icon in their colour beside the button's name and each stick is a dot per
 player in its ring (an N64's C buttons stay buttons), so everybody can try
-their controls -- the owner too, after A on it, until Select is held half a
-second; a rebind (A; the panel
+their controls, the owner included (A on it stops the owner's presses from
+also moving the menu, until Select is held half a second); a rebind (A; the panel
 lights each control as it is pressed), a reorder (A held, then left/right --
 danstick's `move`), a controller taken out of its seat (X -- `unseat`), a
 seat's game port off or on (Y -- `port`, leased) and a held Exit that pushes the saves on the way out; B

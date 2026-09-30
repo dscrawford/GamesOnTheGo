@@ -800,19 +800,16 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                 .with_nobody(pairing.nobody(clock))
                 .with_menu(menu.as_ref().map(|open| {
                     let view = open.view(clock);
-                    // Everybody can try their buttons on the game's controller:
-                    // each seat's clone as the game reads it. The owner's pad
-                    // is held back from the game while the menu is theirs, and
-                    // drives it, so theirs show from danstick's word, and only
-                    // while they are testing.
+                    // Everybody can try their buttons on the game's controller,
+                    // from the moment it comes down: each seat's clone as the
+                    // game reads it, and the owner -- held back from the game
+                    // while the menu is theirs -- as danstick says they press.
+                    // The owner's presses also drive the menu until they start
+                    // a test; they show either way.
                     let held: [Held; ROWS_MAX] = std::array::from_fn(|at| {
                         let player = at as i32 + 1;
                         if player == view.owner {
-                            if view.testing {
-                                focused.held(player)
-                            } else {
-                                Held::default()
-                            }
+                            focused.held(player)
                         } else {
                             pads.0
                                 .iter()
