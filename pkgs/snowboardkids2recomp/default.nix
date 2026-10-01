@@ -47,7 +47,7 @@
 }:
 stdenv.mkDerivation (finalAttrs: {
   pname = "snowboardkids2recomp";
-  version = "1.0.5";
+  version = "2.0.0+alpha3";
 
   # A plain tarball, unlike DK64's zip-around-a-tarball, so the default
   # unpackPhase handles it.
@@ -55,7 +55,7 @@ stdenv.mkDerivation (finalAttrs: {
     url =
       "https://github.com/cdlewis/snowboardkids2-recomp/releases/download/"
       + "v${finalAttrs.version}/SnowboardKids2Recompiled-Linux-X64-Release.tar.gz";
-    hash = "sha256-kKl9Tu2Dv8OpYiEsCeTUlDwTEgDNEAkLjnpdgL1OdzI=";
+    hash = "sha256-0Y/WhX3rNJpIv41hArqIy72jA6eK0tvZN1QCnYNUWbo=";
   };
 
   # The tarball has no top-level directory — it unpacks the binary, assets/
