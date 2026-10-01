@@ -185,6 +185,104 @@ def test_only_the_newest_three_generations_survive(service, store):
     assert body == b"save 4"
 
 
+# --- history ----------------------------------------------------------------
+#
+# A person picking a save to go back to needs the generations that are kept,
+# who wrote each and when, and the bytes of the one they pick. The head is
+# only the newest of them.
+
+
+def push_chain(service, count: int, attr: str = "env-n64") -> list[dict]:
+    metas, parent = [], ""
+    for n in range(count):
+        _, meta, _ = push(service, f"save {n}".encode(), parent=parent, attr=attr)
+        metas.append(json.loads(meta))
+        parent = metas[-1]["hash"]
+    return metas
+
+
+def test_history_lists_the_kept_generations_newest_first(service):
+    metas = push_chain(service, 2)
+    status, body, _ = call(f"{service}/saves/env-n64/history")
+    assert status == 200
+    history = json.loads(body)["generations"]
+    assert [g["generation"] for g in history] == [2, 1]
+    assert history[0]["hash"] == metas[1]["hash"]
+    assert history[0]["device"] == "aaaa1111"
+    assert history[0]["written_at"] == metas[1]["written_at"]
+    assert history[0]["size"] == len(b"save 1")
+    assert [g["current"] for g in history] == [True, False]
+
+
+def test_history_before_any_push_is_empty_not_an_error(service):
+    status, body, _ = call(f"{service}/saves/env-n64/history")
+    assert status == 200
+    assert json.loads(body)["generations"] == []
+
+
+def test_history_drops_what_retention_dropped(service):
+    push_chain(service, 5)
+    history = json.loads(call(f"{service}/saves/env-n64/history")[1])["generations"]
+    assert [g["generation"] for g in history] == [5, 4, 3]
+
+
+def test_an_older_generation_is_fetched_by_number(service):
+    metas = push_chain(service, 3)
+    status, body, headers = call(f"{service}/saves/env-n64/gen/2")
+    assert status == 200
+    assert body == b"save 1"
+    assert headers["X-Gotg-Generation"] == "2"
+    assert headers["X-Gotg-Hash"] == metas[1]["hash"]
+
+
+def test_a_generation_retention_dropped_is_a_404(service):
+    push_chain(service, 5)
+    assert call(f"{service}/saves/env-n64/gen/1")[0] == 404
+    assert call(f"{service}/saves/env-n64/gen/9")[0] == 404
+
+
+def test_a_generation_that_is_not_a_number_is_refused(service):
+    push_chain(service, 1)
+    for gen in ("x", "-1", "1.5", "000001-abc"):
+        assert call(f"{service}/saves/env-n64/gen/{gen}")[0] in (400, 404), gen
+
+
+def test_a_generation_pushed_before_history_existed_is_still_listed(service, store):
+    # Bundles from before the store kept a record of each one: their number
+    # and hash are in their name and their size on disk, and who wrote them
+    # is not known -- which is said rather than guessed.
+    push_chain(service, 2)
+    for record in (store.root / "legacy" / "env-n64" / "history").iterdir():
+        record.unlink()
+    history = json.loads(call(f"{service}/saves/env-n64/history")[1])["generations"]
+    assert [g["generation"] for g in history] == [2, 1]
+    assert history[1]["device"] == ""
+    assert history[1]["hash"] == hashlib.sha256(b"save 0").hexdigest()
+    assert history[1]["size"] == len(b"save 0")
+    assert history[1]["written_at"].endswith("Z")
+
+
+def test_history_is_namespaced_by_user(tmp_path, store):
+    tokens = TokenStore(db=tmp_path / "tokens.db")
+    daniel = tokens.claim(tokens.mint_invite("daniel-desktop"))[1]
+    john = tokens.claim(tokens.mint_invite("john-deck"))[1]
+    server = make_server("127.0.0.1", free_port(), Config(token="client-token"), store, token_store=tokens)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        call(f"{base}/saves/env-n64", method="PUT", body=b"d", token=daniel, headers={"X-Gotg-Parent": ""})
+        assert json.loads(call(f"{base}/saves/env-n64/history", token=john)[1])["generations"] == []
+        assert call(f"{base}/saves/env-n64/gen/1", token=john)[0] == 404
+    finally:
+        server.shutdown()
+
+
+def test_ten_generations_are_kept_by_default(tmp_path):
+    # Three was enough to recover from a bad sync; it is not enough to pick a
+    # save to go back to.
+    assert SavesStore(root=tmp_path).keep == 10
+
+
 # --- refusing shapes --------------------------------------------------------
 
 

@@ -20,9 +20,14 @@ client can name another user's saves at all:
 
     <root>/daniel/env-n64/current.json
     <root>/daniel/env-n64/gen/000042-3f9a1c2b4d5e.tar.zst
+    <root>/daniel/env-n64/history/000042-3f9a1c2b4d5e.json
 
 The newest few generations are kept and the rest pruned — retention is the
 server's job now, so every client stops needing delete rights on anything.
+Each kept generation has a record beside it in history/, the same meta the
+pointer held when it was the head, so that a person can be shown who wrote
+which and when, and pick one to go back to. Bundles pushed before records
+existed are listed from their names and their files, with no device.
 """
 
 from __future__ import annotations
@@ -44,7 +49,9 @@ ATTR_RE = re.compile(r"^env-[a-z0-9][a-z0-9_-]*$")
 USER_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 GEN_RE = re.compile(r"^\d{6}-[0-9a-f]{12}\.tar\.zst$")
 
-DEFAULT_KEEP = 3
+# Three was enough to recover from a bad sync, not to pick a save to go back
+# to; bundles are kilobytes to a few megabytes.
+DEFAULT_KEEP = 10
 DEFAULT_MAX_BYTES = 64 * 1024 * 1024
 
 
@@ -105,6 +112,49 @@ class SavesStore:
         path = self._attr_dir(user, attr) / meta["bundle"]
         return path if path.is_file() else None
 
+    def history(self, user: str, attr: str) -> list[dict]:
+        """The kept generations, newest first, each marked whether it is the
+        head. Empty when nothing has been pushed."""
+        gen_dir = self._attr_dir(user, attr) / "gen"
+        if not gen_dir.is_dir():
+            return []
+        current = self.meta(user, attr)
+        head = current["generation"] if current is not None else None
+        names = sorted((p.name for p in gen_dir.iterdir() if GEN_RE.match(p.name)), reverse=True)
+        return [{**self._record(user, attr, name), "current": int(name[:6]) == head} for name in names]
+
+    def generation_path(self, user: str, attr: str, generation: int) -> tuple[Path, dict] | None:
+        """A kept generation's bytes and record, or None when retention has
+        dropped it or it never was."""
+        gen_dir = self._attr_dir(user, attr) / "gen"
+        prefix = f"{generation:06d}-"
+        if generation < 1 or not gen_dir.is_dir():
+            return None
+        for path in gen_dir.iterdir():
+            if path.name.startswith(prefix) and GEN_RE.match(path.name):
+                return path, self._record(user, attr, path.name)
+        return None
+
+    def _record(self, user: str, attr: str, name: str) -> dict:
+        """What is known of one generation: its record, or what its name and
+        file say when it predates records."""
+        stem = name.removesuffix(".tar.zst")
+        try:
+            loaded = json.loads((self._attr_dir(user, attr) / "history" / f"{stem}.json").read_text())
+            if loaded.get("bundle") == f"gen/{name}":
+                return {key: loaded[key] for key in ("generation", "hash", "size", "device", "written_at")}
+        except (OSError, ValueError, KeyError):
+            pass
+        bundle = self._attr_dir(user, attr) / "gen" / name
+        stat = bundle.stat()
+        return {
+            "generation": int(name[:6]),
+            "hash": hashlib.sha256(bundle.read_bytes()).hexdigest(),
+            "size": stat.st_size,
+            "device": "",
+            "written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(stat.st_mtime)),
+        }
+
     # --- writing -------------------------------------------------------------
 
     def save(self, user: str, attr: str, body: bytes, parent: str, device: str, *, force: bool = False) -> Publish:
@@ -149,6 +199,13 @@ class SavesStore:
                 "device": device,
                 "written_at": _utc_now(),
             }
+            history_dir = self._attr_dir(user, attr) / "history"
+            history_dir.mkdir(exist_ok=True)
+            record = history_dir / f"{name.removesuffix('.tar.zst')}.json"
+            tmp = record.with_suffix(".part")
+            tmp.write_text(json.dumps(meta))
+            tmp.replace(record)
+
             pointer = self._attr_dir(user, attr) / "current.json"
             tmp = pointer.with_suffix(".part")
             tmp.write_text(json.dumps(meta))
@@ -166,6 +223,8 @@ class SavesStore:
         """
         gen_dir = self._attr_dir(user, attr) / "gen"
         names = sorted(p.name for p in gen_dir.iterdir() if GEN_RE.match(p.name))
+        history_dir = self._attr_dir(user, attr) / "history"
         for name in names[: max(0, len(names) - self.keep)]:
             if name != keep_name:
                 (gen_dir / name).unlink(missing_ok=True)
+                (history_dir / f"{name.removesuffix('.tar.zst')}.json").unlink(missing_ok=True)

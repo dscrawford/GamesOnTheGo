@@ -766,11 +766,13 @@ class Handler(BaseHTTPRequestHandler):
         return default_user(principal)
 
     def _saves(self, rest: str, body: bytes | None, user: str) -> None:
-        """`/saves/<attr>` is the whole surface: PUT is `.save()`, GET is
-        `.retrieve()`, and `/saves/<attr>/meta` says what is current without
-        moving the bytes. Conflicts are answered here — a PUT carries the hash
-        of the generation it descends from, and a parent that is not the head
-        is a 409 carrying what the head actually is."""
+        """`/saves/<attr>` is the head: PUT is `.save()`, GET is `.retrieve()`,
+        and `/saves/<attr>/meta` says what is current without moving the
+        bytes. Conflicts are answered here — a PUT carries the hash of the
+        generation it descends from, and a parent that is not the head is a
+        409 carrying what the head actually is. `/saves/<attr>/history` lists
+        the kept generations and `/saves/<attr>/gen/<n>` is one of them, for a
+        person picking a save to go back to."""
         if self.store is None:
             self._problem(503, "this service holds no saves store")
             return
@@ -779,12 +781,35 @@ class Handler(BaseHTTPRequestHandler):
         segments = parts.path.strip("/").split("/")
         attr = segments[0]
         want_meta = segments[1:] == ["meta"]
-        if segments[1:] not in ([], ["meta"]):
+        want_history = segments[1:] == ["history"]
+        # Digits only, so "-1", "1.5" and a bundle's own name never parse.
+        want_gen = len(segments) == 3 and segments[1] == "gen" and segments[2].isascii() and segments[2].isdigit()
+        if segments[1:] not in ([], ["meta"], ["history"]) and not want_gen:
             self._problem(404, f"nothing lives at /saves/{parts.path.strip('/')}")
+            return
+        if (want_history or want_gen) and self.command != "GET":
+            self._problem(405, f"{self.command} is not something saves history answers")
             return
 
         try:
-            if self.command == "GET" and want_meta:
+            if want_history:
+                history = self.store.history(user, attr)
+                self._send(200, json.dumps({"generations": history}).encode(), "application/json")
+            elif want_gen:
+                found = self.store.generation_path(user, attr, int(segments[2]))
+                if found is None:
+                    self._problem(404, f"generation {segments[2]} of {attr} is not kept")
+                    return
+                path, record = found
+                payload = path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zstd")
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("X-Gotg-Generation", str(record["generation"]))
+                self.send_header("X-Gotg-Hash", record["hash"])
+                self.end_headers()
+                self.wfile.write(payload)
+            elif self.command == "GET" and want_meta:
                 meta = self.store.meta(user, attr)
                 if meta is None:
                     self._problem(404, f"nothing has been pushed for {attr}")
