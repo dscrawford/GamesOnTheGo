@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "files_url": "https://files.example",
+  "games": [
+    {"id": "usa.donkey_kong_64", "platform": "n64", "handler": "single_file", "title": "Donkey Kong 64",
+     "files": [{"name": "Donkey Kong 64 (USA).zip", "size_bytes": 1, "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}]},
+    {"id": "usa.zelda", "platform": "n64", "handler": "single_file", "title": "Zelda",
+     "files": [{"name": "Zelda (USA).z64", "size_bytes": 1, "sha256": "2222222222222222222222222222222222222222222222222222222222222222"}]},
+    {"id": "usa.legend_of_zelda_ocarina_of_time_rev2", "platform": "n64", "handler": "single_file", "title": "Ocarina of Time",
+     "files": [{"name": "Ocarina (USA).zip", "size_bytes": 1, "sha256": "3333333333333333333333333333333333333333333333333333333333333333"}]},
+    {"id": "usa.super_mario_64", "platform": "n64", "handler": "single_file", "title": "Super Mario 64",
+     "files": [{"name": "Super Mario 64 (USA).zip", "size_bytes": 1, "sha256": "4444444444444444444444444444444444444444444444444444444444444444"}]},
+    {"id": "usa.tetris_2", "platform": "gb", "handler": "single_file", "title": "Tetris 2",
+     "files": [{"name": "Tetris 2 (USA).gb", "size_bytes": 1, "sha256": "5555555555555555555555555555555555555555555555555555555555555555"}]},
+    {"id": "usa.tetris_2", "platform": "nes", "handler": "single_file", "title": "Tetris 2",
+     "files": [{"name": "Tetris 2 (USA).nes", "size_bytes": 1, "sha256": "6666666666666666666666666666666666666666666666666666666666666666"}]},
+    {"id": "world.super_metroid", "platform": "snes", "handler": "single_file", "title": "Super Metroid",
+     "files": [{"name": "Super Metroid (World).sfc", "size_bytes": 1, "sha256": "7777777777777777777777777777777777777777777777777777777777777777"}]},
+    {"id": "usa.pikmin_rev1", "platform": "gamecube", "handler": "single_archive", "title": "Pikmin",
+     "files": [{"name": "Pikmin (USA) (Rev 1).7z", "size_bytes": 1, "sha256": "8888888888888888888888888888888888888888888888888888888888888888"}]},
+    {"id": "usa.crash_bandicoot", "platform": "psx", "handler": "single_file", "title": "Crash Bandicoot",
+     "files": [{"name": "Crash Bandicoot (USA).bin", "size_bytes": 1, "sha256": "9999999999999999999999999999999999999999999999999999999999999999"}]}
+  ]
+}

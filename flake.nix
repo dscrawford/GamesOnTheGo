@@ -100,6 +100,10 @@
       );
     in
     {
+      # What a library flake builds games with: the catalog as Nix data and
+      # the environment each game runs in. See docs/nix-games.md.
+      lib = import ./lib { inherit (nixpkgs) lib; };
+
       packages = forAllSystems (
         pkgs:
         let
