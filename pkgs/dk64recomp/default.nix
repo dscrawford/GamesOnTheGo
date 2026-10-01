@@ -42,16 +42,17 @@
 }:
 stdenv.mkDerivation (finalAttrs: {
   pname = "dk64recomp";
-  version = "1.0.2";
+  version = "1.0.3";
 
   # The release zip holds a tarball; unpackPhase takes the zip apart and the
   # tarball inside it, in that order.
+  # Tags gained their "v" at 1.0.3; the asset names did not.
   src = fetchurl {
     url =
       "https://github.com/Rainchus/Donkey-Kong-64-Recompiled/releases/download/"
-      + "${finalAttrs.version}/DK64Recompiled-Linux-X64-Release-"
+      + "v${finalAttrs.version}/DK64Recompiled-Linux-X64-Release-"
       + "${lib.replaceStrings [ "." ] [ "-" ] finalAttrs.version}.zip";
-    hash = "sha256-enIygNknaLvrHDhPX76fJ80I/a2LkN+FqUAqFR0x5N8=";
+    hash = "sha256-NSOAQY8jdmQIJf5lsLoIXhLnt5IgXPpDWmyqAgLlS1w=";
   };
 
   nativeBuildInputs = [
