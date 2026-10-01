@@ -103,19 +103,19 @@ publish_raw() {
   run ! grep -rF "$GOTG_ENV_STATE_DIR" "$SAVES_DATA_DIR"
 }
 
-@test "only the last three generations survive a push" {
+@test "only the last ten generations survive a push" {
   local v
-  for v in one two three four; do
-    write_save zelda.ram "$v"
+  for v in $(seq 1 12); do
+    write_save zelda.ram "save $v"
     gotg saves push env-n64
     [ "$status" -eq 0 ]
   done
 
   run -0 bash -c "ls $SAVES_DATA_DIR/legacy/env-n64/gen | wc -l"
-  [ "$output" -eq 3 ]
-  # The oldest is the one that went; generations still count upward.
+  [ "$output" -eq 10 ]
+  # The oldest are the ones that went; generations still count upward.
   run -0 bash -c "ls $SAVES_DATA_DIR/legacy/env-n64/gen | sort | head -1"
-  [[ "$output" == 000002-* ]]
+  [[ "$output" == 000003-* ]]
 }
 
 # --- the round trip ---------------------------------------------------------
@@ -386,6 +386,147 @@ publish_raw() {
   gotg saves keep env-n64
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"here|remote"* ]]
+}
+
+# --- going back to a save ---------------------------------------------------
+#
+# What the picker's Saves list and the overlay's are made of: every save this
+# user has for one environment -- the service's kept generations and this
+# machine's own archives -- and putting one of them back.
+
+push_save() {
+  write_save zelda.ram "$1"
+  gotg saves push env-n64
+  [ "$status" -eq 0 ]
+}
+
+@test "list shows the service's kept saves newest first, and which one is here" {
+  push_save one
+  push_save two
+  gotg saves list env-n64 --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.attr' <<<"$output")" = env-n64 ]
+  [ "$(jq -c '[.saves[] | .generation]' <<<"$output")" = '[2,1]' ]
+  [ "$(jq -c '[.saves[] | .here]' <<<"$output")" = '[true,false]' ]
+  [ "$(jq -r '.saves[0].source' <<<"$output")" = remote ]
+  [ "$(jq -r '.saves[0].id' <<<"$output")" = remote:2 ]
+  [ "$(jq -r '.saves[1].device' <<<"$output")" = aaaa1111 ]
+}
+
+@test "list includes this machine's archives, but not twice what the service has" {
+  push_save "from machine a"
+  second_device
+  write_save zelda.ram "from machine b"
+  gotg saves pull env-n64
+  gotg saves list env-n64 --json
+  [ "$status" -eq 0 ]
+  [ "$(jq '.saves | length' <<<"$output")" -eq 2 ]
+  [[ "$(jq -r '.saves[] | select(.source == "local") | .id' <<<"$output")" == local:* ]]
+  [ "$(jq -r '.saves[] | select(.source == "local") | .device' <<<"$output")" = bbbb2222 ]
+}
+
+@test "list says whether a game has its environment to itself" {
+  gotg saves list env-n64 --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.dedicated' <<<"$output")" = false ]
+  fake_env env-n64-usa_zelda '["saves/**"]'
+  gotg saves list env-n64-usa_zelda --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.dedicated' <<<"$output")" = true ]
+  [ "$(jq '.saves' <<<"$output")" = '[]' ]
+}
+
+@test "list with no service still shows this machine's archives" {
+  push_save "pushed"
+  second_device
+  write_save zelda.ram "only here"
+  gotg saves pull env-n64
+  rm -f "$GOTG_CONFIG_DIR/api.json"
+  gotg saves list env-n64 --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.offline' <<<"$output")" = true ]
+  [ "$(jq -r '[.saves[] | .source] | unique | join(",")' <<<"$output")" = local ]
+}
+
+@test "restoring an older save puts it back, and archives what was here first" {
+  push_save one
+  push_save two
+  gotg saves restore env-n64 remote:1
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STATE/saves/zelda.ram")" = one ]
+  local archive
+  archive="$(find "$GOTG_SAVES_DIR/local/env-n64" -name '*.tar.zst' | head -1)"
+  tar -xOf "$archive" saves/zelda.ram | grep -q two
+}
+
+@test "a restored save is pushed as the newest, not refused as a conflict" {
+  push_save one
+  push_save two
+  gotg saves restore env-n64 remote:1
+  [ "$status" -eq 0 ]
+  gotg saves push env-n64
+  [ "$status" -eq 0 ]
+  gotg saves list env-n64 --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.saves[0].generation' <<<"$output")" -eq 3 ]
+  [ "$(jq -r '.saves[0].here' <<<"$output")" = true ]
+  second_device
+  gotg saves pull env-n64
+  [ "$(cat "$STATE/saves/zelda.ram")" = one ]
+}
+
+@test "a restore takes away the save files the chosen save did not have" {
+  push_save one
+  write_save mario.ram "a later file"
+  printf 'archive' >"$STATE/saves/port.o2r"
+  gotg saves push env-n64
+  gotg saves restore env-n64 remote:1
+  [ "$status" -eq 0 ]
+  [ ! -e "$STATE/saves/mario.ram" ]
+  # Not a save: the restore has no business with it.
+  [ "$(cat "$STATE/saves/port.o2r")" = archive ]
+}
+
+@test "a launch does not pull back over a restore" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  push_save one
+  push_save two
+  gotg saves restore env-n64 remote:1
+  [ "$status" -eq 0 ]
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STATE/saves/zelda.ram")" = one ]
+}
+
+@test "a machine's own archive is restored with no service at all" {
+  push_save "pushed"
+  second_device
+  write_save zelda.ram "only here"
+  gotg saves pull env-n64
+  gotg saves list env-n64 --json
+  local id
+  id="$(jq -r '.saves[] | select(.source == "local") | .id' <<<"$output")"
+  rm -f "$GOTG_CONFIG_DIR/api.json"
+  gotg saves restore env-n64 "$id"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STATE/saves/zelda.ram")" = "only here" ]
+}
+
+@test "restore refuses what is not one of the saves" {
+  push_save one
+  for which in bogus remote:x remote:-1 local:../../etc/passwd local:nothing-here.tar.zst; do
+    gotg saves restore env-n64 "$which"
+    [ "$status" -ne 0 ]
+  done
+  [ "$(cat "$STATE/saves/zelda.ram")" = one ]
+}
+
+@test "a generation the service no longer keeps is said to be gone" {
+  push_save one
+  gotg saves restore env-n64 remote:7
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"not kept"* ]]
 }
 
 # --- what a launch does -----------------------------------------------------

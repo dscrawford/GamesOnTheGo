@@ -2,8 +2,9 @@
 # The saves store, as the client sees it: save and retrieve, nothing else.
 #
 #   store_save     <attr> <bundle> [parent] [force]   -> meta JSON on stdout
-#   store_retrieve <attr> <out-file>                  -> "<generation> <hash>"
+#   store_retrieve <attr> <out-file> [generation]     -> "<generation> <hash>"
 #   store_meta     <attr>                             -> meta JSON on stdout
+#   store_history  <attr>                             -> {"generations": [...]}
 #
 # All three speak to the one GOTG service — the same url and token that carry
 # artwork requests, from the same api.json — so a machine is configured once.
@@ -83,10 +84,17 @@ store_save() {
   esac
 }
 
-# .retrieve(): the current generation's bundle, and which generation it is.
+# .retrieve(): the current generation's bundle, and which generation it is --
+# or, given a number, that kept generation's. 1 is "not kept": nothing pushed,
+# or retention has dropped it.
 store_retrieve() {
-  local attr="$1" out="$2"
+  local attr="$1" out="$2" generation="${3:-}" path
   validate_attr "$attr"
+  path="saves/$attr"
+  if [[ -n "$generation" ]]; then
+    [[ "$generation" =~ ^[0-9]+$ ]] || die "not a generation number: $generation"
+    path="$path/gen/$generation"
+  fi
   local headers http
   headers="$(saves_tmp)/retrieve-headers"
 
@@ -94,7 +102,7 @@ store_retrieve() {
   # hostile or broken service cannot fill the disk before being refused.
   http="$(saves_api_curl -D "$headers" -o "$out.part" -w '%{http_code}' \
     --max-filesize "$(saves_max_bytes)" \
-    "$(saves_api_url)/saves/$attr")" || {
+    "$(saves_api_url)/$path")" || {
     rm -f "$out.part"
     return 2
   }
@@ -141,6 +149,25 @@ store_meta() {
     # Not a die: this function's output is consumed inside $( ), where die
     # kills only the subshell and rc 1 masquerades as 404. The caller owns
     # the message.
+    401) return 3 ;;
+    *) return 2 ;;
+  esac
+}
+
+# The kept generations, newest first: what a person picking a save to go back
+# to chooses from. Empty, not "nothing there", when nothing has been pushed.
+store_history() {
+  local attr="$1"
+  validate_attr "$attr"
+  local out http
+  out="$(saves_tmp)/store-history.json"
+
+  http="$(saves_api_curl -o "$out" -w '%{http_code}' \
+    "$(saves_api_url)/saves/$attr/history")" || return 2
+
+  case "$http" in
+    200) jq -ce '{generations: [.generations[]]}' "$out" 2>/dev/null || return 2 ;;
+    # Not a die, for the same reason as store_meta's.
     401) return 3 ;;
     *) return 2 ;;
   esac

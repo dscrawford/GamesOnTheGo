@@ -25,6 +25,10 @@ usage: gotg saves <command> [args]
                          settle a conflict: keep this machine's saves (the
                          service's generation is kept too) or the service's
                          (what is here is archived first)
+  list   <id> [variant]  every save to go back to: the service's kept
+                         generations and this machine's archives  [--json]
+  restore <id> [variant] remote:<generation>|local:<archive>
+                         put one back (what is here is archived first)
   adopt  [<id>|--all]    copy in saves from before the emulators were
                          told where to put them          [--yes]
 
@@ -51,6 +55,8 @@ cmd_saves() {
     pull) saves_cmd_pull "$@" ;;
     check) saves_cmd_check "$@" ;;
     keep) saves_cmd_keep "$@" ;;
+    list) saves_cmd_list "$@" ;;
+    restore) saves_cmd_restore "$@" ;;
     adopt) saves_cmd_adopt "$@" ;;
     help | --help | -h | "") saves_usage ;;
     *)
