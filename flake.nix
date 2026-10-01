@@ -115,6 +115,8 @@
             inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg-pads;
           };
           py = pythonSets.${pkgs.stdenv.hostPlatform.system};
+          # SDL3 cut to what gotg-pads and the overlay do: see rust/sdl3.nix.
+          sdl3s = pkgs.callPackage ./rust/sdl3.nix { };
         in
         envs
         // rec {
@@ -201,10 +203,11 @@
 
           # Asks the same library the emulators ask, so nothing downstream has
           # to guess which physical controller is which.
-          gotg-pads = pkgs.callPackage ./rust/gotg-pads.nix { };
+          gotg-pads = pkgs.callPackage ./rust/gotg-pads.nix { sdl3 = sdl3s.gamepad; };
 
           # The controller's way out of a running game.
           gotg-killswitch = pkgs.callPackage ./rust/gotg-killswitch.nix {
+            sdl3 = sdl3s.overlay;
             theme = ./config/theme.yaml;
             iconRules = ./config/icons.yaml;
             iconArt = ./src/ui/assets/icons;
