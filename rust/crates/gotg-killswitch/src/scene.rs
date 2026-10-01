@@ -1525,6 +1525,36 @@ mod tests {
     }
 
     #[test]
+    fn a_trigger_danstick_says_the_owner_pulled_is_marked_beside_its_name() {
+        use crate::events::Event;
+        let console = crate::consoles::for_platform("generic");
+        let generic = &CONSOLES[console];
+        let mut focused = crate::menu::Focused::default();
+        for (control, down) in [("lefttrigger", true), ("righttrigger", true)] {
+            focused.apply(&Event::Focus {
+                player: 1,
+                control: control.into(),
+                down,
+            });
+        }
+        let held = focused.held(1);
+        let mut scene = menu(0, 0.0);
+        let frame = scene.menu.as_mut().expect("menu");
+        frame.console = console as u32;
+        frame.pressed[0] = held.bits(generic.controls.iter().map(|control| control.id));
+        let mut drawing = Drawing::default();
+        build(&scene, &mut drawing);
+        let marks = marks(&drawing);
+        for name in ["Left trigger", "Right trigger"] {
+            let label = drawing.labels.iter().find(|l| l.text == name).expect(name);
+            assert!(
+                marks.iter().any(|m| (m.cy - label.y).abs() < 0.01),
+                "{name} has no mark: {marks:?}"
+            );
+        }
+    }
+
+    #[test]
     fn an_n64s_c_buttons_are_buttons_and_its_stick_a_dot() {
         let (console, _) = n64();
         let n64 = &CONSOLES[console as usize];
