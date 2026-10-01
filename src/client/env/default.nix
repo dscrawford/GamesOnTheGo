@@ -54,11 +54,15 @@ let
       lib.filterAttrs (n: t: t == "regular" && lib.hasSuffix ".nix" n) (builtins.readDir dir)
     );
 
+  # Every file here but the machinery is a platform. foreign-gl was missing
+  # from this list, so env-foreign-gl was a "platform" whose evaluation
+  # failed -- and with it `nix flake check` and checks.environments.
   platforms = lib.subtractLists [
     "default"
     "lib"
     "helpers"
     "steps"
+    "foreign-gl"
   ] (nixNames ./.);
 
   baseFor =

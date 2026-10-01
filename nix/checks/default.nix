@@ -25,7 +25,7 @@
   recipes = import ./recipes.nix { inherit pkgs packages; };
   switchContent = import ./switch-content.nix { inherit pkgs; };
   platforms = import ./platforms.nix { inherit pkgs py; };
-  environments = import ./environments.nix { inherit pkgs; };
+  environments = import ./environments.nix { inherit pkgs packages; };
   fullscreen = import ./fullscreen.nix { inherit pkgs; };
   aresSystem = import ./ares-system.nix { inherit pkgs; };
   inheritsPlatform = import ./inherits-platform.nix { inherit pkgs; };

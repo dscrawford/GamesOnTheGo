@@ -5,10 +5,13 @@
 # Harkinian and decomp-port environment failed SC2034 on a variable only
 # ares-shaped launchers consume, and the first build to run was a Master Quest
 # launch on somebody else's machine.
-{ pkgs }:
-let
-  envs = import ../../src/client/env { inherit pkgs; };
-in
+#
+# The flake's own environments, not a second import of src/client/env: that
+# one was given neither danstick-rs nor gotg-pads, which the Four Swords
+# split-screen launchers name, and failed on null before it reached them.
+{ pkgs, packages }:
 pkgs.linkFarm "check-environments" (
-  pkgs.lib.mapAttrsToList (name: path: { inherit name path; }) envs
+  pkgs.lib.mapAttrsToList (name: path: { inherit name path; }) (
+    pkgs.lib.filterAttrs (name: _: pkgs.lib.hasPrefix "env-" name) packages
+  )
 )

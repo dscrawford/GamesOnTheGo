@@ -237,8 +237,10 @@ name-CRC, because SDL renames clones) and `keys.py`.
 
 ## Gotchas
 
-- `nix flake check` currently fails evaluating `packages.env-foreign-gl`
-  (`foreign-gl.nix` needs `mesa`); build checks individually until fixed.
+- `checks.environments` builds every environment the flake has -- the
+  Sunshine mods alone are gigabytes -- so build checks individually, and that
+  one when an environment's shape changed. (`env-foreign-gl`, a helper read as
+  a platform, no longer breaks evaluation.)
 - SDL renames a danstick clone that mirrors a pad it knows (`Xbox 360
   Controller`), so device *names* cannot identify danstick's pads. The GUID's
   bytes 2–3 carry a CRC-16 of the real name; that is what `clones.py` reads.
