@@ -92,11 +92,25 @@
         }
       ];
 
+      # An archive belongs to the port version that made it. 2Ship 5.0 met
+      # 4.0.2's mm.o2r with a modal "Outdated ROM Archive ... You will now be
+      # redirected to re-extract them" and an OK button that no pad reaches
+      # -- the game never started. So the archive is stamped with the version
+      # that extracted it, and one stamped otherwise, or not at all (made
+      # before the stamp existed), is removed and extracted again. A minor
+      # bump that did not need it costs a minute of extraction once.
       preLaunch = ''
         harkinian_data="''${XDG_DATA_HOME:-$HOME/.local/share}/${appName}"
+        harkinian_stamp="$harkinian_data/.gotg-archive-version"
+        if [ "$(cat "$harkinian_stamp" 2>/dev/null)" != "${lib.getVersion port}" ]; then
+          rm -f ${lib.concatMapStringsSep " " (a: ''"$harkinian_data/${a}"'') archives}
+        fi
         if ${lib.concatMapStringsSep " && " (a: ''[ ! -e "$harkinian_data/${a}" ]'') archives}; then
           echo "first run: extracting game assets from $target" >&2
           mkdir -p "$harkinian_data"
+          # Stamped before the exec, since nothing runs after it; an extraction
+          # that fails leaves no archive, and the check above tries again.
+          printf '%s' "${lib.getVersion port}" >"$harkinian_stamp"
           # The ports take no ROM argument: they scan their working directory
           # and data directory for one and offer to extract it. Learned on the
           # Deck — every desktop had adopted a hand-made archive through

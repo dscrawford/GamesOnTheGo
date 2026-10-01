@@ -16,11 +16,21 @@ let
       inherit (pkgs) lib;
     }).harkinianPort
       {
-        port = pkgs.coreutils;
-        bin = "true";
+        port = harkinianPort;
+        bin = "probe-port";
         appName = "probe";
-        archives = [ ];
+        archives = [ "probe.o2r" ];
       };
+  # Stands in for the port's first run: it says it ran and leaves an archive,
+  # as extraction does. Its version is what the archive is stamped with.
+  harkinianPort =
+    pkgs.writeShellScriptBin "probe-port" ''
+      touch ran
+      touch probe.o2r
+    ''
+    // {
+      version = "2.0";
+    };
   # The one game environment that composes the unzip recipe itself rather
   # than inheriting it from a helper. Imported with a stand-in for the port
   # so this stays an eval — building the real one would pull the whole
@@ -359,6 +369,28 @@ pkgs.runCommand "check-recipes" { nativeBuildInputs = [ pkgs.zip ]; } ''
   fi
   grep -q 'gotg-recipe\[collect-extras\]' $TMPDIR/err-extra
   [ ! -e $TMPDIR/out6/x ]
+
+  # A HarbourMasters archive is the port version's: 2Ship 5.0 met 4.0.2's
+  # mm.o2r with a modal "Outdated ROM Archive" no pad could dismiss. One
+  # stamped with another version, or with none, is extracted again.
+  harkinian() {
+    rm -f $TMPDIR/hk/probe/ran
+    (
+      export XDG_DATA_HOME=$TMPDIR/hk target=$TMPDIR/hk-rom.z64
+      ${harkinianProbe.preLaunch}
+    )
+  }
+  mkdir -p $TMPDIR/hk/probe && printf 'rom' > $TMPDIR/hk-rom.z64
+  touch $TMPDIR/hk/probe/probe.o2r
+  harkinian
+  [ -e $TMPDIR/hk/probe/ran ] || { echo "an unstamped archive must be extracted again" >&2; exit 1; }
+  [ "$(cat $TMPDIR/hk/probe/.gotg-archive-version)" = 2.0 ]
+  harkinian
+  [ ! -e $TMPDIR/hk/probe/ran ] || { echo "an archive of this version must be kept" >&2; exit 1; }
+  [ -e $TMPDIR/hk/probe/probe.o2r ] && [ ! -e $TMPDIR/hk/probe/gotg-extract.z64 ]
+  printf '1.0' > $TMPDIR/hk/probe/.gotg-archive-version
+  harkinian
+  [ -e $TMPDIR/hk/probe/ran ] || { echo "an archive of another version must be extracted again" >&2; exit 1; }
 
   touch $out
 ''
