@@ -1,4 +1,5 @@
-# The two SDL3s GOTG's crates link, cut to what each one does.
+# The SDL3s GOTG's own programs and the ports it packages link, cut to what
+# each one does.
 #
 # The stock build is ~940MiB of closure: zenity (gtk4, gstreamer, flite) for
 # message boxes, pipewire, jack and pulse for sound, libdecor, ibus, a tray.
@@ -17,6 +18,15 @@
 #            code -- so it gets a stand-in that only fails: the overlay calls
 #            no message box, and a dialog over a game is not something it
 #            should ever show.
+#   game     the prebuilt ports patched onto nixpkgs (DK64, Snowboard Kids 2,
+#            BattleShip), through `sdl2`, an sdl2-compat over it: everything a
+#            game uses, with sound through PulseAudio and ALSA, and dbus for
+#            the screensaver. Off are zenity (the same stand-in), jack, ibus,
+#            the tray, and the pipewire backend -- the last brought pipewire
+#            whole, gstreamer, libcamera, ffmpeg and a python with it. SteamOS
+#            and NixOS both serve pipewire through its PulseAudio side, which
+#            is the driver QA already forces. DK64's port went from 978 to
+#            370 MiB of closure.
 #
 # libusb stays in both. Without it SDL's HIDAPI saw no Steam Controller at
 # all -- a pad SDL reaches through /dev/hidraw, with no joystick node for any
@@ -25,7 +35,11 @@
 # database; a list of the pads in the room is another question.
 #
 # SDL's own suite is off for both: it inits the subsystems switched off here.
-{ sdl3, writeShellScriptBin }:
+{
+  sdl3,
+  sdl2-compat,
+  writeShellScriptBin,
+}:
 let
   quiet = {
     alsaSupport = false;
@@ -37,8 +51,21 @@ let
     traySupport = false;
   };
   noCheck = drv: drv.overrideAttrs { doCheck = false; };
+  noDialogs = writeShellScriptBin "zenity" "exit 1";
+  game = noCheck (
+    sdl3.override {
+      jackSupport = false;
+      ibusSupport = false;
+      traySupport = false;
+      pipewireSupport = false;
+      zenity = noDialogs;
+    }
+  );
 in
 {
+  inherit game;
+  sdl2 = sdl2-compat.override { sdl3 = game; };
+
   gamepad = noCheck (
     sdl3.override (
       quiet
@@ -58,7 +85,7 @@ in
       quiet
       // {
         libdecorSupport = false;
-        zenity = writeShellScriptBin "zenity" "exit 1";
+        zenity = noDialogs;
       }
     )
   );

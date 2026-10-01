@@ -115,8 +115,9 @@
             inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg-pads;
           };
           py = pythonSets.${pkgs.stdenv.hostPlatform.system};
-          # SDL3 cut to what gotg-pads and the overlay do: see rust/sdl3.nix.
-          sdl3s = pkgs.callPackage ./rust/sdl3.nix { };
+          # SDL3 cut to what gotg-pads, the overlay and the ports do: see
+          # pkgs/sdl3.nix.
+          sdl3s = pkgs.callPackage ./pkgs/sdl3.nix { };
         in
         envs
         // rec {
@@ -273,7 +274,7 @@
 
           # Donkey Kong 64: Recompiled — not in nixpkgs, though its siblings
           # zelda64recomp and n64recomp are.
-          dk64recomp = pkgs.callPackage ./pkgs/dk64recomp { };
+          dk64recomp = pkgs.callPackage ./pkgs/dk64recomp { SDL2 = sdl3s.sdl2; };
 
           # Super Smash Bros. Melee — the native port off doldecomp/melee.
           melee-pc = pkgs.callPackage ./pkgs/melee-pc { };
@@ -282,11 +283,11 @@
           open-nectar = pkgs.callPackage ./pkgs/open-nectar { };
 
           # Super Smash Bros. (N64) — the libultraship port, not a recomp.
-          battleship = pkgs.callPackage ./pkgs/battleship { };
+          battleship = pkgs.callPackage ./pkgs/battleship { SDL2 = sdl3s.sdl2; };
 
           # Snowboard Kids 2: Recompiled — the same N64Recomp/RT64 stack as
           # dk64recomp above, and likewise not in nixpkgs.
-          snowboardkids2recomp = pkgs.callPackage ./pkgs/snowboardkids2recomp { };
+          snowboardkids2recomp = pkgs.callPackage ./pkgs/snowboardkids2recomp { SDL2 = sdl3s.sdl2; };
 
           # Not in nixpkgs, though its sibling wiimms-iso-tools is. Needed to
           # open and rebuild the Yaz0 archives GameCube games keep their data in.

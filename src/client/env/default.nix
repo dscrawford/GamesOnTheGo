@@ -28,10 +28,13 @@ let
   # Tools this project packages itself, for environments that need something
   # nixpkgs does not carry. Passed alongside pkgs so an env file never has to
   # reach back up the tree with a relative path.
+  # The ports patched onto nixpkgs take an SDL cut to what a game uses; see
+  # pkgs/sdl3.nix for what that leaves out and what it saved.
+  sdl3s = pkgs.callPackage ../../../pkgs/sdl3.nix { };
   gotgPkgs = {
-    dk64recomp = pkgs.callPackage ../../../pkgs/dk64recomp { };
-    snowboardkids2recomp = pkgs.callPackage ../../../pkgs/snowboardkids2recomp { };
-    battleship = pkgs.callPackage ../../../pkgs/battleship { };
+    dk64recomp = pkgs.callPackage ../../../pkgs/dk64recomp { SDL2 = sdl3s.sdl2; };
+    snowboardkids2recomp = pkgs.callPackage ../../../pkgs/snowboardkids2recomp { SDL2 = sdl3s.sdl2; };
+    battleship = pkgs.callPackage ../../../pkgs/battleship { SDL2 = sdl3s.sdl2; };
     open-nectar = pkgs.callPackage ../../../pkgs/open-nectar { };
     melee-pc = pkgs.callPackage ../../../pkgs/melee-pc { };
     # nixpkgs' Ryubing with the JIT cache size upstream Ryujinx shipped; see
