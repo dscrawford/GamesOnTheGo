@@ -11,6 +11,7 @@
 //!
 //! Encoded field by field in native byte order: both ends are this binary.
 
+use crate::menu::{Browse, Listed};
 use crate::pairing::{HOLDS_MAX, Hold, JOINED_MAX};
 
 /// "GOSV", so a torn or foreign read is refused.
@@ -21,8 +22,16 @@ pub const MAGIC: u32 = 0x5653_4f47;
 pub const SIZE: usize = 4 * (6 + HOLDS_MAX * 3 + JOINED_MAX * 2 + REBIND_WORDS + MENU_WORDS + 1);
 
 /// Owner, rows, focus, carried, two fills, the icons, the off mask, the
-/// console, each seat's presses in two words and sticks in one, and testing.
-const MENU_WORDS: usize = 9 + ROWS_MAX + 2 * ROWS_MAX + ROWS_MAX;
+/// console, each seat's presses in two words and sticks in one, testing, and
+/// the saves list.
+const MENU_WORDS: usize = 9 + ROWS_MAX + 2 * ROWS_MAX + ROWS_MAX + SAVES_WORDS;
+
+/// The saves row and list: whether there is a row, the list's state and the
+/// prompt in one word, how many saves, and which is under the cursor. Their
+/// words are not in the frame -- the painter reads them from the session the
+/// client wrote them to (`gotg saves list --lines`), since a frame has room
+/// for numbers and not for a dozen machine names and dates.
+const SAVES_WORDS: usize = 3;
 
 /// Seats a menu frame lists.
 pub const ROWS_MAX: usize = crate::menu::SEATS_MAX;
@@ -53,6 +62,52 @@ pub struct MenuFrame {
     pub sticks: [[f32; 4]; ROWS_MAX],
     /// The owner is trying their buttons rather than driving the menu.
     pub testing: bool,
+    pub saves: Saves,
+}
+
+/// The menu's saves: a row to open them, and the list while it is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Saves {
+    pub row: bool,
+    pub browse: Option<Browse>,
+}
+
+impl Saves {
+    fn encode(self) -> [u32; SAVES_WORDS] {
+        let (state, count, selected, confirming) = match self.browse {
+            None => (0, 0, 0, false),
+            Some(b) => match b.listed {
+                Listed::Loading => (1, 0, 0, b.confirming),
+                Listed::Failed => (2, 0, 0, b.confirming),
+                Listed::Ready(n) => (3, n as u32, b.selected as u32, b.confirming),
+            },
+        };
+        [
+            u32::from(self.row) | u32::from(confirming) << 1 | state << 8,
+            count,
+            selected,
+        ]
+    }
+
+    /// Whatever arrived, a list that can be drawn: the cursor on a save that
+    /// is there, and no list at all for a state there is none of.
+    fn decode(words: [u32; SAVES_WORDS]) -> Self {
+        let [flags, count, selected] = words;
+        let listed = match (flags >> 8) & 0xff {
+            1 => Some(Listed::Loading),
+            2 => Some(Listed::Failed),
+            3 => Some(Listed::Ready(count as usize)),
+            _ => None,
+        };
+        Self {
+            row: flags & 1 != 0,
+            browse: listed.map(|listed| Browse {
+                listed,
+                selected: (selected as usize).min((count as usize).saturating_sub(1)),
+                confirming: flags & 2 != 0,
+            }),
+        }
+    }
 }
 
 /// Four stick axes in a word, a signed byte each: a dot on a ring a few
@@ -75,6 +130,8 @@ pub enum Saying {
     Nothing,
     /// The game has been stopped from the menu and its saves are on their way.
     Saving,
+    /// A save picked from the menu is being put back and the game started on it.
+    Loading,
 }
 
 const REBIND_WORDS: usize = 13;
@@ -250,6 +307,7 @@ impl Frame {
             pressed: [0; ROWS_MAX],
             sticks: [[0.0; 4]; ROWS_MAX],
             testing: false,
+            saves: Saves::default(),
         });
         put(menu.owner.to_ne_bytes());
         put(menu.rows.to_ne_bytes());
@@ -270,9 +328,14 @@ impl Frame {
             put(pack_sticks(sticks).to_ne_bytes());
         }
         put(u32::from(menu.testing).to_ne_bytes());
+        menu.saves
+            .encode()
+            .iter()
+            .for_each(|word| put(word.to_ne_bytes()));
         put(match self.saying {
             Saying::Nothing => 0u32,
             Saying::Saving => 1,
+            Saying::Loading => 2,
         }
         .to_ne_bytes());
         out
@@ -308,7 +371,8 @@ impl Frame {
             menu: (owner > 0).then(|| MenuFrame {
                 owner,
                 rows: u32::from_ne_bytes(word(menu + 1)).min(ROWS_MAX as u32),
-                focus: u32::from_ne_bytes(word(menu + 2)).min(ROWS_MAX as u32 + 1),
+                // A seat, the tester, the saves row, or Exit.
+                focus: u32::from_ne_bytes(word(menu + 2)).min(ROWS_MAX as u32 + 2),
                 carried: i32::from_ne_bytes(word(menu + 3)),
                 a_fill: fill(menu + 4),
                 b_fill: fill(menu + 5),
@@ -324,9 +388,13 @@ impl Frame {
                     unpack_sticks(u32::from_ne_bytes(word(menu + 8 + 3 * ROWS_MAX + i)))
                 }),
                 testing: u32::from_ne_bytes(word(menu + 8 + 4 * ROWS_MAX)) != 0,
+                saves: Saves::decode(std::array::from_fn(|i| {
+                    u32::from_ne_bytes(word(menu + 9 + 4 * ROWS_MAX + i))
+                })),
             }),
             saying: match u32::from_ne_bytes(word(menu + MENU_WORDS)) {
                 1 => Saying::Saving,
+                2 => Saying::Loading,
                 _ => Saying::Nothing,
             },
             rebind: (player > 0).then(|| Rebinding {
@@ -440,6 +508,14 @@ mod tests {
                 [0.0; 4],
             ],
             testing: true,
+            saves: Saves {
+                row: true,
+                browse: Some(Browse {
+                    listed: Listed::Ready(7),
+                    selected: 3,
+                    confirming: true,
+                }),
+            },
         };
         let with_menu = none.with_menu(Some(menu)).with_saying(Saying::Saving);
         let back = Frame::decode(&with_menu.encode()).expect("a frame");
@@ -461,6 +537,87 @@ mod tests {
             Some([0.0, 1.0, 0.0, -0.5]),
             "a stick off its travel is drawn at its edge or in the middle"
         );
+    }
+
+    #[test]
+    fn a_saves_list_crosses_the_pipe_in_each_of_its_states() {
+        let base = Frame::pack(1.0, 0.0, &[], &[]);
+        for browse in [
+            None,
+            Some(Browse {
+                listed: Listed::Loading,
+                selected: 0,
+                confirming: false,
+            }),
+            Some(Browse {
+                listed: Listed::Failed,
+                selected: 0,
+                confirming: false,
+            }),
+            Some(Browse {
+                listed: Listed::Ready(0),
+                selected: 0,
+                confirming: false,
+            }),
+            Some(Browse {
+                listed: Listed::Ready(12),
+                selected: 11,
+                confirming: false,
+            }),
+        ] {
+            let saves = Saves { row: true, browse };
+            let frame = base.with_menu(Some(MenuFrame {
+                saves,
+                ..menu_frame()
+            }));
+            let back = Frame::decode(&frame.encode())
+                .and_then(|f| f.menu)
+                .map(|m| m.saves);
+            assert_eq!(back, Some(saves));
+        }
+        let loading = base.with_saying(Saying::Loading);
+        assert_eq!(
+            Frame::decode(&loading.encode()).map(|f| f.saying),
+            Some(Saying::Loading)
+        );
+    }
+
+    #[test]
+    fn a_saves_list_past_its_end_or_in_no_state_is_drawn_safely() {
+        let frame = Frame::pack(1.0, 0.0, &[], &[]).with_menu(Some(menu_frame()));
+        let mut bytes = frame.encode();
+        let at = 4 * (SIZE / 4 - 1 - SAVES_WORDS);
+        // Ready, five saves, the cursor on the ninth.
+        bytes[at..at + 4].copy_from_slice(&(1u32 | 3 << 8).to_ne_bytes());
+        bytes[at + 4..at + 8].copy_from_slice(&5u32.to_ne_bytes());
+        bytes[at + 8..at + 12].copy_from_slice(&9u32.to_ne_bytes());
+        let browse = Frame::decode(&bytes)
+            .and_then(|f| f.menu)
+            .and_then(|m| m.saves.browse);
+        assert_eq!(browse.map(|b| b.selected), Some(4), "on the last of them");
+        bytes[at..at + 4].copy_from_slice(&(1u32 | 9 << 8).to_ne_bytes());
+        let browse = Frame::decode(&bytes)
+            .and_then(|f| f.menu)
+            .and_then(|m| m.saves.browse);
+        assert_eq!(browse, None, "a state there is none of is no list");
+    }
+
+    fn menu_frame() -> MenuFrame {
+        MenuFrame {
+            owner: 1,
+            rows: 1,
+            icons: [EMPTY_SEAT; ROWS_MAX],
+            focus: 0,
+            carried: 0,
+            a_fill: 0.0,
+            b_fill: 0.0,
+            off: 0,
+            console: 0,
+            pressed: [0; ROWS_MAX],
+            sticks: [[0.0; 4]; ROWS_MAX],
+            testing: false,
+            saves: Saves::default(),
+        }
     }
 
     #[test]

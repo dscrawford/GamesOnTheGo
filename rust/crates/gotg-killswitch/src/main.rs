@@ -25,8 +25,9 @@ use gotg_killswitch::bar::Bar;
 use gotg_killswitch::clones;
 use gotg_killswitch::consoles::{self, CONSOLES};
 use gotg_killswitch::departures::Departures;
-use gotg_killswitch::frame::{EMPTY_SEAT, Frame, MenuFrame, ROWS_MAX, Rebinding, Saying};
+use gotg_killswitch::frame::{self, EMPTY_SEAT, Frame, MenuFrame, ROWS_MAX, Rebinding, Saying};
 use gotg_killswitch::killswitch::{Chord, Input, Pad};
+use gotg_killswitch::loading;
 use gotg_killswitch::menu::{self, Focused, Menu, Row};
 use gotg_killswitch::native::Native;
 use gotg_killswitch::padlink::Link;
@@ -66,6 +67,9 @@ const MENU_HOLD_MS: u64 = 500;
 const MENU_CLOSE_SECONDS: f64 = 1.0;
 /// The longest the saves are waited on after the menu's Exit.
 const SAVE_SECONDS: f64 = 60.0;
+/// The longest the bar says a save is loading: the wrapper pushes, restores
+/// and starts the game again, and a game slow to start is not waited on.
+const RELOAD_SECONDS: f64 = 120.0;
 
 static STOP: AtomicBool = AtomicBool::new(false);
 
@@ -87,7 +91,10 @@ Both shoulders and A, held half a second, bring the menu down for that
 controller's player: the seated controllers (A rebinds one, A held
 moves it to another seat), the game's controller for everybody to try
 their buttons on (A starts the owner's own test, Select held half a
-second ends it), and Exit (A held half a second) -- which stops the game
+second ends it), for a game of its own saves played from `gotg play`
+(GOTG_SESSION_DIR) a save to load (A lists them, A on one asks, A held
+half a second loads it: the game starts again on it, everybody still
+seated), and Exit (A held half a second) -- which stops the game
 and, with --saves and --client, runs `CLIENT saves push ENV` on the way
 out. B held half a second closes it.
 
@@ -560,6 +567,13 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
     let mut native_holds: std::collections::HashMap<i32, (Pad, Pad, bool)> = std::collections::HashMap::new();
     let mut menu: Option<Menu> = None;
     let mut exiting = false;
+    // Loading a save from the menu: this play's session, the client listing
+    // the saves into it, and -- once one is picked -- the game being started
+    // again on it, the bar saying so until the wrapper has. See loading.rs.
+    let session = loading::Session::from_env();
+    let mut listing: Option<loading::Listing> = None;
+    let mut save_lines: Vec<loading::SaveLine> = Vec::new();
+    let mut reloading: Option<(f64, i32)> = None;
     let mut seat_icons: std::collections::HashMap<String, u8> = std::collections::HashMap::new();
     let console_index = consoles::for_platform(&options.platform);
     let console = &CONSOLES[console_index];
@@ -698,7 +712,14 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
             match who {
                 Some(owner) => {
                     let rows = seat_rows(&rebind, &seating, &mut seat_icons);
-                    menu = Some(Menu::open(owner, rows, &down));
+                    let opened = Menu::open(owner, rows, &down);
+                    // Only where the game can be started again: a session, a
+                    // wrapper that said which process is the game, a game of
+                    // its own saves, and a client to ask.
+                    let can_load = !options.client.is_empty()
+                        && loading::dedicated(&options.saves)
+                        && session.as_ref().and_then(loading::Session::game_pid).is_some();
+                    menu = Some(if can_load { opened.with_saves() } else { opened });
                     focused.clear();
                     send_focus(&mut link, &focused, owner, true);
                     if !options.quiet {
@@ -764,8 +785,46 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                         &serde_json::json!({"cmd": "port", "player": player, "open": open}).to_string(),
                     );
                 }
+                Some(menu::Action::ListSaves) => {
+                    if let Some(session) = &session {
+                        listing = Some(loading::Listing::start(
+                            &options.client,
+                            &options.saves,
+                            session,
+                            clock,
+                        ));
+                    }
+                }
+                Some(menu::Action::Load(at)) => {
+                    send_focus(&mut link, &focused, owner, false);
+                    menu = None;
+                    listing = None;
+                    reloading = load_save(options, session.as_ref(), save_lines.get(at), clock);
+                    if reloading.is_none() {
+                        bar.want_over(false, clock, MENU_CLOSE_SECONDS);
+                    }
+                }
                 None => {}
             }
+        }
+        if let (Some(running), Some(session)) = (listing.as_mut(), session.as_ref())
+            && let Some(listed) = running.poll(session, clock)
+        {
+            listing = None;
+            save_lines = session.lines();
+            if let Some(open) = menu.as_mut() {
+                open.saves_listed(listed.map(|_| save_lines.len()));
+            }
+        }
+        // Started again once the wrapper says a different process is the game.
+        if let Some((since, was)) = reloading
+            && (clock - since > RELOAD_SECONDS
+                || session
+                    .as_ref()
+                    .and_then(loading::Session::game_pid)
+                    .is_some_and(|pid| pid != was && procstat::alive(pid)))
+        {
+            reloading = None;
         }
 
         // Down while there is something to show, up when not. The painter
@@ -781,6 +840,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                     || pairing.nobody(clock)
                     || rebinding.is_some()
                     || menu.is_some()
+                    || reloading.is_some()
                     || exiting),
             clock,
         );
@@ -821,7 +881,13 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                     });
                     menu_frame(&view, console_index, console, &held)
                 }))
-                .with_saying(if exiting { Saying::Saving } else { Saying::Nothing })
+                .with_saying(if exiting {
+                    Saying::Saving
+                } else if reloading.is_some() {
+                    Saying::Loading
+                } else {
+                    Saying::Nothing
+                })
                 .with_rebind(rebinding.map(|view| {
                     // danstick's word while it walks; the seat's clone after.
                     let held = view.held.clone().unwrap_or_else(|| {
@@ -986,7 +1052,39 @@ fn menu_frame(
         pressed: std::array::from_fn(|at| held[at].bits(console.controls.iter().map(|control| control.id))),
         sticks: std::array::from_fn(|at| held[at].sticks),
         testing: view.testing,
+        saves: frame::Saves {
+            row: view.saves_row,
+            browse: view.saves,
+        },
     }
+}
+
+/// A save picked from the menu: named in the session, and the game -- the
+/// game alone -- stopped on a thread of its own, so the loop keeps the bar
+/// and the chord while it goes. The wrapper does the rest. Some((when, the
+/// game that was)) while that happens; None when there was nothing to do it
+/// with.
+fn load_save(
+    options: &Options,
+    session: Option<&loading::Session>,
+    line: Option<&loading::SaveLine>,
+    now: f64,
+) -> Option<(f64, i32)> {
+    let (session, line) = (session?, line?);
+    let game = session.game_pid()?;
+    if let Err(error) = session.request(&line.id) {
+        eprintln!("gotg-killswitch: could not ask for {}: {error}", line.id);
+        return None;
+    }
+    if !options.quiet {
+        eprintln!(
+            "gotg-killswitch: loading {} ({}); stopping {game}",
+            line.id, line.when
+        );
+    }
+    let (grace_ms, poll_ms) = (options.grace_ms, options.poll_ms);
+    std::thread::spawn(move || loading::stop_tree(game, grace_ms, poll_ms));
+    Some((now, game))
 }
 
 /// After the menu's Exit: `CLIENT saves push ENV`, waited on (up to a minute)

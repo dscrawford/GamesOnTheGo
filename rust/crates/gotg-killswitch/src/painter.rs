@@ -13,6 +13,8 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::time::Duration;
 
 use crate::frame::{self, Frame};
+use crate::loading::{SaveLine, Session};
+use crate::menu::Listed;
 use crate::overlay::Overlay;
 use crate::scene::{self, Drawing, Scene};
 
@@ -213,6 +215,9 @@ pub fn paint() -> i32 {
 
     let mut drawing = Drawing::default();
     let mut pending = Vec::with_capacity(frame::SIZE * 8);
+    let session = Session::from_env();
+    let mut saves: Vec<SaveLine> = Vec::new();
+    let mut saves_for: Option<usize> = None;
     loop {
         // Asleep until the kill switch sends something new: it sends only
         // when the picture changed, so an unchanged bar costs no redraws.
@@ -228,8 +233,19 @@ pub fn paint() -> i32 {
             break;
         }
         let Some(frame) = latest else { continue };
+        // The saves' words, from the session the client listed them into:
+        // read once a list is ready, again only when another one is.
+        match frame.menu.and_then(|menu| menu.saves.browse).map(|b| b.listed) {
+            Some(Listed::Ready(count)) if saves_for != Some(count) => {
+                saves = session.as_ref().map(Session::lines).unwrap_or_default();
+                saves_for = Some(count);
+            }
+            Some(Listed::Ready(_)) => {}
+            _ => saves_for = None,
+        }
         let (width, bar_height, panel_height) = overlay.size();
         let scene = Scene {
+            saves: &saves,
             panel_height,
             rebind: frame.rebind,
             menu: frame.menu,

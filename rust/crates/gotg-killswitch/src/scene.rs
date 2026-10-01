@@ -20,6 +20,8 @@
 use crate::consoles::CONSOLES;
 use crate::frame::{EMPTY_SEAT, MenuFrame, Rebinding, Saying};
 use crate::leaders;
+use crate::loading::SaveLine;
+use crate::menu::{Browse, Listed};
 use crate::shapes::{Colour, Mesh};
 use crate::text;
 use crate::theme;
@@ -65,6 +67,9 @@ pub struct Scene<'a> {
     pub saying: Saying,
     /// danstick has nobody seated and nobody joining.
     pub nobody: bool,
+    /// The saves the menu lists, as the client said them: read by the
+    /// painter from the session, never carried in a frame.
+    pub saves: &'a [SaveLine],
 }
 
 /// A controller's drawing, centred at (`cx`, `cy`) and `height` tall: shown
@@ -686,6 +691,8 @@ fn build_nobody(scene: &Scene, top: f32, drawing: &mut Drawing) {
 
 /// What the bar says while a game stopped from the menu is saving.
 pub const SAVING: &str = "Saving your game…";
+/// And while a save picked from the menu is put back and the game started.
+pub const LOADING: &str = "Loading your save…";
 
 /// A line (and perhaps a second, dimmer one) in a card as wide as the words.
 fn build_words(scene: &Scene, top: f32, first: &str, second: Option<&str>, drawing: &mut Drawing) {
@@ -725,11 +732,27 @@ pub const MENU_KEYS: &str =
 pub const TESTER_KEYS: &str = "A  try your buttons      hold B  close";
 pub const TESTING_KEYS: &str = "hold Select  stop trying";
 pub const EXIT_KEYS: &str = "hold A  exit      hold B  close";
+pub const SAVES_ROW_KEYS: &str = "A  see your saves      hold B  close";
+pub const BROWSE_KEYS: &str = "up / down  choose      A  load this one      B  back";
+pub const LOAD_KEYS: &str = "hold A  load      B  back";
+
+/// The saves row, and what its list says when it has no saves to show.
+pub const LOAD_ROW: &str = "Load a save";
+pub const LIST_LOADING: &str = "Looking for your saves…";
+pub const LIST_FAILED: &str = "The saves could not be listed.";
+pub const LIST_EMPTY: &str = "No saves yet: one is kept each time the game is closed.";
+/// Under the prompt: what becomes of the game as it is now.
+pub const KEPT: &str = "What you have now is kept, and can be loaded again from here.";
+/// Saves shown at once; the list scrolls to keep the chosen one among them.
+const SAVES_VISIBLE: usize = 5;
 
 /// Where the menu's parts sit, as fractions of the panel.
 const LINE_AT: f32 = 0.08;
 const TESTER_BAND: (f32, f32) = (0.15, 0.82);
 const EXIT_AT: f32 = 0.86;
+/// With a saves row: the tester gives up the room for it, above Exit.
+const TESTER_BAND_WITH_SAVES: (f32, f32) = (0.15, 0.74);
+const SAVES_AT: f32 = 0.79;
 const KEYS_AT: f32 = 0.94;
 
 /// The menu: the controllers in a line along the top -- where one stands is
@@ -742,22 +765,33 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
     let seats = (menu.rows as usize).min(menu.icons.len());
     let keys_size = panel * 0.034;
     let tester_row = seats;
-    let exit_row = seats + 1;
+    let saves_row = menu.saves.row.then_some(seats + 1);
+    let exit_row = seats + 1 + usize::from(menu.saves.row);
+    let browse = menu.saves.browse;
     let keys = if menu.testing {
         TESTING_KEYS
+    } else if let Some(browse) = browse {
+        if browse.confirming { LOAD_KEYS } else { BROWSE_KEYS }
     } else if menu.focus as usize == tester_row {
         TESTER_KEYS
+    } else if Some(menu.focus as usize) == saves_row {
+        SAVES_ROW_KEYS
     } else if menu.focus as usize == exit_row {
         EXIT_KEYS
     } else {
         MENU_KEYS
+    };
+    let band = if menu.saves.row {
+        TESTER_BAND_WITH_SAVES
+    } else {
+        TESTER_BAND
     };
     let label_size = panel * 0.04;
     let marker = label_size * 1.3;
     let layout = labelled_layout(
         scene,
         menu.console,
-        (top + panel * TESTER_BAND.0, top + panel * TESTER_BAND.1),
+        (top + panel * band.0, top + panel * band.1),
         marker * 2.4,
     );
     let slot = panel * 0.11;
@@ -782,7 +816,13 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
         over.arc(x, y, radius, radius * 0.3, 0.0, fill, ink, FEATHER);
     };
     build_line(menu, (cx, top + panel * LINE_AT), slot, drawing);
-    if menu.focus as usize == tester_row || menu.testing {
+    if let Some(browse) = browse.filter(|b| !b.confirming) {
+        // The list stands where the tester was, over the same band. Not under
+        // the prompt: words are drawn over every card, so they would show
+        // through it.
+        let area = (top + panel * band.0, top + panel * band.1);
+        build_saves_list(scene, menu, &browse, area, (cx, card_w), drawing);
+    } else if menu.focus as usize == tester_row || menu.testing {
         // The test is the owner's while it runs: lit in their colour.
         let lit = if menu.testing {
             player_colour(menu.owner).with_alpha(0.14)
@@ -792,10 +832,31 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
         let (w, h) = (layout.card_width.min(card_w) - label_size, layout.height * 1.4);
         drawing.under.rect(cx - w / 2.0, layout.cy - h / 2.0, w, h, lit);
     }
-    if let Some(console) = CONSOLES.get(menu.console as usize) {
+    if browse.is_none()
+        && let Some(console) = CONSOLES.get(menu.console as usize)
+    {
         build_tester(menu, console, &layout, marker, drawing);
     }
-    let on_exit = menu.focus as usize == exit_row && !menu.testing;
+    if saves_row.is_some() {
+        let size = panel * 0.04;
+        let y = top + panel * SAVES_AT;
+        let on = Some(menu.focus as usize) == saves_row && !menu.testing && browse.is_none();
+        if on {
+            let (w, h) = (text::width(LOAD_ROW, size) + size * 4.0, size * 1.8);
+            drawing
+                .under
+                .rect(cx - w / 2.0, y - h / 2.0, w, h, dim.with_alpha(0.18));
+        }
+        drawing.labels.push(Label {
+            text: LOAD_ROW.to_owned(),
+            x: cx,
+            y,
+            size,
+            colour: if on { Colour::rgb(theme::TEXT, 1.0) } else { dim },
+            align: Align::Centre,
+        });
+    }
+    let on_exit = menu.focus as usize == exit_row && !menu.testing && browse.is_none();
     let exit_size = panel * 0.045;
     let exit_y = top + panel * EXIT_AT;
     let exit_w = text::width("Exit game", exit_size);
@@ -813,6 +874,9 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
         colour: if on_exit { RED } else { dim },
         align: Align::Centre,
     });
+    if let Some(browse) = browse.filter(|b| b.confirming) {
+        build_prompt(scene, menu, &browse, top, drawing);
+    }
     if on_exit && menu.a_fill > 0.0 {
         let x = cx + exit_w / 2.0 + exit_size * 0.8;
         fill_ring(&mut drawing.over, x, exit_y, exit_size * 0.35, menu.a_fill, RED);
@@ -829,6 +893,141 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
     if menu.b_fill > 0.0 {
         let x = cx + text::width(keys, keys_size) / 2.0 + keys_size * 1.2;
         fill_ring(&mut drawing.over, x, keys_y, keys_size * 0.55, menu.b_fill, dim);
+    }
+}
+
+/// The saves, newest first, over `area` (top and bottom): a date as the
+/// picker says it and a line on where it was made, the chosen one lit. Or a
+/// line on why there are none to show.
+fn build_saves_list(
+    scene: &Scene,
+    menu: &MenuFrame,
+    browse: &Browse,
+    area: (f32, f32),
+    (cx, card_w): (f32, f32),
+    drawing: &mut Drawing,
+) {
+    let panel = scene.panel_height;
+    let dim = Colour::rgb(theme::TEXT_DIM, 1.0);
+    let ink = Colour::rgb(theme::TEXT, 1.0);
+    let heading = panel * 0.045;
+    drawing.labels.push(Label {
+        text: LOAD_ROW.to_owned(),
+        x: cx,
+        y: area.0 + heading * 0.6,
+        size: heading,
+        colour: ink,
+        align: Align::Centre,
+    });
+    let said = match browse.listed {
+        Listed::Loading => Some(LIST_LOADING),
+        Listed::Failed => Some(LIST_FAILED),
+        Listed::Ready(0) => Some(LIST_EMPTY),
+        Listed::Ready(_) if scene.saves.is_empty() => Some(LIST_LOADING),
+        Listed::Ready(_) => None,
+    };
+    if let Some(said) = said {
+        drawing.labels.push(Label {
+            text: said.to_owned(),
+            x: cx,
+            y: (area.0 + area.1) / 2.0,
+            size: panel * 0.035,
+            colour: dim,
+            align: Align::Centre,
+        });
+        return;
+    }
+    let count = scene.saves.len();
+    let selected = browse.selected.min(count - 1);
+    let first = selected
+        .saturating_sub(SAVES_VISIBLE / 2)
+        .min(count.saturating_sub(SAVES_VISIBLE));
+    let rows_top = area.0 + heading * 1.6;
+    let row_h = (area.1 - rows_top) / SAVES_VISIBLE as f32;
+    let (big, small) = (row_h * 0.36, row_h * 0.24);
+    let row_w = (card_w * 0.8).min(scene.width as f32 * 0.9);
+    let left = cx - row_w / 2.0;
+    for (slot, line) in scene.saves.iter().enumerate().skip(first).take(SAVES_VISIBLE) {
+        let y = rows_top + (slot - first) as f32 * row_h;
+        let lit = slot == selected;
+        if lit {
+            let colour = player_colour(menu.owner).with_alpha(0.22);
+            drawing
+                .under
+                .rect(left, y + row_h * 0.06, row_w, row_h * 0.88, colour);
+        }
+        drawing.labels.push(Label {
+            text: line.when.clone(),
+            x: left + big * 0.6,
+            y: y + row_h * 0.36,
+            size: big,
+            colour: ink,
+            align: Align::Left,
+        });
+        drawing.labels.push(Label {
+            text: line.detail.clone(),
+            x: left + big * 0.6,
+            y: y + row_h * 0.72,
+            size: small,
+            colour: if lit { ink } else { dim },
+            align: Align::Left,
+        });
+    }
+}
+
+/// Before a save is loaded, what loading it means: a card over the list,
+/// and the ring of the hold that does it.
+fn build_prompt(scene: &Scene, menu: &MenuFrame, browse: &Browse, top: f32, drawing: &mut Drawing) {
+    let Some(line) = scene.saves.get(browse.selected) else {
+        return;
+    };
+    let panel = scene.panel_height;
+    let cx = scene.width as f32 / 2.0;
+    let question = format!("Load the save from {}?", line.when);
+    let (big, small) = (panel * 0.05, panel * 0.032);
+    let wide = text::width(&question, big).max(text::width(KEPT, small)) + big * 2.0;
+    let (w, h) = (wide.min(scene.width as f32 * 0.94), panel * 0.3);
+    let y = top + panel * 0.33;
+    // In the owner's colour, as the lit save was: the panel's own would not
+    // stand out from the panel.
+    let tint = player_colour(menu.owner);
+    drawing.under.rect(cx - w / 2.0, y, w, h, tint.with_alpha(0.2));
+    drawing.labels.push(Label {
+        text: question.clone(),
+        x: cx,
+        y: y + h * 0.32,
+        size: big,
+        colour: Colour::rgb(theme::TEXT, 1.0),
+        align: Align::Centre,
+    });
+    drawing.labels.push(Label {
+        text: KEPT.to_owned(),
+        x: cx,
+        y: y + h * 0.62,
+        size: small,
+        colour: Colour::rgb(theme::TEXT_DIM, 1.0),
+        align: Align::Centre,
+    });
+    let ink = player_colour(menu.owner);
+    let (x, ring_y, radius) = (
+        cx + text::width(&question, big) / 2.0 + big,
+        y + h * 0.32,
+        big * 0.35,
+    );
+    drawing.over.arc(
+        x,
+        ring_y,
+        radius,
+        radius * 0.3,
+        0.0,
+        1.0,
+        ink.with_alpha(0.25),
+        FEATHER,
+    );
+    if menu.a_fill > 0.0 {
+        drawing
+            .over
+            .arc(x, ring_y, radius, radius * 0.3, 0.0, menu.a_fill, ink, FEATHER);
     }
 }
 
@@ -1049,6 +1248,10 @@ pub fn build(scene: &Scene, drawing: &mut Drawing) {
     let count = scene.joined.len() + scene.fractions.len();
     if scene.saying == Saying::Saving && scene.exit_progress <= 0.0 {
         build_words(scene, top, SAVING, None, drawing);
+        return;
+    }
+    if scene.saying == Saying::Loading && scene.exit_progress <= 0.0 {
+        build_words(scene, top, LOADING, None, drawing);
         return;
     }
     if scene.nobody && count == 0 && scene.exit_progress <= 0.0 {
@@ -1444,6 +1647,7 @@ mod tests {
                 pressed: [0; crate::frame::ROWS_MAX],
                 sticks: [[0.0; 4]; crate::frame::ROWS_MAX],
                 testing: false,
+                saves: crate::frame::Saves::default(),
             }),
             ..down(0.0)
         }
@@ -1478,6 +1682,113 @@ mod tests {
             (off.x - xs[1]).abs() < slot / 2.0 + 0.01,
             "under player three, whose port is off"
         );
+    }
+
+    fn lines() -> Vec<SaveLine> {
+        ["today, 21:10", "yesterday, 08:02", "Sep 20, 10:00"]
+            .iter()
+            .enumerate()
+            .map(|(at, when)| SaveLine {
+                id: format!("remote:{}", 3 - at),
+                when: (*when).to_owned(),
+                detail: format!("daniel-deck · saved to the service {at}"),
+            })
+            .collect()
+    }
+
+    fn with_saves(focus: u32, browse: Option<Browse>, lines: &[SaveLine]) -> Scene<'_> {
+        let mut scene = menu(focus, 0.0);
+        scene.saves = lines;
+        if let Some(frame) = scene.menu.as_mut() {
+            frame.saves = crate::frame::Saves { row: true, browse };
+        }
+        scene
+    }
+
+    fn texts(scene: &Scene) -> Vec<String> {
+        let mut drawing = Drawing::default();
+        build(scene, &mut drawing);
+        drawing.labels.iter().map(|l| l.text.clone()).collect()
+    }
+
+    #[test]
+    fn a_game_with_its_own_saves_has_a_row_to_load_one() {
+        // Three seats: the tester is 3, the saves 4, Exit 5.
+        let said = texts(&with_saves(4, None, &[]));
+        assert!(said.iter().any(|t| t == LOAD_ROW), "{said:?}");
+        assert!(said.iter().any(|t| t == SAVES_ROW_KEYS), "{said:?}");
+        assert!(said.iter().any(|t| t == "Exit game"));
+        assert!(
+            !texts(&menu(0, 0.0)).iter().any(|t| t == LOAD_ROW),
+            "and none without"
+        );
+    }
+
+    #[test]
+    fn the_saves_list_says_when_and_where_each_was_made() {
+        let lines = lines();
+        let browse = Browse {
+            listed: Listed::Ready(3),
+            selected: 1,
+            confirming: false,
+        };
+        let said = texts(&with_saves(4, Some(browse), &lines));
+        for line in &lines {
+            assert!(said.contains(&line.when), "{} missing from {said:?}", line.when);
+            assert!(said.contains(&line.detail));
+        }
+        assert!(said.iter().any(|t| t == BROWSE_KEYS));
+        assert!(
+            !said.iter().any(|t| t == "A (bottom face)"),
+            "the list stands where the tester was"
+        );
+    }
+
+    #[test]
+    fn the_prompt_names_the_save_and_what_happens_to_the_one_here() {
+        let lines = lines();
+        let browse = Browse {
+            listed: Listed::Ready(3),
+            selected: 2,
+            confirming: true,
+        };
+        let mut scene = with_saves(4, Some(browse), &lines);
+        scene.menu.as_mut().expect("a menu").a_fill = 0.5;
+        let mut drawing = Drawing::default();
+        build(&scene, &mut drawing);
+        let said: Vec<&str> = drawing.labels.iter().map(|l| l.text.as_str()).collect();
+        assert!(said.contains(&"Load the save from Sep 20, 10:00?"), "{said:?}");
+        assert!(said.contains(&KEPT));
+        assert!(said.contains(&LOAD_KEYS));
+        assert!(!drawing.over.vertices.is_empty(), "the hold's ring fills");
+    }
+
+    #[test]
+    fn a_list_still_coming_failed_or_empty_says_so() {
+        for (listed, want) in [
+            (Listed::Loading, LIST_LOADING),
+            (Listed::Failed, LIST_FAILED),
+            (Listed::Ready(0), LIST_EMPTY),
+        ] {
+            let browse = Browse {
+                listed,
+                selected: 0,
+                confirming: false,
+            };
+            let said = texts(&with_saves(4, Some(browse), &[]));
+            assert!(said.iter().any(|t| t == want), "{want} missing from {said:?}");
+        }
+    }
+
+    #[test]
+    fn the_bar_says_a_save_is_loading() {
+        let scene = Scene {
+            saying: Saying::Loading,
+            ..down(0.0)
+        };
+        let mut drawing = Drawing::default();
+        build(&scene, &mut drawing);
+        assert!(drawing.labels.iter().any(|l| l.text == LOADING));
     }
 
     #[test]

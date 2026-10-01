@@ -316,6 +316,31 @@ mod tests {
     }
 
     #[test]
+    fn stopping_the_game_reaches_what_it_started_and_nothing_beside_it() {
+        // A game that started a helper of its own, and a process beside it
+        // that is not the game's -- the wrapper's other business.
+        let mut game = Command::new("sh")
+            .args(["-c", "sleep 30 & echo $! ; wait"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("sh runs");
+        let mut beside = Command::new("sleep").arg("30").spawn().expect("sleep runs");
+        let mut helper = String::new();
+        std::io::BufRead::read_line(
+            &mut std::io::BufReader::new(game.stdout.take().expect("piped")),
+            &mut helper,
+        )
+        .expect("the helper's pid");
+        let helper: i32 = helper.trim().parse().expect("a pid");
+        stop_tree(game.id() as i32, 2000, 20);
+        let _ = game.wait();
+        assert!(!crate::procstat::alive(helper), "the helper went with the game");
+        assert!(crate::procstat::alive(beside.id() as i32), "and nothing else did");
+        let _ = beside.kill();
+        let _ = beside.wait();
+    }
+
+    #[test]
     fn a_stat_lines_parent_is_read_past_a_name_with_parentheses() {
         assert_eq!(parent("4242 (dolphin-emu) S 4200 4242 4242 0 -1"), Some(4200));
         assert_eq!(parent("77 (a) Z 1 1) S 9 77"), Some(9));

@@ -13,6 +13,7 @@ pub mod frame;
 pub mod icons;
 pub mod killswitch;
 pub mod leaders;
+pub mod loading;
 pub mod menu;
 pub mod native;
 pub mod overlay;

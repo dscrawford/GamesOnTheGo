@@ -23,10 +23,16 @@
 //!   also drive this menu; A on the controller starts a test, and from then
 //!   everything they press is only theirs to try, B included, until Select
 //!   held for half a second hands the menu back.
+//! - **Load a save**, for a game that keeps its saves to itself: A lists them
+//!   (the client is asked, `gotg saves list --lines`), up and down choose, A
+//!   asks whether to load the one chosen, and A held for half a second loads
+//!   it -- the game stops, what was played is pushed, the save is put back and
+//!   the game starts again with everybody still in their seats. B steps back
+//!   out, one level at a time.
 //! - **Exit**, below that, which takes A held for half a second: the game is
 //!   stopped, and its saves pushed on the way out.
 //!
-//! Down and up step between the three. B held for half a second closes the
+//! Down and up step between them. B held for half a second closes the
 //! menu, and the bar slides away over a second.
 //!
 //! A button already down when the menu opened -- the A of the chord that
@@ -43,6 +49,8 @@ use std::collections::BTreeSet;
 pub const GRAB_SECONDS: f64 = 0.5;
 /// Held this long on Exit, A stops the game.
 pub const EXIT_SECONDS: f64 = 0.5;
+/// Held this long on the prompt, A loads the save chosen.
+pub const LOAD_SECONDS: f64 = 0.5;
 /// Held this long anywhere, B closes the menu.
 pub const CLOSE_SECONDS: f64 = 0.5;
 /// Held this long while testing, Select gives the menu back.
@@ -73,6 +81,28 @@ pub enum Action {
         player: i32,
         open: bool,
     },
+    /// The saves are wanted: the loop asks the client and says how many with
+    /// `saves_listed`.
+    ListSaves,
+    /// Load the save at this place in the list.
+    Load(usize),
+}
+
+/// The saves list, while it is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Browse {
+    pub listed: Listed,
+    pub selected: usize,
+    /// The prompt is up: A held loads, B steps back to the list.
+    pub confirming: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Listed {
+    Loading,
+    /// The client could not say.
+    Failed,
+    Ready(usize),
 }
 
 /// Where the cursor is, top to bottom.
@@ -80,6 +110,7 @@ pub enum Action {
 enum Stop {
     Line,
     Tester,
+    Saves,
     Exit,
 }
 
@@ -120,6 +151,9 @@ pub struct Menu {
     owner_seen: bool,
     owner_gone: bool,
     done: bool,
+    /// The game keeps its saves to itself, so a save can be loaded.
+    offer_saves: bool,
+    browse: Option<Browse>,
 }
 
 /// What the painter needs of the menu.
@@ -136,6 +170,10 @@ pub struct View {
     /// Select hold that stops the test.
     pub b_fill: f32,
     pub testing: bool,
+    /// There is a saves row, between the tester and Exit.
+    pub saves_row: bool,
+    /// The saves list, while it is open.
+    pub saves: Option<Browse>,
 }
 
 impl Menu {
@@ -159,8 +197,25 @@ impl Menu {
             owner_seen: false,
             owner_gone: false,
             done: false,
+            offer_saves: false,
+            browse: None,
         }
         .with_owner_checked()
+    }
+
+    /// With a saves row: for a game whose saves are its own.
+    pub fn with_saves(mut self) -> Self {
+        self.offer_saves = true;
+        self
+    }
+
+    /// What the client said: how many saves, or None when it could not say.
+    pub fn saves_listed(&mut self, count: Option<usize>) {
+        if let Some(browse) = &mut self.browse {
+            browse.listed = count.map_or(Listed::Failed, Listed::Ready);
+            browse.selected = 0;
+            browse.confirming = false;
+        }
     }
 
     fn with_owner_checked(mut self) -> Self {
@@ -194,8 +249,13 @@ impl Menu {
         match self.stop {
             Stop::Line if !self.rows.is_empty() => self.along.min(self.rows.len() - 1),
             Stop::Line | Stop::Tester => self.tester_row(),
+            Stop::Saves => self.saves_row(),
             Stop::Exit => self.exit_row(),
         }
+    }
+
+    fn saves_row(&self) -> usize {
+        self.rows.len() + 1
     }
 
     fn tester_row(&self) -> usize {
@@ -211,7 +271,7 @@ impl Menu {
     }
 
     fn exit_row(&self) -> usize {
-        self.rows.len() + 1
+        self.rows.len() + 1 + usize::from(self.offer_saves)
     }
 
     fn seated(&self, at: usize) -> bool {
@@ -232,6 +292,9 @@ impl Menu {
         if self.testing {
             self.test(down, now);
             return None;
+        }
+        if self.browse.is_some() {
+            return self.browse_tick(down, now);
         }
         let live: BTreeSet<&String> = down.iter().filter(|c| !self.ignored.contains(*c)).collect();
         let pressed = |names: &[&str], last: &BTreeSet<String>| {
@@ -281,14 +344,17 @@ impl Menu {
                 let last = self.rows.len() as i32 - 1;
                 self.along = (self.focus() as i32 + step).clamp(0, last) as usize;
             }
+            let saves = self.offer_saves;
             if down_pressed {
                 self.stop = match self.stop {
                     Stop::Line => Stop::Tester,
-                    Stop::Tester | Stop::Exit => Stop::Exit,
+                    Stop::Tester if saves => Stop::Saves,
+                    Stop::Tester | Stop::Saves | Stop::Exit => Stop::Exit,
                 };
             } else if up {
                 self.stop = match self.stop {
-                    Stop::Exit => Stop::Tester,
+                    Stop::Exit if saves => Stop::Saves,
+                    Stop::Exit | Stop::Saves => Stop::Tester,
                     Stop::Tester | Stop::Line => Stop::Line,
                 };
             }
@@ -332,6 +398,16 @@ impl Menu {
                     self.start_test(down);
                     return action;
                 }
+                if !self.a_used && self.stop == Stop::Saves {
+                    self.a_since = None;
+                    self.b_since = None;
+                    self.browse = Some(Browse {
+                        listed: Listed::Loading,
+                        selected: 0,
+                        confirming: false,
+                    });
+                    return Some(Action::ListSaves);
+                }
                 let tapped = !self.a_used && self.carried.is_none() && self.seated(self.focus());
                 self.a_since = None;
                 self.carried = None;
@@ -343,6 +419,64 @@ impl Menu {
             _ => {}
         }
         action
+    }
+
+    /// The saves list: up and down choose, A asks, A held loads, B steps
+    /// back. Nothing else is read, B's hold to close included -- a tap of B
+    /// here is a step back, and must not also be the start of a close.
+    fn browse_tick(&mut self, down: &BTreeSet<String>, now: f64) -> Option<Action> {
+        let live: BTreeSet<&String> = down.iter().filter(|c| !self.ignored.contains(*c)).collect();
+        let pressed = |names: &[&str], last: &BTreeSet<String>| {
+            names
+                .iter()
+                .any(|name| live.iter().any(|c| c == name) && !last.contains(*name))
+        };
+        let up = pressed(&UP, &self.last);
+        let down_pressed = pressed(&DOWN, &self.last);
+        let b = pressed(&["b"], &self.last);
+        let a_pressed = pressed(&["a"], &self.last);
+        let a_down = live.iter().any(|c| *c == "a");
+        self.last = down.clone();
+        let browse = self.browse.as_mut()?;
+
+        if b {
+            self.a_since = None;
+            if browse.confirming {
+                browse.confirming = false;
+            } else {
+                self.browse = None;
+            }
+            return None;
+        }
+        let Listed::Ready(count) = browse.listed else {
+            self.a_since = None;
+            return None;
+        };
+        if count == 0 {
+            return None;
+        }
+        if !browse.confirming {
+            if down_pressed {
+                browse.selected = (browse.selected + 1).min(count - 1);
+            } else if up {
+                browse.selected = browse.selected.saturating_sub(1);
+            } else if a_pressed {
+                browse.confirming = true;
+                // This press opened the prompt; the load takes a press of its own.
+                self.ignored.insert("a".to_owned());
+            }
+            return None;
+        }
+        match (a_down, self.a_since) {
+            (true, None) => self.a_since = Some(now),
+            (true, Some(since)) if now - since >= LOAD_SECONDS => {
+                self.done = true;
+                return Some(Action::Load(browse.selected));
+            }
+            (false, _) => self.a_since = None,
+            _ => {}
+        }
+        None
     }
 
     /// The owner's buttons are theirs to try: nothing is read but Select,
@@ -371,6 +505,13 @@ impl Menu {
     }
 
     pub fn view(&self, now: f64) -> View {
+        if let Some(browse) = self.browse {
+            let a_fill = match self.a_since {
+                Some(since) if browse.confirming => ((now - since) / LOAD_SECONDS).clamp(0.0, 1.0) as f32,
+                _ => 0.0,
+            };
+            return self.view_with(a_fill, now);
+        }
         let a_fill = match self.a_since {
             Some(since) if !self.a_used => {
                 let span = if self.focus() == self.exit_row() {
@@ -404,6 +545,8 @@ impl Menu {
                 })
             },
             testing: self.testing,
+            saves_row: self.offer_saves,
+            saves: self.browse,
         }
     }
 }
@@ -555,6 +698,138 @@ mod tests {
         // The chord is let go.
         assert_eq!(menu.tick(&held(&[]), 0.0), None);
         menu
+    }
+
+    // --- loading a save ------------------------------------------------------
+
+    fn with_saves(owner: i32) -> Menu {
+        let mut menu =
+            Menu::open(owner, room(2, 4), &held(&["a", "leftshoulder", "rightshoulder"])).with_saves();
+        assert_eq!(menu.tick(&held(&[]), 0.0), None);
+        menu
+    }
+
+    /// Down from the line to the saves row: the tester, then the saves.
+    fn to_saves(menu: &mut Menu) {
+        tap(menu, "dpdown", 0.1);
+        tap(menu, "dpdown", 0.2);
+    }
+
+    #[test]
+    fn the_saves_row_is_between_the_tester_and_exit_only_when_offered() {
+        let mut menu = with_saves(1);
+        to_saves(&mut menu);
+        let view = menu.view(0.3);
+        assert!(view.saves_row);
+        assert_eq!(view.focus, 3, "two seats, the tester, then the saves");
+        tap(&mut menu, "dpdown", 0.4);
+        assert_eq!(menu.view(0.5).focus, 4, "and Exit under it");
+
+        let mut plain = opened(1);
+        to_saves(&mut plain);
+        assert!(!plain.view(0.3).saves_row);
+        assert_eq!(
+            plain.view(0.3).focus,
+            3,
+            "no saves row: the second step down is Exit"
+        );
+    }
+
+    #[test]
+    fn a_on_the_saves_row_asks_for_the_list_and_shows_it_loading() {
+        let mut menu = with_saves(1);
+        to_saves(&mut menu);
+        menu.tick(&held(&["a"]), 0.3);
+        assert_eq!(menu.tick(&held(&[]), 0.32), Some(Action::ListSaves));
+        assert_eq!(
+            menu.view(0.4).saves,
+            Some(Browse {
+                listed: Listed::Loading,
+                selected: 0,
+                confirming: false
+            })
+        );
+    }
+
+    fn browsing(count: usize) -> Menu {
+        let mut menu = with_saves(1);
+        to_saves(&mut menu);
+        tap(&mut menu, "a", 0.3);
+        menu.saves_listed(Some(count));
+        menu
+    }
+
+    #[test]
+    fn up_and_down_walk_the_saves_and_stop_at_the_ends() {
+        let mut menu = browsing(3);
+        tap(&mut menu, "dpdown", 0.5);
+        tap(&mut menu, "dpdown", 0.6);
+        tap(&mut menu, "dpdown", 0.7);
+        assert_eq!(menu.view(0.8).saves.expect("the list is open").selected, 2);
+        tap(&mut menu, "dpup", 0.9);
+        assert_eq!(menu.view(1.0).saves.expect("the list is open").selected, 1);
+    }
+
+    #[test]
+    fn a_asks_first_and_a_held_half_a_second_loads() {
+        let mut menu = browsing(3);
+        tap(&mut menu, "dpdown", 0.5);
+        tap(&mut menu, "a", 0.6);
+        assert!(
+            menu.view(0.7).saves.expect("the list is open").confirming,
+            "the prompt, not the load"
+        );
+        let fired = hold(&mut menu, &["a"], 0.8, 1.0);
+        assert!(fired.is_empty(), "under half a second it is not yet");
+        assert!(menu.view(1.0).a_fill > 0.0, "the ring fills while it is held");
+        let fired = hold(&mut menu, &["a"], 1.05, 1.4);
+        assert_eq!(fired, [Action::Load(1)], "the save under the cursor, once");
+    }
+
+    #[test]
+    fn b_steps_back_from_the_prompt_then_from_the_list() {
+        let mut menu = browsing(2);
+        tap(&mut menu, "a", 0.5);
+        tap(&mut menu, "b", 0.6);
+        let saves = menu.view(0.7).saves.expect("the list is open");
+        assert!(!saves.confirming, "out of the prompt, still in the list");
+        tap(&mut menu, "b", 0.8);
+        assert_eq!(menu.view(0.9).saves, None, "out of the list, the menu still down");
+        assert_eq!(menu.view(0.9).focus, 3, "on the saves row it was opened from");
+        assert!(
+            hold(&mut menu, &["b"], 1.0, 1.2).is_empty(),
+            "a tap to step back is not a hold to close"
+        );
+    }
+
+    #[test]
+    fn nothing_to_load_while_the_list_is_loading_failed_or_empty() {
+        for listed in [None, Some(0)] {
+            let mut menu = with_saves(1);
+            to_saves(&mut menu);
+            tap(&mut menu, "a", 0.3);
+            menu.saves_listed(listed);
+            tap(&mut menu, "a", 0.5);
+            assert!(hold(&mut menu, &["a"], 0.6, 1.5).is_empty());
+            assert!(!menu.view(1.5).saves.expect("the list is open").confirming);
+        }
+        let mut loading = with_saves(1);
+        to_saves(&mut loading);
+        tap(&mut loading, "a", 0.3);
+        tap(&mut loading, "a", 0.5);
+        assert!(hold(&mut loading, &["a"], 0.6, 1.5).is_empty());
+    }
+
+    #[test]
+    fn the_list_shows_failed_when_the_client_could_not_say() {
+        let mut menu = with_saves(1);
+        to_saves(&mut menu);
+        tap(&mut menu, "a", 0.3);
+        menu.saves_listed(None);
+        assert_eq!(
+            menu.view(0.4).saves.expect("the list is open").listed,
+            Listed::Failed
+        );
     }
 
     #[test]
