@@ -348,6 +348,66 @@ def test_no_token_is_a_401_with_no_route_shape_leaked(service):
     assert status == 401
 
 
+# --- the catalog as a flake input ---------------------------------------------
+#
+# A library flake pins the catalog as an input, and Nix authenticates a fetch
+# only through its netrc-file, which sends HTTP Basic. So the token is taken as
+# a Basic password -- on the catalog's read alone.
+
+
+def basic(url, password: str, user: str = "gotg"):
+    import base64
+
+    request = urllib.request.Request(url)
+    request.add_header("Authorization", "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode())
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, json.loads(response.read() or b"{}")
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read() or b"{}")
+
+
+def test_the_catalog_answers_a_token_sent_as_a_basic_password(service, library):
+    call(f"{service}/catalog/n64/usa.zelda", method="PUT", token=INDEX, body=entry(library))
+    status, view = basic(f"{service}/catalog", CLIENT)
+    assert status == 200
+    assert view["games"][0]["id"] == "usa.zelda"
+    assert basic(f"{service}/catalog", CLIENT, user="anybody")[0] == 200, "the user part is not read"
+
+
+def test_a_wrong_basic_password_is_a_401(service):
+    assert basic(f"{service}/catalog", "not-the-token")[0] == 401
+
+
+def test_basic_is_the_catalog_read_alone(service, library):
+    # Not a second way into everything: writing the catalog, its full view
+    # with paths, and every other route stay bearer-only.
+    request = urllib.request.Request(f"{service}/catalog/n64/usa.zelda", data=b"{}", method="PUT")
+    import base64
+
+    request.add_header("Authorization", "Basic " + base64.b64encode(f"gotg:{INDEX}".encode()).decode())
+    try:
+        urllib.request.urlopen(request, timeout=10)
+        status = 200
+    except urllib.error.HTTPError as error:
+        status = error.code
+    assert status == 401
+    assert basic(f"{service}/catalog?full=1", INDEX)[0] in (401, 403)
+    assert basic(f"{service}/auth/whoami", CLIENT)[0] == 401
+
+
+def test_a_malformed_basic_header_is_a_401_not_an_error(service):
+    for header in ("Basic", "Basic !!!not-base64", "Basic " + "Z290Zw==", "Basic \xff"):
+        request = urllib.request.Request(f"{service}/catalog")
+        request.add_header("Authorization", header)
+        try:
+            urllib.request.urlopen(request, timeout=10)
+            status = 200
+        except urllib.error.HTTPError as error:
+            status = error.code
+        assert status == 401, header
+
+
 def test_a_service_without_a_catalog_says_so():
     config = Config(token=CLIENT, index_token=INDEX)
     server = make_server("127.0.0.1", free_port(), config)

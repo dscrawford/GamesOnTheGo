@@ -33,6 +33,8 @@ has.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -444,8 +446,29 @@ class Handler(BaseHTTPRequestHandler):
         # unauthenticated caller would otherwise crash the thread instead of
         # earning its 401.
         header = self.headers.get("Authorization", "")
-        token = header[len("Bearer ") :] if header.startswith("Bearer ") else ""
-        return token.encode("latin-1", "replace")
+        if header.startswith("Bearer "):
+            return header[len("Bearer ") :].encode("latin-1", "replace")
+        if header.startswith("Basic ") and self._basic_allowed():
+            return self._basic_password(header[len("Basic ") :])
+        return b""
+
+    def _basic_allowed(self) -> bool:
+        """The catalog's client read, and nothing else. A library flake pins
+        the catalog as an input, and Nix authenticates a fetch only through
+        its netrc-file -- HTTP Basic. Everywhere else a token is a bearer."""
+        parts = urllib.parse.urlsplit(self.path)
+        return self.command == "GET" and parts.path == "/catalog" and not parts.query
+
+    @staticmethod
+    def _basic_password(encoded: str) -> bytes:
+        """The password of `user:password`, which is where netrc puts the
+        token; the user is not read. Anything malformed is no token at all."""
+        try:
+            decoded = base64.b64decode(encoded.strip(), validate=True)
+        except (ValueError, binascii.Error):
+            return b""
+        _, sep, password = decoded.partition(b":")
+        return password if sep else b""
 
     def _authenticated(self) -> bool:
         return self._principal() is not None
