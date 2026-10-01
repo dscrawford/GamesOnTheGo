@@ -101,7 +101,7 @@ choosing one the lock does not have yet updates the `catalog` input first.
 |---|---|---|
 | 0 | this document | -- |
 | 1 | catalog as Nix data: Basic auth on `/catalog`; `gotg.lib.catalog`; id → environment in Nix | service tests; `lib.runTests`; Nix and bash resolvers agree on a fixture catalog |
-| 2 | `gotg-launch`: the play path from a JSON spec, minus environment building; `gotg play` becomes a wrapper over it | bats moved over; QA through `gotg play` |
+| 2 | `gotg launch --spec`: the play path from a JSON spec, minus environment building; `gotg play` shares it (`play_launch`) | bats moved over; QA through `gotg play` |
 | 3 | per-game outputs from `mkLibrary`, variants, unique-id aliases, laziness | an eval check that one game forces no other; dry runs; QA through an attribute |
 | 4 | the library flake template, registry, netrc for the catalog | a second library against the test service |
 | 5 | picker, Steam, QA and `#update` on per-game roots | picker tests; Steam bats; controller e2e; QA desktop and `--machine deck`; the Deck |
