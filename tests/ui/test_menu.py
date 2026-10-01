@@ -265,3 +265,32 @@ def test_a_game_on_its_way_offers_to_stop_rather_than_start_again():
     verbs = [verb for _, verb in m.actions]
     assert verbs[:2] == ["play", "cancel-install"]
     assert "install" not in verbs
+
+
+# --- going back to a save ---------------------------------------------------
+
+
+def test_a_game_with_its_own_saves_offers_them_under_play():
+    m = Menu(game(), tile_index=0, installed=True, saves=frozenset({None}))
+    assert [verb for _, verb in m.actions][:2] == ["play", "saves"]
+    m.move(1)
+    assert m.confirm() == "saves"
+
+
+def test_no_saves_row_for_a_game_sharing_its_platforms_saves():
+    m = Menu(game(), tile_index=0, installed=True)
+    assert "saves" not in [verb for _, verb in m.actions]
+
+
+def test_no_saves_row_for_a_game_that_is_not_here():
+    m = Menu(game(), tile_index=0, saves=frozenset({None}))
+    assert "saves" not in [verb for _, verb in m.actions]
+
+
+def test_the_saves_row_follows_the_chosen_mod():
+    # Each mod is its own environment: the row is there for the ones that
+    # keep their saves to themselves, whatever the plain game does.
+    m = Menu(game(), tile_index=0, installed=True, variants=("rando", "coop"), saves=frozenset({"rando"}))
+    assert "saves" not in [verb for _, verb in m.actions]
+    m.choose("variant:rando")
+    assert "saves" in [verb for _, verb in m.actions]

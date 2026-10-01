@@ -40,6 +40,9 @@ from .recent import Recent
 from .saves_choice import HERE, REMOTE, Choice
 from .saves_choice import check as check_saves
 from .saves_choice import when as saves_when
+from .saves_draw import draw_saves
+from .saves_list import Saves, has_own_saves
+from .saves_list import fetch as fetch_saves
 from .storage import Storage, human
 from .variants import variants_for
 from .versions import forget as forget_versions
@@ -876,6 +879,10 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     checking: Future | None = None
     starting: tuple | None = None  # (game, verb, variant, version) waiting on the check
     choice: Choice | None = None
+    # The Saves screen a game's menu opens, and its list on the same worker:
+    # the client bundles and hashes to say which save is the one here.
+    saves: Saves | None = None
+    listing: Future | None = None
     restarting: Future | None = None
     # The space bar: tapped it opens the menu as it always did; held, danstick
     # seats the keyboard and the release is nothing. Decided on release.
@@ -890,6 +897,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     prepare_failed = False
     # What happens when the loader succeeds: exec the verb, or come back here.
     after_prepare: str | None = None
+    # The game a restore was for, to start once it is done.
+    restoring: tuple | None = None
     running = True
 
     def start(game: Game, verb: str, variant: str | None, version: str | None) -> None:
@@ -903,9 +912,26 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
         starting = (game, verb, variant, version)
         checking = saves_asker.submit(check_saves, game, variant)
 
+    def menu_for(game: Game) -> Menu:
+        variants = variants_for(game)
+        return Menu(
+            game,
+            state.selected,
+            browser.is_installed(game),
+            variants,
+            version_names(versions_for(game)),
+            columns=browser.columns,
+            installing=installs.running(game.key),
+            saves=frozenset(v for v in (None, *variants) if has_own_saves(game, v)),
+        )
+
     def pick(game: Game | None, verb: str = "play", variant: str | None = None, version: str | None = None) -> None:
-        nonlocal chosen, running, preparer, after_prepare, storage
+        nonlocal chosen, running, preparer, after_prepare, storage, saves, listing
         if game is None:
+            return
+        if verb == "saves":
+            saves = Saves.open(game, variant, version)
+            listing = saves_asker.submit(fetch_saves, game, variant)
             return
         if verb == "storage":
             storage = Storage()
@@ -1055,6 +1081,35 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         preparer = Preparer(choice.game, ["saves", "keep", choice.selected], choice.variant)
                         after_prepare = "kept"
                         choice = None
+                    continue
+
+                # The Saves screen: up and down, A twice to load, B to step back.
+                if saves is not None:
+                    if (
+                        event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_b)
+                    ) or pads.button(event) == pads.B:
+                        saves = saves.press_b()
+                        if saves is None:
+                            listing = None
+                        continue
+                    step = pads.direction(event)
+                    if event.type == pygame.KEYDOWN and event.key in (pygame.K_UP, pygame.K_DOWN):
+                        step = (0, -1 if event.key == pygame.K_UP else 1)
+                    if step and step[1]:
+                        saves = saves.move(step[1])
+                    elif (
+                        event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER)
+                    ) or pads.button(event) == pads.A:
+                        saves, entry = saves.press_a()
+                        if entry is not None:
+                            # Through the loader, which shows the client
+                            # archiving and restoring; the game starts after.
+                            # No version: `restore` takes none, and the play
+                            # that follows gets it from `restoring`.
+                            restoring = (saves.game, saves.variant, saves.version)
+                            preparer = Preparer(saves.game, ["saves", "restore", entry.id], saves.variant)
+                            after_prepare = "restored"
+                            saves, listing = None, None
                     continue
 
                 # The storage screen owns its input: a list to walk, three
@@ -1262,15 +1317,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         space.down(time.monotonic())
                     elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                         if state.game is not None:
-                            menu = Menu(
-                                state.game,
-                                state.selected,
-                                browser.is_installed(state.game),
-                                variants_for(state.game),
-                                version_names(versions_for(state.game)),
-                                columns=browser.columns,
-                                installing=installs.running(state.game.key),
-                            )
+                            menu = menu_for(state.game)
                     elif event.key == pygame.K_i:
                         browser.toggle_installed()
                     elif event.key == pygame.K_s:
@@ -1292,15 +1339,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         # already put the cursor there, so this cannot launch
                         # something the click was not on.
                         if over is not None and state.select(over):
-                            menu = Menu(
-                                state.game,
-                                state.selected,
-                                browser.is_installed(state.game),
-                                variants_for(state.game),
-                                version_names(versions_for(state.game)),
-                                columns=browser.columns,
-                                installing=installs.running(state.game.key),
-                            )
+                            menu = menu_for(state.game)
                     # No button 4/5 here: SDL2 reports a wheel as MOUSEWHEEL *and*
                     # as those two for compatibility, so handling both turns the
                     # page twice for one scroll.
@@ -1309,15 +1348,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     # finished has already seated the keyboard and this is
                     # just the key coming back up.
                     if space.up(time.monotonic()) and state.game is not None:
-                        menu = Menu(
-                            state.game,
-                            state.selected,
-                            browser.is_installed(state.game),
-                            variants_for(state.game),
-                            version_names(versions_for(state.game)),
-                            columns=browser.columns,
-                            installing=installs.running(state.game.key),
-                        )
+                        menu = menu_for(state.game)
                 elif event.type == pygame.MOUSEWHEEL:
                     browser.grid.turn(-1 if event.y > 0 else 1)
                 elif pads.direction(event) is not None:
@@ -1329,15 +1360,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     pressed = pads.button(event)
                     if pressed == pads.A:
                         if state.game is not None:
-                            menu = Menu(
-                                state.game,
-                                state.selected,
-                                browser.is_installed(state.game),
-                                variants_for(state.game),
-                                version_names(versions_for(state.game)),
-                                columns=browser.columns,
-                                installing=installs.running(state.game.key),
-                            )
+                            menu = menu_for(state.game)
                     elif pressed == pads.B:
                         running = False
                     elif pressed == pads.LB:
@@ -1379,6 +1402,15 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         choice = Choice.open(game, variant, version, found)
                     else:
                         chosen, running = starting, False
+            if listing is not None and listing.done():
+                try:
+                    found_saves = listing.result()
+                except Exception as error:  # noqa: BLE001 - a list that fails says so on screen
+                    trace.say("saves-list-failed", why=str(error))
+                    found_saves = None
+                listing = None
+                if saves is not None:
+                    saves = saves.loaded(found_saves)
             # Completion first, drawing second: a finished steam-add clears
             # the preparer, and this same frame must already be the grid's.
             if preparer is not None and not prepare_failed and not preparer.running:
@@ -1391,6 +1423,12 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         # that is no longer there -- or not there yet.
                         forget_versions()
                         preparer = None
+                    elif after_prepare == "restored" and restoring is not None:
+                        # The save is back: play it, asking about saves as any
+                        # play does -- this machine is now simply ahead.
+                        game, variant, version = restoring
+                        restoring, preparer = None, None
+                        start(game, "play", variant, version)
                     elif after_prepare == "kept" and starting is not None:
                         # A save kept: the game starts with it, and no second
                         # question -- the two sides now agree.
@@ -1437,6 +1475,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 )
             elif checking is not None or choice is not None:
                 draw_saves_choice(screen, font_at, choice, starting[0].title if starting else "")
+            elif saves is not None:
+                draw_saves(screen, font_at, saves)
             elif storage is not None:
                 draw_storage(screen, font_at, storage, storage_typing)
             elif panel is not None:

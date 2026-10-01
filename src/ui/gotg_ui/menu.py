@@ -38,6 +38,10 @@ UNINSTALL: tuple[str, str] = ("Uninstall", "uninstall")
 INSTALL: tuple[str, str] = ("Install", "install")
 # While one is on its way, the same row is the way to stop it.
 CANCEL_INSTALL: tuple[str, str] = ("Cancel install", "cancel-install")
+# Going back to an earlier save: a screen in this program, like storage. Only
+# for a game that is here and keeps its saves to itself -- see saves_list.py
+# for why a platform's shared saves are not offered.
+SAVES: tuple[str, str] = ("Saves", "saves")
 
 # The rows that open a list, and the one that comes back from them. Their
 # verbs never leave this program: the menu handles them itself.
@@ -67,6 +71,7 @@ class Menu:
         versions: tuple[str, ...] | Sequence[str] = (),
         columns: int = COLUMNS,
         installing: bool = False,
+        saves: frozenset[str | None] = frozenset(),
     ):
         self.game = game
         self.tile_index = tile_index
@@ -75,6 +80,8 @@ class Menu:
         self.columns = max(1, columns)
         self.installed = installed
         self.installing = installing
+        # Which of the plain game (None) and its mods have saves of their own.
+        self.saves = saves
         self.variants = tuple(variants)
         # Newest first, as the client lists them — a version list reads like a
         # changelog, and the one somebody wants is usually at the top.
@@ -99,7 +106,8 @@ class Menu:
             return rows + [(name, f"version:{name}") for name in self.versions]
 
         if self.installed:
-            verbs = [*ACTIONS, UNINSTALL]
+            own = [SAVES] if self.variant in self.saves else []
+            verbs = [ACTIONS[0], *own, *ACTIONS[1:], UNINSTALL]
         else:
             verbs = [ACTIONS[0], CANCEL_INSTALL if self.installing else INSTALL, *ACTIONS[1:]]
         # Above the verbs, because they decide what every row under them means.
