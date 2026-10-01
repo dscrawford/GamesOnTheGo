@@ -45,16 +45,17 @@
   libpulseaudio,
   udev,
   libdecor,
+  libusb1,
 }:
 stdenv.mkDerivation (finalAttrs: {
   pname = "melee-pc";
-  version = "0.1.7-beta";
+  version = "0.2.2-beta";
 
   src = fetchurl {
     url =
       "https://github.com/999sian/melee-pc/releases/download/"
       + "v${finalAttrs.version}/melee-linux-x86_64.tar.gz";
-    hash = "sha256-EE/xB2WF/F4U0JWx55xRoKziJGqQS9mVo7xdWqpzLtk=";
+    hash = "sha256-TWGDyTcByE0mi22IEolJRwdV5b01AmAk5TWguhVosF4=";
   };
 
   nativeBuildInputs = [
@@ -86,6 +87,7 @@ stdenv.mkDerivation (finalAttrs: {
     alsa-lib
     libpulseaudio
     udev
+    libusb1
   ];
 
   # Two that are asked for and never used here. libsteam_api is the Steam
@@ -111,7 +113,9 @@ stdenv.mkDerivation (finalAttrs: {
     # the executable's directory, so the working directory is the caller's to
     # choose. Vulkan needs the loader told where it is, which outside a NixOS
     # session it otherwise cannot find, and SDL3 dlopens its windowing and
-    # audio libraries by soname at runtime rather than linking them.
+    # audio libraries by soname at runtime rather than linking them. libusb
+    # is dlopened too, since 0.2: upstream carries its own in lib/ and its
+    # run.sh puts that on the path, which this does with nixpkgs' instead.
     makeWrapper $out/share/melee-pc/melee $out/bin/melee \
       --suffix LD_LIBRARY_PATH : ${
         lib.makeLibraryPath [
@@ -131,6 +135,7 @@ stdenv.mkDerivation (finalAttrs: {
           alsa-lib
           libpulseaudio
           udev
+          libusb1
         ]
       }
     runHook postInstall
