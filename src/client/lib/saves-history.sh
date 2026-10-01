@@ -26,23 +26,24 @@ saves_dedicated() { [[ "$1" =~ ^env-[a-z0-9]+-[a-z0-9] ]]; }
 
 saves_cmd_list() {
   config_load
-  local want="" variant="" json="no" arg
+  local want="" variant="" form="say" arg
   for arg in "$@"; do
     case "$arg" in
-      --json) json="yes" ;;
+      --json) form="json" ;;
+      --lines) form="lines" ;;
       *) if [[ -z "$want" ]]; then want="$arg"; else variant="$arg"; fi ;;
     esac
   done
-  [[ -n "$want" ]] || die "which game? usage: gotg saves list <id> [variant] [--json]"
+  [[ -n "$want" ]] || die "which game? usage: gotg saves list <id> [variant] [--json|--lines]"
 
   local attrs=() attr
   mapfile -t attrs < <(saves_resolve "$want" "$variant")
   for attr in "${attrs[@]}"; do
-    if [[ "$json" == "yes" ]]; then
-      saves_list_one "$attr"
-    else
-      saves_list_say "$(saves_list_one "$attr")"
-    fi
+    case "$form" in
+      json) saves_list_one "$attr" ;;
+      lines) saves_list_lines "$(saves_list_one "$attr")" ;;
+      *) saves_list_say "$(saves_list_one "$attr")" ;;
+    esac
   done
 }
 
@@ -97,6 +98,39 @@ saves_local_archives() {
       done
     fi
   } | jq -sc '.'
+}
+
+# For the overlay, which has neither a JSON parser in its painter nor a time
+# zone in Rust's standard library: a save a line, its id, when it was made as
+# the picker says it, and what it is, tab-separated.
+saves_list_lines() {
+  local list="$1" id at detail
+  while IFS=$'\t' read -r id at detail; do
+    printf '%s\t%s\t%s\n' "$id" "$(saves_when "$at")" "$detail"
+  done < <(jq -r '.saves[] | [.id, .written_at,
+    ((if .device == "" then "an unknown machine" else .device end | gsub("[\t\n\r]"; " "))
+     + (if .source == "local" then " · archived on this machine" else " · saved to the service" end)
+     + (if .here then " · what you have now" else "" end))] | @tsv' <<<"$list")
+}
+
+# An ISO time as a person reads it, in this machine's zone -- the picker's
+# saves_choice.when, word for word: "today, 21:10", "yesterday, 08:02",
+# "Sep 20, 10:00", "Sep 20 2025".
+saves_when() {
+  local at="$1" day
+  day="$(date -d "$at" +%F 2>/dev/null)" || {
+    printf '%s' "$at"
+    return 0
+  }
+  if [[ "$day" == "$(date +%F)" ]]; then
+    date -d "$at" '+today, %H:%M'
+  elif [[ "$day" == "$(date -d yesterday +%F)" ]]; then
+    date -d "$at" '+yesterday, %H:%M'
+  elif [[ "${day:0:4}" == "$(date +%Y)" ]]; then
+    date -d "$at" '+%b %-d, %H:%M'
+  else
+    date -d "$at" '+%b %-d %Y'
+  fi
 }
 
 saves_list_say() {

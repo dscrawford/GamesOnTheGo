@@ -326,3 +326,57 @@ have_killswitch() {
   [ "$status" -eq 0 ]
   [[ "$output" != *"not ok"* ]]
 }
+
+# --- a session for picking a save from the overlay --------------------------
+
+# The environment's wrapper, standing in: says where its session is, and what
+# the overlay was told.
+session_env() {
+  local play="$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'printf "%%s\\n" "${GOTG_SESSION_DIR:-none}" >"%s"\n' "$TEST_TMP/session"
+    printf 'printf "%%s\\n" "${GOTG_SESSION_CLIENT:-none}" >"%s"\n' "$TEST_TMP/client"
+  } >"$play"
+  chmod +x "$play"
+}
+
+@test "a play gives the game a session of its own that only this user can enter" {
+  fake_watcher
+  session_env
+  export XDG_RUNTIME_DIR="$TEST_TMP/run"
+  mkdir -p -m 700 "$XDG_RUNTIME_DIR"
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  local dir
+  dir="$(cat "$TEST_TMP/session")"
+  [[ "$dir" == "$XDG_RUNTIME_DIR"/gotg/session-* ]]
+  [ -d "$dir" ]
+  [ "$(stat -c '%a' "$dir")" = 700 ]
+  [ -x "$(cat "$TEST_TMP/client")" ]
+}
+
+@test "a session left by a play that is gone is cleared by the next" {
+  fake_watcher
+  session_env
+  export XDG_RUNTIME_DIR="$TEST_TMP/run"
+  mkdir -p -m 700 "$XDG_RUNTIME_DIR/gotg/session-999999999.abcd"
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [ ! -e "$XDG_RUNTIME_DIR/gotg/session-999999999.abcd" ]
+  [ -d "$(cat "$TEST_TMP/session")" ]
+}
+
+@test "with no runtime directory a session is still private" {
+  fake_watcher
+  session_env
+  unset XDG_RUNTIME_DIR
+  export TMPDIR="$TEST_TMP/tmp"
+  mkdir -p "$TMPDIR"
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  local dir
+  dir="$(cat "$TEST_TMP/session")"
+  [[ "$dir" == "$TMPDIR"/gotg-session-* ]]
+  [ "$(stat -c '%a' "$dir")" = 700 ]
+}

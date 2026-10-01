@@ -448,6 +448,32 @@ push_save() {
   [ "$(jq -r '[.saves[] | .source] | unique | join(",")' <<<"$output")" = local ]
 }
 
+@test "list --lines is one save a line for the overlay: its id, when, and where" {
+  push_save one
+  push_save two
+  gotg saves list env-n64 --lines
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <<<"$output")" -eq 2 ]
+  local id when detail
+  IFS=$'\t' read -r id when detail <<<"$(sed -n 1p <<<"$output")"
+  [ "$id" = remote:2 ]
+  [ -n "$when" ]
+  [[ "$detail" == *aaaa1111* ]]
+  [[ "$detail" == *"what you have now"* ]]
+  IFS=$'\t' read -r id when detail <<<"$(sed -n 2p <<<"$output")"
+  [ "$id" = remote:1 ]
+  [[ "$detail" != *"what you have now"* ]]
+}
+
+@test "list --lines says a time as a person reads it" {
+  push_save one
+  gotg saves list env-n64 --lines
+  [ "$status" -eq 0 ]
+  [ "$(cut -f1 <<<"$output")" = remote:1 ]
+  # Pushed just now by the service's clock: the picker's words for it.
+  [[ "$(cut -f2 <<<"$output")" =~ ^today,\ [0-9]{2}:[0-9]{2}$ ]]
+}
+
 @test "restoring an older save puts it back, and archives what was here first" {
   push_save one
   push_save two

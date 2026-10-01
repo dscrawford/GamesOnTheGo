@@ -47,6 +47,31 @@ let
       snowboardkids2recomp = pkgs.coreutils;
     };
   };
+  # A game that, the first time, does what the overlay does when somebody
+  # picks a save -- names it in the session and stops -- and the second time
+  # ends on its own with a status worth passing on. PROBE_MODE=sleep is a
+  # game that runs until it is stopped.
+  restartEmulator = pkgs.writeShellScriptBin "probe-game" ''
+    echo run >> "$PROBE_LOG"
+    if [ "''${PROBE_MODE:-}" = sleep ]; then exec sleep 30; fi
+    if [ ! -e "$PROBE_LOG.restarted" ] && [ -n "''${GOTG_SESSION_DIR:-}" ]; then
+      touch "$PROBE_LOG.restarted"
+      printf 'remote:3' > "$GOTG_SESSION_DIR/restart"
+      exit 0
+    fi
+    exit 7
+  '';
+  restartProbe =
+    (import ../../src/client/env/lib.nix {
+      inherit pkgs;
+      inherit (pkgs) lib;
+    })
+      {
+        name = "env-n64-usa_probe";
+        emulator = restartEmulator;
+        bin = "probe-game";
+        saves = [ "saves/**" ];
+      };
   overrides = builtins.fromJSON (builtins.readFile ../../src/client/data/overrides.json);
 
   # An environment nothing ships, composing its own pipeline from the
@@ -391,6 +416,47 @@ pkgs.runCommand "check-recipes" { nativeBuildInputs = [ pkgs.zip ]; } ''
   printf '1.0' > $TMPDIR/hk/probe/.gotg-archive-version
   harkinian
   [ -e $TMPDIR/hk/probe/ran ] || { echo "an archive of another version must be extracted again" >&2; exit 1; }
+
+  # A save picked from the overlay: the game stops, the wrapper pushes what
+  # was played, restores the pick and starts the game again as the same
+  # process -- the one danstick's session hangs off -- and the game's own
+  # status is what it finally ends with.
+  cat > $TMPDIR/bin/fake-client <<'EOF'
+  #!${pkgs.runtimeShell}
+  echo "$*" >> "$PROBE_LOG.client"
+  EOF
+  chmod +x $TMPDIR/bin/fake-client
+  export PROBE_LOG=$TMPDIR/restart/log GOTG_ENV_STATE=$TMPDIR/restart/state
+  mkdir -p $TMPDIR/restart/session
+  rc=0
+  GOTG_SESSION_DIR=$TMPDIR/restart/session GOTG_SESSION_CLIENT=$TMPDIR/bin/fake-client \
+    ${restartProbe}/bin/gotg-play $TMPDIR/rom.z64 || rc=$?
+  [ "$rc" = 7 ] || { echo "the game's own status must come out, got $rc" >&2; exit 1; }
+  [ "$(grep -c run $PROBE_LOG)" = 2 ] || { echo "a picked save must start the game again" >&2; exit 1; }
+  [ "$(sed -n 1p $PROBE_LOG.client)" = "saves push env-n64-usa_probe" ]
+  [ "$(sed -n 2p $PROBE_LOG.client)" = "saves restore env-n64-usa_probe remote:3" ]
+  [ ! -e $TMPDIR/restart/session/restart ]
+  [ -s $TMPDIR/restart/session/game.pid ]
+
+  # No session -- the environment run by hand, out of the store -- is the
+  # plain exec it always was: one run, nobody asked to restore anything.
+  rm -f $PROBE_LOG $PROBE_LOG.client $PROBE_LOG.restarted
+  rc=0
+  ${restartProbe}/bin/gotg-play $TMPDIR/rom.z64 || rc=$?
+  [ "$rc" = 7 ] && [ "$(grep -c run $PROBE_LOG)" = 1 ] && [ ! -e $PROBE_LOG.client ]
+
+  # Stopped from outside with nothing picked -- the exit hold, the menu's
+  # Exit -- the game goes and the wrapper with it, not into a loop.
+  rm -f $PROBE_LOG
+  PROBE_MODE=sleep GOTG_SESSION_DIR=$TMPDIR/restart/session GOTG_SESSION_CLIENT=$TMPDIR/bin/fake-client \
+    ${restartProbe}/bin/gotg-play $TMPDIR/rom.z64 &
+  wrapper=$!
+  for _ in $(seq 100); do [ -s $TMPDIR/restart/session/game.pid ] && grep -q run $PROBE_LOG 2>/dev/null && break; sleep 0.05; done
+  game=$(cat $TMPDIR/restart/session/game.pid)
+  kill -TERM $wrapper
+  rc=0; wait $wrapper || rc=$?
+  ! kill -0 $game 2>/dev/null || { echo "the game must stop with its wrapper" >&2; exit 1; }
+  [ "$(grep -c run $PROBE_LOG)" = 1 ]
 
   touch $out
 ''

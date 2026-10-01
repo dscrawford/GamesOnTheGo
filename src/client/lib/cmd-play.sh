@@ -128,10 +128,40 @@ cmd_play() {
   # Controller seated as player one, published, and dead in the game.
   pads_configure "$PLAY_ATTR" || warn "could not set controller bindings for $PLAY_ATTR"
 
+  # Before the watcher, which reads it from the environment it inherits.
+  play_session "$$"
+
   # "$$" survives the exec below, so what the watcher holds is the emulator.
   killswitch_start "$$" "$(killswitch_console "$PLAY_ATTR" "$(manifest_field "$PLAY_GAME" platform)")" "$PLAY_ATTR"
   danstick_keeper_start "$$"
   danstick_exec "$(env_bin "$PLAY_ATTR")" "$PLAY_TARGET" "$@"
+}
+
+# A directory this one play shares with the overlay over it and the
+# environment's wrapper under it: where a save picked from the overlay is
+# named, and the game's pid for the overlay to stop it by. See the end of
+# gotg-play in env/lib.nix for what happens there.
+#
+# Private to this user, since what is written in it is run: under
+# XDG_RUNTIME_DIR, and with mktemp's 0700 wherever it is. Named by the play's
+# pid so a later play can clear the ones whose play is gone.
+play_session() {
+  local pid="$1" base dir name old
+  if [[ -n "${XDG_RUNTIME_DIR:-}" && -d "$XDG_RUNTIME_DIR" ]]; then
+    base="$XDG_RUNTIME_DIR/gotg"
+    [[ -d "$base" ]] || mkdir -m 700 "$base"
+    for old in "$base"/session-*; do
+      [[ -d "$old" ]] || continue
+      name="${old##*/session-}"
+      [[ "${name%%.*}" =~ ^[0-9]+$ ]] || continue
+      kill -0 "${name%%.*}" 2>/dev/null || rm -rf -- "$old"
+    done
+    dir="$(mktemp -d "$base/session-$pid.XXXXXX")" || return 0
+  else
+    dir="$(mktemp -d "${TMPDIR:-/tmp}/gotg-session-$pid.XXXXXX")" || return 0
+  fi
+  export GOTG_SESSION_DIR="$dir"
+  export GOTG_SESSION_CLIENT="$GOTG_ROOT/bin/gotg"
 }
 
 # Everything a launch needs short of running the emulator, shared by play and

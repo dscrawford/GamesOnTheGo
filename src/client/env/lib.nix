@@ -298,6 +298,21 @@ let
     text = ''
       # usage: gotg-play [rom] [extra emulator arguments]
       #
+      # As started, for starting again after a save is picked from the
+      # overlay (see the end), and the outside world's HOME and XDG
+      # directories, before isolation or a preLaunch moves them: the client
+      # run then must find its own configuration, not this environment's.
+      gotg_self="$(readlink -f "$0")"
+      gotg_argv=("$@")
+      gotg_outside=(env)
+      for gotg_var in XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME; do
+        [ -n "''${!gotg_var+set}" ] || gotg_outside+=(-u "$gotg_var")
+      done
+      gotg_outside+=("HOME=$HOME")
+      for gotg_var in XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME; do
+        [ -z "''${!gotg_var+set}" ] || gotg_outside+=("$gotg_var=''${!gotg_var}")
+      done
+
       # `gotg play` passes the ROM it resolved from the catalog; running this
       # straight out of the store takes the same argument, which is most of the
       # point of building it this way.
@@ -361,7 +376,47 @@ let
       esac
 
       ${preLaunch}
-      exec ${exe} ${lib.concatMapStringsSep " " render args} "$@"
+
+      # Out of the store, or from anything but `gotg play`, the game simply
+      # becomes this process, as it always did.
+      session="''${GOTG_SESSION_DIR:-}"
+      if [ -z "$session" ] || [ ! -d "$session" ] || [ -z "''${GOTG_SESSION_CLIENT:-}" ]; then
+        exec ${exe} ${lib.concatMapStringsSep " " render args} "$@"
+      fi
+
+      # From `gotg play`, the game is a child, so that picking a save from the
+      # overlay can start it again without this process ending. That matters
+      # because of what is above it: `danstick-rs exec`, the process danstick's
+      # daemon follows, waits on this one, and when it ends the session ends
+      # and every controller loses its seat. So the overlay names the save in
+      # the session and stops the game alone (its pid is written for it);
+      # this pushes what was played, puts the pick back, and starts over as the
+      # same process. Stopped with nothing picked -- the exit hold, the menu's
+      # Exit -- the game goes and this goes with it, with the game's status.
+      # Still one process group: the kill switch's last resort is a SIGKILL to
+      # the group, and a game that had left it would outlive the switch.
+      rm -f "$session/restart"
+      ${exe} ${lib.concatMapStringsSep " " render args} "$@" <&0 &
+      gotg_game=$!
+      printf '%s' "$gotg_game" >"$session/game.pid"
+      trap 'kill -TERM "$gotg_game" 2>/dev/null || true' TERM INT HUP
+      gotg_status=0
+      wait "$gotg_game" || gotg_status=$?
+      while kill -0 "$gotg_game" 2>/dev/null; do
+        gotg_status=0
+        wait "$gotg_game" || gotg_status=$?
+      done
+      trap - TERM INT HUP
+      if [ ! -s "$session/restart" ]; then
+        exit "$gotg_status"
+      fi
+      gotg_pick="$(cat "$session/restart")"
+      rm -f "$session/restart"
+      "''${gotg_outside[@]}" "$GOTG_SESSION_CLIENT" saves push ${lib.escapeShellArg name} ||
+        echo "gotg-play: the saves played since could not be pushed; they are archived here" >&2
+      "''${gotg_outside[@]}" "$GOTG_SESSION_CLIENT" saves restore ${lib.escapeShellArg name} "$gotg_pick" ||
+        echo "gotg-play: could not load $gotg_pick; starting with the saves as they were" >&2
+      exec "$gotg_self" "''${gotg_argv[@]}"
     '';
   };
   # Every tool any step in any pipeline names, deduplicated. Two steps naming
