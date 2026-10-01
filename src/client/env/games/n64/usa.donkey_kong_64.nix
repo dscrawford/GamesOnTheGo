@@ -42,21 +42,28 @@ let
     "dk64_tag_anywhere.nrm" = pkgs.fetchurl {
       url =
         "https://github.com/Killklli/DK64TagAnywhereRecomp/releases/download/"
-        + "v1.0.1/dk64_tag_anywhere.zip";
-      hash = "sha256-x+u2nj7XdA16z4w/DShDaX3uVZqfWX2GRYzbUucHq7U=";
+        + "v1.0.3/dk64_tag_anywhere.zip";
+      hash = "sha256-w5/Pq0c1FKZIYDePjyPUOPo4KrwOFa+Sl1yI2kWO1jA=";
     };
     "fixed_beaver_bother.nrm" = pkgs.fetchurl {
       url =
         "https://github.com/theballaam96/RecompFixedBeaverBother/releases/download/"
-        + "1.0.0/fixed_beaver_bother.zip";
-      hash = "sha256-TRuXZOa4SSfyNikwdCr6KFNMWpJfENcDr20M3+Vw9u0=";
+        + "1.0.1/fixed_beaver_bother.zip";
+      hash = "sha256-dBZsZpngcRbdt8IJGVYTzBiKFoFUQPEen1n3IGfVOao=";
     };
   };
+  # Each mod is reinstalled when the zip it came from changes, not only when
+  # it is missing: an "is it there" test kept the first version of every mod
+  # in a state directory for good, whatever this file was bumped to. The
+  # stamp in mod-stamps/ names the store path it was unpacked from -- kept out
+  # of mods/, where the runtime logs every file that is not a mod.
   installMods = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (name: zip: ''
-      if [ ! -f "$mods_dir/${name}" ]; then
+      if [ ! -f "$mods_dir/${name}" ] \
+        || [ "$(cat "$stamps_dir/${name}" 2>/dev/null)" != "${zip}" ]; then
         echo "installing mod: ${name}" >&2
         unzip -q -o ${zip} -d "$mods_dir"
+        printf '%s' "${zip}" >"$stamps_dir/${name}"
       fi
     '') mods
   );
@@ -108,7 +115,8 @@ in
   preLaunch = ''
     export HOME="$state"
     mods_dir="$state/.config/DK64Recompiled/mods"
-    mkdir -p "$mods_dir"
+    stamps_dir="$state/.config/DK64Recompiled/mod-stamps"
+    mkdir -p "$mods_dir" "$stamps_dir"
 
     ${installMods}
 
