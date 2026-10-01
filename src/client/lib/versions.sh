@@ -126,7 +126,7 @@ versions_env_floor() { versions_env_field "$1" gameVersionMin; }
 
 versions_env_field() {
   local attr="$1" field="$2" manifest
-  manifest="$GOTG_ROOTS_DIR/$attr/share/gotg/saves.json"
+  manifest="$(env_root "$attr")/share/gotg/saves.json"
   [[ -f "$manifest" ]] || return 0
   jq -r --arg f "$field" '.[$f] // empty' "$manifest" 2>/dev/null
 }

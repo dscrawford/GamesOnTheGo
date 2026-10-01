@@ -14,7 +14,7 @@
 # redistributable, and track firmware — so a store path holding them would be
 # both wrong and stale, and world-readable in the bargain.
 
-keys_manifest() { printf '%s/%s/share/gotg/keys.json' "$GOTG_ROOTS_DIR" "$1"; }
+keys_manifest() { printf '%s/share/gotg/keys.json' "$(env_root "$1")"; }
 
 # Fetch whatever this environment declares it needs, into the environment's own
 # state directory. Missing keys are a warning and not a failure: the emulator is

@@ -40,9 +40,16 @@ setup() { setup_env; }
   [[ "$output" == *"--page"* ]]
 }
 
+@test "launch's help says what a spec is, and that launch <id> is play" {
+  gotg launch --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"usage: gotg launch --spec"* ]]
+  [[ "$output" == *"is \`play\`"* ]]
+}
+
 @test "each alias answers help under its canonical name" {
   local pair alias canon
-  for pair in "ls:list" "show:info" "get:download" "launch:play"; do
+  for pair in "ls:list" "show:info" "get:download"; do
     alias="${pair%%:*}"
     canon="${pair##*:}"
     gotg "$alias" --help

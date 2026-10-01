@@ -198,7 +198,16 @@ env_variants() {
   printf 'Available: %s' "${names[*]}"
 }
 
-env_root() { printf '%s/%s' "$GOTG_ROOTS_DIR" "$1"; }
+# Where an environment is: its GC root, or -- for the one a `gotg launch` spec
+# names (cmd-launch.sh) -- the store path Nix built it at.
+env_root() {
+  if [[ -n "${GOTG_PINNED_ATTR:-}" && "$1" == "$GOTG_PINNED_ATTR" ]]; then
+    printf '%s' "$GOTG_PINNED_ENV"
+    return 0
+  fi
+  printf '%s/%s' "$GOTG_ROOTS_DIR" "$1"
+}
+env_pinned() { [[ -n "${GOTG_PINNED_ATTR:-}" && "$1" == "$GOTG_PINNED_ATTR" ]]; }
 env_bin() { printf '%s/bin/gotg-play' "$(env_root "$1")"; }
 env_is_built() { [[ -x "$(env_bin "$1")" ]]; }
 
@@ -454,6 +463,8 @@ env_build_key() {
 # thing env_ensure checks before it rebuilds. Asked by `complete ready` too:
 # a root that is about to be rebuilt is not ready, whatever is on disk.
 env_is_current() {
+  # Nix built it for this very launch.
+  env_pinned "$1" && return 0
   local by
   by="$(env_root "$1").by"
   [[ ! -f "$by" || "$(cat "$by")" == "$(env_build_key)" ]]
@@ -461,6 +472,10 @@ env_is_current() {
 
 env_ensure() {
   local attr="$1"
+  if env_pinned "$attr"; then
+    env_is_built "$attr" || die "no gotg-play in $(env_root "$attr"), the environment this launch names"
+    return 0
+  fi
   if ! env_is_built "$attr"; then
     env_build "$attr"
     return

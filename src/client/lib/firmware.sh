@@ -17,7 +17,7 @@
 # environment that already has firmware can seed the cache instead of the
 # server being asked at all.
 
-firmware_manifest() { printf '%s/%s/share/gotg/firmware.json' "$GOTG_ROOTS_DIR" "$1"; }
+firmware_manifest() { printf '%s/share/gotg/firmware.json' "$(env_root "$1")"; }
 
 firmware_cache_dir() { printf '%s/%s' "${GOTG_FIRMWARE_DIR:-$GOTG_STATE_DIR/firmware}" "$1"; }
 

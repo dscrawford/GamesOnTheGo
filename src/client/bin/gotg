@@ -71,6 +71,8 @@ source "$GOTG_LIB/cmd-saves.sh"
 source "$GOTG_LIB/saves-history.sh"
 # shellcheck source=lib/foreign-gl.sh
 source "$GOTG_LIB/foreign-gl.sh"
+# shellcheck source=lib/cmd-launch.sh
+source "$GOTG_LIB/cmd-launch.sh"
 # shellcheck source=lib/cmd-controllers.sh
 source "$GOTG_LIB/cmd-controllers.sh"
 # shellcheck source=lib/cmd-configure.sh
@@ -164,7 +166,8 @@ EOF
     download | get) echo "usage: gotg download <id>    — fetch a game without a launcher" ;;
     install) echo "usage: gotg install <id>    — fetch it, build its environment, write a Steam launcher" ;;
     uninstall) echo "usage: gotg uninstall <id>    — remove the game's files and launchers; saves and settings stay" ;;
-    play | launch) echo "usage: gotg play <id> [variant] [emulator args...]    — build whatever is missing, then launch" ;;
+    play) echo "usage: gotg play <id> [variant] [emulator args...]    — build whatever is missing, then launch" ;;
+    launch) echo "usage: gotg launch --spec <file> [--version v] [emulator args...]    — a game as its Nix output runs it (docs/nix-games.md); \`launch <id>\` is \`play\`" ;;
     configure)
       cat <<'EOF'
 usage: gotg configure <id> [variant]    — open that environment's own settings screen
@@ -199,7 +202,15 @@ main() {
     download | get) cmd_download "$@" ;;
     install) cmd_install "$@" ;;
     uninstall) cmd_uninstall "$@" ;;
-    play | launch) cmd_play "$@" ;;
+    play) cmd_play "$@" ;;
+    # `launch <id>` was always `play`, and still is; with a spec it is a game
+    # as a Nix output runs it (cmd-launch.sh).
+    launch)
+      case "${1:-}" in
+        --spec | --spec=*) cmd_launch "$@" ;;
+        *) cmd_play "$@" ;;
+      esac
+      ;;
     versions) cmd_versions "$@" ;;
     qa) cmd_qa "$@" ;;
     saves) cmd_saves "$@" ;;

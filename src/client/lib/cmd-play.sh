@@ -102,6 +102,16 @@ cmd_play() {
   done
   set -- "${rest[@]+"${rest[@]}"}"
 
+  play_launch "$want" "$variant" "$want_version" "$@"
+}
+
+# Everything from choosing the game to exec'ing it, shared by `play` and
+# `launch` (cmd-launch.sh): the same download, firmware, keys, saves, danstick,
+# bindings, session and overlay, whichever of them chose the game.
+play_launch() {
+  local want="$1" variant="$2" want_version="$3"
+  shift 3
+
   play_prepare "$want" "$variant" "$want_version"
 
   log "launching $(manifest_field "$PLAY_GAME" title) with $PLAY_ATTR"
@@ -172,9 +182,15 @@ play_prepare() {
 
   # Prefer the cached catalog: a game already installed here must still launch
   # when the server is unreachable.
-  manifest_cached || manifest_ensure
+  # A `gotg launch` spec carries the game and its environment's name: no
+  # catalog to consult, and no resolving -- Nix resolved it.
+  [[ -n "${GOTG_PINNED_GAME:-}" ]] || manifest_cached || manifest_ensure
   PLAY_GAME="$(manifest_find "$want")"
-  PLAY_ATTR="$(env_attr "$PLAY_GAME" "$variant")"
+  if [[ -n "${GOTG_PINNED_ATTR:-}" ]]; then
+    PLAY_ATTR="$GOTG_PINNED_ATTR"
+  else
+    PLAY_ATTR="$(env_attr "$PLAY_GAME" "$variant")"
+  fi
   local game="$PLAY_GAME" attr="$PLAY_ATTR"
 
   # Before the download, not after. A missing emulator is the failure most likely

@@ -83,6 +83,11 @@ manifest_files_url() { manifest_files_hosts | head -n1; }
 # caller that sits beside the service — a QA pod on the cluster — names its
 # own with GOTG_FILES_URL and hears of no other.
 manifest_files_hosts() {
+  # A launch spec's, in its order: the catalog it came from named them.
+  if [[ -n "${GOTG_PINNED_FILES_URLS:-}" ]]; then
+    printf '%s\n' "$GOTG_PINNED_FILES_URLS" | grep -E '^https?://' || true
+    return 0
+  fi
   if [[ "${GOTG_FILES_URL:-}" == http://* || "${GOTG_FILES_URL:-}" == https://* ]]; then
     printf '%s\n' "${GOTG_FILES_URL%/}"
     return 0
@@ -133,6 +138,20 @@ manifest_find() {
     id="${want#*/}"
   fi
   validate_id "$id"
+
+  # The game a `gotg launch` spec carries, with no catalog to look in.
+  if [[ -n "${GOTG_PINNED_GAME:-}" ]] &&
+    [[ "$(manifest_field "$GOTG_PINNED_GAME" platform)/$(manifest_field "$GOTG_PINNED_GAME" id)" == "$platform/$id" ]]; then
+    matches="$GOTG_PINNED_GAME"
+    validate_id "$(manifest_field "$matches" id)"
+    validate_platform "$(manifest_field "$matches" platform)"
+    local member
+    while IFS= read -r member; do
+      validate_filename "$member"
+    done < <(jq -r '.files[].name' <<<"$matches")
+    printf '%s' "$matches"
+    return 0
+  fi
 
   matches="$(manifest_games | jq -c --arg id "$id" --arg pf "$platform" \
     'select(.id == $id and ($pf == "" or .platform == $pf))')"

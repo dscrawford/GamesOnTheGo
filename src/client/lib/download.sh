@@ -552,7 +552,7 @@ _top_up_extras() {
 
 _recipe_declares() {
   jq -e --arg h "$2" '.handlers | index($h)' \
-    "$GOTG_ROOTS_DIR/$1/share/gotg/recipe.json" >/dev/null 2>&1
+    "$(env_root "$1")/share/gotg/recipe.json" >/dev/null 2>&1
 }
 
 # The environment owns the recipe and its tools; the catalog only said what
@@ -564,7 +564,7 @@ _run_recipe() {
   attr="$(env_attr "$game")"
   # The environment may still be building beside the download.
   env_build_wait
-  recipe="$GOTG_ROOTS_DIR/$attr/bin/gotg-recipe"
+  recipe="$(env_root "$attr")/bin/gotg-recipe"
   # An environment that gains a recipe leaves every root built before it
   # without one, and env_ensure only builds what is missing altogether — so the
   # game would fail here on exactly the machines that already had it working.
