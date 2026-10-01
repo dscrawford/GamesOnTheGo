@@ -327,6 +327,16 @@ pkgs.runCommand "check-recipes" { nativeBuildInputs = [ pkgs.zip ]; } ''
   # The SteamOS GL branch can be asked for on any machine: what qa --machine
   # deck relies on to find a Deck-only failure without a Deck.
   grep -qF 'GOTG_FOREIGN_GL' ${probe}/bin/gotg-play
+  # Named, not carried: the mesa a machine without GL loads is fetched there
+  # (lib/foreign-gl.sh), and was a gigabyte in every closure while it was a
+  # dependency.
+  mesa=$(cat ${probe}/share/gotg/foreign-gl)
+  case "$mesa" in /nix/store/*-mesa-*) ;; *) echo "foreign-gl names no mesa: $mesa" >&2; exit 1 ;; esac
+  grep -qF "$mesa/lib/dri" ${probe}/bin/gotg-play
+  if grep -q -- '-mesa-' ${pkgs.closureInfo { rootPaths = [ probe ]; }}/store-paths; then
+    echo "an environment names its mesa; it must not carry it" >&2
+    exit 1
+  fi
   grep -qF 'mkdir -p "$state"/saves' ${probe}/bin/gotg-play
   grep -qF 'mkdir -p "$state"/data/probe' ${probe}/bin/gotg-play
   ! grep -F 'probe*' ${probe}/bin/gotg-play | grep -q mkdir

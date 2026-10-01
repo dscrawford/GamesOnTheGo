@@ -181,6 +181,8 @@ play_prepare() {
   # to need a person, and finding that out at the end of a 10 GB transfer helps
   # nobody. Once built it is a symlink test, so the usual launch pays nothing.
   env_ensure "$attr"
+  # The GL this machine loads if it has none of its own: see foreign-gl.sh.
+  foreign_gl_ensure "$attr"
 
   download_game "$game"
 
@@ -366,6 +368,10 @@ cmd_sync() {
       fi
     done
   fi
+
+  # What the rebuilt roots name for a machine without GL of its own, fetched;
+  # what nothing names any more, let go.
+  foreign_gl_sync
 
   ((changed == 0)) || log "${C_DIM}anything already open keeps its old environment until relaunched${C_RESET}"
   ((failed == 0)) || die "$failed environment(s) did not build"

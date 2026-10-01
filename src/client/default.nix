@@ -25,6 +25,7 @@
   procps,
   python3,
   nix,
+  mesa,
 }:
 
 let
@@ -81,6 +82,9 @@ stdenvNoCC.mkDerivation {
     # env/ is shipped for its file names, not to be evaluated from here: the CLI
     # reads them to work out which flake attribute a game wants, without nix.
     cp -r lib data templates env steam qa $out/share/gotg/
+    # The mesa the overlay this client starts points at on a machine without
+    # GL of its own: named, and fetched there before a game (foreign-gl.sh).
+    echo ${(import ./env/foreign-gl.nix { inherit mesa; }).path} >$out/share/gotg/foreign-gl
     chmod +x $out/share/gotg/steam/shortcuts.py
     chmod +x $out/share/gotg/qa/session.sh $out/share/gotg/qa/pad.py
     install -Dm644 completions/gotg.bash \

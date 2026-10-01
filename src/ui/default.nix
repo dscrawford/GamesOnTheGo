@@ -36,7 +36,8 @@ let
   # only path to a window surface is a GL renderer, and the picker died with
   # "Window framebuffer support not available". The same block the emulator
   # environments and the QA tools use.
-  foreignGl = (import ../client/env/foreign-gl.nix { inherit mesa; }).guarded;
+  foreignGlParts = import ../client/env/foreign-gl.nix { inherit mesa; };
+  foreignGl = foreignGlParts.guarded;
 in
 stdenvNoCC.mkDerivation {
   pname = "gotg-ui";
@@ -52,6 +53,8 @@ stdenvNoCC.mkDerivation {
     runHook preInstall
 
     mkdir -p $out/share/gotg-ui
+    # Named, not carried: `gotg sync` fetches it where it is loaded.
+    echo ${foreignGlParts.path} >$out/share/gotg-ui/foreign-gl
     cp -r gotg_ui $out/share/gotg-ui/
     cp -r ${configDir} $out/share/gotg-ui/config
 

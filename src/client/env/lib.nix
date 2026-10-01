@@ -263,7 +263,8 @@ let
 
   # GL on a machine that is not NixOS: see foreign-gl.nix, which is also
   # what the picker and the QA tools use.
-  foreignGl = (import ./foreign-gl.nix { inherit (pkgs) mesa; }).guarded;
+  foreignGlParts = import ./foreign-gl.nix { inherit (pkgs) mesa; };
+  foreignGl = foreignGlParts.guarded;
 
   sourceOf = v: if lib.isDerivation v || lib.isPath v then v else pkgs.writeText "gotg-config" v;
 
@@ -494,6 +495,9 @@ pkgs.runCommand "gotg-env-${name}"
     mkdir -p $out/bin $out/share/gotg
     ln -s ${app}/bin/gotg-play $out/bin/gotg-play
     cp ${pkgs.writeText "saves.json" (builtins.toJSON manifest)} $out/share/gotg/saves.json
+    # The mesa gotg-play points at on a machine without GL of its own, named
+    # rather than depended on: the client fetches it there (foreign-gl.nix).
+    echo ${foreignGlParts.path} >$out/share/gotg/foreign-gl
     ${lib.optionalString ownsSession ''
       touch $out/share/gotg/owns-session
     ''}

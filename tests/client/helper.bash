@@ -27,6 +27,11 @@ setup_env() {
   # on the internet. The ones that mean to override it.
   export GOTG_LIBRETRO_URL="http://127.0.0.1:1"
 
+  # A host with GL of its own, as NixOS is, whatever machine runs the tests:
+  # the build sandbox has no /run/opengl-driver, and every launch and sync
+  # there would go fetching mesa. foreign-gl.bats moves it where it means to.
+  export GOTG_HOST_GL="$TEST_TMP"
+
   mkdir -p "$GOTG_GAMES_DIR"
 }
 

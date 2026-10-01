@@ -509,6 +509,12 @@ EOF
   fi
 
   play_prepare "$want" "$variant"
+  # A machine without GL of its own -- a Deck -- has the game load nixpkgs'
+  # mesa (GOTG_FOREIGN_GL in its profile, applied inside the session), so the
+  # mesa it names is fetched here as a real Deck's launch would fetch it.
+  if [[ "$(jq -r --arg m "$machine" '.[$m].env.GOTG_FOREIGN_GL // ""' "$(qa_machines_json)")" == 1 ]]; then
+    GOTG_FOREIGN_GL=1 foreign_gl_ensure "$PLAY_ATTR"
+  fi
   local id platform
   id="$(manifest_field "$PLAY_GAME" id)"
   platform="$(manifest_field "$PLAY_GAME" platform)"
