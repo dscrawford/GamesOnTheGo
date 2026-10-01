@@ -401,9 +401,11 @@ danstick_sdl_config() {
 # Have danstick write this environment's emulator configuration. Returns 0 when
 # something was written, so a caller that snapshots the result knows to.
 #
-# Every destination is named, including the three this environment is not:
-# an unnamed one means the real location, and the point is that nothing lands
-# in the home. ares is gotg's own writer, so danstick's goes to scratch.
+# Every destination is named, including the ones this environment is not: an
+# unnamed one means the real location, and the point is that nothing lands in
+# the home. ares is gotg's own writer, so danstick's goes to scratch, and so
+# does RetroArch's, which gotg never runs -- unnamed, it is
+# ~/.config/retroarch on any machine where RetroArch has run.
 danstick_emit() {
   local attr="$1" manifest emulator state pads scratch
   command -v "$(danstick_rs_bin)" >/dev/null 2>&1 || return 1
@@ -429,6 +431,7 @@ danstick_emit() {
     --cemu-dir "$cemu" \
     --dolphin-dir "$dolphin" \
     --ares-settings "$scratch/settings.bml" \
+    --retroarch-dir "$scratch/retroarch" \
     --env-file "$scratch/env.sh" <<<"$pads" 2>/dev/null)" || return 1
   rm -rf "$scratch"
   # Only the file this environment reads counts as written; the scratch ones

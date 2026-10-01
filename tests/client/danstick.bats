@@ -399,10 +399,14 @@ ryujinx_env() {
   grep -qxF -- "--ryujinx-config" "$EMIT_ARGS"
   grep -qxF -- "$state/config/Ryujinx/Config.json" "$EMIT_ARGS"
   # Every other destination is named too, and none of them is under the home.
-  for flag in --cemu-dir --dolphin-dir --ares-settings --env-file; do
+  for flag in --cemu-dir --dolphin-dir --ares-settings --env-file --retroarch-dir; do
     grep -qxF -- "$flag" "$EMIT_ARGS"
   done
   ! grep -q "$HOME/.config" "$EMIT_ARGS"
+  # RetroArch is danstick's sixth: on a machine where it has ever run, an
+  # unnamed one is ~/.config/retroarch. gotg runs no RetroArch, so scratch.
+  grep -A1 -xF -- "--retroarch-dir" "$EMIT_ARGS" | grep -qxF "$state/danstick-scratch/retroarch"
+  [ ! -e "$state/danstick-scratch" ]
   [ "$(jq 'length' "$EMIT_STDIN")" = 2 ]
   [ "$(jq -r '.[0].name' "$EMIT_STDIN")" = "danstick Player 1" ]
 }
