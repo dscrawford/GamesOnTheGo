@@ -6,42 +6,16 @@
 # HUD out for 16:9 rather than stretching it, and the original JAudio engine
 # for sound.
 #
-# Upstream ships a deliberately self-contained tarball — its own glibc, its
-# own loader, its own SDL2 — so that it runs on any distribution. Every other
-# prebuilt port here gets that bundle stripped and is patched onto nixpkgs'
-# libraries. This one cannot be, and the reason is worth writing down so the
-# next person does not spend the afternoon rediscovering it:
-#
-#     nectar.real: /nix/store/...-glibc-2.42-67/lib/libm.so.6:
-#     version `GLIBC_2.43' not found (required by nectar.real)
-#
-# The game binary is built against a glibc one release newer than the one in
-# our nixpkgs. Its bundled copy is not a convenience here, it is a
-# requirement, so the package keeps the bundle intact and runs the game
-# through the bundled loader exactly as upstream's own script does. Stripping
-# only part of it does not help either: drop the bundled glibc alone and the
-# bundled libasound still wants GLIBC_2.43.
-#
-# That leaves GL, which is the one thing the bundle deliberately does not
-# carry: the game asks the host for libOpenGL. The direction of the version
-# skew is what makes answering it safe — the bundled glibc is newer than the
-# one those libraries were built against, so it satisfies them, which is the
-# same arrangement every other distribution gets.
-#
-# *Which* GL has to be decided when the game runs rather than when it is
-# built, and that is the whole reason the wrapper is a script. Invoking the
-# loader directly means passing --library-path, and --library-path replaces
-# LD_LIBRARY_PATH rather than adding to it, so a path baked in at build time
-# would be the only GL this could ever see. Bake in nixpkgs' mesa and the
-# machine's own driver is shut out — on an NVIDIA desktop the game answers
-#
-#     [PC Port Fatal Error] Could not initialize window/OpenGL!
-#
-# because mesa drives no NVIDIA card. So the script asks what
-# env/foreign-gl.nix asks — is there a /run/opengl-driver — and prefers the
-# host's stack when there is one, with ours behind it to fill the gaps, and
-# ours alone when there is not — which is the SteamOS case. GOTG_FOREIGN_GL=1 forces the fallback, so
-# `gotg qa --machine deck` can find a Deck-only failure without a Deck.
+# Up to 0.6 upstream shipped a self-contained tarball -- its own glibc, its
+# own loader, its own SDL2 -- built against a glibc newer than nixpkgs' and so
+# impossible to patch onto it: this package ran the bundled loader, with a
+# script choosing the host's GL or ours. 0.9 dropped the bundle. The binaries
+# now want glibc 2.29 and link SDL2 in, asking the system only for libGL and
+# libX11, and dlopening the rest (Wayland, the X extensions, the sound
+# servers, udev) the way SDL does. So it is patched like every other
+# prebuilt port here, and GL is nothing special any more: the host's when
+# there is a /run/opengl-driver, nixpkgs' mesa when there is not -- which
+# env/foreign-gl.nix arranges for every environment alike.
 #
 # Two programs matter. `nectar-launcher` verifies a disc image and extracts
 # its assets, and takes --rom/--install-dir/--extract-only so that it can do
@@ -49,79 +23,82 @@
 # assets relative to the working directory. The game env drives both; see
 # src/client/env/games/gamecube/usa.pikmin_rev1.nix.
 #
-# nectar-pal is the European build. gotg's entry is the USA disc, so the
-# wrapper exists for completeness rather than for use.
+# nectar-pal is the European build. gotg's entry is the USA disc, so it is
+# installed for completeness rather than for use.
 #
 # It ships no game assets: they come out of the player's own disc image.
 {
   lib,
   stdenv,
   fetchurl,
-  libglvnd,
-  libdrm,
-  mesa,
-  libgbm,
+  autoPatchelfHook,
+  makeWrapper,
+  libGL,
+  libx11,
+  libxext,
+  libxcursor,
+  libxfixes,
+  libxi,
+  libxrandr,
+  libxscrnsaver,
+  libxkbcommon,
+  wayland,
+  alsa-lib,
+  libpulseaudio,
+  udev,
+  dbus,
 }:
 stdenv.mkDerivation (finalAttrs: {
   pname = "open-nectar";
-  version = "0.6";
+  version = "0.9.1";
 
   src = fetchurl {
     url =
       "https://github.com/SSunnKing/Open-Nectar---Pikmin-Native-PC-Mobile-Port/"
       + "releases/download/${finalAttrs.version}/nectar-linux.tar.gz";
-    hash = "sha256-1NbrCCq+mFD8oAyS8J2Sh6gK56Yve4wao4VXsX2kASE=";
+    hash = "sha256-vdjyv+2HxdjGYPd54YavIMVTBrKlcUMIY+RuxERV/Y8=";
   };
 
-  # The bundle is self-contained by design and every binary in it resolves
-  # against its own loader. Patching would only break that.
-  dontPatchELF = true;
-  dontStrip = true;
+  nativeBuildInputs = [
+    autoPatchelfHook
+    makeWrapper
+  ];
+
+  buildInputs = [
+    libGL
+    libx11
+  ];
+
+  # What the built-in SDL2 dlopens rather than links: without these on the
+  # RUNPATH it finds no video or audio driver at all.
+  runtimeDependencies = [
+    libxext
+    libxcursor
+    libxfixes
+    libxi
+    libxrandr
+    libxscrnsaver
+    libxkbcommon
+    wayland
+    alsa-lib
+    libpulseaudio
+    udev
+    dbus
+  ];
+
   dontConfigure = true;
   dontBuild = true;
 
-  # libdrm and gbm travel with our mesa because libglvnd alone gets as far as
-  # "libdrm.so.2: cannot open shared object file", and libdrm only as far as
-  # the same complaint about libgbm.
-  fallbackGl = lib.makeLibraryPath [
-    libglvnd
-    libdrm
-    mesa
-    libgbm
-  ];
-
+  # The game finds its assets relative to the working directory, which the
+  # environment sets, so the wrappers only exist to keep the binaries in
+  # share/ beside the launcher that looks for them there.
   installPhase = ''
     runHook preInstall
     mkdir -p $out/share/open-nectar $out/bin
-    cp -r . $out/share/open-nectar/
-    rm -f $out/share/open-nectar/{nectar,nectar-pal,nectar-launcher}
-    chmod +x $out/share/open-nectar/*.real
-
+    install -m755 nectar nectar-pal nectar-launcher $out/share/open-nectar/
+    install -m644 README.txt open_nectar.png $out/share/open-nectar/
     for exe in nectar nectar-pal nectar-launcher; do
-      cat > $out/bin/$exe <<'WRAPPER'
-    #!/bin/sh
-    # Generated by pkgs/open-nectar. That file says why this is a script.
-    here=@here@
-    host=''${GOTG_HOST_GL:-/run/opengl-driver}
-    if [ "''${GOTG_FOREIGN_GL:-0}" != 1 ] && [ -e "$host" ]; then
-      # The host's stack first, ours behind it: /run/opengl-driver carries the
-      # driver but not necessarily the rest, and without a libdrm to fall
-      # back on this stops at "libdrm.so.2: cannot open shared object file".
-      gl=$host/lib:@fallback@
-    else
-      gl=@fallback@
-    fi
-    export NECTAR_EXECUTABLE_PATH=''${NECTAR_EXECUTABLE_PATH:-$here/@exe@.real}
-    exec "$here/lib/ld-linux-x86-64.so.2" \
-      --library-path "$here/lib:$gl''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-      "$here/@exe@.real" "$@"
-    WRAPPER
-      sed -i 's/^    //' $out/bin/$exe
-      substituteInPlace $out/bin/$exe \
-        --replace-fail '@here@' "$out/share/open-nectar" \
-        --replace-fail '@fallback@' "${finalAttrs.fallbackGl}" \
-        --replace-fail '@exe@' "$exe"
-      chmod +x $out/bin/$exe
+      makeWrapper $out/share/open-nectar/$exe $out/bin/$exe
     done
     runHook postInstall
   '';

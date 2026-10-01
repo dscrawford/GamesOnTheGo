@@ -28,16 +28,16 @@
 #     dolphin-emu package this platform already uses for emulation, so it
 #     costs nothing to put on PATH.
 #
-#   * **The last step of the install fails, and that is fine.** Having
-#     extracted the data, the launcher copies its own binaries next to it and
-#     cannot, because they are in the store: "Could not copy the lib folder:
-#     Permission denied". Nothing downstream wants that copy — the game runs
-#     from the store and only reads assets/ — so what is checked is whether
-#     the data arrived, not what the launcher returned.
+#   * **What is checked is whether the data arrived.** Having extracted it,
+#     the launcher copies its own binaries next to it, and up to 0.6 that
+#     failed -- "Could not copy the lib folder: Permission denied" -- because
+#     they are in the store. Nothing downstream wants that copy: the game
+#     runs from the store and only reads assets/. So the launcher's exit
+#     status is not what decides.
 #
 # The game reads its data relative to the working directory, so the launch
-# happens in the directory the data went into. Saves land there too, as
-# ordinary files.
+# happens in the directory the data went into. Saves are told to land there
+# too, as ordinary files; see NECTAR_SAVE_DIR below.
 {
   pkgs,
   lib,
@@ -73,7 +73,7 @@ in
       echo "first run: extracting game data from $target" >&2
       echo "  about 640 MB, a few minutes, and only this once" >&2
       # Failure is judged by what landed, not by what it returned. See the
-      # note at the top about the lib folder.
+      # note at the top.
       ${port}/bin/nectar-launcher \
         --rom "$target" \
         --install-dir "$run" \
@@ -105,7 +105,17 @@ in
     export SDL_VIDEODRIVER=x11
     export SDL_VIDEO_X11_FORCE_EGL=1
 
-    # It resolves assets/ relative to here, and writes saves here too.
+    # The memory card, where `saves` below looks for it. The port puts it in
+    # "the game folder" -- the directory its executable is in -- and that is
+    # the store. 0.6 did not check, and every QA log of it reads
+    # "persistent filesystem card: /nix/store/...-open-nectar-0.6/share/
+    # open-nectar/save/card0": nothing anybody saved survived the session.
+    # 0.9 checks, finds the folder read-only and falls back to
+    # $XDG_DATA_HOME/pikmin-native/save, which persists but which nothing
+    # syncs. NECTAR_SAVE_DIR names the place outright.
+    export NECTAR_SAVE_DIR="$run/save"
+
+    # It resolves assets/ relative to here.
     cd "$run"
   '';
 
@@ -117,12 +127,15 @@ in
   ];
   # The extracted data is 640 MB that any machine can make again from the
   # disc image it already has, and the shader cache is per-GPU by
-  # definition — neither is worth carrying.
+  # definition — neither is worth carrying. The cache follows NECTAR_SAVE_DIR
+  # into save/ since 0.9; *.real and lib/ are what 0.6 left behind.
   saveExcludes = [
     "nectar/assets/**"
     "nectar/*.real"
     "nectar/lib/**"
     "nectar/save/shaders/**"
+    "nectar/save/shader_cache/**"
+    "nectar/shader_cache/**"
     "nectar/**/*.shadercache"
   ];
 }
