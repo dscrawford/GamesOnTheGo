@@ -8,6 +8,7 @@
   pkgs,
   packages,
   py,
+  flake,
 }:
 
 {
@@ -28,6 +29,7 @@
   environments = import ./environments.nix { inherit pkgs packages; };
   catalog = import ./catalog.nix { inherit pkgs; };
   resolver = import ./resolver.nix { inherit pkgs packages; };
+  library = import ./library.nix { inherit pkgs flake; };
   fullscreen = import ./fullscreen.nix { inherit pkgs; };
   aresSystem = import ./ares-system.nix { inherit pkgs; };
   inheritsPlatform = import ./inherits-platform.nix { inherit pkgs; };

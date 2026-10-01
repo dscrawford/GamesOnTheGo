@@ -100,9 +100,45 @@
       );
     in
     {
-      # What a library flake builds games with: the catalog as Nix data and
-      # the environment each game runs in. See docs/nix-games.md.
-      lib = import ./lib { inherit (nixpkgs) lib; };
+      # What a library flake builds games with: the catalog as Nix data, the
+      # environment each game runs in, and mkLibrary, which makes every game
+      # in a catalog something `nix run` runs. See docs/nix-games.md.
+      lib =
+        let
+          base = import ./lib { inherit (nixpkgs) lib; };
+          library = import ./lib/library.nix {
+            inherit (nixpkgs) lib;
+            catalogLib = base.catalog;
+          };
+        in
+        base
+        // {
+          mkLibrary =
+            {
+              # Where the library is: the server a token is held for, and
+              # the one a launch from this library talks to.
+              server,
+              # The catalog file, as the library flake's `catalog` input
+              # pins it.
+              catalog,
+              systems ? [ "x86_64-linux" ],
+            }:
+            {
+              legacyPackages = nixpkgs.lib.genAttrs systems (
+                system:
+                library.forSystem {
+                  pkgs = import nixpkgs {
+                    inherit system;
+                    config.allowUnfree = true;
+                  };
+                  envs = nixpkgs.lib.filterAttrs (name: _: nixpkgs.lib.hasPrefix "env-" name) self.packages.${system};
+                  inherit (self.packages.${system}) gotg;
+                  envDir = ./src/client/env;
+                  inherit server catalog;
+                }
+              );
+            };
+        };
 
       packages = forAllSystems (
         pkgs:
@@ -504,6 +540,7 @@
           inherit pkgs;
           packages = self.packages.${pkgs.stdenv.hostPlatform.system};
           py = pythonSets.${pkgs.stdenv.hostPlatform.system};
+          flake = self;
         }
       );
 
