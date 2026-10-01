@@ -26,8 +26,15 @@
   Flat, unbranded line art on purpose: see docs/controller-diagram-research.md
   for why that is the licence answer and the trademark answer at the same time.
 -->
-<svg xmlns="http://www.w3.org/2000/svg" width="850" height="392" viewBox="-43 76 850 392">
+<svg xmlns="http://www.w3.org/2000/svg" width="850" height="420" viewBox="-43 48 850 420">
   <g id="artwork" fill="none">
+    <!-- triggers: on the back, so drawn first and peeking out above the
+         shoulders -->
+    <rect x="196" y="56" width="68" height="44" rx="14"
+          fill="#3c3c46" stroke="#9a9aad" stroke-width="2.5"/>
+    <rect x="536" y="56" width="68" height="44" rx="14"
+          fill="#3c3c46" stroke="#9a9aad" stroke-width="2.5"/>
+
     <!-- shell -->
     <path d="M 232 118
              L 568 118
@@ -92,6 +99,8 @@
 
     <circle id="anchor-L" cx="228" cy="101" r="6"/>
     <circle id="anchor-R" cx="572" cy="101" r="6"/>
+    <circle id="anchor-lefttrigger" cx="230" cy="70" r="6"/>
+    <circle id="anchor-righttrigger" cx="570" cy="70" r="6"/>
 
     <circle id="anchor-Select" cx="358" cy="206" r="6"/>
     <circle id="anchor-Start" cx="442" cy="206" r="6"/>

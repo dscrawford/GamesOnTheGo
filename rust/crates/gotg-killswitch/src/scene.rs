@@ -1216,14 +1216,16 @@ mod tests {
 
     #[test]
     fn a_button_the_drawing_cannot_show_rings_nothing_and_a_rebind_before_its_first_step_neither() {
-        let switch = crate::consoles::for_platform("switch");
-        let zl = CONSOLES[switch].control("lefttrigger").expect("ZL");
-        for control in [zl as i32, -1] {
+        let nes = crate::consoles::for_platform("nes");
+        let trigger = CONSOLES[nes]
+            .control("lefttrigger")
+            .expect("danstick's NES layout has one");
+        for control in [trigger as i32, -1] {
             let mut drawing = Drawing::default();
             let scene = rebinding(control, 0);
             let scene = Scene {
                 rebind: scene.rebind.map(|r| Rebinding {
-                    console: switch as u32,
+                    console: nes as u32,
                     ..r
                 }),
                 ..scene

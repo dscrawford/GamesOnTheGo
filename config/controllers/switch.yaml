@@ -2,7 +2,7 @@
 #
 # Ryujinx writes its own configuration and publishes no ares console, so
 # this comes from danstick alone. No Switch Pro drawing yet: the generic
-# pad stands in, which leaves Minus, Plus, ZL and ZR unmarked.
+# pad stands in, its triggers for ZL and ZR.
 
 label: Switch Pro
 

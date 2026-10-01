@@ -142,14 +142,27 @@ mod tests {
 
     #[test]
     fn a_button_the_drawing_cannot_show_is_walked_all_the_same() {
-        // ZL is on the back of a Switch Pro pad; the drawing is from the front.
-        let switch = named("switch");
-        let zl = switch.control("lefttrigger").map(|at| switch.controls[at]);
-        assert_eq!(zl.map(|c| c.anchor), Some(None));
+        // danstick's NES layout has triggers an NES pad never had: walked,
+        // and nowhere on the drawing.
+        let nes = named("nes");
+        let trigger = nes.control("lefttrigger").map(|at| nes.controls[at]);
+        assert_eq!(trigger.map(|c| c.anchor), Some(None));
         // An N64's Z is underneath too, and drawn on the grip it is pressed from.
         let n64 = named("n64");
         let z = n64.control("lefttrigger").map(|at| n64.controls[at]);
         assert!(z.is_some_and(|c| c.anchor.is_some()));
+    }
+
+    #[test]
+    fn the_generic_pads_triggers_are_drawn_on_its_back() {
+        let generic = named("generic");
+        for trigger in ["lefttrigger", "righttrigger"] {
+            let control = generic.control(trigger).map(|at| generic.controls[at]);
+            assert!(
+                control.is_some_and(|c| c.anchor.is_some()),
+                "{trigger}: {control:?}"
+            );
+        }
     }
 
     #[test]
