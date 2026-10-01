@@ -1,7 +1,7 @@
 # Games as Nix outputs
 
-Status: in progress on `feat/nix-games`. `gotg play` keeps working until the
-last phase retires it.
+Status: in progress on `feat/nix-games` -- phases 0 to 4 done. `gotg play`
+keeps working until the last phase retires it.
 
 ## What it is
 
@@ -12,7 +12,7 @@ nix run gotg#n64.usa.legend_of_zelda_ocarina_of_time_rev2.rando   # a variant
 nix run gotg#gb.usa.tetris_2                        # usa.tetris_2 is on gb and nes
 ```
 
-A game is a flake output: a small app that runs `gotg-launch` with that game's
+A game is a flake output: a small app that runs `gotg launch --spec` with that game's
 spec baked in, its environment (emulator or port, settings, mods, recipe) a
 Nix dependency of it. Evaluating or building one game touches that game alone.
 
@@ -69,8 +69,13 @@ leads: ids repeat across platforms and an attribute path cannot carry the
 
 The catalog is private, and a flake input authenticates only through Nix's
 `netrc-file`, which sends HTTP Basic: the service accepts the token as a
-Basic-auth password on `/catalog`. Tokens never enter the store; `login`
-writes `~/.config/gotg` as it does now.
+Basic-auth password on `GET /catalog`, and nowhere else. `gotg login` keeps
+`~/.config/gotg/netrc` (0600) beside `api.json` and points the user's Nix at
+it -- a user setting is enough, the fetch is the evaluator's, not the
+daemon's -- unless Nix already reads a netrc, whose other credentials a second
+one would hide: then it says the line to add. Tokens never enter the store.
+
+`nix flake init -t gotg#library` writes that flake.
 
 The picker still searches the catalog: the cached copy the launcher keeps
 fresh, so a game added on the website shows before the lock is updated;
@@ -83,10 +88,10 @@ choosing one the lock does not have yet updates the `catalog` input first.
 | `refresh`, `manifest.json` | the `catalog` input, parsed by `gotg.lib.catalog`; the launcher's cache for the picker |
 | id → environment (`env_attr`) | the same rule in Nix; the attribute is the resolution |
 | `env_build`, `env_ensure`, `sync`, environment GC roots | gone from a launch: the environment is a dependency |
-| `install`: download, verify, recipe | `gotg-launch`, from the game's spec |
-| firmware, keys, versions, DLC | `gotg-launch` |
-| saves sync, `saves list`/`restore` | `gotg-launch` and its library |
-| danstick, bindings, overlay, session | `gotg-launch`, unchanged |
+| `install`: download, verify, recipe | `gotg launch`, from the game's spec |
+| firmware, keys, versions, DLC | `gotg launch` |
+| saves sync, `saves list`/`restore` | `gotg launch` and its library |
+| danstick, bindings, overlay, session | `gotg launch`, unchanged |
 | `login`, `admin`, `saves`, `qa`, `controllers` | `nix run gotg#gotg -- <command>` |
 | `play`, `install`, `uninstall`, `sync`, `refresh`, `versions` | retired; `#update`, `#uninstall` |
 

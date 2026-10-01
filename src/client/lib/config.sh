@@ -116,6 +116,49 @@ prompt_line() {
 # One url, one token: the same api.json that carries saves and artwork now
 # carries the whole library. Verified by fetching the catalog before writing,
 # so a typo is caught here rather than at launch time.
+# The token for Nix. A library flake pins the catalog as an input
+# (docs/nix-games.md), and Nix authenticates a fetch only through a netrc file
+# -- the service takes the token as the Basic password on its catalog. So a
+# netrc beside api.json, 0600, with this server's host in it; and Nix pointed
+# at it, unless Nix already reads a netrc of its own, whose other credentials
+# a second file would hide: then the line to add is said, never the token.
+login_netrc() {
+  local url="$1" token="$2" host netrc tmp conf system current
+  host="${url#*://}"
+  host="${host%%/*}"
+  host="${host%%:*}"
+  [[ "$host" =~ ^[A-Za-z0-9.-]+$ ]] || {
+    warn "not writing a netrc for $url: no host Nix could match"
+    return 0
+  }
+  netrc="$GOTG_CONFIG_DIR/netrc"
+  tmp="$(mktemp "$netrc.XXXXXX")"
+  chmod 600 "$tmp"
+  {
+    [[ ! -f "$netrc" ]] || grep -v "^machine $host " "$netrc" || true
+    printf 'machine %s login gotg password %s\n' "$host" "$token"
+  } >"$tmp"
+  mv "$tmp" "$netrc"
+
+  conf="${XDG_CONFIG_HOME:-$HOME/.config}/nix/nix.conf"
+  system="${GOTG_SYSTEM_NETRC:-/etc/nix/netrc}"
+  if [[ -f "$conf" ]] && grep -qE '^[[:space:]]*netrc-file[[:space:]]*=' "$conf"; then
+    current="$(sed -nE 's/^[[:space:]]*netrc-file[[:space:]]*=[[:space:]]*//p' "$conf" | tail -n1)"
+    [[ "$current" == "$netrc" ]] && return 0
+    warn "Nix reads its netrc from $current. For a library flake's catalog, add to it:"
+    warn "  machine $host login gotg password <the token in $netrc>"
+    return 0
+  fi
+  if [[ -e "$system" ]]; then
+    warn "Nix reads its netrc from $system. For a library flake's catalog, add to it (as root):"
+    warn "  machine $host login gotg password <the token in $netrc>"
+    return 0
+  fi
+  mkdir -p "$(dirname "$conf")"
+  printf 'netrc-file = %s\n' "$netrc" >>"$conf"
+  log "Nix will fetch the catalog with $netrc (netrc-file, in $conf)"
+}
+
 cmd_login() {
   local url token name=""
   if [[ "${1:-}" == "--claim" ]]; then
@@ -189,6 +232,8 @@ cmd_login() {
   chmod 600 "$tmp"
   mv "$tmp" "$file"
   log "saved $file (mode 600)${name:+ — you are $name}"
+
+  login_netrc "$url" "$token"
 
   # The File Browser era left a password behind; a dead credential in a 0600
   # file is still a credential.

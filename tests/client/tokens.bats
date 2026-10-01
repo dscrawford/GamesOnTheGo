@@ -247,3 +247,62 @@ invite_code() {
   [ "$status" -eq 0 ]
   [[ "$output$stderr" == *"nothing"* ]]
 }
+
+# --- the token for Nix ------------------------------------------------------
+#
+# A library flake pins the catalog as an input, and Nix authenticates a fetch
+# only through a netrc file. So login keeps one beside api.json, and points
+# the user's Nix at it -- unless Nix already has a netrc, whose other
+# credentials a second file would hide.
+
+nix_conf() { printf '%s/nix/nix.conf' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
+
+@test "login keeps a netrc for the server's host, private" {
+  export GOTG_SYSTEM_NETRC="$TEST_TMP/no-system-netrc"
+  local code
+  code="$(invite_code alice-deck)"
+  gotg login --claim "$GOTG_SERVICE_URL/claim/$code"
+  [ "$status" -eq 0 ]
+  local netrc="$GOTG_CONFIG_DIR/netrc" token
+  token="$(jq -r .token "$GOTG_CONFIG_DIR/api.json")"
+  [ "$(stat -c '%a' "$netrc")" = 600 ]
+  grep -qx "machine 127.0.0.1 login gotg password $token" "$netrc"
+}
+
+@test "login points Nix at it when Nix has no netrc of its own" {
+  export GOTG_SYSTEM_NETRC="$TEST_TMP/no-system-netrc"
+  local code
+  code="$(invite_code alice-deck)"
+  gotg login --claim "$GOTG_SERVICE_URL/claim/$code"
+  [ "$status" -eq 0 ]
+  grep -qx "netrc-file = $GOTG_CONFIG_DIR/netrc" "$(nix_conf)"
+  # Twice is still one line.
+  code="$(invite_code alice-deck2)"
+  gotg login --claim "$GOTG_SERVICE_URL/claim/$code"
+  [ "$(grep -c '^netrc-file' "$(nix_conf)")" = 1 ]
+}
+
+@test "login leaves a netrc Nix already has alone, and says what to add" {
+  export GOTG_SYSTEM_NETRC="$TEST_TMP/system-netrc"
+  : >"$GOTG_SYSTEM_NETRC"
+  local code
+  code="$(invite_code alice-deck)"
+  gotg login --claim "$GOTG_SERVICE_URL/claim/$code"
+  [ "$status" -eq 0 ]
+  ! grep -q '^netrc-file' "$(nix_conf)" 2>/dev/null
+  [[ "$stderr" == *"$GOTG_SYSTEM_NETRC"* ]]
+  [[ "$stderr" == *"machine 127.0.0.1"* ]]
+  [[ "$stderr" != *"$(jq -r .token "$GOTG_CONFIG_DIR/api.json")"* ]]
+}
+
+@test "a netrc-file already set for this user is not overridden" {
+  export GOTG_SYSTEM_NETRC="$TEST_TMP/no-system-netrc"
+  mkdir -p "$(dirname "$(nix_conf)")"
+  printf 'netrc-file = /somewhere/else\n' >"$(nix_conf)"
+  local code
+  code="$(invite_code alice-deck)"
+  gotg login --claim "$GOTG_SERVICE_URL/claim/$code"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^netrc-file' "$(nix_conf)")" = "netrc-file = /somewhere/else" ]
+  [[ "$stderr" == *"/somewhere/else"* ]]
+}

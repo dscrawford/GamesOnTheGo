@@ -544,6 +544,12 @@
         }
       );
 
-      formatter = forAllSystems (pkgs: pkgs.nixfmt-tree);
+      # `nix flake init -t gotg#library`: a library flake for one server.
+      templates.library = {
+        path = ./templates/library;
+        description = "A GOTG library: one server's games, each something `nix run` runs";
+      };
+
+            formatter = forAllSystems (pkgs: pkgs.nixfmt-tree);
     };
 }

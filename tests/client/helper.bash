@@ -19,6 +19,9 @@ setup_env() {
   export GOTG_ENV_STATE_DIR="$GOTG_STATE_DIR/env"
   export GOTG_SAVES_DIR="$GOTG_STATE_DIR/saves"
   export GOTG_APP_ROOT="$GOTG_STATE_DIR/app"
+  # Never the real one: login writes Nix's netrc-file there, and a test run
+  # from a desk would otherwise reach the person's own nix.conf.
+  export XDG_CONFIG_HOME="$TEST_TMP/xdg-config"
   export GOTG_LOG_DIR="$GOTG_STATE_DIR/logs"
 
   # Artwork has a source that needs no key, so it is reached on any `steam add`
