@@ -193,10 +193,10 @@ impl Frame {
 
     pub fn encode(&self) -> [u8; SIZE] {
         let mut out = [0u8; SIZE];
-        let mut words = out.chunks_exact_mut(4);
+        let mut words = out.as_chunks_mut::<4>().0.iter_mut();
         let mut put = |bytes: [u8; 4]| {
             if let Some(word) = words.next() {
-                word.copy_from_slice(&bytes);
+                *word = bytes;
             }
         };
         put(MAGIC.to_ne_bytes());

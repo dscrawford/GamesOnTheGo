@@ -192,7 +192,9 @@ mod tests {
             );
             assert!(
                 pixels
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .any(|px| px[3] > 200 && px[..3] != [255, 255, 255]),
                 "{} drew nothing but white",
                 console.name

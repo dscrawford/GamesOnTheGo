@@ -92,7 +92,9 @@ pub fn silhouette(icon: u8, height: u32) -> Option<(u32, Vec<u8>)> {
     // Premultiplied RGBA in; only the coverage is kept.
     let pixels = pixmap
         .data()
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|px| [255, 255, 255, px[3]])
         .collect();
     Some((width, pixels))
@@ -152,11 +154,15 @@ mod tests {
                 silhouette(icon as u8, 40).unwrap_or_else(|| panic!("{name} did not render"));
             assert_eq!(pixels.len(), (width * 40 * 4) as usize, "{name}");
             assert!(
-                pixels.chunks_exact(4).all(|px| px[..3] == [255, 255, 255]),
+                pixels
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .all(|px| px[..3] == [255, 255, 255]),
                 "{name} is not white"
             );
             assert!(
-                pixels.chunks_exact(4).any(|px| px[3] > 200),
+                pixels.as_chunks::<4>().0.iter().any(|px| px[3] > 200),
                 "{name} drew nothing"
             );
         }
