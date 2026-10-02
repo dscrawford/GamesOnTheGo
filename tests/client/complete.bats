@@ -175,13 +175,6 @@ comp() {
   [[ "$output" != *"usa.metroid"* ]]
 }
 
-@test "list completes a platform name" {
-  add_game n64 usa.zelda.z64 "rom" "Zelda"
-  gotg refresh
-  run comp gotg list "n"
-  [[ "$output" == *"n64"* ]]
-}
-
 @test "steam art offers its own options" {
   add_game n64 usa.zelda.z64 "rom" "Zelda"
   gotg refresh

@@ -97,6 +97,18 @@ let
       expr = games.n64.usa.donkey_kong_64.meta.mainProgram;
       expected = "gotg-n64-usa-donkey_kong_64";
     };
+    testNixSearchWalksPlatformsAndRegions = {
+      expr = [
+        (games.n64.recurseForDerivations or false)
+        (games.n64.usa.recurseForDerivations or false)
+        (games.usa.recurseForDerivations or false)
+      ];
+      expected = [
+        true
+        true
+        true
+      ];
+    };
     # The apps a person runs from a library, each knowing the library.
     testTheLibrarysAppsAreThere = {
       expr = builtins.sort builtins.lessThan (builtins.attrNames apps);

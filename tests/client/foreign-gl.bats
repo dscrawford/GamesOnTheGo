@@ -97,20 +97,20 @@ fetched() { grep -F -- "build $1 -o $GOTG_STATE_DIR/foreign-gl/$(basename "$1")"
   [[ "$output" == *"launched with"* ]]
 }
 
-@test "sync keeps the GL something here names, and lets the rest go" {
+@test "update keeps the GL something here names, and lets the rest go" {
   export GOTG_HOST_GL="$TEST_TMP/no-such-gl"
   mkdir -p "$GOTG_STATE_DIR/foreign-gl/$(basename "$MESA")" "$GOTG_STATE_DIR/foreign-gl/$(basename "$OTHER")"
   # The fake nix builds a root with no share/gotg; the environment names
   # its mesa once it is rebuilt, as a real build would.
   sed -i 's|^exit 0$|[[ "$out" != */roots/env-* ]] \|\| { mkdir -p "$out/share/gotg"; printf "%s\\n" "'"$MESA"'" >"$out/share/gotg/foreign-gl"; }\nexit 0|' "$GOTG_NIX"
-  gotg sync --force
+  gotg update
   [ -e "$GOTG_STATE_DIR/foreign-gl/$(basename "$MESA")" ]
   [ ! -e "$GOTG_STATE_DIR/foreign-gl/$(basename "$OTHER")" ]
 }
 
-@test "on a machine with its own GL, sync keeps none" {
+@test "on a machine with its own GL, update keeps none" {
   export GOTG_HOST_GL="$TEST_TMP"
   mkdir -p "$GOTG_STATE_DIR/foreign-gl/$(basename "$MESA")"
-  gotg sync --force
+  gotg update
   [ ! -e "$GOTG_STATE_DIR/foreign-gl/$(basename "$MESA")" ]
 }

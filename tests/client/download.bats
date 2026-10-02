@@ -27,17 +27,17 @@ teardown() {
   [ "$output" = "200" ]
 }
 
-@test "list marks which games are already installed" {
+@test "a download is what makes a game installed" {
   add_game n64 "usa.zelda.z64" "rom-content" "Zelda"
   gotg refresh
-  gotg list
+  gotg complete installed
   [ "$status" -eq 0 ]
-  [[ "$output" == *"[ ]"*"usa.zelda"* ]]
+  [[ "$output" != *"usa.zelda"* ]]
 
   gotg download usa.zelda
   [ "$status" -eq 0 ]
-  gotg list
-  [[ "$output" == *"[*]"*"usa.zelda"* ]]
+  gotg complete installed
+  [ "$output" = "n64/usa.zelda" ]
 }
 
 @test "a downloaded game matches the service byte for byte" {
@@ -266,8 +266,8 @@ publish_scene_game() {
   gotg download world.game
   [ "$status" -eq 0 ]
   [[ "$stderr" == *"already installed"* ]]
-  gotg list
-  [[ "$output" == *"[*]"*"world.game"* ]]
+  gotg complete installed
+  [[ "$output" == *"/world.game"* ]]
 }
 
 @test "a failed recipe keeps the raw members and installs nothing" {
@@ -569,8 +569,6 @@ publish_bundle_game_plus_update() {
   [ ! -e "$GOTG_GAMES_DIR/switch/world.zelda.nsp" ]
   [ ! -e "$GOTG_PARTIAL_DIR/world.zelda" ]
 
-  gotg list --installed
-  [[ "$output" == *"[*]"*"world.zelda"* ]]
   gotg complete installed
   [[ "$output" == *"switch/world.zelda"* ]]
 }
@@ -611,8 +609,8 @@ publish_bundle_game_plus_update() {
   stub_bundle_recipe_env
   gotg refresh
 
-  gotg list --installed
-  [[ "$output" == *"[*]"*"world.zelda"* ]]
+  gotg complete installed
+  [[ "$output" == *"switch/world.zelda"* ]]
   gotg download world.zelda
   [ "$status" -eq 0 ]
   [[ "$stderr" == *"without its updates and DLC"* ]]

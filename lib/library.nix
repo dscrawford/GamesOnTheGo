@@ -44,7 +44,8 @@
           };
           suffix = lib.optionalString (variant != null) ".${variant}";
           name = "${game.platform}.${game.id}${suffix}";
-          env = envs.${chosen.attr} or (throw "${name}: ${chosen.attr} is not an environment this flake builds");
+          env =
+            envs.${chosen.attr} or (throw "${name}: ${chosen.attr} is not an environment this flake builds");
           fields = {
             version = 1;
             server = lib.removeSuffix "/" server;
@@ -78,7 +79,9 @@
               {
                 meta = {
                   mainProgram = program;
-                  description = "${game.title or game.id} (${game.platform})${lib.optionalString (variant != null) ", ${variant}"}";
+                  description = "${game.title or game.id} (${game.platform})${
+                    lib.optionalString (variant != null) ", ${variant}"
+                  }";
                 };
               }
               ''
@@ -113,6 +116,10 @@
       # The short forms, without shadowing a platform: a region named like one
       # would turn `gotg#nes...` into something else.
       short = removeAttrs (catalogLib.unique withVariants data.games) (builtins.attrNames byPlatform);
+      # Marked for `nix search <library> zelda`, which walks only the sets
+      # that ask: that is the list a library has, now that the client has
+      # none. A game's variants hang off the game and are not walked.
+      searchable = lib.mapAttrs (_: lib.recurseIntoAttrs);
     in
-    byPlatform // short;
+    searchable (lib.mapAttrs (_: searchable) byPlatform) // searchable short;
 }

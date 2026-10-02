@@ -32,20 +32,15 @@ _gotg() {
     sub="${COMP_WORDS[2]:-}"
     COMPREPLY=()
 
-    local commands="login refresh list info download install uninstall play configure steam saves controllers admin sync help"
+    local commands="login refresh download install uninstall play configure steam saves controllers admin update library help"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
         mapfile -t COMPREPLY < <(compgen -W "$commands" -- "$cur")
         return
     fi
 
-    # --limit wants a number, and nothing sensible can be offered for one.
-    if [[ "$prev" == "--limit" ]]; then
-        return
-    fi
-
     case "$cmd" in
-        info | download | install | uninstall)
+        download | install | uninstall)
             [[ $COMP_CWORD -eq 2 ]] &&
                 mapfile -t COMPREPLY < <(_gotg_ids "$cur")
             ;;
@@ -61,21 +56,6 @@ _gotg() {
                 fi
             elif [[ $COMP_CWORD -eq 3 ]]; then
                 mapfile -t COMPREPLY < <(compgen -W "$(gotg complete variants "$sub")" -- "$cur")
-            fi
-            ;;
-        list)
-            if [[ "$prev" == "--platform" ]]; then
-                mapfile -t COMPREPLY < <(compgen -W "$(gotg complete platforms)" -- "$cur")
-            elif [[ "$cur" == -* ]]; then
-                mapfile -t COMPREPLY < <(compgen -W "--all --limit --platform --search --page" -- "$cur")
-            else
-                # A pattern is a regex over ids, titles and platforms. Offering
-                # the ids makes the common case — completing one — work, and
-                # anything else is still typed by hand.
-                mapfile -t COMPREPLY < <(
-                    _gotg_ids "$cur"
-                    compgen -W "$(gotg complete platforms)" -- "$cur"
-                )
             fi
             ;;
         saves)

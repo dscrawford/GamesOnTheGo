@@ -98,10 +98,10 @@ install_fake() {
 
 @test "it is listed as gone afterwards" {
   install_fake
-  gotg list --installed
+  gotg complete installed
   [[ "$output" == *"world.super_metroid"* ]]
   gotg uninstall world.super_metroid
-  gotg list --installed
+  gotg complete installed
   [[ "$output" != *"world.super_metroid"* ]]
 }
 

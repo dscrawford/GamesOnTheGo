@@ -6,10 +6,6 @@ set -euo pipefail
 
 # Resolve the library next to this script so the CLI works both from a checkout
 # and from the nix store.
-# Filled in by the build; a checkout has none and says so rather than claiming
-# a number nobody set.
-GOTG_VERSION="@version@"
-
 GOTG_ROOT="${GOTG_ROOT:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)}"
 GOTG_LIB="$GOTG_ROOT/lib"
 GOTG_DATA="${GOTG_DATA:-$GOTG_ROOT/data}"
@@ -86,64 +82,51 @@ source "$GOTG_LIB/cmd-admin.sh"
 # shellcheck source=lib/cmd-complete.sh
 source "$GOTG_LIB/cmd-complete.sh"
 
-# The store path as well as the number, because on this machine the number is
-# the less useful half: every build of an unchanged tree reports 0.1.0, and the
-# path is what says *which* one is on PATH. From a checkout it is the working
-# copy, which is the same answer to the same question.
-cmd_version() {
-  if [[ "$GOTG_VERSION" == @*@ ]]; then
-    printf 'gotg (unbuilt checkout)\n'
-  else
-    printf 'gotg %s\n' "$GOTG_VERSION"
-  fi
-  printf '%s\n' "$GOTG_ROOT"
-}
-
 usage() {
   cat <<'EOF'
+gotg is the launcher: what every game built from a library runs, and what
+the picker asks. Nothing here is meant to be typed. From a library made by
+`nix flake new <dir> -t <gotg>#library`:
+
+  nix search <library> zelda                 what it has
+  nix run <library>#n64.usa.donkey_kong_64   a game
+  nix run <library>#ui                       the picker
+  nix run <library>#steam -- picker          the picker in Steam; `add <id>` a game
+  nix run <library>#update                   rebuild the picker and every game here
+  nix run <library>#login                    the token for its server
+
+and from gotg itself: nix run <gotg>#{admin,qa,controllers}.
+
 usage: gotg <command> [args]
 
+  launch --spec <f>  a game as its Nix output runs it
+  play <id> [variant] build it from the library if needed, then launch
+                     --version <v> runs a particular update of the game
+  install <id>       fetch it, build it from the library, write a Steam launcher
+  download <id>      fetch a game without setting up a launcher
+  uninstall <id>     remove the game and its launchers; saves stay
+  refresh            move the library's catalog pin, and show that
+  versions <id> [variant]
+                     which updates of a game are here, and which one runs
+  saves <command>    move saves between machines (saves help for the rest)
+  configure <id> [variant]
+                     open that environment's own emulator settings
+  configure storage  where games are kept: list, add, remove, default
+  library [<ref>]    which library games are built from, or set it
+  update             rebuild gotg, the picker and every game built here
   login [--claim <url>] [--server <url>]
                      save the server URL and credentials (mode 600);
                      --claim exchanges a single-use invite link for a token
   admin <command>    mint invites, list and revoke tokens (admin help)
-  refresh            re-fetch the game catalog from the server
-  list [pattern] [page]  games matching a regex on id, title or platform,
-                     marking the ones installed here; a bare number is the
-                     page (--platform <p>, --installed, --all, --limit N)
-  info <id>          show one game's details, its mods included
-  download <id>      fetch a game without setting up a launcher
-  install <id>       fetch it, build it from the library, write a Steam launcher
-  uninstall <id>     remove the game and its launchers; saves stay
-  play <id> [variant] fetch it, build it from the library if needed, launch
-                     --version <v> runs a particular update of the game
-  versions <id> [variant]
-                     which updates of a game are here, and which one runs
   qa <id> [variant]  run it headless with a virtual pad and grade the recording
-  saves <command>    move saves between machines (saves help for the rest)
   controllers <cmd>  what SDL sees, and where its inputs land
-  configure <id> [variant]
-                     open that environment's own emulator settings
-  configure storage  where games are kept: list, add, remove, default
   steam <command>    add / remove / list non-Steam games (steam help)
-  library [<ref>]    which library games are built from, or set it
-  update             rebuild gotg, the picker and every game built here from
-                     the library (sync is the old name)
-  launch --spec <f>  a game as its Nix output runs it
-  version            which gotg this is, and where it was installed from
 
 Ids look like usa.legend_of_zelda_majoras_mask. When the same id exists on more
 than one platform, qualify it: n64/usa.bugs_life
 
 gotg ships no games. The library it downloads from is your own server, holding
 games you have obtained legally: your own dumps, or digital purchases.
-
-Games are played from a library: a flake made by `nix flake init -t
-<gotg>#library` that names the server and pins its catalog. Each game is an
-output of it (`nix run <library>#n64.usa.donkey_kong_64`), its environment a
-Nix dependency. `play` builds one the first time, which can compile an emulator
-and is far happier in a terminal than under Steam -- so running `install` once,
-from a terminal, is still the smoother way in.
 EOF
 }
 
@@ -152,24 +135,8 @@ EOF
 command_help() {
   case "$1" in
     login) echo "usage: gotg login [--claim <url>] [--server <url>]    — save the server URL and token (a claim url is a single-use invite; --server skips the url question), stored mode 600" ;;
-    refresh) echo "usage: gotg refresh  — re-fetch the game catalog from the server" ;;
+    refresh) echo "usage: gotg refresh  — move the library's catalog pin to what the server has, and show that" ;;
     versions) echo "usage: gotg versions <id> [variant]  — which installed versions there are, and which one a launch would run" ;;
-    list | ls)
-      cat <<'EOF'
-usage: gotg list [pattern] [page] [--search <re>] [--platform <p>] [--installed] [--page N] [--all] [--limit N]
-
-  Lists the catalog, marking the games installed here. A bare argument is a
-  pattern (a regex over id, title and platform) or, if it is a number, the
-  page; --search and --page are the named spellings of those two.
-
-    gotg list zelda                       every Zelda, on any platform
-    gotg list --platform nes --page 2     the second page of the NES set
-    gotg list --search zelda --platform nes
-    gotg list --installed                 only what is downloaded here
-    gotg list --all                       every game, no paging
-EOF
-      ;;
-    info | show) echo "usage: gotg info <id>    — one game's details and its mods" ;;
     download | get) echo "usage: gotg download <id>    — fetch a game without a launcher" ;;
     install) echo "usage: gotg install <id>    — fetch it, build its environment, write a Steam launcher" ;;
     uninstall) echo "usage: gotg uninstall <id>    — remove the game's files and launchers; saves and settings stay" ;;
@@ -182,8 +149,7 @@ usage: gotg configure <id> [variant]    — open that environment's own settings
                                         — where games are kept; the first is where downloads land
 EOF
       ;;
-    update) echo "usage: gotg update    — rebuild every game built here from the library (GOTG_LIBRARY, or \`library\` in the config): sync, per game" ;;
-    sync) echo "usage: gotg sync    — the old name for update" ;;
+    update) echo "usage: gotg update    — rebuild gotg, the picker and every game built here from the library (GOTG_LIBRARY, or \`library\` in the config)" ;;
     library) echo "usage: gotg library [<flake ref or directory>]    — print the library games are built from, or set it" ;;
   esac
 }
@@ -196,7 +162,7 @@ main() {
 
   # Every leaf command answers -h/--help. The group commands handle their own.
   case "$cmd" in
-    login | refresh | list | ls | info | show | download | get | install | uninstall | play | launch | configure | sync | update | versions)
+    login | refresh | download | get | install | uninstall | play | launch | configure | update | versions)
       case "${1:-}" in
         -h | --help) command_help "$cmd"; return 0 ;;
       esac
@@ -206,8 +172,6 @@ main() {
   case "$cmd" in
     login) cmd_login "$@" ;;
     refresh) cmd_refresh "$@" ;;
-    list | ls) cmd_list "$@" ;;
-    info | show) cmd_info "$@" ;;
     download | get) cmd_download "$@" ;;
     install) cmd_install "$@" ;;
     uninstall) cmd_uninstall "$@" ;;
@@ -227,10 +191,8 @@ main() {
     configure) cmd_configure "$@" ;;
     steam) cmd_steam "$@" ;;
     admin) cmd_admin "$@" ;;
-    version | --version | -V) cmd_version ;;
     # Not in the usage: this is what shell completion calls.
     complete) cmd_complete "$@" ;;
-    sync) cmd_sync "$@" ;;
     update) cmd_update "$@" ;;
     library) cmd_library "$@" ;;
     help | --help | -h | "") usage ;;

@@ -264,12 +264,3 @@ play_prepare() {
   export GOTG_GAME_VERSION="$version"
 }
 
-# `sync` was every environment's GC root, rebuilt from the flake; a game is its
-# library's output now, and `update` rebuilds those -- and the client and the
-# picker Steam starts -- so `sync` is the name it had.
-cmd_sync() {
-  [[ "${1:-}" != "--force" && "${1:-}" != "-f" ]] || shift
-  log "${C_DIM}sync is gotg update now${C_RESET}"
-  cmd_update "$@"
-}
-

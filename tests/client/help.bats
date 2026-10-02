@@ -13,7 +13,7 @@ setup() { setup_env; }
 
 @test "every leaf command answers --help without needing the server" {
   local cmd
-  for cmd in login refresh list info download install play configure sync; do
+  for cmd in login refresh download install play configure update versions; do
     gotg "$cmd" --help
     [ "$status" -eq 0 ] || {
       echo "gotg $cmd --help exited $status" >&2
@@ -32,12 +32,12 @@ setup() { setup_env; }
   [[ "$output" == *"usage: gotg install"* ]]
 }
 
-@test "list --help documents the search and page flags" {
-  gotg list --help
+@test "the usage says what gotg is now, and where the commands went" {
+  gotg help
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--search"* ]]
-  [[ "$output" == *"--platform"* ]]
-  [[ "$output" == *"--page"* ]]
+  [[ "$output" == *"the launcher"* ]]
+  [[ "$output" == *"nix run <library>#ui"* ]]
+  [[ "$output" != *"  list "* ]]
 }
 
 @test "launch's help says what a spec is, and that launch <id> is play" {
@@ -49,7 +49,7 @@ setup() { setup_env; }
 
 @test "each alias answers help under its canonical name" {
   local pair alias canon
-  for pair in "ls:list" "show:info" "get:download"; do
+  for pair in "get:download"; do
     alias="${pair%%:*}"
     canon="${pair##*:}"
     gotg "$alias" --help
@@ -64,9 +64,8 @@ setup() { setup_env; }
 @test "help is only intercepted in the first position, not after an argument" {
   # An id can never be --help, so --help after a positional is a plain
   # unknown option — a clean failure, not a help screen.
-  gotg list zelda --help
+  gotg download zelda --help
   [ "$status" -ne 0 ]
-  [[ "$stderr" == *"unknown option for list"* ]]
 }
 
 @test "complete --help is a harmless no-op, not a help screen" {
@@ -86,7 +85,7 @@ setup() { setup_env; }
 
 @test "help does not fetch or need a token" {
   rm -f "$GOTG_CONFIG_DIR/api.json"
-  gotg list --help
+  gotg install --help
   [ "$status" -eq 0 ]
-  [[ "$output" == *"usage: gotg list"* ]]
+  [[ "$output" == *"usage: gotg install"* ]]
 }

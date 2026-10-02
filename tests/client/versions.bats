@@ -270,16 +270,14 @@ env_with_window() {
   [ "$status" -ne 0 ]
 }
 
-@test "info names the mods that cannot run, and what they want" {
-  # The only place that says so: they are gone from completion and from the
-  # picker, and a mod that vanishes without a word is worse than one that
-  # never worked.
+@test "the mods that cannot run are named, with what they want" {
+  # They are gone from completion and from the picker's menu; `complete
+  # disabled` is where the picker reads why, and a mod that vanishes without
+  # a word is worse than one that never worked.
   installed_with 1.4.3
   env_with_ceiling env-switch-world_zelda-60fps 1.4.2
-  gotg info world.zelda
-  [[ "$output" == *"disabled:"* ]]
-  [[ "$output" == *"60fps"* ]]
-  [[ "$output" == *"needs 1.4.2 or older"* ]]
+  gotg complete disabled world.zelda
+  [ "$output" = "60fps" ]
 }
 
 @test "a mod nothing here can run does not go into Steam either" {

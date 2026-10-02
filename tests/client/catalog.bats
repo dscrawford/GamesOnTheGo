@@ -24,9 +24,10 @@ teardown() {
   [ "$output" = "n64" ]
 }
 
-@test "an already installed game still lists when the server is down" {
+@test "an already installed game is still known when the server is down" {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
+  gotg download usa.zelda
   stop_saves_service
   # The killed port can be re-bound by a parallel bats job whose mock accepts
   # the same tester/hunter2 — point at port 1, which nothing answers.
@@ -34,9 +35,12 @@ teardown() {
   mv "$GOTG_CONFIG_DIR/api.json.tmp" "$GOTG_CONFIG_DIR/api.json"
   chmod 600 "$GOTG_CONFIG_DIR/api.json"
 
-  gotg list
+  gotg complete installed
   [ "$status" -eq 0 ]
-  [[ "$output" == *"usa.zelda"* ]]
+  [ "$output" = "n64/usa.zelda" ]
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"already installed"* ]]
 }
 
 @test "an id on two platforms is reported as ambiguous, not guessed" {
@@ -104,37 +108,36 @@ teardown() {
   [[ "$stderr" == *"0 game(s)"* ]]
 }
 
-@test "info reports install state" {
+@test "a game is installed once its bytes are here, and not before" {
   add_game n64 "usa.zelda.z64" "rom" "The Legend of Zelda"
   gotg refresh
-  gotg info usa.zelda
+  gotg complete installed
   [ "$status" -eq 0 ]
-  [[ "$output" == *"installed: no"* ]]
-  [[ "$output" == *"The Legend of Zelda"* ]]
+  [[ "$output" != *"usa.zelda"* ]]
 
   gotg download usa.zelda
-  gotg info usa.zelda
-  [[ "$output" == *"installed: yes"* ]]
+  gotg complete installed
+  [[ "$output" == *"n64/usa.zelda"* ]]
 }
 
-@test "info lists the mods a game has variant environments for" {
+@test "the mods a game has variant environments for are its variants" {
   add_game gamecube "usa.super_mario_sunshine.rvz" "disc" "Super Mario Sunshine"
   export GOTG_ENV_DIR="$TEST_TMP/env"
   mkdir -p "$GOTG_ENV_DIR/games/gamecube"
   : >"$GOTG_ENV_DIR/games/gamecube/usa.super_mario_sunshine.bse.nix"
   : >"$GOTG_ENV_DIR/games/gamecube/usa.super_mario_sunshine.bsmso.nix"
   gotg refresh
-  gotg info usa.super_mario_sunshine
+  gotg complete variants usa.super_mario_sunshine
   [ "$status" -eq 0 ]
-  [[ "$output" == *"mods:"*"bse, bsmso"* ]]
+  [ "$output" = $'bse\nbsmso' ]
 }
 
-@test "info stays silent about mods when a game has none" {
+@test "a game with no mods has no variants" {
   add_game n64 "usa.zelda.z64" "rom" "Zelda"
   gotg refresh
-  gotg info usa.zelda
+  gotg complete variants usa.zelda
   [ "$status" -eq 0 ]
-  [[ "$output" != *"mods:"* ]]
+  [ -z "$output" ]
 }
 
 @test "names with spaces and punctuation survive the round trip" {
@@ -169,9 +172,10 @@ teardown() {
           handler: "single_file", title: "Evil",
           files: [{name: "../../escape.z64", size_bytes: 1, sha256: null}]}]}' \
     >"$GOTG_CACHE_FILE"
-  gotg info usa.evil
+  gotg download usa.evil
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"invalid file name"* ]]
+  [ ! -e "$TEST_TMP/escape.z64" ]
 }
 
 @test "a stale cache survives an unreachable server — the offline fallback" {
@@ -184,13 +188,13 @@ teardown() {
   mv "$GOTG_CONFIG_DIR/api.json.tmp" "$GOTG_CONFIG_DIR/api.json"
   chmod 600 "$GOTG_CONFIG_DIR/api.json"
 
-  # Everything cached is stale, so list has to attempt a refresh — and the
-  # refresh failing must degrade to the cache, not kill the command.
+  # Everything cached is stale, so a lookup has to attempt a refresh — and
+  # the refresh failing must degrade to the cache, not kill the command.
+  # (The download itself then fails: the server is gone.)
   touch -d '2 days ago' "$GOTG_CACHE_FILE"
-  gotg list
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"usa.zelda"* ]]
+  gotg download usa.zelda
   [[ "$stderr" == *"using the cached catalog"* ]]
+  [[ "$stderr" != *"no game called"* ]]
 }
 
 @test "no cache and no server is a plain failure, not a silent one" {
@@ -200,9 +204,9 @@ teardown() {
   jq '.url = "http://127.0.0.1:1"' "$GOTG_CONFIG_DIR/api.json" >"$GOTG_CONFIG_DIR/api.json.tmp"
   mv "$GOTG_CONFIG_DIR/api.json.tmp" "$GOTG_CONFIG_DIR/api.json"
   chmod 600 "$GOTG_CONFIG_DIR/api.json"
-  gotg list
+  gotg download usa.zelda
   [ "$status" -ne 0 ]
-  [[ "$stderr" == *"catalog"* ]]
+  [[ "$stderr" == *"no catalog cached and none could be fetched"* ]]
 }
 
 @test "an explicit refresh against a dead server fails loudly" {
@@ -241,10 +245,9 @@ teardown() {
   chmod 600 "$GOTG_CONFIG_DIR/api.json"
   touch -d '2 days ago' "$GOTG_CACHE_FILE"
 
-  gotg list
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"usa.zelda"* ]]
+  gotg download usa.zelda
   [[ "$stderr" == *"using the cached catalog"* ]]
+  [[ "$stderr" != *"no game called"* ]]
   [ "$(cat "$GOTG_CACHE_FILE")" = "$before" ]
   start_saves_service
 }
@@ -257,9 +260,9 @@ teardown() {
   gotg refresh
   stop_saves_service
   touch -d '1 hour hence' "$GOTG_CACHE_FILE"
-  gotg list
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"usa.zelda"* ]]
+  gotg download usa.zelda
+  [[ "$stderr" != *"cached catalog"* ]]
+  [[ "$stderr" != *"no game called"* ]]
 }
 
 @test "segment length caps at 255" {
@@ -277,18 +280,17 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
-@test "a poisoned platform is rejected by info before the mods glob" {
+@test "a poisoned platform is rejected before the mods glob" {
   mkdir -p "$GOTG_STATE_DIR"
   jq -n '{version: 2, games: [{id: "usa.evil", platform: "../../VICTIM",
           handler: "single_file", title: "Evil",
           files: [{name: "usa.evil.z64", size_bytes: 1, sha256: null}]}]}' \
     >"$GOTG_CACHE_FILE"
-  gotg info usa.evil
-  [ "$status" -ne 0 ]
-  [[ "$stderr" == *"invalid platform"* ]]
+  gotg complete variants usa.evil
+  [ -z "$output" ]
 }
 
-@test "info's mods are its own — not the base env, not a sibling id's" {
+@test "a game's mods are its own — not the base env, not a sibling id's" {
   add_game gamecube "usa.mario.rvz" "disc" "Mario"
   add_game gamecube "usa.mario_kart.rvz" "disc" "Mario Kart"
   export GOTG_ENV_DIR="$TEST_TMP/env"
@@ -297,23 +299,21 @@ teardown() {
   : >"$GOTG_ENV_DIR/games/gamecube/usa.mario.bse.nix"
   : >"$GOTG_ENV_DIR/games/gamecube/usa.mario_kart.hd.nix"
   gotg refresh
-  gotg info usa.mario
+  gotg complete variants usa.mario
   [ "$status" -eq 0 ]
-  [[ "$output" == *"mods:"*"bse"* ]]
-  [[ "$output" != *"hd"* ]]
+  [ "$output" = "bse" ]
 }
 
-@test "info only advertises mods that play accepts" {
+@test "only mods that play accepts are variants" {
   add_game n64 "usa.zelda.z64" "rom" "Zelda"
   export GOTG_ENV_DIR="$TEST_TMP/env"
   mkdir -p "$GOTG_ENV_DIR/games/n64"
   : >"$GOTG_ENV_DIR/games/n64/usa.zelda.bse.nix"
   : >"$GOTG_ENV_DIR/games/n64/usa.zelda.60.fps.nix"
   gotg refresh
-  gotg info usa.zelda
+  gotg complete variants usa.zelda
   [ "$status" -eq 0 ]
-  [[ "$output" == *"mods:"*"bse"* ]]
-  [[ "$output" != *"60.fps"* ]]
+  [ "$output" = "bse" ]
 }
 
 # --- the catalog is the library's pin ------------------------------------------

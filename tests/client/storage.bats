@@ -86,8 +86,6 @@ teardown() { stop_saves_service; }
 
   # The disk becomes the default again; the card still holds the game.
   gotg configure storage default "$HOME/Games"
-  gotg list --installed
-  [[ "$output" == *"[*]"*"usa.zelda"* ]]
   gotg complete installed
   [[ "$output" == *"n64/usa.zelda"* ]]
   gotg download usa.zelda

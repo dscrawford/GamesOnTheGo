@@ -184,6 +184,9 @@ cmd_update() {
   local library root attr failed=0
   library="$(gotg_library)"
   [[ -n "$library" ]] || die "no library configured: set GOTG_LIBRARY, or \`library\` in $GOTG_CONFIG_FILE"
+  # It narrates itself, one line per game; a dialog on top of that is the
+  # same news twice, and under the installer a window nobody asked for.
+  export GOTG_NO_DIALOG=1
   "$(nix_bin)" build "$library#gotg" -o "$GOTG_APP_ROOT" || die "could not build gotg from $library"
   log "gotg: up to date"
   # Best effort: a machine without the picker's dependencies still updates.

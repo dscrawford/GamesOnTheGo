@@ -523,18 +523,16 @@ fake_zenity() {
 
 # --- sync: no dialog, and several at once --------------------------------------
 
-@test "sync raises no progress dialog" {
-  # It narrates itself, one line per environment. A dialog on top of that is
-  # the same news twice -- and under the installer, which runs sync after an
+@test "update raises no progress dialog" {
+  # It narrates itself, one line per game. A dialog on top of that is the
+  # same news twice -- and under the installer, which runs update after an
   # upgrade, it is a window nobody asked for.
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
-  stub_nix
   fake_zenity ok
-  fake_env env-n64
-  fake_env env-snes
+  root_game n64.usa.zelda
 
-  gotg sync --force
+  gotg update
   [ "$status" -eq 0 ]
   [ ! -s "$ZENITY_LOG" ]
 }
