@@ -314,7 +314,13 @@ build_library() {
   step "building the picker, and any game already here, from $LIBRARY_DIR"
   export NIX_CONFIG="netrc-file = $CONFIG_DIR/netrc${NIX_CONFIG:+
 $NIX_CONFIG}"
-  change nix run "$LIBRARY_DIR#update" || die "could not build GOTG from $LIBRARY_DIR"
+  # Locked by its path first: Nix writes no lock through a store copy, and
+  # `nix run <dir>#update` on an unlocked library evaluated one -- whose apps
+  # then named that copy as the library, and update tried to lock it there.
+  # GOTG_LIBRARY for the same reason: gotg is not told of the library until
+  # after this, and the copy is not where a pin can be moved.
+  change nix flake lock "$LIBRARY_DIR" || die "could not lock $LIBRARY_DIR (is the token right?)"
+  GOTG_LIBRARY="$LIBRARY_DIR" change nix run "$LIBRARY_DIR#update" || die "could not build GOTG from $LIBRARY_DIR"
   change "$STATE_DIR/app/bin/gotg" library "$LIBRARY_DIR" ||
     warn "could not point gotg at $LIBRARY_DIR; run: $STATE_DIR/app/bin/gotg library $LIBRARY_DIR"
 }

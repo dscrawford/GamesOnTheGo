@@ -722,3 +722,24 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"CLAIM=https://gotg.example/claim/gotgi_y"* ]]
 }
+
+@test "the library is locked by its path before anything builds from it, and update is told which it is" {
+  # A Deck's first install: `nix run <dir>#update` on a library with no lock
+  # evaluated a store copy of it, whose apps name that copy as the library;
+  # update then tried to write a lock into the store and died.
+  other_linux
+  export GOTG_LIBRARY_DIR="$TMP/library"
+  load_installer
+  stub_nix
+  stub_side_effects
+  nix() {
+    printf '%s GOTG_LIBRARY=%s\n' "$*" "${GOTG_LIBRARY:-}" >>"$NIX_CALLS"
+    [[ "$1 $2" != "flake new" ]] || { mkdir -p "$3"; : >"$3/flake.nix"; }
+    return 0
+  }
+  run install_gotg
+  [ "$status" -eq 0 ]
+  grep -qx "flake lock $TMP/library GOTG_LIBRARY=" "$NIX_CALLS"
+  grep -qx "run $TMP/library#update GOTG_LIBRARY=$TMP/library" "$NIX_CALLS"
+  [ "$(grep -n "flake lock\|#update" "$NIX_CALLS" | head -n1 | cut -d: -f2- | cut -d' ' -f1-2)" = "flake lock" ]
+}
