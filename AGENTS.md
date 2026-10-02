@@ -25,15 +25,22 @@ what a launch from Steam or a bare terminal runs. Keep it current:
 
 ```bash
 git push && nix profile upgrade gotg gotg-ui   # the profile follows origin
-gotg sync                                      # and the copies Steam launches
+nix flake update gotg --flake "$(gotg library)" # the library follows it too
+gotg update                                    # and the copies Steam launches
 ```
+
+Games are played from a **library** (`docs/nix-games.md`): a flake made from
+`templates/library` that pins this repository and the server's catalog, one
+output per game. `gotg play`/`install` build that output and keep it as a
+root under `~/.local/state/gotg/games/`; there is no other way to run a game.
 
 The upgrade alone is not what Steam runs. Its picker entry starts
 `~/.local/state/gotg/picker` first and the client's `app` root beside it --
-both made by `gotg sync`, both left where they were by `nix profile upgrade`.
+both made by `gotg update` (`sync` is its old name) from the *library's* pin
+of this repository, both left where they were by `nix profile upgrade`.
 A Deck upgraded that way kept running the day-old picker, and a fix that
 had shipped looked like one that did not work. On a machine where a full
-sync is too long for now, the two roots alone are `nix build <flake>#gotg-ui
+update is too long for now, the two roots alone are `nix build <library>#gotg-ui
 -o ~/.local/state/gotg/picker` and `#gotg -o ~/.local/state/gotg/app`.
 
 ## Build / Run

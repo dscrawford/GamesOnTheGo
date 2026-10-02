@@ -7,6 +7,8 @@ a row `gotg play` will refuse.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from gotg_ui.catalog import Game
@@ -130,6 +132,33 @@ def ported(tmp_path, monkeypatch, id="usa.zelda", platform="n64"):
     (marker / "native-port").touch()
     monkeypatch.setenv("GOTG_ROOTS_DIR", str(roots))
     return roots
+
+
+def ported_from_library(tmp_path, monkeypatch, id="usa.zelda", platform="n64"):
+    """The same environment, built as a game from a library: a root under
+    games/ whose spec names the environment's store path."""
+    attr = f"env-{platform}-{id.replace('.', '_')}"
+    env = tmp_path / "store" / f"aaaa-{attr}"
+    (env / "share" / "gotg").mkdir(parents=True)
+    (env / "share" / "gotg" / "native-port").touch()
+    spec = tmp_path / "state" / "games" / f"{platform}.{id}" / "share" / "gotg"
+    spec.mkdir(parents=True)
+    (spec / "spec.json").write_text(json.dumps({"version": 1, "attr": attr, "env": str(env)}))
+    monkeypatch.setenv("GOTG_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("GOTG_ROOTS_DIR", raising=False)
+
+
+def test_emulate_is_offered_from_a_game_built_by_a_library(env, tmp_path, monkeypatch):
+    """No roots/ at all: the spec is where the environment is found."""
+    ported_from_library(tmp_path, monkeypatch)
+    (tmp_path / "n64.nix").write_text("{}")
+    assert "emulate" in variants_for(game(), tmp_path)
+
+
+def test_another_games_spec_does_not_lend_its_port(env, tmp_path, monkeypatch):
+    ported_from_library(tmp_path, monkeypatch, id="usa.mario")
+    (tmp_path / "n64.nix").write_text("{}")
+    assert "emulate" not in variants_for(game(), tmp_path)
 
 
 def test_emulate_is_offered_for_a_game_that_replaces_the_emulator(env, tmp_path, monkeypatch):

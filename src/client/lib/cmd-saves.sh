@@ -73,18 +73,10 @@ cmd_saves() {
 saves_resolve() {
   local want="${1:-}" variant="${2:-}"
   if [[ -z "$want" || "$want" == "--all" ]]; then
-    local root name
-    [[ -d "$GOTG_ROOTS_DIR" ]] || return 0
-    for root in "$GOTG_ROOTS_DIR"/*; do
-      [[ -e "$root" ]] || continue
-      name="$(basename "$root")"
-      # An environment's name, and nothing else in here: the build-key file
-      # beside every root (`env-n64.by`) starts with env- too, and asking
-      # its manifest was one "invalid environment name" per environment.
-      [[ "$name" =~ $GOTG_ATTR_RE ]] || continue
-      [[ -f "$(env_saves_manifest "$name")" ]] || continue
-      printf '%s\n' "$name"
-    done
+    local name
+    while IFS= read -r name; do
+      [[ -f "$(env_saves_manifest "$name")" ]] && printf '%s\n' "$name"
+    done < <(env_built_attrs)
     return 0
   fi
 

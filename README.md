@@ -44,7 +44,18 @@ nix run github:dscrawford/GamesOnTheGo#gotg-ui
 NixOS or home-manager: add `github:dscrawford/GamesOnTheGo` as a flake input
 and put `.packages.${system}.gotg` and `.gotg-ui` in your package list.
 
-Upgrade: re-run the installer, or `nix profile upgrade gotg gotg-ui --refresh && gotg sync`. The `gotg sync` is not optional: the picker Steam launches is a copy of its own, and only sync refreshes it -- without it Game Mode keeps running the old picker, whatever the profile says.
+Games are played from a **library**: a small flake that names your server and
+pins its catalog, each game one of its outputs ([docs/nix-games.md](docs/nix-games.md)).
+The installer makes one in `~/.config/gotg/library`; by hand:
+
+```bash
+nix flake new ~/.config/gotg/library -t github:dscrawford/GamesOnTheGo#library
+gotg library ~/.config/gotg/library   # then edit its server and catalog url
+gotg login                            # also lets Nix fetch the catalog (a netrc)
+nix run ~/.config/gotg/library#n64.usa.donkey_kong_64
+```
+
+Upgrade: re-run the installer, or `nix profile upgrade gotg gotg-ui --refresh && gotg update`. The `gotg update` is not optional: the picker Steam launches is a copy of its own, and only update refreshes it -- without it Game Mode keeps running the old picker, whatever the profile says. `nix flake update catalog` in the library picks up games added on the server; the picker does that itself for a game its lock does not have yet.
 
 Uninstall (games and saves stay; `--games` removes them too; Nix stays, and it says how to remove that):
 
@@ -73,14 +84,15 @@ gotg refresh                        # re-fetch the catalog
 gotg list [pattern] [page]          # regex on id, title, platform; * = installed here
 gotg list --platform snes --installed --all --limit 100
 gotg info <id>                      # size, path, installed, mods
-gotg install <id>                   # download + build environment + write launcher
-gotg play <id> [variant]            # build what is missing, then launch
+gotg install <id>                   # download + build from the library + write launcher
+gotg play <id> [variant]            # build it if needed, then launch
 gotg play <id> --version 1.4.2      # a particular game update
 gotg versions <id> [variant]        # installed updates; * = the one that runs
 gotg uninstall <id>                 # removes game and launchers; saves stay
 gotg configure <id> [variant]       # the emulator's own settings
 gotg configure storage list|add|remove|default <dir>
-gotg sync [--force]                 # rebuild after a git pull
+gotg library [<ref>]                # which library games come from
+gotg update                         # rebuild gotg, the picker and every game here
 gotg version
 ```
 

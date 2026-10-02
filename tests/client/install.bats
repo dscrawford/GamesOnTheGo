@@ -563,18 +563,79 @@ EOF
   [[ "$output" != *"No such device"* ]]
 }
 
-@test "an upgrade rebuilds the environments already here" {
-  # A newer gotg launching yesterday's environments is the Deck after every
-  # upgrade: the roots only ever caught up when somebody ran gotg sync.
+@test "an upgrade rebuilds the games already here" {
+  # A newer gotg launching yesterday's games is the Deck after every upgrade:
+  # the roots only ever caught up when somebody ran gotg update.
   other_linux
   load_installer
   stub_nix
   stub_side_effects
-  NIX_HAVE="gotg gotg-ui" run install_gotg
+  # Not under `run`: what install_gotg found is what rebuild_games reads.
+  NIX_HAVE="gotg gotg-ui" install_gotg 2>/dev/null
+  run rebuild_games
   [ "$status" -eq 0 ]
-  grep -qx "gotg sync" "$SIDE"
+  grep -qx "gotg update" "$SIDE"
   # A first install has nothing to catch up.
   : >"$SIDE"
-  NIX_HAVE="" run install_gotg
-  ! grep -q "gotg sync" "$SIDE"
+  UPGRADED=0
+  NIX_HAVE="" install_gotg 2>/dev/null
+  run rebuild_games
+  ! grep -q "gotg update" "$SIDE"
+}
+
+# --- a library: where games are played from (docs/nix-games.md) --------------
+
+@test "a machine with no library gets one from the template, and gotg is told where" {
+  other_linux
+  export GOTG_LIBRARY_DIR="$TMP/library"
+  load_installer
+  stub_nix
+  stub_side_effects
+  run ensure_library
+  [ "$status" -eq 0 ]
+  grep -qx "flake new $TMP/library -t $FLAKE#library" "$NIX_CALLS"
+  grep -qx "gotg library $TMP/library" "$SIDE"
+}
+
+@test "a library already configured is left alone" {
+  other_linux
+  load_installer
+  stub_nix
+  stub_side_effects
+  gotg() {
+    printf 'gotg %s\n' "$*" >>"$SIDE"
+    [[ "$*" != library ]] || printf '/somewhere/mine\n'
+  }
+  run ensure_library
+  [ "$status" -eq 0 ]
+  ! grep -q "flake new" "$NIX_CALLS"
+  ! grep -q "gotg library /" "$SIDE"
+  [[ "$output" == *"/somewhere/mine"* ]]
+}
+
+@test "a library directory already there is used, not made again" {
+  other_linux
+  export GOTG_LIBRARY_DIR="$TMP/library"
+  load_installer
+  stub_nix
+  stub_side_effects
+  mkdir -p "$TMP/library"
+  : >"$TMP/library/flake.nix"
+  run ensure_library
+  ! grep -q "flake new" "$NIX_CALLS"
+  grep -qx "gotg library $TMP/library" "$SIDE"
+}
+
+@test "a dry run makes no library" {
+  other_linux
+  export GOTG_LIBRARY_DIR="$TMP/library"
+  load_installer
+  stub_nix
+  stub_side_effects
+  DRY_RUN=1 run ensure_library
+  [ "$status" -eq 0 ]
+  ! grep -q "flake new" "$NIX_CALLS"
+  ! grep -q "gotg library $TMP" "$SIDE"
+  [ ! -e "$TMP/library" ]
+  [[ "$output" == *"would run:"* ]]
 }

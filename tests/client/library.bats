@@ -163,3 +163,22 @@ SHIM
   grep -qF "build $GOTG_LIBRARY#gotg -o $GOTG_STATE_DIR/app" "$NIX_LOG"
   grep -qF "build $GOTG_LIBRARY#gotg-ui -o $GOTG_STATE_DIR/picker" "$NIX_LOG"
 }
+
+@test "what is built here is what the games' specs name, and what roots/ still holds" {
+  # saves --all, controllers --all and the GL sync walk this: with games built
+  # from a library there is nothing under roots/, and walking only that was
+  # every one of them finding nothing.
+  load_client_libs
+  local env="$TEST_TMP/store/aaaa-env-n64-usa_zelda"
+  mkdir -p "$env" "$GOTG_STATE_DIR/games/n64.usa.zelda/share/gotg" \
+    "$GOTG_STATE_DIR/games/n64.usa.gone/share/gotg" "$GOTG_STATE_DIR/roots/env-snes"
+  jq -n --arg e "$env" '{version: 1, attr: "env-n64-usa_zelda", env: $e}' \
+    >"$GOTG_STATE_DIR/games/n64.usa.zelda/share/gotg/spec.json"
+  # A spec whose environment was collected is not something built here.
+  jq -n '{version: 1, attr: "env-n64-usa_gone", env: "/nonexistent"}' \
+    >"$GOTG_STATE_DIR/games/n64.usa.gone/share/gotg/spec.json"
+  : >"$GOTG_STATE_DIR/roots/env-snes.by"
+  run env_built_attrs
+  [ "$status" -eq 0 ]
+  [ "$output" = $'env-n64-usa_zelda\nenv-snes' ]
+}

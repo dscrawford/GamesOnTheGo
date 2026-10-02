@@ -19,6 +19,7 @@ answers with a paragraph is a row somebody presses twice.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -88,13 +89,32 @@ def variants_for(game: Game, where: Path | None = None) -> tuple[str, ...]:
     return tuple(sorted(names | emulate_for(game, where)))
 
 
-def roots_dir() -> Path:
-    """Where the client keeps its built environments, by the same rule it uses."""
+def state_dir() -> Path:
+    """The client's state directory, by the same rule it uses."""
     state = os.environ.get("GOTG_STATE_DIR")
     if not state:
         base = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
         state = os.path.join(base, "gotg")
-    return Path(os.environ.get("GOTG_ROOTS_DIR") or Path(state) / "roots")
+    return Path(state)
+
+
+def built_env(attr: str) -> Path | None:
+    """Where the environment `attr` is built, as the client's env_root finds it.
+
+    A game built from a library is a root under games/ whose spec names its
+    environment's store path; nothing is under roots/ for it any more. The
+    old roots directory is still read for a machine that has not updated.
+    """
+    for spec in sorted((state_dir() / "games").glob("*/share/gotg/spec.json")):
+        try:
+            data = json.loads(spec.read_text())
+        except (OSError, ValueError):
+            continue
+        env = data.get("env") if isinstance(data, dict) and data.get("attr") == attr else None
+        if isinstance(env, str) and env:
+            return Path(env)
+    legacy = Path(os.environ.get("GOTG_ROOTS_DIR") or state_dir() / "roots") / attr
+    return legacy if legacy.exists() else None
 
 
 def emulate_for(game: Game, where: Path) -> set[str]:
@@ -109,17 +129,17 @@ def emulate_for(game: Game, where: Path) -> set[str]:
     different and much larger set: most of those are the platform's emulator
     with settings added, and swapping one for the bare platform would only
     drop the settings. The environment says which it is, with a marker its
-    build carries, so this reads the built root -- the client's own rule, in
-    env_variant_names.
+    build carries, so this reads the built environment -- the client's own rule, in
+    env_variant_names, found the way env_root finds it.
 
     The name is reserved rather than a file (see env_attr), so there is
     nothing for the glob above to find. A real <id>.emulate.nix wins there,
     exactly as it does in the client.
     """
     platform = where / f"{game.platform}.nix"
-    marker = roots_dir() / f"env-{game.platform}-{game.id.replace('.', '_')}" / "share" / "gotg" / "native-port"
+    env = built_env(f"env-{game.platform}-{game.id.replace('.', '_')}")
     try:
-        if marker.exists() and platform.is_file():
+        if env is not None and (env / "share" / "gotg" / "native-port").exists() and platform.is_file():
             return {"emulate"}
     except OSError:
         return set()

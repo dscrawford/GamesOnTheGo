@@ -336,7 +336,7 @@ steam_display_name() {
     return 0
   fi
   local root title=""
-  root="$GOTG_ROOTS_DIR/$(env_attr "$game" "$variant")"
+  root="$(env_root "$(env_attr "$game" "$variant")")"
   if [[ -f "$root/share/gotg/saves.json" ]]; then
     title="$(jq -r '.title // empty' "$root/share/gotg/saves.json")"
   fi

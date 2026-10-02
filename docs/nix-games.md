@@ -1,8 +1,9 @@
 # Games as Nix outputs
 
-Status: in progress on `feat/nix-games` -- phases 0 to 5 done and checked
-on a real Deck; 6, retiring the old path, is next. `gotg play` with no
-library configured is what it always was.
+Status: on `feat/nix-games` -- phases 0 to 6 done; 5 checked on a real Deck,
+6's fresh Deck from nothing still to do. A game is played only from its
+library: `gotg play` with none configured says how to make one, and the
+installer makes one.
 
 Verified, against a local copy of the service on 127.0.0.1 (nothing reached
 the real server): a library flake fetched the catalog through a netrc and
@@ -52,7 +53,7 @@ leads: ids repeat across platforms and an attribute path cannot carry the
    danstick, the overlay and the session are the launcher's, unchanged.
 3. **Per-game outputs**, rooted for the couch: the picker and Steam launch a
    game's build kept as a GC root, so a launch neither evaluates a flake nor
-   needs the network; `nix run gotg#update` rebuilds the games that have
+   needs the network; `gotg update` rebuilds the games that have
    roots. That is sync, per game.
 
 ## Two inputs: the tools and the catalog
@@ -106,7 +107,7 @@ choosing one the lock does not have yet updates the `catalog` input first.
 | saves sync, `saves list`/`restore` | `gotg launch` and its library |
 | danstick, bindings, overlay, session | `gotg launch`, unchanged |
 | `login`, `admin`, `saves`, `qa`, `controllers` | `nix run gotg#gotg -- <command>` |
-| `play`, `install`, `uninstall`, `sync`, `refresh`, `versions` | retired; `#update`, `#uninstall` |
+| `play`, `install`, `sync`, `refresh` | `play`/`install` build the library's output; `sync` is `update`; `refresh` is the picker's cache |
 
 ## Phases
 
@@ -118,7 +119,7 @@ choosing one the lock does not have yet updates the `catalog` input first.
 | 3 | per-game outputs from `mkLibrary`, variants, unique-id aliases, laziness | an eval check that one game forces no other; dry runs; QA through an attribute |
 | 4 | the library flake template, registry, netrc for the catalog | a second library against the test service |
 | 5 | `gotg qa --spec`; `gotg play` through a configured library (so the picker and Steam), per-game roots, `gotg update` | picker tests; Steam bats; controller e2e; QA desktop and `--machine deck`; the Deck |
-| 6 | retire `play`, `install`, `sync`, `refresh` and the bash resolver; installer installs Nix and the registry entry | all checks; a fresh Deck from nothing |
+| 6 | retire the old path: environment building, its roots and `sync` (now `update`) gone from the client; `play`/`install` kept as the library's front door; the installer makes a library | all checks; a fresh Deck from nothing |
 
 ## Watch
 

@@ -82,12 +82,14 @@ foreign_gl_self() {
 foreign_gl_sync() {
   local dir root file path
   local -A wanted=()
+  local envs=() attr
   dir="$(foreign_gl_dir)"
+  while IFS= read -r attr; do envs+=("$(env_root "$attr")/share/gotg/foreign-gl"); done < <(env_built_attrs)
   if foreign_gl_needed; then
     # The client and picker sync just built, which Steam launches, as well as
     # this one and every environment.
     for file in "$(foreign_gl_self)" "$GOTG_APP_ROOT/share/gotg/foreign-gl" \
-      "$GOTG_UI_ROOT/share/gotg-ui/foreign-gl" "$GOTG_ROOTS_DIR"/env-*/share/gotg/foreign-gl; do
+      "$GOTG_UI_ROOT/share/gotg-ui/foreign-gl" "${envs[@]}"; do
       [[ -f "$file" ]] || continue
       path="$(head -n1 "$file")"
       foreign_gl_valid "$path" || continue

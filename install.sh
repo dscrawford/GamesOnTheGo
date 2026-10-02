@@ -23,6 +23,8 @@ NIX_INSTALLER="${GOTG_NIX_INSTALLER:-https://nixos.org/nix/install}"
 OS_RELEASE="${GOTG_OS_RELEASE:-/etc/os-release}"
 UDEV_PATH="${GOTG_UDEV_PATH:-/etc/udev/rules.d/99-gotg-uinput.rules}"
 UINPUT="${GOTG_UINPUT:-/dev/uinput}"
+# Where a library is made when a machine has none (docs/nix-games.md).
+LIBRARY_DIR="${GOTG_LIBRARY_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gotg/library}"
 
 C_OK=$'\e[32m'; C_WARN=$'\e[33m'; C_ERR=$'\e[31m'; C_DIM=$'\e[2m'; C_OFF=$'\e[0m'
 [[ -t 1 ]] || { C_OK=""; C_WARN=""; C_ERR=""; C_DIM=""; C_OFF=""; }
@@ -228,6 +230,7 @@ installed() {
     grep -oE '"(gotg|gotg-ui)":' | tr -d '":' | sort -u || true
 }
 
+UPGRADED=0
 install_gotg() {
   local have want=() upgrade=() name
   have="$(installed)"
@@ -244,11 +247,7 @@ install_gotg() {
   if ((${#upgrade[@]})); then
     step "upgrading ${upgrade[*]}"
     change nix profile upgrade "${upgrade[@]}" || die "could not upgrade ${upgrade[*]}"
-    # The environments already built here follow the upgrade now rather than
-    # on each game's next launch: a first launch that is also a rebuild is a
-    # long wait behind a loader, and a build error is better read here.
-    step "rebuilding the environments already here"
-    change gotg sync || warn "could not rebuild the environments; each rebuilds on its next launch"
+    UPGRADED=1
   fi
   if ((${#want[@]})); then
     step "installing GOTG from $FLAKE"
@@ -256,6 +255,36 @@ install_gotg() {
       die "could not install GOTG. For a private repository, set
      NIX_CONFIG=\"extra-access-tokens = github.com=<token>\""
   fi
+}
+
+# The games already built here follow an upgrade now rather than on each one's
+# next launch: a first launch that is also a rebuild is a long wait behind a
+# loader, and a build error is better read here. After ensure_library, since
+# an upgrade from before libraries has none until then.
+rebuild_games() {
+  ((UPGRADED)) || return 0
+  step "rebuilding the games already here"
+  change gotg update || warn "could not rebuild the games; run gotg update once you have logged in"
+}
+
+# Games are played from a library: a flake of this repository's template that
+# names the server and pins its catalog. One the person already set up is
+# theirs; otherwise one is made where config lives, and the client told.
+ensure_library() {
+  local current
+  current="$(gotg library 2>/dev/null || true)"
+  if [[ -n "$current" ]]; then
+    skip "games come from $current"
+    return 0
+  fi
+  if [[ -f "$LIBRARY_DIR/flake.nix" ]]; then
+    skip "a library in $LIBRARY_DIR"
+  else
+    step "making a library in $LIBRARY_DIR"
+    change nix flake new "$LIBRARY_DIR" -t "$FLAKE#library" ||
+      die "could not make a library from $FLAKE#library"
+  fi
+  change gotg library "$LIBRARY_DIR" || die "could not point gotg at $LIBRARY_DIR"
 }
 
 # A yes-or-no put to the person, on the terminal if there is one. Through a
@@ -357,6 +386,8 @@ main() {
   ensure_nix
   ensure_flakes
   install_gotg
+  ensure_library
+  rebuild_games
   ensure_uinput
   add_to_steam
 
@@ -367,8 +398,8 @@ main() {
   fi
   say "${C_OK}Done.${C_OFF}"
   say ""
-  say "  gotg list                 what is in the catalog"
-  say "  gotg install <id>         download a game and build what runs it"
+  say "  gotg login                sign in; the library's catalog needs it"
+  say "  gotg play <id>            download a game, build what runs it, play"
   say "  gotg-ui                   the picker, for a controller and a sofa"
   say ""
   if is_steamos; then

@@ -149,6 +149,27 @@ env_root() {
   done
   printf '%s/%s' "$GOTG_ROOTS_DIR" "$1"
 }
+# Every environment built here, one attr per line: those the games' specs name,
+# then any left in the roots directory from before libraries. What `--all`
+# walks (saves, controllers) and what sync keeps GL for.
+env_built_attrs() {
+  local spec root name
+  {
+    for spec in "$GOTG_STATE_DIR"/games/*/share/gotg/spec.json; do
+      [[ -f "$spec" ]] || continue
+      jq -r '.attr // empty' "$spec" 2>/dev/null || true
+    done
+    for root in "$GOTG_ROOTS_DIR"/*; do
+      [[ -e "$root" ]] || continue
+      name="$(basename "$root")"
+      printf '%s\n' "$name"
+    done
+  } | while IFS= read -r name; do
+    # An environment's name, and nothing else: the build-key file beside
+    # every old root (`env-n64.by`) starts with env- too.
+    [[ "$name" =~ $GOTG_ATTR_RE && -e "$(env_root "$name")" ]] && printf '%s\n' "$name"
+  done | awk '!seen[$0]++'
+}
 env_pinned() { [[ -n "${GOTG_PINNED_ATTR:-}" && "$1" == "$GOTG_PINNED_ATTR" ]]; }
 env_bin() { printf '%s/bin/gotg-play' "$(env_root "$1")"; }
 env_is_built() { [[ -x "$(env_bin "$1")" ]]; }

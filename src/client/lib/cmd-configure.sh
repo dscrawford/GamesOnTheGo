@@ -35,7 +35,8 @@ cmd_configure() {
   game="$(manifest_find "$want")"
   attr="$(env_attr "$game" "$variant")"
 
-  local root="$GOTG_ROOTS_DIR/$attr"
+  local root
+  root="$(env_root "$attr")"
   [[ -e "$root" ]] ||
     die "$attr is not built here yet — run: gotg install $want${variant:+ $variant}"
 

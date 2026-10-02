@@ -252,15 +252,11 @@ controllers_apply() {
   local attrs=()
 
   if [[ -z "$want" || "$want" == "--all" ]]; then
-    local root name
-    [[ -d "$GOTG_ROOTS_DIR" ]] || die "nothing is built here yet"
-    for root in "$GOTG_ROOTS_DIR"/*; do
-      [[ -e "$root" ]] || continue
-      name="$(basename "$root")"
-      [[ "$name" =~ $GOTG_ATTR_RE ]] || continue
-      [[ -f "$(env_pads_manifest "$name")" ]] || continue
-      attrs+=("$name")
-    done
+    local name
+    while IFS= read -r name; do
+      [[ -f "$(env_pads_manifest "$name")" ]] && attrs+=("$name")
+    done < <(env_built_attrs)
+    ((${#attrs[@]})) || die "nothing is built here yet"
   else
     manifest_cached || manifest_ensure
     local game
