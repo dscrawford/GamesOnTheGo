@@ -1,19 +1,23 @@
 # GamesOnTheGo (GOTG)
 
-A game library you host once and play anywhere. A server holds the catalog,
-artwork and saves; on each machine (a desktop, a Steam Deck) every game is a
-Nix flake output -- `nix run` fetches it on first launch, builds the emulator
-or port it needs, maps whatever controllers are plugged in, and runs it --
-from a terminal, from Steam, or from a controller-driven picker. Saves go back
-to the server, so a game picked up on the Deck continues where the desktop
-left it.
+Your games, on a server you host; every one of them a Nix flake output.
+
+![nix search gotg majora, then the picker listing the N64 Zeldas](docs/demos/gotg-search.gif)
+
+```bash
+nix run gotg#n64.usa.legend_of_zelda_majoras_mask
+```
+
+First run: the bytes come down from your server, the emulator or port is
+built, the controllers in the room are mapped. Every run: saves are pulled
+before and pushed after, the overlay is up, and a game picked up on the Deck
+continues where the desktop left it.
 
 **GOTG ships no games and downloads none from anyone but your own server.**
-It is a library manager and launcher for games you have obtained legally:
-cartridges and discs you own and have dumped yourself, or titles bought
-digitally. The same goes for console keys and firmware, which some platforms
-need to run a game — they come from a console you own. Do not point the
-indexer at material you do not have the right to copy.
+It is for games you have obtained legally: cartridges and discs you own and
+have dumped yourself, or titles bought digitally. The same goes for console
+keys and firmware. Do not point the indexer at material you do not have the
+right to copy.
 
 | Component | Does | Runs |
 |---|---|---|
@@ -21,90 +25,94 @@ indexer at material you do not have the right to copy.
 | [service](src/gotg/service/) | serves the catalog, artwork and saves | Deployment |
 | [library](templates/library/) | a flake naming your server and pinning its catalog; every game an output | Desktop, Steam Deck |
 | [launcher](src/client/) | `gotg` — what a game's output runs: fetch, saves, controllers, overlay | inside every game |
-| [picker](src/ui/) | `nix run <library>#ui` — controller-driven game grid | Desktop, Steam Deck |
+| [picker](src/ui/) | `nix run gotg#ui` — controller-driven game grid | Desktop, Steam Deck |
 
 ## Install
 
-Steam Deck (Desktop Mode, Konsole) or any Linux without Nix:
+Steam Deck (Desktop Mode, Konsole) or any Linux:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install.sh | bash
 ```
 
-`bash -s -- --server https://games.example.org` for a server other than `gotg.dcraw.net`.
+What it does, step by step (`bash -s -- --dry-run` prints this and changes nothing):
 
-Nothing goes in a profile. Games are played from a **library**: a small flake
-that names your server and pins its catalog, each game one of its outputs
-([docs/nix-games.md](docs/nix-games.md)). The installer makes one in
-`~/.config/gotg/library` and builds the picker from it. With Nix already here,
-by hand:
+```console
+  GOTG — installing onto this machine
+==> Nix is here (already done)
+==> flakes are on (already done)
+==> making a library in /home/you/.config/gotg/library, of https://gotg.dcraw.net
+   would run: nix flake new /home/you/.config/gotg/library -t github:dscrawford/GamesOnTheGo#library
+==> building the picker, and any game already here, from /home/you/.config/gotg/library
+   would run: nix run /home/you/.config/gotg/library#update
+   would run: /home/you/.local/state/gotg/app/bin/gotg library /home/you/.config/gotg/library
+==> letting GOTG publish controllers (/dev/uinput)
+   would ask for your password
+==> putting GOTG in your Steam library
+   would run: /home/you/.local/state/gotg/app/bin/gotg steam picker
+Dry run done. Nothing was changed.
+```
+
+Nothing goes in a Nix profile. The **library** is the install: a flake in
+`~/.config/gotg/library` naming your server and pinning its catalog, each game
+an output of it ([docs/nix-games.md](docs/nix-games.md)). `--server
+https://games.example.org` makes it a library of another server. With Nix
+already here, the whole of it by hand:
 
 ```bash
-nix flake new ~/.config/gotg/library -t github:dscrawford/GamesOnTheGo#library   # edit its server and catalog url
-nix run ~/.config/gotg/library#login              # the token; also lets Nix fetch the catalog (a netrc)
-nix run ~/.config/gotg/library#n64.usa.donkey_kong_64
+nix flake new ~/.config/gotg/library -t github:dscrawford/GamesOnTheGo#library
+nix registry add gotg ~/.config/gotg/library     # so it is gotg#… from anywhere, as below
+nix run gotg#login
 ```
 
-Upgrade: re-run the installer, or in the library `nix flake update gotg` then
-`nix run .#update`. The update is not optional: the picker Steam launches is a
-copy of its own, and only that refreshes it -- without it Game Mode keeps
-running the old picker. `nix flake update catalog` picks up games added on
-the server; the picker does that itself for a game its lock does not have yet.
+Upgrade: the installer again, or `nix flake update gotg --flake ~/.config/gotg/library && nix run gotg#update`.
+Uninstall: the same line with `uninstall.sh` (`--games` takes games and saves too; Nix stays).
+More: [docs/install.md](docs/install.md).
 
-Uninstall (games and saves stay; `--games` removes them too; Nix stays, and it says how to remove that):
+## Play
+
+```console
+$ nix search gotg majora
+* legacyPackages.x86_64-linux.n64.usa.legend_of_zelda_majoras_mask
+  Legend Of Zelda - Majora's Mask (n64)
+
+$ nix run gotg#n64.usa.legend_of_zelda_majoras_mask
+```
+
+An id is `<region>.<title_slug>`, unique per platform, so the attribute is
+`<platform>.<region>.<title>`; `gotg#usa.legend_of_zelda_majoras_mask` works
+when the id is on one platform only.
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/uninstall.sh | bash
+nix run gotg#n64.usa.legend_of_zelda_ocarina_of_time_rev2.rando        # a variant
+nix run gotg#n64.usa.donkey_kong_64.emulate                              # a native port, back on the emulator
+nix run gotg#switch.world.legend_of_zelda_tears_of_the_kingdom -- --version 1.4.2   # one of its updates
+nix flake update catalog --flake ~/.config/gotg/library                  # games added on the server since
 ```
 
-Details, and what the installer does besides: [docs/install.md](docs/install.md).
-
-## Game ids
-
-```
-/Games/<platform>/<region>.<title_slug>[.<ext>]     →  id: <region>.<title_slug>
-```
-
-- Pattern: `^[a-z]{3,5}\.[a-z0-9][a-z0-9_]*$`; region is `usa`, `eur`, `jpn` or `world`.
-- Unique per platform, not globally. Qualify when ambiguous: `snes/usa.mario_is_missing`.
-
-## Playing
-
-Everything is `nix run` on the library. `nix registry add gotg ~/.config/gotg/library`
-makes it `gotg#…` from anywhere.
-
-```bash
-nix run ~/.config/gotg/library#login                        # the token for your server
-nix run ~/.config/gotg/library#login -- --claim <url>       # redeem an invite link instead
-nix search ~/.config/gotg/library zelda                     # what there is
-nix run ~/.config/gotg/library#n64.usa.donkey_kong_64       # play: fetched and built on first run
-nix run ~/.config/gotg/library#usa.donkey_kong_64           # the short form, for an id on one platform
-nix run ~/.config/gotg/library#n64.usa.legend_of_zelda_ocarina_of_time_rev2.rando   # a variant
-nix run ~/.config/gotg/library#switch.world.legend_of_zelda_tears_of_the_kingdom -- --version 1.4.2   # a game update
-nix run ~/.config/gotg/library#ui                           # the picker
-nix run ~/.config/gotg/library#steam -- picker              # the picker in Steam, as "Games On The Go"
-nix run ~/.config/gotg/library#update                       # rebuild the picker and every game built here
-nix flake update catalog --flake ~/.config/gotg/library     # games added on the server since
-```
-
-Behind every game is the launcher, `gotg`, which the library builds and
-nobody installs: `~/.local/state/gotg/app/bin/gotg`. The `gotg …` lines below
-are that program; it answers `help`. Admin and QA are `nix run
-github:dscrawford/GamesOnTheGo#admin` and `#qa`.
-
-Launch log: `~/.local/state/gotg/logs/<id>.log`.
+Behind every game is the launcher, `gotg`, which the library builds and nobody
+installs: `~/.local/state/gotg/app/bin/gotg`. It answers `help`; the `gotg …`
+lines further down are that program. Launch log: `~/.local/state/gotg/logs/<id>.log`.
 
 ## Picker
 
-```bash
-nix run ~/.config/gotg/library#ui                 # the grid
-nix run ~/.config/gotg/library#steam -- picker    # put it in Steam as "Games On The Go"
+```console
+$ nix run gotg#ui -- --list --search zelda --platform n64
+n64       jpn.zelda_no_densetsu_mujura_no_kamen_rev1 Zelda No Densetsu - Mujura No Kamen
+n64       usa.legend_of_zelda_majoras_mask         Legend Of Zelda - Majora's Mask
+n64       usa.legend_of_zelda_ocarina_of_time_master_quest Legend Of Zelda - Ocarina Of Time - Master Quest
+n64       usa.legend_of_zelda_ocarina_of_time_rev2 Legend Of Zelda - Ocarina Of Time
+page 1 of 1 · 7 games
+$ nix run gotg#ui                         # the grid itself
+$ nix run gotg#steam -- picker            # in Steam, as "Games On The Go"
 ```
+
+![The picker's mod menu on Four Swords Adventures: Back, vanilla, 2p, 3p, 4p](docs/ui-mods-menu.png)
 
 | Pad | Keyboard | Does |
 |---|---|---|
 | D-pad | arrows | move |
-| A | Enter / tap `Space` | game menu |
+| A | Enter / tap `Space` | game menu: Play, Install, mods, versions, saves, Steam |
 | B | Esc / q | back / quit |
 | LB / RB | PgUp / PgDn | page |
 | X | `/` or `f` | search |
@@ -115,133 +123,157 @@ nix run ~/.config/gotg/library#steam -- picker    # put it in Steam as "Games On
 | — | `i` | installed only |
 | — | `s` | storage |
 
-**View** switches between `grid` (10 covers) and `rows` (list + full art).
+Install from the menu runs behind the grid, a ring on the tile; Play on a game
+that is not here yet shows the download and the build on screen, then becomes
+the game.
 
-![The picker's mod menu on Four Swords Adventures: Back, vanilla, 2p, 3p, 4p](docs/ui-mods-menu.png)
+![Four Swords Adventures, split-screen for two](docs/four-swords-2p.png)
 
 ## Controllers
 
-Launches run through [danstick](https://github.com/dscrawford/danstick) (formerly padmap): pads are republished via `/dev/uinput`, seated by holding a button, and mapped before the emulator starts.
-
-```bash
-gotg controllers list               # what SDL sees
-gotg controllers list --as-game     # what a game sees: inside danstick's sandbox, clones only
-gotg controllers order [--json]     # player order
-gotg controllers order --set xbox   # pin player 1; --clear to undo
-gotg controllers apply [<id>|--all] # write bindings without launching
+```console
+$ gotg controllers list
+Steam Controller
+  binds as   03002854de2800000413000002006800/0
+  reached by /dev/hidraw2 (raw HID, no evdev node)
+  mapping    32 elements
+  motion     gyro and accelerometer — used by Ryujinx and Cemu
 ```
 
-| Emulator | Consoles | Bindings written to |
-|---|---|---|
-| ares | NES, SNES, N64, GB, GBC, GBA, Mega Drive | `settings.bml` |
-| Dolphin | GameCube, Wii | `GCPadNew.ini` |
-| Ryujinx | Switch | `Config.json` |
-| Cemu | Wii U | `controllerProfiles/*.xml` |
+Launches run through [danstick](https://github.com/dscrawford/danstick):
+pads are republished via `/dev/uinput`, seated by holding a button, and bound
+before the emulator starts -- ares (`settings.bml`), Dolphin (`GCPadNew.ini`),
+Ryujinx (`Config.json`), Cemu (`controllerProfiles/*.xml`). Motion goes over
+DSU (`127.0.0.1:26760`, slot = player − 1); `DANSTICK_DSU_PORT=0` turns it off.
 
-**Motion:** danstick serves every seated pad's gyro and accelerometer over DSU (`127.0.0.1:26760`, slot = player − 1) and writes each environment's Ryujinx, Cemu and Dolphin config to read it. `DANSTICK_DSU_PORT=0` turns it off.
+**Every session starts with nobody seated**, picker and game alike. Pick a
+controller up, hold a button for a second and a half, and the bar at the top
+fills in your colour: you are player one, the next to hold is player two, and
+that is the numbering every game is bound against. A controller danstick has
+no buttons for gets them walked right there, over the game.
 
-**Stop any game:** hold a shoulder or trigger on each side + Start for 3 s.
+**L + R + A** held half a second brings a menu down for that player alone:
+the seats as a row of controller icons; the game's controller under them,
+every press lighting the presser's icon beside the button it hit; A rebinds
+yours, A held then left/right moves your seat, X takes a controller out of
+its seat, Y turns its game port off or on, a save to load, and **Exit** (held)
+stops the game and pushes its saves. **L + R + Start** held three seconds
+stops any game.
 
-**Every session starts with nobody seated** — the picker and each game alike. danstick's daemon is the session's: started unseated, following the process, gone when it is. Pick a controller up, hold a button, and you are player one; the next to hold is player two, which is the numbering every game is bound against.
-
-**What a clone looks like** is `mirror` by default: the physical pad's vendor and product, which is what an emulator told to bind that controller expects. The decompiled ports (DK64 Recompiled, Snowboard Kids 2, Paper Mario ReCut) carry their own controller database and a clone of a Steam Controller is in nobody's, so their environments ask for `xbox360` — every clone a wired `045e:028e`, the one GUID every SDL maps by heart. Refused for Ryujinx whatever an environment says: under it every clone shares a GUID and Ryujinx cannot tell them apart.
-
-**In the picker**, danstick listens for a hold for as long as the grid is up: pick a controller up, hold a button, and the ring above the games fills in your colour and seats you. Only pads danstick has published move the cursor — an unseated one is ignored, so a controller nobody has assigned cannot drive the library. That holds whether or not danstick is running; the keyboard and mouse always work. A controller that is *also* a keyboard — a Steam Controller in lizard mode, a Bluetooth Xbox pad's extra collections — is held quiet at the kernel while the picker runs, so it cannot arrive as arrow keys either. `GOTG_ANY_PAD=1` lifts it by hand, for a television with no keyboard in the room.
-
-That is a requirement, and it has a test that runs it against a real daemon and real kernel devices — `tests/e2e`:
+Only pads danstick has published move the picker -- the keyboard takes a seat
+too (hold `Space`), and a controller that is also a keyboard (a Steam
+Controller in lizard mode, a Bluetooth Xbox pad's extra collections) is held
+quiet at the kernel while the picker runs. That is a requirement with a test
+against a real daemon and real kernel devices:
 
 ```bash
-nix run .#test-controllers                 # or gotg-test-controllers in the dev shell
-GOTG_E2E_REQUIRE=1 nix run .#test-controllers   # a machine that cannot run it fails instead of skipping
+nix run github:dscrawford/GamesOnTheGo#test-controllers      # needs /dev/uinput writable, nothing else
 ```
 
-It needs `/dev/uinput` writable and nothing else; each test starts a danstick of its own under a temporary directory and never touches the one you are playing with.
-
-**Controllers join over whatever is on screen** — the picker or a game. The overlay (`gotg-killswitch`, started beside both) keeps danstick listening for a hold: pick a controller up and hold any button for a second and a half, and the bar at the top fills in that seat's colour. A controller danstick has no buttons for gets them walked right there, over the game; **L + R + A** held a second brings a menu down for that player -- the seated controllers (A rebinds one, lighting each button as it is pressed; A held moves it to another seat; Y switches its game port off or on, so the game ignores that pad) and **Exit** (A held a second: the game stops and its saves are pushed); **B** held a second closes it; **L + R + Start** held three seconds stops the game. A game started with nobody seated says "No controllers connected" until somebody holds a button. Nothing is asked before a launch. The emulator is bound to port N = `danstick Player N`, found by the GUID danstick published, and never a raw pad — `danstick-rs exec` hides those from the game. Seating stays open during play; the press latency through a clone is measured by `tests/e2e`.
+```bash
+gotg controllers list --as-game      # what a game sees: inside danstick's sandbox, clones only
+gotg controllers order --set xbox    # pin player 1; --clear to undo
+gotg controllers apply [<id>|--all]  # write bindings without launching
+```
 
 ## Steam
 
-```bash
-nix run ~/.config/gotg/library#steam -- add <id> [variant]    # launcher + shortcut + artwork
-nix run ~/.config/gotg/library#steam -- remove <id> [variant]
-nix run ~/.config/gotg/library#steam -- list
-nix run ~/.config/gotg/library#steam -- pending               # changes queued while Steam is running
-nix run ~/.config/gotg/library#steam -- art <id> [variant] [--force]
-nix run ~/.config/gotg/library#steam -- art <id> --from <file|url> [--as tile|capsule|hero|logo|icon]
+```console
+$ nix run gotg#steam -- list
+Legend Of Zelda - Majora's Mask
+  /home/you/Games/n64/play-usa.legend_of_zelda_majoras_mask.sh
+Paper Mario (recut)
+  /home/you/Games/n64/play-usa.paper_mario-recut.sh
+Games On The Go
+  /home/you/.local/state/gotg/launchers/gotg-ui.sh
 ```
 
-Close Steam before changes apply; restart it to see them — it reads that file once, at startup, and rewrites it from memory when it exits.
-
-What Steam does not tell you, and what it cost to find out: [docs/steam.md](docs/steam.md).
+`add <id> [variant]` writes the launcher, the shortcut and the artwork;
+`remove <id>`; `pending` is what queued while Steam was open; `art <id>
+[--from <file|url>] [--as tile|capsule|hero|logo|icon]`. Steam reads that
+file once, at startup, and rewrites it from memory when it exits: close it
+before changes, restart it to see them. The rest of what it cost to find out:
+[docs/steam.md](docs/steam.md).
 
 ## Variants
 
-```bash
-nix run ~/.config/gotg/library#gamecube.usa.super_mario_sunshine.bse
-nix run ~/.config/gotg/library#n64.usa.super_mario_64.pc-4p
-nix run ~/.config/gotg/library#switch.world.legend_of_zelda_tears_of_the_kingdom.120fps -- --version 1.4.2
+```console
+$ nix eval --raw gotg#n64.usa.legend_of_zelda_ocarina_of_time_rev2.rando.gotgSpec.attr
+env-n64-usa_legend_of_zelda_ocarina_of_time_rev2-rando
 ```
 
 | Game | Variants |
 |---|---|
-| `gamecube/usa.super_mario_sunshine` | `bse`, `bsmso` |
-| `gamecube/usa.legend_of_zelda_four_swords_adventures` | `2p`, `3p`, `4p` (split-screen) |
-| `n64/usa.super_mario_64` | `pc`, `pc-2p`, `pc-3p`, `pc-4p` (sm64coopdx, split-screen) |
-| `n64/usa.legend_of_zelda_majoras_mask` | `rando` |
-| `n64/usa.legend_of_zelda_ocarina_of_time_rev2` | `rando`, `2p`, `3p`, `4p` (Anchor co-op, split-screen) |
-| `n64/usa.paper_mario` | `recut` |
-| `gba/world.pokemon_emerald_version` | `rogue` |
-| `switch/world.legend_of_zelda_breath_of_the_wild` | `60fps`, `120fps` (needs 1.6.0) |
-| `switch/world.legend_of_zelda_tears_of_the_kingdom` | `60fps`, `120fps`, `enhanced` (needs 1.1.0–1.4.2) |
-| `switch/world.legend_of_zelda_skyward_sword_hd` | `120fps` (needs 1.0.1) |
-| `switch/world.luigis_mansion_2_hd` | `60fps`, `120fps` |
-| `switch/world.kirby_and_the_forgotten_land` | `60fps` |
-| `switch/world.paper_mario_the_thousand_year_door` | `60fps` |
-| `switch/world.super_mario_rpg` | `120fps` |
+| `gamecube.usa.super_mario_sunshine` | `bse`, `bsmso` |
+| `gamecube.usa.legend_of_zelda_four_swords_adventures` | `2p`, `3p`, `4p` (split-screen) |
+| `n64.usa.super_mario_64` | `pc`, `pc-2p`, `pc-3p`, `pc-4p` (sm64coopdx, split-screen) |
+| `n64.usa.legend_of_zelda_majoras_mask` | `rando` |
+| `n64.usa.legend_of_zelda_ocarina_of_time_rev2` | `rando`, `2p`, `3p`, `4p` (Anchor co-op, split-screen) |
+| `n64.usa.paper_mario` | `recut` |
+| `gba.world.pokemon_emerald_version` | `rogue` |
+| `switch.world.legend_of_zelda_breath_of_the_wild` | `60fps`, `120fps` (needs 1.6.0) |
+| `switch.world.legend_of_zelda_tears_of_the_kingdom` | `60fps`, `120fps`, `enhanced` (needs 1.1.0–1.4.2) |
+| `switch.world.legend_of_zelda_skyward_sword_hd` | `120fps` (needs 1.0.1) |
+| `switch.world.luigis_mansion_2_hd` | `60fps`, `120fps` |
+| `switch.world.kirby_and_the_forgotten_land` | `60fps` |
+| `switch.world.paper_mario_the_thousand_year_door` | `60fps` |
+| `switch.world.super_mario_rpg` | `120fps` |
 
-A variant whose version range matches nothing installed is hidden from the
-picker; `gotg complete disabled <id>` names it.
+A variant is a file: `src/client/env/games/<platform>/<id>.<variant>.nix`,
+beside `<id>.nix` for one game's settings and `<platform>.nix` for the rest.
+One whose version range matches nothing installed is hidden from the picker.
 
-Native ports, not emulated: Ocarina of Time and Master Quest (Ship of Harkinian), Majora's Mask (2 Ship 2 Harkinian), Donkey Kong 64 (recomp), Snowboard Kids 2 (recomp), Super Smash Bros. (BattleShip), Pikmin (Open Nectar), Super Mario 64 `pc` (sm64coopdx), Paper Mario `recut` (Wine), Animal Crossing (ACGC PC Port, Wine), Super Smash Bros. Melee (melee-pc).
-Any of those can be put back on the emulator for a launch: the `.emulate` attribute (`nix run …#n64.usa.donkey_kong_64.emulate`), or the same row in the picker. A port is younger than the emulator it replaces, so this is how you find out which of the two has the bug.
+Native ports, not emulated: Ocarina of Time and Master Quest (Ship of
+Harkinian), Majora's Mask (2 Ship 2 Harkinian), Donkey Kong 64 (recomp),
+Snowboard Kids 2 (recomp), Super Smash Bros. (BattleShip), Pikmin (Open
+Nectar), Super Mario 64 `pc` (sm64coopdx), Paper Mario `recut` (Wine), Animal
+Crossing (ACGC PC Port, Wine), Super Smash Bros. Melee (melee-pc). Each has
+an `.emulate` attribute that puts it back on the emulator: a port is younger
+than what it replaces, and that is how you find out which of the two has the
+bug.
 
 ## Saves
 
 ```bash
-gotg saves setup https://gotg.dcraw.net
 gotg saves status [<id>|--all]      # compare; writes nothing
 gotg saves push   [<id>|--all] [--force]
 gotg saves pull   [<id>|--all]
-gotg saves adopt  [<id>|--all] [--yes]   # import saves from before isolation
 gotg saves check  <id> [variant] [--json]       # conflict? which machine, and when
 gotg saves keep   <id> [variant] here|remote    # settle one
 ```
 
-- `play` pulls first when the service is ahead and nothing local changed.
-- **Both sides changed since they last matched** is a conflict. From the picker, starting that game shows both saves -- the machine each is on (its login name) and when it was last updated -- and the one you pick is kept; the other is kept aside, not deleted. From the command line: `gotg saves check`, then `gotg saves keep`.
-- A push against a newer server copy is refused (409) unless `--force`.
-- Local history: `~/.local/state/gotg/saves/local/`, last 3 (`GOTG_SAVES_KEEP`).
-- Wii U saves are not synced yet.
+A launch pulls first when the server is ahead and nothing local changed, and
+pushes on the way out. **Both sides changed since they last matched** is a
+conflict: starting that game from the picker shows both saves -- the machine
+each is on and when -- and keeps the one you pick, the other set aside. A
+push against a newer server copy is refused (409) unless `--force`. Local
+history: `~/.local/state/gotg/saves/local/`, last 3. Wii U saves are not
+synced yet.
+
+## QA
+
+```console
+$ gotg qa usa.donkey_kong_64 --machine deck --overlay-at 20
+running Donkey Kong 64 headless for 60s here, standing in for a deck
+
+run:     ~/.local/state/gotg/qa/runs/20261001-171902-Cxih
+machine: deck
+  boots     pass
+  audio     pass
+  video     pass
+  controller pass
+  graphics  skip
+  overlay   pass
+```
+
+A minute of the game under a headless compositor with a virtual pad, graded
+for boot, sound, motion, input and the overlay coming down. `--machine deck`
+is a Steam Deck's profile (no host GL, X11, C locale) and says whether it ran
+on the real one or a stand-in; `--spec <file>` is a game exactly as its
+output launches it; `--bless` keeps the frame as the golden image.
+`nix run github:dscrawford/GamesOnTheGo#qa`.
 
 ## Admin
-
-`nix run github:dscrawford/GamesOnTheGo#admin -- …`; `gotg admin` for short.
-
-```bash
-gotg admin invite alice-deck [--ttl <days>] [--user <user>]   # prints a claim url
-gotg admin tokens
-gotg admin revoke alice-deck
-
-gotg admin import [--follow]        # run the importer now (needs kubectl)
-gotg admin import --match "Breath of the Wild"   # only sources matching; seconds, no sweep
-gotg admin scan [--since <when>] [--all] [--json]
-
-gotg admin art warm [--limit N] [--platform p] [--refresh]
-gotg admin art status
-gotg admin art search "<title>" [--assets N]
-gotg admin art set <platform>/<id> <file|url>
-gotg admin art show|miss|forget <platform>/<id>
-```
 
 ```console
 $ gotg admin scan
@@ -250,14 +282,32 @@ $ gotg admin scan
 1 added, 1 missing since 2026-08-14T09:11:02Z — 2431 in the catalog
 ```
 
+`invite <name>` prints a claim url for one person and device (`nix run
+gotg#login -- --claim <url>` redeems it); `tokens`, `revoke <name>`; `import
+[--follow] [--match <re>]` runs the indexer now; `art warm|status|search|set`.
+`nix run github:dscrawford/GamesOnTheGo#admin`.
+
+## home-manager
+
+```nix
+programs.gotg = {
+  enable = true;
+  library = inputs.library;      # a flake made from gotg#library
+  games = [ "n64.usa.donkey_kong_64" "gamecube.usa.super_smash_bros_melee_rev2" ];
+};
+```
+
+`inputs.gotg.homeManagerModules.gotg`: the picker and those games on PATH.
+The token stays `#login`'s, 0600, never in the store.
+
 ## Configuration
 
 | File | Contents |
 |---|---|
-| `~/.config/gotg/config.json` | `library`: the writable library games are built from |
 | `~/.config/gotg/library/` | the library flake: server, catalog pin (`flake.lock`) |
-| `~/.config/gotg/netrc` | the token, for Nix to fetch the catalog |
 | `~/.config/gotg/api.json` | `{"url": "...", "token": "..."}` |
+| `~/.config/gotg/netrc` | the token, for Nix to fetch the catalog |
+| `~/.config/gotg/config.json` | `library`: the writable library games are built from |
 | `~/.config/gotg/steamgriddb.json` | `{"api_key": "..."}` |
 | `~/.config/gotg/video.json` | `{"resolution": "default\|native\|720p\|1080p\|1440p\|4k\|5k\|1x…8x"}` (Dolphin) |
 | `~/.config/gotg/controllers.json` | pinned player order |
@@ -275,42 +325,7 @@ $ gotg admin scan
 | `GOTG_ADMIN_TOKEN`, `GOTG_INDEX_TOKEN` | admin and importer credentials |
 | `GOTG_ART_DIR`, `GOTG_UPSTREAM_RATE` | service: art cache, upstream requests/s |
 
-Private repository:
-
-```bash
-NIX_CONFIG="extra-access-tokens = github.com=github_pat_…" nix run ~/.config/gotg/library#update
-```
-
-## Environments
-
-```
-src/client/env/<platform>.nix                        every game on a platform
-src/client/env/games/<platform>/<id>.nix             one game's overrides
-src/client/env/games/<platform>/<id>.<variant>.nix   a variant
-```
-
-```nix
-# src/client/env/games/snes/world.super_metroid.nix
-{ ... }: { isolate = true; }
-```
-
-## QA
-
-`nix run github:dscrawford/GamesOnTheGo#qa -- …`; `gotg qa` for short.
-
-```bash
-gotg qa <id> [variant]              # run headless for a minute with a virtual pad; grade boot, audio, video, input
-gotg qa --spec <file>               # a game exactly as its output would launch it
-gotg qa <id> --machine deck         # as a Steam Deck: no host GL, X11 only, C locale (also: deck-desktop)
-GOTG_QA_HOST_DECK=deck@10.0.0.5 gotg qa <id> --machine deck   # run it on the real Deck when it answers, stand in when it does not
-gotg qa <id> --bless                # store this run's frame as the golden image
-gotg qa <id> --duration 30 --boot-wait 5
-gotg qa --rerun latest              # that run again; --rerun <dir> for a particular one
-```
-
-Runs and `verdict.json` land in `~/.local/state/gotg/qa/runs/`. Machine profiles: `src/client/data/qa-machines.json`.
-
-Every run says which machine it exercised — the real one or a stand-in — because those are two different results. Each difference found only on real hardware is added to that machine's profile, so the next run without it finds the same thing.
+Private repository: `NIX_CONFIG="extra-access-tokens = github.com=github_pat_…" nix run gotg#update`.
 
 ## Development
 

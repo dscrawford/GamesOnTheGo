@@ -22,6 +22,11 @@ setup_env() {
   # Never the real one: login writes Nix's netrc-file there, and a test run
   # from a desk would otherwise reach the person's own nix.conf.
   export XDG_CONFIG_HOME="$TEST_TMP/xdg-config"
+  # Never the real Steam library: a test that ran `steam picker` without a
+  # file of its own, outside the sandbox, put "Games On The Go" pointing at
+  # a bats tmpdir into a real shortcuts.vdf. Tests that want a particular
+  # file still set this themselves.
+  export GOTG_STEAM_SHORTCUTS="$TEST_TMP/steam-shortcuts.vdf"
   export GOTG_LOG_DIR="$GOTG_STATE_DIR/logs"
 
   # Artwork has a source that needs no key, so it is reached on any `steam add`

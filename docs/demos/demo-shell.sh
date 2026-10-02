@@ -25,7 +25,7 @@ for candidate in "${SHELL:-}" /run/current-system/sw/bin/bash /bin/bash "$(comma
   # rebuilds PATH, losing the gotg being demonstrated.
   exec env -i \
     HOME="$home" PATH="$path" TERM="${TERM:-xterm-256color}" \
-    LANG="${LANG:-C.UTF-8}" NOSYSBASHRC=1 \
+    LANG="${LANG:-C.UTF-8}" NOSYSBASHRC=1 GOTG_DEMO_RC="${GOTG_DEMO_RC:-}" \
     "$candidate" --noprofile --rcfile "$here/demo.bashrc" -i
 done
 

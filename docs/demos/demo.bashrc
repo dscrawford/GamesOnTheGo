@@ -1,14 +1,14 @@
 # The shell the recorded demos run in.
 #
-# The catalog never ages out here: a demo that reaches for the server records
-# a ten-second DNS timeout and three warnings before its first line of output.
-# Completion is sourced from the checkout rather than the installed package so
-# the recording matches the tree it was made from.
+# What is on camera is `nix search gotg …` and `nix run gotg#…`: a library,
+# named `gotg` in the flake registry. Which library, and whose config and
+# state, is the recorder's: GOTG_DEMO_RC names a file that exports them
+# (XDG_CONFIG_HOME with a nix/registry.json naming the library, GOTG_CONFIG_DIR,
+# XDG_STATE_HOME, GOTG_LIBRARY), so a machine's paths never land in here.
 
-export GOTG_MANIFEST_MAX_AGE=99999999
 PS1='$ '
-
-source "$(dirname "${BASH_SOURCE[0]}")/../../src/client/completions/gotg.bash"
+# shellcheck disable=SC1090
+[[ -z "${GOTG_DEMO_RC:-}" ]] || source "$GOTG_DEMO_RC"
 
 # One Tab lists the alternatives instead of waiting for a second one, and no
 # terminal bell — a flash on every ambiguous completion reads as an error.
