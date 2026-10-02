@@ -10,17 +10,16 @@
       "locked": {
         "lastModified": 1790878984,
         "narHash": "sha256-hwxvvvNC+f8WJ6jHI5JnTIEeYz4sTA5FIBe4MEiaQUE=",
-        "ref": "main",
+        "owner": "dscrawford",
+        "repo": "danstick",
         "rev": "d514477e5c7814f97d01a2dbf7d5e5379a44f535",
-        "revCount": 232,
-        "type": "git",
-        "url": "ssh://git@github.com/dscrawford/danstick"
+        "type": "github"
       },
       "original": {
-        "ref": "main",
+        "owner": "dscrawford",
+        "repo": "danstick",
         "rev": "d514477e5c7814f97d01a2dbf7d5e5379a44f535",
-        "type": "git",
-        "url": "ssh://git@github.com/dscrawford/danstick"
+        "type": "github"
       }
     },
     "flake-utils": {
