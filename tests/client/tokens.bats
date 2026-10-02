@@ -306,3 +306,20 @@ nix_conf() { printf '%s/nix/nix.conf' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
   [ "$(grep '^netrc-file' "$(nix_conf)")" = "netrc-file = /somewhere/else" ]
   [[ "$stderr" == *"/somewhere/else"* ]]
 }
+
+@test "login --server takes the url from the library, and asks only for the token" {
+  # `nix run <library>#login`: the library knows its server, so the one
+  # question left is the token. No terminal, no zenity: the token is read
+  # from stdin, which is how a script hands one over.
+  export GOTG_SYSTEM_NETRC="$TEST_TMP/no-system-netrc" GOTG_NO_DIALOG=1
+  local code token
+  code="$(invite_code alice-deck)"
+  gotg login --claim "$GOTG_SERVICE_URL/claim/$code"
+  token="$(jq -r .token "$GOTG_CONFIG_DIR/api.json")"
+  rm -f "$GOTG_CONFIG_DIR/api.json"
+  run --separate-stderr bash -c "printf '%s\n' '$token' | '$GOTG_BIN' login --server '$GOTG_SERVICE_URL/'"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .url "$GOTG_CONFIG_DIR/api.json")" = "$GOTG_SERVICE_URL" ]
+  [ "$(jq -r .token "$GOTG_CONFIG_DIR/api.json")" = "$token" ]
+  [[ "$stderr" != *"service URL"* ]]
+}

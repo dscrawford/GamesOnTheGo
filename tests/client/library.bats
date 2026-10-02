@@ -183,3 +183,18 @@ SHIM
   [ "$output" = $'env-n64-usa_zelda\nenv-snes' ]
 }
 
+
+@test "a library's own apps name it as the default, and a configured one still wins" {
+  # `nix run <library>#ui` runs a picker that knows where it came from; a
+  # machine that has pointed gotg at a writable copy keeps using that one,
+  # since a pin can only be moved there.
+  unset GOTG_LIBRARY
+  GOTG_LIBRARY_DEFAULT="/nix/store/aaaa-library" gotg library
+  [ "$status" -eq 0 ]
+  [ "$output" = "/nix/store/aaaa-library" ]
+  mkdir -p "$TEST_TMP/mylib"
+  : >"$TEST_TMP/mylib/flake.nix"
+  gotg library "$TEST_TMP/mylib"
+  GOTG_LIBRARY_DEFAULT="/nix/store/aaaa-library" gotg library
+  [ "$output" = "$TEST_TMP/mylib" ]
+}

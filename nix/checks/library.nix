@@ -5,11 +5,14 @@
 { pkgs, flake }:
 let
   inherit (pkgs) lib;
-  games =
-    (flake.lib.mkLibrary {
-      server = "https://gotg.example/";
-      catalog = ../../tests/fixtures/catalog.json;
-    }).legacyPackages.${pkgs.stdenv.hostPlatform.system};
+  library = flake.lib.mkLibrary {
+    server = "https://gotg.example/";
+    catalog = ../../tests/fixtures/catalog.json;
+    library = ../../tests/fixtures;
+  };
+  games = library.legacyPackages.${pkgs.stdenv.hostPlatform.system};
+  apps = library.apps.${pkgs.stdenv.hostPlatform.system};
+  appText = name: builtins.readFile apps.${name}.program;
   spec = drv: drv.gotgSpec // { env = builtins.unsafeDiscardStringContext drv.gotgSpec.env; };
   forced = v: (builtins.tryEval (builtins.seq v.drvPath true)).success;
   failures = lib.runTests {
@@ -19,7 +22,8 @@ let
     };
     testItsEnvironmentIsTheFlakesBuild = {
       expr = (spec games.n64.usa.donkey_kong_64).env;
-      expected = builtins.unsafeDiscardStringContext "${flake.packages.${pkgs.stdenv.hostPlatform.system}.env-n64-usa_donkey_kong_64}";
+      expected = builtins.unsafeDiscardStringContext "${flake.packages.${pkgs.stdenv.hostPlatform.system}.env-n64-usa_donkey_kong_64
+      }";
     };
     testTheServerIsTheLibrarysWithoutASlash = {
       expr = (spec games.n64.usa.donkey_kong_64).server;
@@ -31,15 +35,23 @@ let
     };
     testTheGameIsTheCatalogsEntry = {
       expr = (spec games.n64.usa.donkey_kong_64).game.files;
-      expected = (builtins.head (builtins.fromJSON (builtins.readFile ../../tests/fixtures/catalog.json)).games).files;
+      expected =
+        (builtins.head (builtins.fromJSON (builtins.readFile ../../tests/fixtures/catalog.json)).games)
+        .files;
     };
     testAGameWithoutAFileRunsInItsPlatforms = {
       expr = (spec games.n64.usa.zelda).attr;
       expected = "env-n64";
     };
     testAVariantIsAnAttributeOfItsGame = {
-      expr = with spec games.n64.usa.legend_of_zelda_ocarina_of_time_rev2.rando; [ attr variant ];
-      expected = [ "env-n64-usa_legend_of_zelda_ocarina_of_time_rev2-rando" "rando" ];
+      expr = with spec games.n64.usa.legend_of_zelda_ocarina_of_time_rev2.rando; [
+        attr
+        variant
+      ];
+      expected = [
+        "env-n64-usa_legend_of_zelda_ocarina_of_time_rev2-rando"
+        "rando"
+      ];
     };
     testEmulateIsOfferedUnderAGameWithAFile = {
       expr = (spec games.n64.usa.donkey_kong_64.emulate).attr;
@@ -54,22 +66,64 @@ let
       expected = "env-n64-usa_donkey_kong_64";
     };
     testAnIdOnTwoPlatformsNeedsItsPlatform = {
-      expr = [ (games.usa ? tetris_2) (spec games.gb.usa.tetris_2).attr (spec games.nes.usa.tetris_2).attr ];
-      expected = [ false "env-gb" "env-nes" ];
+      expr = [
+        (games.usa ? tetris_2)
+        (spec games.gb.usa.tetris_2).attr
+        (spec games.nes.usa.tetris_2).attr
+      ];
+      expected = [
+        false
+        "env-gb"
+        "env-nes"
+      ];
     };
     testAGameWithNoEnvironmentFailsOnlyWhenRun = {
-      expr = [ (forced games.psx.usa.crash_bandicoot) (forced games.n64.usa.donkey_kong_64) ];
-      expected = [ false true ];
+      expr = [
+        (forced games.psx.usa.crash_bandicoot)
+        (forced games.n64.usa.donkey_kong_64)
+      ];
+      expected = [
+        false
+        true
+      ];
     };
     testTheSpecFileIsTheOneTheGameCarries = {
-      expr = lib.hasInfix (builtins.unsafeDiscardStringContext "${games.n64.usa.donkey_kong_64.gotgSpecFile}") (
-        builtins.unsafeDiscardStringContext games.n64.usa.donkey_kong_64.drvAttrs.buildCommand or ""
-      );
+      expr =
+        lib.hasInfix (builtins.unsafeDiscardStringContext "${games.n64.usa.donkey_kong_64.gotgSpecFile}")
+          (builtins.unsafeDiscardStringContext games.n64.usa.donkey_kong_64.drvAttrs.buildCommand or "");
       expected = true;
     };
     testNixRunFindsTheProgram = {
       expr = games.n64.usa.donkey_kong_64.meta.mainProgram;
       expected = "gotg-n64-usa-donkey_kong_64";
+    };
+    # The apps a person runs from a library, each knowing the library.
+    testTheLibrarysAppsAreThere = {
+      expr = builtins.sort builtins.lessThan (builtins.attrNames apps);
+      expected = [
+        "default"
+        "login"
+        "steam"
+        "ui"
+        "update"
+      ];
+    };
+    testTheLibrarysAppsKnowTheLibrary = {
+      expr = lib.all (name: lib.hasInfix "GOTG_LIBRARY_DEFAULT" (appText name)) [
+        "ui"
+        "steam"
+        "update"
+        "login"
+      ];
+      expected = true;
+    };
+    testLoginKnowsTheServer = {
+      expr = lib.hasInfix "login --server https://gotg.example/ " (appText "login");
+      expected = true;
+    };
+    testTheCatalogIsBuildable = {
+      expr = lib.isDerivation library.packages.${pkgs.stdenv.hostPlatform.system}.catalog;
+      expected = true;
     };
   };
 in

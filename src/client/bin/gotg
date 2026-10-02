@@ -103,7 +103,8 @@ usage() {
   cat <<'EOF'
 usage: gotg <command> [args]
 
-  login [--claim <url>]  save the server URL and credentials (mode 600);
+  login [--claim <url>] [--server <url>]
+                     save the server URL and credentials (mode 600);
                      --claim exchanges a single-use invite link for a token
   admin <command>    mint invites, list and revoke tokens (admin help)
   refresh            re-fetch the game catalog from the server
@@ -150,7 +151,7 @@ EOF
 # controllers) print their own, richer, subcommand help and are not here.
 command_help() {
   case "$1" in
-    login) echo "usage: gotg login [--claim <url>]    — save the server URL and token (a claim url is a single-use invite), stored mode 600" ;;
+    login) echo "usage: gotg login [--claim <url>] [--server <url>]    — save the server URL and token (a claim url is a single-use invite; --server skips the url question), stored mode 600" ;;
     refresh) echo "usage: gotg refresh  — re-fetch the game catalog from the server" ;;
     versions) echo "usage: gotg versions <id> [variant]  — which installed versions there are, and which one a launch would run" ;;
     list | ls)

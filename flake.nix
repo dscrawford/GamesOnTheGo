@@ -106,7 +106,7 @@
       lib =
         let
           base = import ./lib { inherit (nixpkgs) lib; };
-          library = import ./lib/library.nix {
+          libraryLib = import ./lib/library.nix {
             inherit (nixpkgs) lib;
             catalogLib = base.catalog;
           };
@@ -121,6 +121,10 @@
               # The catalog file, as the library flake's `catalog` input
               # pins it.
               catalog,
+              # The library flake itself (`self`), so its apps know where
+              # they came from: `nix run <library>#ui` is a picker that
+              # builds games from this library with nothing configured.
+              library ? null,
               systems ? [ "x86_64-linux" ],
             }:
             let
@@ -141,9 +145,42 @@
                 inherit (self.packages.${system}) gotg gotg-ui qa-tools;
                 catalog = (pkgsFor system).runCommand "gotg-catalog" { } "ln -s ${catalog} $out";
               });
+              # What a person runs, from the library: the picker, the Steam
+              # entries, the rebuild after an upgrade, and the login -- each
+              # knowing this library and its server, so none of them needs
+              # a `gotg` on PATH or anything configured first.
+              apps = nixpkgs.lib.genAttrs systems (
+                system:
+                let
+                  pkgs = pkgsFor system;
+                  inherit (self.packages.${system}) gotg gotg-ui;
+                  withLibrary =
+                    name: text:
+                    pkgs.writeShellApplication {
+                      inherit name;
+                      text = ''
+                        ${nixpkgs.lib.optionalString (
+                          library != null
+                        ) ''export GOTG_LIBRARY_DEFAULT="''${GOTG_LIBRARY_DEFAULT:-${library}}"''}
+                        ${text}
+                      '';
+                    };
+                  app = name: text: {
+                    type = "app";
+                    program = "${withLibrary name text}/bin/${name}";
+                  };
+                in
+                {
+                  ui = app "gotg-library-ui" ''exec ${gotg-ui}/bin/gotg-ui "$@"'';
+                  steam = app "gotg-library-steam" ''exec ${gotg}/bin/gotg steam "$@"'';
+                  update = app "gotg-library-update" ''exec ${gotg}/bin/gotg update "$@"'';
+                  login = app "gotg-library-login" ''exec ${gotg}/bin/gotg login --server ${nixpkgs.lib.escapeShellArg server} "$@"'';
+                  default = app "gotg-library-ui" ''exec ${gotg-ui}/bin/gotg-ui "$@"'';
+                }
+              );
               legacyPackages = nixpkgs.lib.genAttrs systems (
                 system:
-                library.forSystem {
+                libraryLib.forSystem {
                   pkgs = pkgsFor system;
                   envs = nixpkgs.lib.filterAttrs (name: _: nixpkgs.lib.hasPrefix "env-" name) self.packages.${system};
                   inherit (self.packages.${system}) gotg;
@@ -208,9 +245,11 @@
                 echo "      set GOTG_DEV_ROOT to your checkout" >&2
                 exit 1
               fi
-              export PATH="${pkgs.lib.makeBinPath [
-                danstick.packages.${pkgs.stdenv.hostPlatform.system}.danstick
-              ]}:$PATH"
+              export PATH="${
+                pkgs.lib.makeBinPath [
+                  danstick.packages.${pkgs.stdenv.hostPlatform.system}.danstick
+                ]
+              }:$PATH"
               export PYTHONPATH="$root/src/ui''${PYTHONPATH:+:$PYTHONPATH}"
               export SDL_VIDEODRIVER="''${SDL_VIDEODRIVER:-dummy}"
               # Nothing here plays a sound; without this every test's
@@ -397,37 +436,64 @@
       );
 
       # `nix run github:dscrawford/GamesOnTheGo#install` -- the other way in,
-      # for a machine that already has nix and wants the rest.
-      apps = forAllSystems (pkgs: {
-        install = {
-          type = "app";
-          program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-install}/bin/gotg-install";
-        };
-        uninstall = {
-          type = "app";
-          program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-uninstall}/bin/gotg-uninstall";
-        };
-        # The controller requirement, on whatever machine is doubting it.
-        # tests/e2e on the cluster, a pod per node: k8s/controllers/run.py.
-        controllers-cluster = {
-          type = "app";
-          program = "${
-            pkgs.writeShellApplication {
-              name = "controllers-cluster";
-              runtimeInputs = [
-                pkgs.kubectl
-                pkgs.skopeo
-                pkgs.python3
-              ];
-              text = ''exec python3 ${./k8s/controllers/run.py} "$@"'';
-            }
-          }/bin/controllers-cluster";
-        };
-        test-controllers = {
-          type = "app";
-          program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-test-controllers}/bin/gotg-test-controllers";
-        };
-      });
+      # for a machine that already has nix and wants the rest. And the
+      # client's commands a person still runs, each its own app: nothing of
+      # the client goes in a profile (docs/nix-games.md, phase 7).
+      apps = forAllSystems (
+        pkgs:
+        let
+          gotgPkg = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg;
+          verb = name: {
+            type = "app";
+            program = "${
+              pkgs.writeShellApplication {
+                name = "gotg-${name}";
+                text = ''exec ${gotgPkg}/bin/gotg ${name} "$@"'';
+              }
+            }/bin/gotg-${name}";
+          };
+        in
+        {
+          login = verb "login";
+          admin = verb "admin";
+          qa = verb "qa";
+          controllers = verb "controllers";
+          ui = {
+            type = "app";
+            program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-ui}/bin/gotg-ui";
+          };
+          install = {
+            type = "app";
+            program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-install}/bin/gotg-install";
+          };
+          uninstall = {
+            type = "app";
+            program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-uninstall}/bin/gotg-uninstall";
+          };
+          # The controller requirement, on whatever machine is doubting it.
+          # tests/e2e on the cluster, a pod per node: k8s/controllers/run.py.
+          controllers-cluster = {
+            type = "app";
+            program = "${
+              pkgs.writeShellApplication {
+                name = "controllers-cluster";
+                runtimeInputs = [
+                  pkgs.kubectl
+                  pkgs.skopeo
+                  pkgs.python3
+                ];
+                text = ''exec python3 ${./k8s/controllers/run.py} "$@"'';
+              }
+            }/bin/controllers-cluster";
+          };
+          test-controllers = {
+            type = "app";
+            program = "${
+              self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-test-controllers
+            }/bin/gotg-test-controllers";
+          };
+        }
+      );
 
       devShells = forAllSystems (
         pkgs:
@@ -457,7 +523,10 @@
             exec "$root/src/client/bin/gotg" "$@"
           '';
 
-          uiPython = pkgs.python3.withPackages (ps: [ ps.pygame-ce ps.pyyaml ]);
+          uiPython = pkgs.python3.withPackages (ps: [
+            ps.pygame-ce
+            ps.pyyaml
+          ]);
           # What the packaged picker puts on PATH, and for the same reasons:
           # `gotg` because a pick execs it, and danstick because the picker is
           # what starts the daemon. Without danstick here the dev picker said
@@ -472,20 +541,22 @@
           ];
 
           # The picker, from the working tree, for the same reason `gotg` is.
-          uiDev = name: module: extra: pkgs.writeShellScriptBin name ''
-            root="''${GOTG_DEV_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-            if [ ! -d "$root/src/ui/gotg_ui" ]; then
-              echo "${name}: no src/ui/gotg_ui under $root" >&2
-              echo "      set GOTG_DEV_ROOT to your checkout, or use: nix run .#gotg-ui" >&2
-              exit 1
-            fi
-            export PATH="${uiPath}:$PATH"
-            export PYTHONPATH="$root/src/ui:${gotgPkg}/share/gotg/steam''${PYTHONPATH:+:$PYTHONPATH}"
-            export GOTG_UI_ENV="''${GOTG_UI_ENV:-${gotgPkg}/share/gotg/env}"
-            export GOTG_CONFIG="''${GOTG_CONFIG:-$root/config}"
-            ${extra}
-            exec ${uiPython}/bin/python3 -m ${module} "$@"
-          '';
+          uiDev =
+            name: module: extra:
+            pkgs.writeShellScriptBin name ''
+              root="''${GOTG_DEV_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+              if [ ! -d "$root/src/ui/gotg_ui" ]; then
+                echo "${name}: no src/ui/gotg_ui under $root" >&2
+                echo "      set GOTG_DEV_ROOT to your checkout, or use: nix run .#gotg-ui" >&2
+                exit 1
+              fi
+              export PATH="${uiPath}:$PATH"
+              export PYTHONPATH="$root/src/ui:${gotgPkg}/share/gotg/steam''${PYTHONPATH:+:$PYTHONPATH}"
+              export GOTG_UI_ENV="''${GOTG_UI_ENV:-${gotgPkg}/share/gotg/env}"
+              export GOTG_CONFIG="''${GOTG_CONFIG:-$root/config}"
+              ${extra}
+              exec ${uiPython}/bin/python3 -m ${module} "$@"
+            '';
           controllerTests = self.packages.${pkgs.stdenv.hostPlatform.system}.gotg-test-controllers;
           pickerDev = uiDev "gotg-ui" "gotg_ui" "";
         in
@@ -562,6 +633,6 @@
         description = "A GOTG library: one server's games, each something `nix run` runs";
       };
 
-            formatter = forAllSystems (pkgs: pkgs.nixfmt-tree);
+      formatter = forAllSystems (pkgs: pkgs.nixfmt-tree);
     };
 }

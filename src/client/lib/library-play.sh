@@ -15,9 +15,14 @@
 # moved since -- its flake.lock, stamped beside the root (library_stamp).
 # `gotg update` rebuilds them all.
 
+# The environment, then the config, then the library this client was run
+# from (`nix run <library>#ui` sets GOTG_LIBRARY_DEFAULT to its own store
+# copy): a configured one wins over that, because a pin can only be moved in
+# a writable copy.
 gotg_library() {
   local library="${GOTG_LIBRARY:-}"
   [[ -n "$library" ]] || library="$(config_get library 2>/dev/null || true)"
+  [[ -n "$library" ]] || library="${GOTG_LIBRARY_DEFAULT:-}"
   printf '%s' "$library"
 }
 

@@ -92,6 +92,9 @@ prompt_secret() {
     printf '\n' >&2
   elif has_display && have_zenity; then
     value="$(zenity_run --password --title="GOTG" 2>/dev/null)" || true
+  elif [[ ! -t 0 ]]; then
+    # Piped: a script handing a token over, the one way that never shows it.
+    IFS= read -r value || true
   else
     die "no terminal or display to prompt for a password"
   fi
@@ -160,7 +163,14 @@ login_netrc() {
 }
 
 cmd_login() {
-  local url token name=""
+  local url token name="" server=""
+  # `nix run <library>#login`: the library knows its server, so the one
+  # question left is the token.
+  if [[ "${1:-}" == "--server" ]]; then
+    server="${2:-}"
+    [[ -n "$server" ]] || die "usage: gotg login [--claim <url>] [--server <url>]"
+    shift 2
+  fi
   if [[ "${1:-}" == "--claim" ]]; then
     local claim="${2:-}"
     [[ -n "$claim" ]] || die "usage: gotg login [--claim <url>]"
@@ -196,7 +206,11 @@ cmd_login() {
     name="$(printable "$(jq -r '.name // empty' "$reply")")"
     [[ -n "$token" ]] || die "the claim reply carried no token"
   else
-    url="$(prompt_line "GOTG service URL [https://gotg.dcraw.net]: " "https://gotg.dcraw.net")"
+    if [[ -n "$server" ]]; then
+      url="$server"
+    else
+      url="$(prompt_line "GOTG service URL [https://gotg.dcraw.net]: " "https://gotg.dcraw.net")"
+    fi
     url="${url%/}"
     [[ "$url" == http://* || "$url" == https://* ]] || die "service must be an http(s) URL: $url"
     url_is_private_or_tls "$url" ||

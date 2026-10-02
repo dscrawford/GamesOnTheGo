@@ -1,6 +1,7 @@
 # A GOTG library: the games one server has, each something `nix run` runs.
 #
 #   nix run .#n64.usa.donkey_kong_64
+#   nix run .#ui                   # the picker; .#steam, .#update, .#login likewise
 #   nix registry add gotg "$PWD"   # then, from anywhere: nix run gotg#usa.donkey_kong_64
 #
 # The catalog is the server's, pinned here by flake.lock; the website updates
@@ -18,11 +19,12 @@
   };
 
   outputs =
-    { gotg, catalog, ... }:
+    { self, gotg, catalog, ... }:
     gotg.lib.mkLibrary {
       # The server this library is: where the catalog came from, and the
       # one a launch logs into.
       server = "https://gotg.dcraw.net";
       inherit catalog;
+      library = self;
     };
 }
