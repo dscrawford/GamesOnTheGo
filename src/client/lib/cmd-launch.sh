@@ -43,6 +43,15 @@ cmd_launch() {
     esac
   done
   [[ -n "$spec" && -f "$spec" ]] || die "usage: gotg launch --spec <file> [--version v] [emulator args...]"
+  launch_spec_load "$spec"
+  play_launch "$LAUNCH_WANT" "$LAUNCH_VARIANT" "$want_version" ${rest[@]+"${rest[@]}"}
+}
+
+# Check a spec and take its game and environment as this run's: what `launch`
+# and `qa --spec` share. Leaves LAUNCH_WANT (platform/id) and LAUNCH_VARIANT.
+launch_spec_load() {
+  local spec="$1"
+  [[ -f "$spec" ]] || die "no launch spec at $spec"
   jq -e '.version == 1' "$spec" >/dev/null 2>&1 ||
     die "$spec is not a version 1 launch spec"
 
@@ -78,5 +87,6 @@ cmd_launch() {
   GOTG_PINNED_FILES_URLS="$(jq -r '(.files_urls // [])[]' "$spec")"
   export GOTG_PINNED_FILES_URLS
 
-  play_launch "$platform/$id" "$variant" "$want_version" ${rest[@]+"${rest[@]}"}
+  LAUNCH_WANT="$platform/$id"
+  LAUNCH_VARIANT="$variant"
 }

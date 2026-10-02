@@ -61,6 +61,12 @@ let
       expr = [ (forced games.psx.usa.crash_bandicoot) (forced games.n64.usa.donkey_kong_64) ];
       expected = [ false true ];
     };
+    testTheSpecFileIsTheOneTheAppRuns = {
+      expr = lib.hasInfix (builtins.unsafeDiscardStringContext "${games.n64.usa.donkey_kong_64.gotgSpecFile}") (
+        builtins.unsafeDiscardStringContext games.n64.usa.donkey_kong_64.drvAttrs.text or ""
+      );
+      expected = true;
+    };
     testNixRunFindsTheProgram = {
       expr = games.n64.usa.donkey_kong_64.meta.mainProgram;
       expected = "gotg-n64-usa-donkey_kong_64";

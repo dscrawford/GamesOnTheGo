@@ -9,7 +9,8 @@
 # See docs/nix-games.md in the GOTG repository.
 {
   inputs = {
-    gotg.url = "git+ssh://git@github.com/dscrawford/GamesOnTheGo";
+    # The feat/nix-games branch until it is merged: mkLibrary is there.
+    gotg.url = "git+ssh://git@github.com/dscrawford/GamesOnTheGo?ref=feat/nix-games";
     catalog = {
       url = "file+https://gotg.dcraw.net/catalog";
       flake = false;

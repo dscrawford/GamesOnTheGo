@@ -252,9 +252,9 @@ qa_host_lacks_gl() {
 # from memory. A result is worth what the build behind it is, so the
 # client's own path goes in too.
 qa_record_run() {
-  local rundir="$1" id="$2" variant="$3" machine="$4" duration="$5" boot_wait="$6" bless="$7" overlay_at="${8:-}"
+  local rundir="$1" id="$2" variant="$3" machine="$4" duration="$5" boot_wait="$6" bless="$7" overlay_at="${8:-}" spec="${9:-}"
   mkdir -p "$rundir"
-  jq -n --arg id "$id" --arg variant "$variant" --arg machine "$machine" \
+  jq -n --arg id "$id" --arg variant "$variant" --arg machine "$machine" --arg spec "$spec" \
     --argjson duration "$duration" --argjson boot_wait "$boot_wait" \
     --argjson bless "$([[ -n "$bless" ]] && echo true || echo false)" \
     --arg overlay_at "$overlay_at" \
@@ -262,7 +262,8 @@ qa_record_run() {
     '{version: 1, id: $id, variant: (if $variant == "" then null else $variant end),
       machine: $machine, duration: $duration, boot_wait: $boot_wait,
       bless: $bless, gotg: $gotg, at: $at}
-     + (if $overlay_at == "" then {} else {overlay_at: ($overlay_at | tonumber)} end)' >"$rundir/run.json"
+     + (if $overlay_at == "" then {} else {overlay_at: ($overlay_at | tonumber)} end)
+     + (if $spec == "" then {} else {spec: $spec} end)' >"$rundir/run.json"
 }
 
 # One run directory, by name or `latest`.
@@ -296,8 +297,14 @@ qa_rerun_args() {
   machine="$(jq -r '.machine // "desktop"' "$rec")"
   duration="$(jq -r '.duration' "$rec")"
   boot_wait="$(jq -r '.boot_wait' "$rec")"
-  printf '%s' "$id"
-  [[ -z "$variant" ]] || printf ' %s' "$variant"
+  # A run from a spec is that spec again: the game Nix chose, not the
+  # catalog's idea of the id today.
+  if [[ -n "$(jq -r '.spec // empty' "$rec")" ]]; then
+    printf -- '--spec %s' "$(jq -r '.spec' "$rec")"
+  else
+    printf '%s' "$id"
+    [[ -z "$variant" ]] || printf ' %s' "$variant"
+  fi
   printf ' --machine %s --duration %s --boot-wait %s' "$machine" "$duration" "$boot_wait"
   local overlay_at
   overlay_at="$(jq -r '.overlay_at // empty' "$rec")"
@@ -344,18 +351,21 @@ qa_where() {
 }
 
 cmd_qa() {
-  local want="" variant="" duration=60 boot_wait=15 bless="" machine="desktop" overlay_at=""
+  local want="" variant="" duration=60 boot_wait=15 bless="" machine="desktop" overlay_at="" spec=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -h | --help)
         cat <<'EOF'
 usage: gotg qa <id> [variant] [--duration N] [--boot-wait N] [--bless] [--machine M]
+       gotg qa --spec <file> [...]    a game as its Nix output runs it
 
   Runs the game with no window, no speakers and no one holding the pad: a
   virtual controller mashes through it while the screen and the audio are
   recorded, then the recording is graded — did it boot, is there sound, did
   the inputs move anything, does the picture match the blessed frame.
 
+    --spec F       the launch spec a library's game carries, instead of an
+                   id: its environment as Nix built it (docs/nix-games.md)
     --rerun R      run the run R again -- a directory name under
                    ~/.local/state/gotg/qa/runs, or `latest`. Flags after it
                    still win, so a rerun can be longer than the original.
@@ -380,6 +390,15 @@ EOF
       --bless) bless=1; shift ;;
       --machine) machine="${2:-}"; shift 2 ;;
       --overlay-at) overlay_at="${2:-}"; shift 2 ;;
+      # A game as its Nix output runs it: the spec a library's game carries
+      # (cmd-launch.sh), checked now, before anything is built or fetched.
+      --spec)
+        launch_spec_load "${2:-}"
+        spec="$2"
+        want="$LAUNCH_WANT"
+        variant="$LAUNCH_VARIANT"
+        shift 2
+        ;;
       --rerun)
         # Whatever that run was, again -- and flags after it still win, so
         # `--rerun x --duration 90` is a longer run of the same thing.
@@ -456,7 +475,7 @@ EOF
 
   # What this run is, before it starts: one that dies half way is still one
   # somebody may want to repeat.
-  qa_record_run "$rundir" "$want" "$variant" "$machine" "$duration" "$boot_wait" "$bless" "$overlay_at"
+  qa_record_run "$rundir" "$want" "$variant" "$machine" "$duration" "$boot_wait" "$bless" "$overlay_at" "$spec"
 
   # Scratch launch state, set before play_prepare so every helper that derives
   # a path from env_state_dir agrees on it.

@@ -516,3 +516,20 @@ overlay_frames() {
   [ "$(jq .pass <<<"$output")" = "false" ]
   [ ! -e "$TEST_TMP/ran" ]
 }
+
+# --- a game as its Nix output runs it ---------------------------------------
+
+@test "a run from a spec writes the spec down, and runs it again" {
+  qa_record_run "$TEST_TMP/run5" usa.zelda "" deck 30 10 "" "" /nix/store/abc-gotg-spec-n64.usa.zelda.json
+  [ "$(jq -r .spec "$TEST_TMP/run5/run.json")" = /nix/store/abc-gotg-spec-n64.usa.zelda.json ]
+  run qa_rerun_args "$TEST_TMP/run5"
+  [ "$output" = "--spec /nix/store/abc-gotg-spec-n64.usa.zelda.json --machine deck --duration 30 --boot-wait 10" ]
+}
+
+@test "qa refuses a spec it could not launch, before it downloads anything" {
+  printf '{"version": 2}' >"$TEST_TMP/bad-spec.json"
+  gotg qa --spec "$TEST_TMP/bad-spec.json"
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"version 1 launch spec"* ]]
+  [ ! -d "$GOTG_STATE_DIR/qa/runs" ]
+}

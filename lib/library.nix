@@ -72,6 +72,9 @@
           })
           // {
             gotgSpec = fields;
+            # The file itself, for `gotg qa --spec`: the very spec this game
+            # launches with.
+            gotgSpecFile = spec;
           };
 
       # A game, with its variants -- and `emulate`, for one that has a file of

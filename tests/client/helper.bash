@@ -227,7 +227,7 @@ load_client_libs() {
 
   # shellcheck source=/dev/null
   local lib
-  for lib in color common config storage manifest download env launcher danstick pads pads-dolphin pads-ryujinx pads-cemu keys firmware remote saves qa-analyze cmd-qa cmd-uninstall; do
+  for lib in color common config storage manifest download env launcher danstick pads pads-dolphin pads-ryujinx pads-cemu keys firmware remote saves qa-analyze cmd-qa cmd-launch cmd-uninstall; do
     source "$GOTG_LIB/$lib.sh"
   done
 }
