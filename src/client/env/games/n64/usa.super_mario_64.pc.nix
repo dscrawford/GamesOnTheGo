@@ -76,14 +76,19 @@ let
   #
   # Not under any environment's state: the co-op variants are the same port as
   # the plain launch, and a directory per variant is the same five-minute
-  # compile four times over for four identical trees. Keyed by the source it
-  # was built from, so bumping the version builds a new one rather than
-  # leaving the old binary in place under a name that says nothing.
+  # compile four times over for four identical trees. Keyed by the builder --
+  # whose store hash is the source it compiles *and* the compiler and the
+  # libraries it links -- so bumping either builds a new one rather than
+  # leaving an old binary in place under a name that says nothing. Keyed by
+  # the source alone, a nixpkgs bump moved glibc from 2.42 to 2.44 under a
+  # binary compiled in August, whose loader was still the old one: the
+  # launcher handed it the new libcurl, `GLIBC_2.43 not found`, and two
+  # players looked at a black screen (2026-10-02).
   #
   # XDG_STATE_HOME rather than {state}: isolation moves XDG_CONFIG_HOME and
   # XDG_DATA_HOME under the environment, and deliberately leaves this one
   # alone. GOTG_PORTS_DIR is for a run that wants a tree of its own.
-  portDir = ''"''${GOTG_PORTS_DIR:-''${XDG_STATE_HOME:-$HOME/.local/state}/gotg/ports}/${builtins.baseNameOf src}"'';
+  portDir = ''"''${GOTG_PORTS_DIR:-''${XDG_STATE_HOME:-$HOME/.local/state}/gotg/ports}/${builtins.baseNameOf builder}"'';
 
   # The port finds dynos/lang/mods beside its executable, so it runs from the
   # tree the first launch compiled. Store libraries at run time: the binary
@@ -120,15 +125,8 @@ in
     # once, and two compiles into one directory is neither of them.
     exec 8>"$gotg_port.lock"
     flock 8
-    # A tree compiled before the port was shared, under this environment's own
-    # state. Moved rather than rebuilt: it is the same 124MB of the same
-    # source, and the alternative is five minutes and two copies of it.
-    if [ ! -x "$gotg_port/sm64coopdx" ] && [ -x "$state/coopdx/sm64coopdx" ]; then
-      if mv "$state/coopdx" "$gotg_port" 2>/dev/null; then
-        echo "adopted the port this environment had compiled for itself" >&2
-      fi
-    fi
-
+    # No adopting a tree compiled under another key: it was compiled against
+    # other libraries, which is the one thing the key is for.
     if [ ! -x "$gotg_port/sm64coopdx" ]; then
       echo "first run: compiling sm64coopdx against this ROM — a few minutes, once" >&2
       chmod -R u+w "$gotg_port" 2>/dev/null || true
@@ -139,6 +137,11 @@ in
       [ -n "$gotg_rom" ] || { echo "no .z64 inside $install" >&2; exit 1; }
       gotg-build-sm64coopdx "$gotg_rom" "$gotg_port"
       rm -rf "$state/.build"
+      # The trees of other keys are of no use to anything now: every variant
+      # shares this one, and 124MB a bump is a disk that fills.
+      find "$(dirname "$gotg_port")" -mindepth 1 -maxdepth 1 -type d ! -name "$(basename "$gotg_port")" \
+        -exec chmod -R u+w {} + -exec rm -rf {} + 2>/dev/null || true
+      rm -rf "$state/coopdx"
     fi
     exec 8>&-
   '';

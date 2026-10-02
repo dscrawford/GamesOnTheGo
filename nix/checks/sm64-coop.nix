@@ -77,15 +77,21 @@ let
     '';
   # Every variant is the same port, compiled once. A directory per environment
   # would be the same five-minute build four times over, and nothing about a
-  # launcher that still works would say so.
+  # launcher that still works would say so. And the one directory is keyed by
+  # the builder: a binary compiled under one glibc and run under another's
+  # libraries was a black screen, and nothing about a launcher that still
+  # works would say that either.
   sharedPort = ''
-    echo "== one compiled port"
+    echo "== one compiled port, keyed by its builder"
     ports=""
     for name in pc pc-2p pc-3p pc-4p; do
       env="${envDir}/env-n64-usa_super_mario_64-$name"
-      found="$(grep -oE 'gotg/ports[^/]*/[a-z0-9]+-source' "$env/bin/gotg-play" | head -1)"
+      found="$(grep -oE 'gotg/ports[^/]*/[a-z0-9]+-gotg-build-sm64coopdx' "$env/bin/gotg-play" | head -1)"
       [ -n "$found" ] ||
-        { echo "$name: names no shared port directory" >&2; exit 1; }
+        { echo "$name: names no shared port directory keyed by the builder" >&2; exit 1; }
+      builder="$(grep -oE '/nix/store/[a-z0-9]+-gotg-build-sm64coopdx' "$env/bin/gotg-play" | head -1)"
+      [ "$(basename "$found")" = "$(basename "$builder")" ] ||
+        { echo "$name: the port directory $found is not keyed by the builder $builder" >&2; exit 1; }
       ports="$ports$found\n"
     done
     [ "$(printf '%b' "$ports" | sort -u | grep -c .)" = 1 ] ||
@@ -96,10 +102,17 @@ let
   # The four environments, in one directory, so the loop above can walk them by
   # name rather than by four interpolations.
   envDir = pkgs.linkFarm "sm64-coop-envs" (
-    map (name: {
-      name = "env-n64-usa_super_mario_64-${name}";
-      path = envs."env-n64-usa_super_mario_64-${name}";
-    }) [ "pc" "pc-2p" "pc-3p" "pc-4p" ]
+    map
+      (name: {
+        name = "env-n64-usa_super_mario_64-${name}";
+        path = envs."env-n64-usa_super_mario_64-${name}";
+      })
+      [
+        "pc"
+        "pc-2p"
+        "pc-3p"
+        "pc-4p"
+      ]
   );
 in
 pkgs.runCommand "check-sm64-coop"
