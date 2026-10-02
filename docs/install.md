@@ -52,9 +52,20 @@ nix flake update gotg && nix run .#update
 Steam needs a built copy to start, which `#update` keeps under
 `~/.local/state/gotg`; that is the one thing a plain `nix run` does not do.
 
-NixOS or home-manager: the library is a flake input like any other, and its
-`packages.<system>.gotg-ui` and `legacyPackages.<system>.<platform>.<region>.<game>`
-are packages. A `programs.gotg` module is planned.
+home-manager: the library is a flake input like any other, and
+`programs.gotg` (`inputs.gotg.homeManagerModules.gotg`) puts its picker and
+the games you name on PATH:
+
+```nix
+programs.gotg = {
+  enable = true;
+  library = inputs.library;
+  games = [ "n64.usa.donkey_kong_64" "gamecube.usa.super_smash_bros_melee_rev2" ];
+};
+```
+
+The token stays `nix run <library>#login`'s: an option would copy it into
+the world-readable store.
 
 Two things the installer would have done, which you do once by hand:
 

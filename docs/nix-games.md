@@ -1,8 +1,7 @@
 # Games as Nix outputs
 
-Status: phases 0 to 6 on `feat/nix-games`, 7.1-7.5 on `feat/no-client`; the
-fresh Deck from nothing (6 and 7.4) and the home-manager module (7.6) still to
-do. Nothing of GOTG goes in a profile: the installer makes a library and
+Status: phases 0 to 6 on `feat/nix-games`, 7 on `feat/no-client`; the
+fresh Deck from nothing (6 and 7.4) still to do. Nothing of GOTG goes in a profile: the installer makes a library and
 builds from it, and `gotg` is the launcher inside every game and behind the
 picker.
 

@@ -191,6 +191,11 @@
             };
         };
 
+      # programs.gotg, for home-manager: the picker and the games of a library
+      # as packages. nix/modules/home-manager.nix.
+      homeManagerModules.gotg = import ./nix/modules/home-manager.nix;
+      homeManagerModules.default = self.homeManagerModules.gotg;
+
       packages = forAllSystems (
         pkgs:
         let
