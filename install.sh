@@ -33,6 +33,8 @@ CONFIG_DIR="${GOTG_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gotg}"
 LIBRARY_DIR="${GOTG_LIBRARY_DIR:-$CONFIG_DIR/library}"
 SERVER="${GOTG_SERVER:-https://gotg.dcraw.net}"
 TEMPLATE_SERVER="https://gotg.dcraw.net"
+# An invite link, which is the whole of first contact when there is one.
+CLAIM="${GOTG_CLAIM:-}"
 
 C_OK=$'\e[32m'; C_WARN=$'\e[33m'; C_ERR=$'\e[31m'; C_DIM=$'\e[2m'; C_OFF=$'\e[0m'
 [[ -t 1 ]] || { C_OK=""; C_WARN=""; C_ERR=""; C_DIM=""; C_OFF=""; }
@@ -285,11 +287,33 @@ set_library_server() {
   sed -i "s|$TEMPLATE_SERVER|${SERVER%/}|g" "$flake" || die "could not write $SERVER into $flake"
 }
 
+# The token, before anything reads the library: its catalog is a flake input
+# Nix fetches with the token as a netrc password, so a library built before
+# a login is a 401 in nix's own words. The login app of this repository, not
+# the library's -- that one is itself behind the catalog.
+ensure_login() {
+  if [[ -s "$CONFIG_DIR/netrc" ]]; then
+    skip "logged in ($CONFIG_DIR/netrc)"
+    return 0
+  fi
+  if [[ -n "$CLAIM" ]]; then
+    step "signing in with the invite link"
+    change nix run "$FLAKE#login" -- --claim "$CLAIM" || die "the invite link did not sign in"
+  else
+    step "signing in to $SERVER (the token, from whoever runs it)"
+    change nix run "$FLAKE#login" -- --server "$SERVER" || die "could not sign in to $SERVER"
+  fi
+}
+
 # The picker, the launcher and every game already here, built from the
 # library into the roots Steam starts; then gotg is told where the writable
-# copy of the library is, so the picker can move its catalog pin.
+# copy of the library is, so the picker can move its catalog pin. The netrc
+# is named outright: `gotg login` could only ask Nix to read it where the
+# user's nix.conf is its own to write.
 build_library() {
   step "building the picker, and any game already here, from $LIBRARY_DIR"
+  export NIX_CONFIG="netrc-file = $CONFIG_DIR/netrc${NIX_CONFIG:+
+$NIX_CONFIG}"
   change nix run "$LIBRARY_DIR#update" || die "could not build GOTG from $LIBRARY_DIR"
   change "$STATE_DIR/app/bin/gotg" library "$LIBRARY_DIR" ||
     warn "could not point gotg at $LIBRARY_DIR; run: $STATE_DIR/app/bin/gotg library $LIBRARY_DIR"
@@ -309,6 +333,7 @@ leave_profile() {
 
 install_gotg() {
   ensure_library
+  ensure_login
   build_library
   leave_profile
 }
@@ -403,10 +428,17 @@ main() {
         shift
         ;;
       --server=*) SERVER="${arg#--server=}" ;;
+      --claim)
+        [[ $# -gt 0 ]] || die "--claim wants an invite url"
+        CLAIM="$1"
+        shift
+        ;;
+      --claim=*) CLAIM="${arg#--claim=}" ;;
       -h | --help)
-        say "usage: install.sh [--dry-run] [--server <url>]"
+        say "usage: install.sh [--dry-run] [--server <url>] [--claim <url>]"
         say "  --dry-run       print what would change, change nothing"
         say "  --server <url>  the GOTG server the library is of (default $TEMPLATE_SERVER; also GOTG_SERVER)"
+        say "  --claim <url>   sign in with an invite link (also GOTG_CLAIM); else the token is asked for"
         exit 0
         ;;
       *) die "unknown option: $arg (try --help)" ;;

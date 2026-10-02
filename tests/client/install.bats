@@ -668,3 +668,57 @@ EOF
   [[ "$output" == *"would run: replace https://gotg.dcraw.net with https://games.example.org"* ]]
   [ ! -e "$TMP/library" ]
 }
+
+# --- the login, before the library is read -----------------------------------
+#
+# The catalog is a flake input Nix fetches with the token as a netrc
+# password: a library built before a login was a 401 in nix's own words.
+
+@test "a machine not logged in is signed in first, to the library's server" {
+  other_linux
+  export GOTG_LIBRARY_DIR="$TMP/library"
+  load_installer
+  stub_nix
+  stub_side_effects
+  run install_gotg
+  [ "$status" -eq 0 ]
+  grep -qx "run $FLAKE#login -- --server https://gotg.dcraw.net" "$NIX_CALLS"
+  [ "$(grep -n "login\|#update" "$NIX_CALLS" | head -n1 | cut -d: -f2-)" = "run $FLAKE#login -- --server https://gotg.dcraw.net" ]
+}
+
+@test "an invite link is the login" {
+  other_linux
+  export GOTG_LIBRARY_DIR="$TMP/library"
+  load_installer
+  stub_nix
+  stub_side_effects
+  CLAIM="https://gotg.example/claim/gotgi_x" run install_gotg
+  [ "$status" -eq 0 ]
+  grep -qx "run $FLAKE#login -- --claim https://gotg.example/claim/gotgi_x" "$NIX_CALLS"
+  ! grep -q -- "--server" "$NIX_CALLS"
+}
+
+@test "a netrc already here is a login already done" {
+  other_linux
+  export GOTG_LIBRARY_DIR="$TMP/library"
+  load_installer
+  stub_nix
+  stub_side_effects
+  mkdir -p "$GOTG_CONFIG_DIR"
+  printf 'machine gotg.dcraw.net login gotg password x\n' >"$GOTG_CONFIG_DIR/netrc"
+  run install_gotg
+  [ "$status" -eq 0 ]
+  ! grep -q "login" "$NIX_CALLS"
+  [[ "$output" == *"logged in"* ]]
+}
+
+@test "--claim reaches the login from the command line" {
+  other_linux
+  export GOTG_LIBRARY_DIR="$TMP/library"
+  load_installer
+  stub_steps
+  install_gotg() { printf 'CLAIM=%s\n' "$CLAIM"; }
+  run main --dry-run --claim https://gotg.example/claim/gotgi_y
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"CLAIM=https://gotg.example/claim/gotgi_y"* ]]
+}

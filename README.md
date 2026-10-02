@@ -43,6 +43,8 @@ What it does, step by step (`bash -s -- --dry-run` prints this and changes nothi
 ==> flakes are on (already done)
 ==> making a library in /home/you/.config/gotg/library, of https://gotg.dcraw.net
    would run: nix flake new /home/you/.config/gotg/library -t github:dscrawford/GamesOnTheGo#library
+==> signing in to https://gotg.dcraw.net (the token, from whoever runs it)
+   would run: nix run github:dscrawford/GamesOnTheGo#login -- --server https://gotg.dcraw.net
 ==> building the picker, and any game already here, from /home/you/.config/gotg/library
    would run: nix run /home/you/.config/gotg/library#update
    would run: /home/you/.local/state/gotg/app/bin/gotg library /home/you/.config/gotg/library
@@ -56,13 +58,15 @@ Dry run done. Nothing was changed.
 Nothing goes in a Nix profile. The **library** is the install: a flake in
 `~/.config/gotg/library` naming your server and pinning its catalog, each game
 an output of it ([docs/nix-games.md](docs/nix-games.md)). `--server
-https://games.example.org` makes it a library of another server. With Nix
-already here, the whole of it by hand:
+https://games.example.org` makes it a library of another server;
+`--claim <url>` signs in with an invite link. With Nix already here, the
+whole of it by hand:
 
 ```bash
 nix flake new ~/.config/gotg/library -t github:dscrawford/GamesOnTheGo#library
+nix run github:dscrawford/GamesOnTheGo#login     # the token first: the catalog is fetched with it
+nix flake lock ~/.config/gotg/library            # by its path; a lock is not written through the registry
 nix registry add gotg ~/.config/gotg/library     # so it is gotg#… from anywhere, as below
-nix run gotg#login
 ```
 
 Upgrade: the installer again, or `nix flake update gotg --flake ~/.config/gotg/library && nix run gotg#update`.
