@@ -102,6 +102,13 @@ cmd_play() {
   done
   set -- "${rest[@]+"${rest[@]}"}"
 
+  # A library configured: the game is its Nix output (library-play.sh).
+  local library
+  library="$(gotg_library)"
+  if [[ -n "$library" ]]; then
+    library_play "$library" "$want" "$variant" "$want_version" "$@"
+  fi
+
   play_launch "$want" "$variant" "$want_version" "$@"
 }
 
