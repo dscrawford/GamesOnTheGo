@@ -120,6 +120,45 @@ choosing one the lock does not have yet updates the `catalog` input first.
 | 4 | the library flake template, registry, netrc for the catalog | a second library against the test service |
 | 5 | `gotg qa --spec`; `gotg play` through a configured library (so the picker and Steam), per-game roots, `gotg update` | picker tests; Steam bats; controller e2e; QA desktop and `--machine deck`; the Deck |
 | 6 | retire the old path: environment building, its roots and `sync` (now `update`) gone from the client; `play`/`install` kept as the library's front door; the installer makes a library | all checks; a fresh Deck from nothing |
+| 7 | no client: the launcher a hidden dependency, the picker the only thing a person runs (below) | all checks; the Deck with no `gotg` in its profile |
+
+## Phase 7: no client
+
+Decided 2026-10-02. Nix cannot do the runtime -- something fetches the bytes
+into `~/Games`, pulls and pushes saves, starts danstick, writes the
+emulator's bindings, starts the overlay and runs the game -- so a launcher
+exists. What goes is the client as a thing a person installs, upgrades and
+types to. After phase 6 the launcher is already a dependency of every game
+output (`exec gotg launch --spec`); the rest of `gotg` is a front door Nix
+and the picker replace.
+
+```bash
+nix run library#n64.usa.donkey_kong_64   # a game; the launcher inside it, invisible
+nix run gotg#login                        # token + netrc, once per machine
+nix run gotg#ui                           # the picker
+nix run library#steam                     # Steam shortcuts for the picker and the games
+```
+
+| Today | After |
+|---|---|
+| `gotg launch`: download, verify, recipe, firmware, keys, versions, saves sync, danstick, bindings, overlay, session, the restart for a save | stays as `gotg-launch`, bash: a per-game dependency, never on PATH, never in a profile |
+| `saves list`/`check`/`restore`, which the overlay and picker ask at runtime | stays, inside the launcher |
+| `login`, `admin`, `qa` | each its own flake app, bash |
+| `steam add`/`picker`, artwork | `library#steam`, and a home-manager module for the declarative machine |
+| the picker's catalog: `manifest.json`, `refresh` | the library's pinned `catalog` input, read from the store -- one source of truth; a game newer than the lock is `nix flake update catalog`, which the picker runs |
+| the picker's Install (A on a game) | `library-play.sh`'s build-and-root moves into the picker: `nix build library#x -o games/x`, then run it |
+| the picker's questions: ready, installed, saves, storage | file reads in Python, or the launcher's `saves`; no shelling out to a general `gotg` |
+| `configure storage` (`~/Games`, an SD card) | a library setting, `gamesDir` |
+| the `gotg` profile entry, `update`, `library`, `install`, `play`, `list`, `info`, `download`, `uninstall`, `versions`, `complete`, `configure`, `controllers` | gone; the installer is Nix, uinput and the Steam entry |
+
+Where "press A to install" lives is the one real decision: it is imperative
+by nature, so it is the picker's, with a `programs.gotg.games = [...]` module
+beside it for a NixOS or home-manager machine; both make the same roots.
+
+Sequencing: `feat/nix-games` merges first -- checked on the Deck, and
+`launch --spec` is the seam this cut runs along -- then phase 7 on its own
+branch. About phase 6's size: most of the bash stays (it is the launcher),
+the bats suite loses the retired commands, the picker grows.
 
 ## Watch
 
