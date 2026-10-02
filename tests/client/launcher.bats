@@ -578,6 +578,25 @@ SHIM
   [ -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
 }
 
+@test "after the picker's install, the picker's own questions are answered from the library's root" {
+  # What the picker asks next, in its own words: is it ready (Play rather
+  # than Install), is it installed (the mark on the tile), what saves are
+  # there. With games built from a library nothing is under roots/, and the
+  # picker would have shown a game it had just installed as never installed.
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  overlapping_nix
+  GOTG_PROGRESS_LINES=1 GOTG_NO_DIALOG=1 gotg install usa.zelda
+  [ "$status" -eq 0 ]
+  gotg complete ready n64/usa.zelda
+  [ "$status" -eq 0 ]
+  gotg complete installed
+  [ "$output" = "n64/usa.zelda" ]
+  gotg saves list n64/usa.zelda --json
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq -e . >/dev/null
+}
+
 @test "a flake that does not evaluate stops the picker's install before the download" {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
