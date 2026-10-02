@@ -70,7 +70,7 @@ leads: ids repeat across platforms and an attribute path cannot carry the
 ```nix
 # a library flake (nix flake init -t gotg#library)
 {
-  inputs.gotg.url = "git+ssh://git@github.com/dscrawford/GamesOnTheGo";
+  inputs.gotg.url = "github:dscrawford/GamesOnTheGo";
   inputs.catalog = {
     url = "file+https://gotg.dcraw.net/catalog";
     flake = false;

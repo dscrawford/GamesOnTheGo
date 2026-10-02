@@ -339,7 +339,6 @@ The token stays `#login`'s, 0600, never in the store.
 | `GOTG_ADMIN_TOKEN`, `GOTG_INDEX_TOKEN` | admin and importer credentials |
 | `GOTG_ART_DIR`, `GOTG_UPSTREAM_RATE` | service: art cache, upstream requests/s |
 
-Private repository: `NIX_CONFIG="extra-access-tokens = github.com=github_pat_…" nix run gotg#update`.
 
 ## Development
 

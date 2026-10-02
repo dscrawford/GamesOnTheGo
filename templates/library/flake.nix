@@ -10,7 +10,7 @@
 # See docs/nix-games.md in the GOTG repository.
 {
   inputs = {
-    gotg.url = "git+ssh://git@github.com/dscrawford/GamesOnTheGo";
+    gotg.url = "github:dscrawford/GamesOnTheGo";
     catalog = {
       url = "file+https://gotg.dcraw.net/catalog";
       flake = false;
