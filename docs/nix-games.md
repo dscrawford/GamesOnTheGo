@@ -15,7 +15,9 @@ Deck -- the library flake pinned to this branch, its catalog through a netrc
 from the same local service over an ssh tunnel, isolated config and state --
 DK64's output built in ~14 minutes, fetched and rooted the mesa its
 environment names (no /run/opengl-driver there), and passed `gotg qa --spec`
-on the Deck's own GPU.
+on the Deck's own GPU. And on 2026-10-02, by hand on this desktop:
+`nix run /tmp/e2e/lib#n64.usa.donkey_kong_64` against that local service,
+with no `gotg` typed at all -- the shape phase 7 keeps.
 
 ## What it is
 
