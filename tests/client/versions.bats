@@ -24,6 +24,7 @@ setup() {
   mkdir -p "$GOTG_ENV_DIR/games/switch"
   : >"$GOTG_ENV_DIR/switch.nix"
   fake_env env-switch
+  use_library
 }
 
 teardown() { stop_saves_service; }

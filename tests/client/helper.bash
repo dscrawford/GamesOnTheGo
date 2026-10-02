@@ -218,7 +218,10 @@ gotg() {
 # rather than the checkout, so what is tested is what is shipped.
 load_client_libs() {
   local root
-  root="$(cd "$(dirname "$GOTG_BIN")/../share/gotg" && pwd)"
+  # The packaged client's libraries are under share/gotg; a checkout's are
+  # beside bin/, which is what a run from a desk has.
+  root="$(cd "$(dirname "$GOTG_BIN")/../share/gotg" 2>/dev/null && pwd)" ||
+    root="$(cd "$(dirname "$GOTG_BIN")/.." && pwd)"
   export GOTG_ROOT="$root"
   export GOTG_LIB="$root/lib"
   export GOTG_DATA="${GOTG_DATA:-$root/data}"
@@ -227,9 +230,32 @@ load_client_libs() {
 
   # shellcheck source=/dev/null
   local lib
-  for lib in color common config storage manifest download env launcher danstick pads pads-dolphin pads-ryujinx pads-cemu keys firmware remote saves qa-analyze cmd-qa cmd-launch cmd-uninstall; do
+  for lib in color common config storage manifest download env launcher danstick pads pads-dolphin pads-ryujinx pads-cemu keys firmware remote saves qa-analyze cmd-qa cmd-launch library-play foreign-gl cmd-uninstall; do
     source "$GOTG_LIB/$lib.sh"
   done
+}
+
+# Play through a library, as `gotg play` does now (docs/nix-games.md), with
+# nix stood in for (library-nix): a game's root runs the real `gotg launch
+# --spec` against the fake environment fake_env made. NIX_LOG has the calls.
+use_library() {
+  export GOTG_LIBRARY="$TEST_TMP/library" NIX_LOG="${NIX_LOG:-$TEST_TMP/nix.log}"
+  mkdir -p "$GOTG_LIBRARY"
+  : >"$GOTG_LIBRARY/flake.nix"
+  # With this machine's bash: the build sandbox has no /usr/bin/env.
+  mkdir -p "$TEST_TMP/bin"
+  sed "1s|.*|#!$(command -v bash)|" "$BATS_TEST_DIRNAME/library-nix" >"$TEST_TMP/bin/library-nix"
+  chmod +x "$TEST_TMP/bin/library-nix"
+  export GOTG_NIX="$TEST_TMP/bin/library-nix"
+}
+
+# A game's root, as library_build leaves it -- built from the library as it
+# is -- with nothing downloaded: use_library's nix, and the stamp.
+root_game() {
+  local attr="$1" root="$GOTG_STATE_DIR/games/$1"
+  mkdir -p "$GOTG_STATE_DIR/games"
+  "$GOTG_NIX" build "$GOTG_LIBRARY#$attr" -o "$root" || return 1
+  printf '%s' "$GOTG_LIBRARY" >"$root.by"
 }
 
 # A stand-in for a built environment: the GC root that `gotg play` execs, with no

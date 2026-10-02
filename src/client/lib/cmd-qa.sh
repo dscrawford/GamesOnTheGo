@@ -34,18 +34,19 @@ qa_tools_ensure() {
 
   local root
   root="$(qa_tools_root)"
+  local library
+  library="$(gotg_library)"
   if ! qa_tools_have_all "$root/bin"; then
-    local flake
-    flake="$(gotg_flake)"
-    log "building QA tools from $flake#qa-tools"
-    "$(nix_bin)" build "$flake#qa-tools" -o "$root" ||
-      die "could not build qa-tools from $flake"
+    [[ -n "$library" ]] || die "no library configured to build the QA tools from: gotg library <ref>"
+    log "building QA tools from $library#qa-tools"
+    "$(nix_bin)" build "$library#qa-tools" -o "$root" ||
+      die "could not build qa-tools from $library"
   fi
   export PATH="$root/bin:$PATH"
 
   qa_tools_have_all ||
     die "qa-tools is missing something a run needs — rebuild it with:
-     nix build $(gotg_flake)#qa-tools -o $root"
+     nix build ${library:-<library>}#qa-tools -o $root"
 }
 
 qa_golden_path() {
@@ -518,13 +519,18 @@ EOF
     warn "could not find the virtual pad among SDL's controllers — bindings may go to a real one"
   fi
 
-  # QA grades the current definition of the environment, not whichever build
-  # happens to be rooted here — a stale root was the first bug a real run ever
-  # caught. Same trade install makes: refresh when possible, run regardless.
-  local attr
-  attr="${GOTG_PINNED_ATTR:-$(env_attr "$game" "$variant")}"
-  if env_is_built "$attr"; then
-    env_refresh "$attr" || warn "could not rebuild $attr — grading the build already here"
+  # An id is its game as the library builds it, graded as that -- built
+  # fresh rather than whatever root is here: a stale root was the first bug
+  # a real run ever caught. A spec (--spec) already is one.
+  if [[ -z "${GOTG_PINNED_ATTR:-}" ]]; then
+    local library lattr
+    library="$(gotg_library)"
+    [[ -n "$library" ]] || die "no library configured: gotg qa runs a game as its library builds it.
+     gotg library <ref>, or gotg qa --spec <file>"
+    lattr="$(library_attr "$game" "$variant")"
+    library_build "$library" "$lattr" || die "could not build $lattr from $library"
+    launch_spec_load "$(library_games_dir)/$lattr/share/gotg/spec.json"
+    want="$LAUNCH_WANT"
   fi
 
   play_prepare "$want" "$variant"

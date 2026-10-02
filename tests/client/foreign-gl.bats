@@ -38,6 +38,7 @@ setup() {
   # The client's own -- the overlay's and the picker's -- is not what these
   # are about.
   export GOTG_FOREIGN_GL_SELF=none
+  use_library
 }
 
 teardown() {
@@ -89,8 +90,7 @@ fetched() { grep -F -- "build $1 -o $GOTG_STATE_DIR/foreign-gl/$(basename "$1")"
 }
 
 @test "a fetch that fails says so, and the game still starts" {
-  export GOTG_HOST_GL="$TEST_TMP/no-such-gl"
-  stub_nix fail
+  export GOTG_HOST_GL="$TEST_TMP/no-such-gl" NIX_FAIL_STORE_PATHS=1
   gotg play usa.zelda
   [ "$status" -eq 0 ]
   [[ "$stderr" == *"could not fetch the GL"* ]]

@@ -22,6 +22,7 @@ setup() {
   mkdir -p "$TEST_TMP/data"
   echo '{}' >"$TEST_TMP/data/overrides.json"
   export GOTG_DATA="$TEST_TMP/data"
+  use_library
 }
 
 teardown() {
@@ -179,19 +180,6 @@ teardown() {
   done <<<"$output"
 }
 
-@test "play builds a missing environment from the flake" {
-  add_game n64 "usa.zelda.z64" "rom"
-  gotg refresh
-  gotg download usa.zelda
-  rm -rf "$GOTG_ROOTS_DIR/env-n64"
-  stub_nix
-
-  gotg play usa.zelda
-  [ "$status" -eq 0 ]
-  grep -q "build $GOTG_FLAKE#env-n64 -o $GOTG_ROOTS_DIR/env-n64" "$NIX_LOG"
-  [[ "$output" == *"launched with: $GOTG_GAMES_DIR/n64/usa.zelda.z64"* ]]
-}
-
 @test "the environment is built before the download, not after it" {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
@@ -203,20 +191,6 @@ teardown() {
   # Nothing was fetched: a missing emulator is worth failing on before a transfer
   # that can run to tens of gigabytes.
   [ ! -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
-}
-
-@test "a failed build says how to run it somewhere it can be read" {
-  add_game n64 "usa.zelda.z64" "rom"
-  gotg refresh
-  rm -rf "$GOTG_ROOTS_DIR/env-n64"
-  stub_nix fail
-
-  gotg play usa.zelda
-  [ "$status" -ne 0 ]
-  [[ "$stderr" == *"terminal"* ]]
-  [[ "$stderr" == *"nix build $GOTG_FLAKE#env-n64"* ]]
-  # Under Steam the only trace of a launch is the log the shortcut redirects to.
-  [[ "$stderr" == *"$GOTG_LOG_DIR"* ]]
 }
 
 @test "a platform with no environment says where to add one" {
@@ -411,214 +385,12 @@ teardown() {
   [[ "$output" == *"--fullscreen"* ]]
 }
 
-@test "no checkout anywhere means environments build from the repo itself" {
-  load_client_libs
-  local out
-  out="$(HOME="$TEST_TMP/nohome" GOTG_FLAKE="" gotg_flake)"
-  [[ "$out" == "github:dscrawford/GamesOnTheGo"* ]]
-}
-
-@test "the default flake is the one form nix can authenticate by itself" {
-  # Not git+ssh (needs a key on the repo) and not git+https (shells out to
-  # git, which asks for a username): nix's access-tokens setting applies to
-  # github: refs only, and a read-only token is the whole point of the
-  # default. Measured, not assumed — git+https with a token set fails with
-  # "could not read Username for 'https://github.com'".
-  load_client_libs
-  local out
-  out="$(HOME="$TEST_TMP/nohome" GOTG_FLAKE="" gotg_flake)"
-  [[ "$out" == github:* ]]
-  [[ "$out" != *ssh* ]]
-  [[ "$out" != git+https* ]]
-}
-
-@test "a checkout in the usual place still wins over the network" {
-  load_client_libs
-  mkdir -p "$TEST_TMP/home/Documents/GOTG"
-  : >"$TEST_TMP/home/Documents/GOTG/flake.nix"
-  local out
-  out="$(HOME="$TEST_TMP/home" GOTG_FLAKE="" gotg_flake)"
-  [ "$out" = "$TEST_TMP/home/Documents/GOTG" ]
-}
-
-@test "with no checkout, environments come from the source this client was built from" {
-  # Not GitHub's head: a Deck given a build from a copy of a checkout built
-  # the client from that copy and every emulator environment from GitHub --
-  # a client speaking danstick, environments still naming padmap.
-  load_client_libs
-  mkdir -p "$TEST_TMP/own"
-  : >"$TEST_TMP/own/flake.nix"
-  local out
-  out="$(HOME="$TEST_TMP/nohome" GOTG_FLAKE="" GOTG_OWN_FLAKE="$TEST_TMP/own" gotg_flake)"
-  [ "$out" = "$TEST_TMP/own" ]
-}
-
-@test "a checkout or a flake somebody named still wins over the client's own source" {
-  load_client_libs
-  mkdir -p "$TEST_TMP/home/Documents/GOTG" "$TEST_TMP/own"
-  : >"$TEST_TMP/home/Documents/GOTG/flake.nix"
-  : >"$TEST_TMP/own/flake.nix"
-  [ "$(HOME="$TEST_TMP/home" GOTG_FLAKE="" GOTG_OWN_FLAKE="$TEST_TMP/own" gotg_flake)" = "$TEST_TMP/home/Documents/GOTG" ]
-  [ "$(HOME="$TEST_TMP/nohome" GOTG_FLAKE="github:me/fork" GOTG_OWN_FLAKE="$TEST_TMP/own" gotg_flake)" = "github:me/fork" ]
-}
-
-@test "updates still come from GitHub, not from the client's own source" {
-  # The own source is what this client is; sync is how a newer one arrives.
-  load_client_libs
-  mkdir -p "$TEST_TMP/own"
-  : >"$TEST_TMP/own/flake.nix"
-  local out
-  out="$(HOME="$TEST_TMP/nohome" GOTG_FLAKE="" GOTG_OWN_FLAKE="$TEST_TMP/own" gotg_update_flake)"
-  [[ "$out" == github:* ]]
-}
-
-@test "sync builds the environments from the flake it built the client from" {
-  stub_nix
-  fake_env env-n64
-  mkdir -p "$TEST_TMP/own"
-  : >"$TEST_TMP/own/flake.nix"
-  export GOTG_OWN_FLAKE="$TEST_TMP/own"
-  gotg sync
-  [ "$status" -eq 0 ]
-  grep -q "build $GOTG_FLAKE#env-n64" "$NIX_LOG"
-  ! grep -q "build $TEST_TMP/own#" "$NIX_LOG"
-}
-
-@test "a source in the store is its own fingerprint" {
-  load_client_libs
-  [ "$(flake_fingerprint /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source)" = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source" ]
-}
-
-@test "a url flake goes to nix without a local flake.nix check" {
-  add_game n64 "usa.zelda.z64" "rom"
-  gotg refresh
-  gotg download usa.zelda
-  rm -rf "$GOTG_ROOTS_DIR/env-n64"
-  stub_nix
-  export GOTG_FLAKE="git+ssh://git@example.com/repo?shallow=1"
-  gotg play usa.zelda
-  [ "$status" -eq 0 ]
-  grep -q "build git+ssh://git@example.com/repo?shallow=1#env-n64" "$NIX_LOG"
-}
-
-@test "sync with a url flake refreshes rather than dying on a missing checkout" {
-  stub_nix
-  export GOTG_FLAKE="git+ssh://git@example.com/repo?shallow=1"
-  gotg sync
-  [ "$status" -eq 0 ]
-  grep -q -- "build git+ssh://git@example.com/repo?shallow=1#gotg .* --refresh" "$NIX_LOG"
-}
-
-@test "sync marks each environment on one line" {
-  stub_nix
-  fake_env env-n64
-  fake_env env-snes
-  gotg sync
-  [ "$status" -eq 0 ]
-  [[ "$stderr" == *"● gotg"* ]]
-  # The picker rides along, into a root of its own, so the Steam entry runs
-  # the build sync last made rather than whatever PATH held when Steam began.
-  grep -q -- "#gotg-ui -o $GOTG_STATE_DIR/picker" "$NIX_LOG"
-  [[ "$stderr" == *"● gotg-ui"* ]]
-  [[ "$stderr" == *"● env-n64"*"same"* ]]
-  [[ "$stderr" == *"● env-snes"*"same"* ]]
-  # No prose per environment: the line is the report.
-  [[ "$stderr" != *"rebuilding env-n64"* ]]
-  [[ "$stderr" != *"building env-n64 from"* ]]
-}
-
-@test "an environment that fails to build is marked, and the others still sync" {
-  stub_nix fail-env
-  fake_env env-n64
-  fake_env env-broken
-  gotg sync
-  [ "$status" -ne 0 ]
-  [[ "$stderr" == *"● env-broken"*"sync-env-broken.log"* ]]
-  [[ "$stderr" == *"● env-n64"*"same"* ]]
-  [[ "$stderr" == *"1 environment(s) did not build"* ]]
-  grep -q "build .*#env-n64" "$NIX_LOG"
-}
-
-@test "a root that is not an environment is marked and skipped" {
-  stub_nix
-  fake_env env-n64
-  mkdir -p "$GOTG_ROOTS_DIR/ares"
-  gotg sync
-  [ "$status" -eq 0 ]
-  [[ "$stderr" == *"● ares"*"not an environment name"* ]]
-  [[ "$stderr" == *"● env-n64"* ]]
-}
-
-@test "the build-key file beside a root is not reported as a stray" {
-  # sync writes these itself, so telling a person to rm one is noise on every
-  # run -- and it arrived in a batch of them, one per environment.
-  stub_nix
-  fake_env env-n64
-  : >"$GOTG_ROOTS_DIR/env-n64.by"
-  gotg sync
-  [ "$status" -eq 0 ]
-  [[ "$stderr" != *"env-n64.by"* ]]
-  [[ "$stderr" == *"● env-n64"* ]]
-}
-
-@test "a refresh builds without a progress dialog" {
-  # Every launch after a client upgrade refreshes before it runs, and from
-  # Steam there is no terminal -- so the dialog this suppresses was a window
-  # in front of a game that was about to start.
-  load_client_libs
-  # Stands in for the real build, and reports the one thing under test.
-  env_build() { echo "dialog=${GOTG_NO_DIALOG:-unset}"; }
-  run env_refresh env-n64
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"dialog=1"* ]]
-}
-
 # --- sync skips a flake that has not changed ---
 
 commit_flake() {
   git -C "$GOTG_FLAKE" init -q 2>/dev/null || true
   git -C "$GOTG_FLAKE" -c user.name=t -c user.email=t@t add -A
   git -C "$GOTG_FLAKE" -c user.name=t -c user.email=t@t commit -q -m "${1:-flake}" --allow-empty
-}
-
-@test "a second sync on the same commit builds nothing" {
-  stub_nix
-  fake_env env-n64
-  commit_flake
-  gotg sync
-  [ "$status" -eq 0 ]
-  # Three per pass: the client, the picker, and the one environment here.
-  local builds
-  builds="$(grep -c "^build " "$NIX_LOG")"
-  [ "$builds" -eq 3 ]
-
-  gotg sync
-  [ "$status" -eq 0 ]
-  [[ "$stderr" == *"nothing changed since"* ]]
-  [[ "$stderr" == *"● env-n64"*"same"* ]]
-  [ "$(grep -c "^build " "$NIX_LOG")" -eq 3 ]
-
-  # A new commit, or a dirty checkout, or --force: built again.
-  commit_flake again
-  gotg sync
-  [ "$(grep -c "^build " "$NIX_LOG")" -eq 6 ]
-  gotg sync --force
-  [ "$(grep -c "^build " "$NIX_LOG")" -eq 9 ]
-  echo edit >>"$GOTG_FLAKE/flake.nix"
-  gotg sync
-  [ "$(grep -c "^build " "$NIX_LOG")" -eq 12 ]
-}
-
-@test "a sync that failed does not stamp the flake as done" {
-  stub_nix fail-env
-  fake_env env-broken
-  commit_flake
-  gotg sync
-  [ "$status" -ne 0 ]
-  [ ! -f "$GOTG_STATE_DIR/sync.rev" ]
-  gotg sync
-  [ "$status" -ne 0 ]
-  [[ "$stderr" != *"nothing changed"* ]]
 }
 
 @test "install points at the command, not at Steam's file picker" {
@@ -662,13 +434,11 @@ fake_zenity() {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
   gotg download usa.zelda
-  rm -rf "$GOTG_ROOTS_DIR/env-n64"
-  stub_nix
   fake_zenity refuse
 
   gotg play usa.zelda
   [ "$status" -eq 0 ]
-  grep -q "build $GOTG_FLAKE#env-n64" "$NIX_LOG"
+  grep -q "build $GOTG_LIBRARY#n64.usa.zelda" "$NIX_LOG"
   [[ "$stderr" == *"progress dialog could not start"* ]]
   [[ "$stderr" != *"build stopped"* ]]
 }
@@ -677,8 +447,6 @@ fake_zenity() {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
   gotg download usa.zelda
-  rm -rf "$GOTG_ROOTS_DIR/env-n64"
-  stub_nix
   fake_zenity ok
 
   LC_ALL=C gotg play usa.zelda
@@ -721,8 +489,6 @@ fake_zenity() {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
   gotg download usa.zelda
-  rm -rf "$GOTG_ROOTS_DIR/env-n64"
-  stub_nix
   fake_zenity ok
   printf '#!%s\nsleep 0.8\necho "This option is not available." >&2\nexit 255\n' "$(command -v bash)" >"$GOTG_ZENITY"
   # A build still running when the dialog dies, or the branch never runs.
@@ -738,8 +504,6 @@ fake_zenity() {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
   gotg download usa.zelda
-  rm -rf "$GOTG_ROOTS_DIR/env-n64"
-  stub_nix
   fake_zenity ok
   printf '#!%s\nsleep 0.8\nexit 1\n' "$(command -v bash)" >"$GOTG_ZENITY"
   # A build that would take long enough to be cancelled.
@@ -756,48 +520,6 @@ fake_zenity() {
 # so a client upgraded under a person kept launching the environments the
 # old one had built -- the Deck after every `nix profile upgrade`, and a
 # checkout after every pull. Four Swords 3p died on a wrapper three pins old.
-
-@test "a root built by an older client is rebuilt on the next launch" {
-  add_game n64 "usa.zelda.z64" "rom"
-  gotg refresh
-  gotg download usa.zelda
-  rm -rf "$GOTG_ROOTS_DIR/env-n64"
-  stub_nix
-  gotg play usa.zelda
-  [ "$status" -eq 0 ]
-  [ "$(grep -c "build $GOTG_FLAKE#env-n64" "$NIX_LOG")" -eq 1 ]
-  # The root remembers who built it.
-  [ -s "$GOTG_ROOTS_DIR/env-n64.by" ]
-
-  # The same client again: nothing to do.
-  gotg play usa.zelda
-  [ "$status" -eq 0 ]
-  [ "$(grep -c "build $GOTG_FLAKE#env-n64" "$NIX_LOG")" -eq 1 ]
-
-  # A root some older gotg built: rebuilt, then launched.
-  printf '/nix/store/00000000000000000000000000000000-gotg-0.0.1\n' >"$GOTG_ROOTS_DIR/env-n64.by"
-  gotg play usa.zelda
-  [ "$status" -eq 0 ]
-  [ "$(grep -c "build $GOTG_FLAKE#env-n64" "$NIX_LOG")" -eq 2 ]
-  [[ "$stderr" == *"built by an older gotg"* ]]
-  [[ "$output" == *"launched with:"* ]]
-}
-
-@test "a rebuild that fails still launches what is there" {
-  add_game n64 "usa.zelda.z64" "rom"
-  gotg refresh
-  gotg download usa.zelda
-  rm -rf "$GOTG_ROOTS_DIR/env-n64"
-  stub_nix
-  gotg play usa.zelda
-  [ "$status" -eq 0 ]
-  printf '/nix/store/00000000000000000000000000000000-gotg-0.0.1\n' >"$GOTG_ROOTS_DIR/env-n64.by"
-  stub_nix fail
-  gotg play usa.zelda
-  [ "$status" -eq 0 ]
-  [[ "$stderr" == *"could not rebuild"* ]]
-  [[ "$output" == *"launched with:"* ]]
-}
 
 # --- sync: no dialog, and several at once --------------------------------------
 
@@ -817,149 +539,58 @@ fake_zenity() {
   [ ! -s "$ZENITY_LOG" ]
 }
 
-@test "environments are built at the same time, not one after another" {
-  add_game n64 "usa.zelda.z64" "rom"
-  gotg refresh
-  stub_nix
-  fake_env env-n64
-  fake_env env-snes
-  fake_env env-nes
-  # A nix that says when each build starts and ends. Built in parallel, a
-  # second starts before the first has finished.
-  export BUILD_ORDER="$TEST_TMP/build-order"
-  : >"$BUILD_ORDER"
-  {
-    printf '#!%s\n' "$(command -v bash)"
-    cat <<'SHIM'
-out=""; prev=""
-for arg in "$@"; do [[ "$prev" == "-o" ]] && out="$arg"; prev="$arg"; done
-name="$(basename "${out:-unknown}")"
-printf 'start %s\n' "$name" >>"$BUILD_ORDER"
-sleep 1
-printf 'end %s\n' "$name" >>"$BUILD_ORDER"
-[[ -n "$out" ]] || exit 0
-mkdir -p "$out/bin"
-printf '#!%s\necho built\n' "$(command -v bash)" >"$out/bin/gotg-play"
-chmod +x "$out/bin/gotg-play"
-SHIM
-  } >"$GOTG_NIX"
-  chmod +x "$GOTG_NIX"
-
-  gotg sync --force
-  [ "$status" -eq 0 ]
-  # Two environments were building at once: a second environment started
-  # before the first finished. Only the environments -- gotg itself is built
-  # before them, and on its own.
-  local envs first_end second_start
-  envs="$(grep -E '^(start|end) env-' "$BUILD_ORDER")"
-  first_end="$(grep -n '^end ' <<<"$envs" | head -1 | cut -d: -f1)"
-  second_start="$(grep -n '^start ' <<<"$envs" | sed -n 2p | cut -d: -f1)"
-  [ -n "$first_end" ] && [ -n "$second_start" ]
-  [ "$second_start" -lt "$first_end" ]
-}
-
-@test "a parallel sync still marks every environment, in a settled order" {
-  add_game n64 "usa.zelda.z64" "rom"
-  gotg refresh
-  stub_nix
-  fake_env env-n64
-  fake_env env-snes
-  fake_env env-nes
-
-  gotg sync --force
-  [ "$status" -eq 0 ]
-  # Each environment named once, and the platform lines in a fixed order --
-  # whichever build happened to finish first must not reorder the report.
-  [ "$(grep -c "env-n64" <<<"$stderr")" -ge 1 ]
-  [ "$(grep -c "env-nes" <<<"$stderr")" -ge 1 ]
-  [ "$(grep -c "env-snes" <<<"$stderr")" -ge 1 ]
-  local order
-  order="$(grep -oE "env-(n64|nes|snes)" <<<"$stderr" | head -3 | tr '\n' ' ')"
-  [ "$order" = "env-n64 env-nes env-snes " ]
-}
-
-@test "a checkout with uncommitted edits is rebuilt when the edits change" {
-  # The fingerprint of a dirty tree was empty, and empty matched empty: a
-  # root built from last night's uncommitted work was launched all the next
-  # day, through every fix made since, until somebody committed.
-  add_game n64 "usa.zelda.z64" "rom"
-  gotg refresh
-  gotg download usa.zelda
-  rm -rf "$GOTG_ROOTS_DIR/env-n64"
-  stub_nix
-  echo "{ }" >"$GOTG_FLAKE/flake.nix"
-  git -C "$GOTG_FLAKE" init -q
-  git -C "$GOTG_FLAKE" -c user.email=t@t -c user.name=t add flake.nix
-  git -C "$GOTG_FLAKE" -c user.email=t@t -c user.name=t commit -qm one
-  gotg play usa.zelda
-  [ "$(grep -c "build $GOTG_FLAKE#env-n64" "$NIX_LOG")" -eq 1 ]
-
-  # An edit nobody has committed: rebuilt.
-  echo "# one" >>"$GOTG_FLAKE/flake.nix"
-  gotg play usa.zelda
-  [ "$status" -eq 0 ]
-  [ "$(grep -c "build $GOTG_FLAKE#env-n64" "$NIX_LOG")" -eq 2 ]
-
-  # The same edits again: nothing to do.
-  gotg play usa.zelda
-  [ "$(grep -c "build $GOTG_FLAKE#env-n64" "$NIX_LOG")" -eq 2 ]
-
-  # Another edit on top, still uncommitted: rebuilt again.
-  echo "# two" >>"$GOTG_FLAKE/flake.nix"
-  gotg play usa.zelda
-  [ "$(grep -c "build $GOTG_FLAKE#env-n64" "$NIX_LOG")" -eq 3 ]
-}
-
 # --- the emulator is built while the game downloads, for the picker ---------
 
 # A nix that evaluates at once and whose build does not finish until the
 # game's bytes are on disk: an install that built first and downloaded
 # second would time the build out and fail.
 overlapping_nix() {
-  export NIX_LOG="$TEST_TMP/nix.log" GOTG_FLAKE="$TEST_TMP/flake" GOTG_NIX="$TEST_TMP/bin/nix"
-  mkdir -p "$GOTG_FLAKE" "$TEST_TMP/bin"
-  : >"$GOTG_FLAKE/flake.nix"
-  cat >"$GOTG_NIX" <<SHIM
+  # The library's nix (use_library), holding a game's build until the
+  # download has started -- or, with an argument, failing the spec's
+  # evaluation, as a definition that does not evaluate would.
+  local fail="${1:-}" real="$GOTG_NIX"
+  cat >"$TEST_TMP/bin/overlap-nix" <<SHIM
 #!$(command -v bash)
-printf '%s\n' "\$*" >>"$NIX_LOG"
-[[ "\$1" == build ]] || exit ${1:-0}
-for _ in \$(seq 1 100); do
-  [[ -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]] && break
-  sleep 0.05
-done
-[[ -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]] || { echo "build finished before the download started" >&2; exit 1; }
-prev=""; for arg in "\$@"; do [[ "\$prev" != -o ]] || out="\$arg"; prev="\$arg"; done
-mkdir -p "\$out/bin"; printf '#!/bin/sh\n' >"\$out/bin/gotg-play"; chmod +x "\$out/bin/gotg-play"
+if [[ "\$2" == *.gotgSpecFile ]]; then
+  [[ -z "$fail" ]] || { echo "error: evaluating \$2 failed" >&2; exit 1; }
+  exec "$real" "\$@"
+fi
+if [[ "\$1" == build && "\$2" == *"#"* ]]; then
+  for _ in \$(seq 1 100); do
+    [[ -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]] && break
+    sleep 0.05
+  done
+  [[ -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]] || { echo "build finished before the download started" >&2; exit 1; }
+fi
+exec "$real" "\$@"
 SHIM
-  chmod +x "$GOTG_NIX"
+  chmod +x "$TEST_TMP/bin/overlap-nix"
+  export GOTG_NIX="$TEST_TMP/bin/overlap-nix"
 }
 
 @test "installing for the picker builds the emulator while the game downloads" {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
-  rm -rf "$GOTG_ROOTS_DIR/env-n64"
   overlapping_nix
   GOTG_PROGRESS_LINES=1 GOTG_NO_DIALOG=1 gotg install usa.zelda
   [ "$status" -eq 0 ]
-  [ -x "$GOTG_ROOTS_DIR/env-n64/bin/gotg-play" ]
+  [ -x "$GOTG_STATE_DIR/games/n64.usa.zelda/bin/gotg-n64-usa-zelda" ]
   [ -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
 }
 
 @test "a flake that does not evaluate stops the picker's install before the download" {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
-  rm -rf "$GOTG_ROOTS_DIR/env-n64"
   overlapping_nix 1
   GOTG_PROGRESS_LINES=1 GOTG_NO_DIALOG=1 gotg install usa.zelda
   [ "$status" -ne 0 ]
   [ ! -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
-  [[ "$stderr" == *"env-n64"* ]]
+  [[ "$stderr" == *"n64.usa.zelda"* ]]
 }
 
 @test "an install at a terminal still builds first, then downloads" {
   add_game n64 "usa.zelda.z64" "rom"
   gotg refresh
-  rm -rf "$GOTG_ROOTS_DIR/env-n64"
   overlapping_nix
   GOTG_NO_DIALOG=1 gotg install usa.zelda
   # The overlapping nix times out when nothing downloads beside it.

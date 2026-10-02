@@ -18,6 +18,7 @@ setup() {
   mkdir -p "$HOME"
   unset GOTG_GAMES_DIR GOTG_PARTIAL_DIR
   export CARD="$TEST_TMP/card/Games"
+  use_library
 }
 
 teardown() { stop_saves_service; }

@@ -596,7 +596,7 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   # run's own status rather than gotg's.
   GOTG_PICKER="$TEST_TMP/no-such-picker" gotg steam picker
   [ "$status" -ne 0 ]
-  [[ "$stderr" == *"nix profile add"* ]]
+  [[ "$stderr" == *"gotg update"* ]]
 }
 
 @test "gotg steam remove picker takes GOTG out again" {

@@ -227,6 +227,7 @@ main() {
     complete) cmd_complete "$@" ;;
     sync) cmd_sync "$@" ;;
     update) cmd_update "$@" ;;
+    library) cmd_library "$@" ;;
     help | --help | -h | "") usage ;;
     *)
       printf 'error: unknown command: %s\n\n' "$cmd" >&2

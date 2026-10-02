@@ -93,13 +93,27 @@ SHIM
   [[ "$output" == *"n64.usa.zelda ran with:"* ]]
 }
 
-@test "offline, a game already rooted still runs, and says it is not rebuilt" {
+@test "a game built from the library as it is launches from its root, with no build" {
   gotg play usa.zelda
+  : >"$NIX_LOG"
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"n64.usa.zelda ran with:"* ]]
+  ! grep -q build "$NIX_LOG"
+}
+
+@test "a library that moved rebuilds a game; offline, the root it has still runs" {
+  gotg play usa.zelda
+  printf '{"nodes": {}}' >"$GOTG_LIBRARY/flake.lock"
   export NIX_OFFLINE=1
   gotg play usa.zelda
   [ "$status" -eq 0 ]
   [[ "$output" == *"n64.usa.zelda ran with:"* ]]
   [[ "$stderr" == *"could not rebuild"* ]]
+  unset NIX_OFFLINE
+  : >"$NIX_LOG"
+  gotg play usa.zelda
+  grep -qF "build $GOTG_LIBRARY#n64.usa.zelda" "$NIX_LOG"
 }
 
 @test "offline, a game never built cannot run, and says why" {
@@ -109,13 +123,33 @@ SHIM
   [[ "$stderr" == *"$GOTG_LIBRARY"* ]]
 }
 
-@test "with no library, play is what it always was" {
+@test "with no library, play says how to make one" {
   unset GOTG_LIBRARY
   fake_env env-n64
   gotg play usa.zelda
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"nix flake init -t"*"#library"* ]]
+  [[ "$stderr" == *"gotg library"* ]]
+  [[ "$output" != *"launched with"* ]]
+}
+
+@test "gotg library sets the library, as an absolute directory, and says it" {
+  unset GOTG_LIBRARY
+  mkdir -p "$TEST_TMP/mylib"
+  : >"$TEST_TMP/mylib/flake.nix"
+  cd "$TEST_TMP"
+  gotg library mylib
   [ "$status" -eq 0 ]
-  [[ "$output" == *"env-n64 launched with:"* ]]
-  ! grep -q "#n64.usa.zelda" "$NIX_LOG" 2>/dev/null
+  gotg library
+  [ "$output" = "$TEST_TMP/mylib" ]
+}
+
+@test "gotg library refuses a directory with no flake in it" {
+  unset GOTG_LIBRARY
+  mkdir -p "$TEST_TMP/empty"
+  gotg library "$TEST_TMP/empty"
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"no flake.nix"* ]]
 }
 
 @test "update rebuilds every game that has a root, and only those" {
@@ -124,5 +158,8 @@ SHIM
   gotg update
   [ "$status" -eq 0 ]
   grep -qF "build $GOTG_LIBRARY#n64.usa.zelda -o $(GAMES)/n64.usa.zelda" "$NIX_LOG"
-  [ "$(grep -c ' build \|^build ' "$NIX_LOG")" = 1 ]
+  # One game build; the client and the picker Steam starts are rebuilt too.
+  [ "$(grep -c '#n64\.' "$NIX_LOG")" = 1 ]
+  grep -qF "build $GOTG_LIBRARY#gotg -o $GOTG_STATE_DIR/app" "$NIX_LOG"
+  grep -qF "build $GOTG_LIBRARY#gotg-ui -o $GOTG_STATE_DIR/picker" "$NIX_LOG"
 }

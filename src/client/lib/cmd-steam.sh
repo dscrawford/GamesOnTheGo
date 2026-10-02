@@ -606,7 +606,7 @@ steam_picker() {
     picker="$(command -v gotg-ui 2>/dev/null)" || picker=""
   fi
   [[ -x "$picker" ]] ||
-    die "no gotg-ui here. Install the picker first: nix profile add $GOTG_REMOTE_FLAKE#gotg-ui"
+    die "no gotg-ui here. Build the picker first: gotg update"
 
   # The launcher is written whether Steam is open or not. It is our file,
   # read fresh each time the entry is pressed, and only the shortcut file

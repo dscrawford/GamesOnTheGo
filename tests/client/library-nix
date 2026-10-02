@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# nix, for a library flake, in tests (helper.bash use_library).
+#
+# `build <library>#<platform>.<region>.<name>[.<variant>] -o <root>` makes the
+# game's root as mkLibrary does -- bin/<program>, which runs the real
+# `gotg launch --spec`, and share/gotg/spec.json -- with the spec worked out
+# by the client's own resolver against the test's catalog cache and pointing
+# at the fake environment under GOTG_ROOTS_DIR. So a test that plays a game
+# tests what a launch does through the path a launch takes. A game the
+# resolver refuses fails to build, as the attribute's throw would.
+set -uo pipefail
+printf '%s\n' "$*" >>"${NIX_LOG:-/dev/null}"
+[[ "${1:-} ${2:-}" != "flake update" ]] || exit 0
+[[ -z "${NIX_OFFLINE:-}" ]] || exit 1
+[[ "${1:-}" == build ]] || exit 1
+installable="${2:-}" out="" prev=""
+for arg in "$@"; do
+  [[ "$prev" != "-o" ]] || out="$arg"
+  prev="$arg"
+done
+[[ -n "$out" ]] || exit 1
+# A store path -- the foreign GL a launch fetches -- is just made there.
+if [[ "$installable" == /nix/store/* ]]; then
+  [[ -z "${NIX_FAIL_STORE_PATHS:-}" ]] || exit 1
+  rm -rf "$out"
+  mkdir -p "$out"
+  exit 0
+fi
+path="${installable#*#}"
+case "$path" in
+  gotg | gotg-ui | qa-tools)
+    rm -rf "$out"
+    mkdir -p "$out/bin"
+    exit 0
+    ;;
+esac
+
+# The packaged client keeps its libraries under share/gotg; a checkout's are
+# beside bin/.
+root="$(cd "$(dirname "$GOTG_BIN")/../share/gotg" 2>/dev/null && pwd)" ||
+  root="$(cd "$(dirname "$GOTG_BIN")/.." && pwd)"
+export GOTG_ROOT="$root" GOTG_LIB="$root/lib" GOTG_TEMPLATES="$root/templates"
+export GOTG_DATA="${GOTG_DATA:-$root/data}" GOTG_ENV_DIR="${GOTG_ENV_DIR:-$root/env}"
+# shellcheck source=/dev/null
+for lib in color common config storage manifest env; do . "$GOTG_LIB/$lib.sh"; done
+
+spec_only=""
+if [[ "$path" == *.gotgSpecFile ]]; then
+  spec_only=1
+  path="${path%.gotgSpecFile}"
+fi
+IFS=. read -r platform region name variant <<<"$path"
+game="$(manifest_find "$platform/$region.$name")" || exit 1
+attr="$(env_attr "$game" "${variant:-}")" || exit 1
+program="gotg-${path//./-}"
+rm -rf "$out"
+spec="$out/share/gotg/spec.json"
+if [[ -n "$spec_only" ]]; then
+  spec="$out"
+  mkdir -p "$(dirname "$out")"
+else
+  mkdir -p "$out/bin" "$out/share/gotg"
+fi
+jq -n --argjson game "$game" --arg attr "$attr" --arg env "$GOTG_ROOTS_DIR/$attr" \
+  --arg server "$(jq -r '.url // ""' "$GOTG_CONFIG_DIR/api.json" 2>/dev/null)" \
+  --arg variant "${variant:-}" \
+  '{version: 1, server: $server, files_urls: [], attr: $attr, variant: $variant,
+    env: $env, game: $game}' >"$spec"
+[[ -z "$spec_only" ]] || exit 0
+{
+  printf '#!%s\n' "$(command -v bash)"
+  printf 'exec %q launch --spec %q "$@"\n' "$GOTG_BIN" "$out/share/gotg/spec.json"
+} >"$out/bin/$program"
+chmod +x "$out/bin/$program"
+exit 0

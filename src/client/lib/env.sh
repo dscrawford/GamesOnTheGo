@@ -1,90 +1,19 @@
 # shellcheck shell=bash
-# Which environment runs a game, and getting it built.
+# Which environment runs a game, and where it is.
 #
 # An environment is a nix derivation — see src/client/env — that wraps one emulator
 # together with the arguments and settings a platform, or one particular game,
-# needs. It is built into a GC-rooted symlink under ~/.local/state/gotg/roots and
-# always exposes the same binary, bin/gotg-play.
+# needs, and always exposes the same binary, bin/gotg-play. Nix builds it as a
+# dependency of the game's library output (docs/nix-games.md); nothing here
+# builds one.
 #
 # Working out *which* environment a game wants never evaluates nix: it comes from
-# the catalog entry and the names of the files in src/client/env. That keeps `list`,
-# `info` and a launch of anything already built working offline, and confines nix
-# to the one case that genuinely needs it — an environment that is not here yet.
-
-# Where environments build from when no checkout is configured: the repo
-# itself, reached the same way the client itself was. What makes `gotg play`
-# work out of the box on a machine that has only ever run `nix run`.
-#
-# `github:` rather than git+ssh or git+https, because it is the one form nix
-# can authenticate on its own. Its access-tokens setting applies to github:
-# refs only — the git+https fetcher shells out to git and asks for a username,
-# so it needs a credential helper configured, and git+ssh needs a key on the
-# repo. Someone handed a read-only token has neither, and this is the whole
-# path that makes them unnecessary:
-#
-#   NIX_CONFIG="extra-access-tokens = github.com=<token>" gotg play <id>
-GOTG_REMOTE_FLAKE="${GOTG_REMOTE_FLAKE:-github:dscrawford/GamesOnTheGo}"
-
-# The flake the environments are built from: explicit env, then the config
-# key, then a checkout in the usual place, then the repo over the network.
-gotg_flake() {
-  local candidate
-  candidate="$(_gotg_named_flake)"
-  # The source this client was built from (GOTG_OWN_FLAKE, set by the
-  # package), before GitHub. Without it a client built from anything but
-  # GitHub's head -- a Deck given a copy of a checkout -- built every
-  # emulator environment from GitHub all the same: a client speaking
-  # danstick, and environments still naming padmap.
-  [[ -z "$candidate" && -f "${GOTG_OWN_FLAKE:-/nonexistent}/flake.nix" ]] && candidate="$GOTG_OWN_FLAKE"
-  [[ -z "$candidate" ]] && candidate="$GOTG_REMOTE_FLAKE"
-  printf '%s' "$candidate"
-}
-
-# Where a newer client comes from: `gotg sync`, and the hint the Steam
-# launcher prints. Never the client's own source -- that is what it already is.
-gotg_update_flake() {
-  local candidate
-  candidate="$(_gotg_named_flake)"
-  [[ -z "$candidate" ]] && candidate="$GOTG_REMOTE_FLAKE"
-  printf '%s' "$candidate"
-}
-
-# A flake somebody chose: GOTG_FLAKE, the config's `flake`, or a checkout in
-# the usual place. Empty when none was.
-_gotg_named_flake() {
-  local candidate="${GOTG_FLAKE:-}"
-  [[ -z "$candidate" ]] && candidate="$(config_get flake 2>/dev/null || true)"
-  [[ -z "$candidate" && -f "$HOME/Documents/GOTG/flake.nix" ]] && candidate="$HOME/Documents/GOTG"
-  printf '%s' "$candidate"
-}
-
-# A path is checked for a flake.nix before nix is asked; a URL cannot be, and
-# nix's own error is the right one when it is unreachable.
-flake_is_path() { [[ "$1" != *://* && "$1" != github:* && "$1" != flake:* ]]; }
+# the catalog entry and the names of the files in src/client/env -- the same rule
+# as gotg.lib.catalog's, which checks.resolver holds them to. That keeps `list`,
+# `info`, saves and configure working offline.
 
 # A seam for the tests, which run where there is no nix.
 nix_bin() { printf '%s' "${GOTG_NIX:-nix}"; }
-
-# What the flake is right now, cheaply: the checkout's commit, or the url
-# flake's resolved revision. Empty when it cannot be known or the checkout
-# has uncommitted edits — either of which means "build and see". This is
-# what lets sync tell an unchanged flake apart from one worth an evaluation,
-# without paying for the evaluation to find out.
-flake_fingerprint() {
-  local flake="$1" rev
-  # A source in the store is content-addressed: its path is its version.
-  if [[ "$flake" == /nix/store/* ]]; then
-    printf '%s' "$flake"
-    return 0
-  fi
-  if flake_is_path "$flake"; then
-    [[ -z "$(git -C "$flake" status --porcelain 2>/dev/null)" ]] || return 0
-    rev="$(git -C "$flake" rev-parse HEAD 2>/dev/null)" || return 0
-  else
-    rev="$("$(nix_bin)" flake metadata --refresh --json "$flake" 2>/dev/null | jq -r '.revision // empty' 2>/dev/null)" || return 0
-  fi
-  printf '%s' "$rev"
-}
 
 # Per-game overrides are the one thing a person tweaks per machine, so a copy in
 # the config directory wins over the one shipped in the store.
@@ -198,13 +127,26 @@ env_variants() {
   printf 'Available: %s' "${names[*]}"
 }
 
-# Where an environment is: its GC root, or -- for the one a `gotg launch` spec
-# names (cmd-launch.sh) -- the store path Nix built it at.
+# Where an environment is. For the one a `gotg launch` spec names
+# (cmd-launch.sh), the store path Nix built it at. Otherwise, the one a game
+# built here through the library names in its spec (share/gotg/spec.json under
+# games/) -- which is what lets saves, configure, steam and controllers find an
+# environment with no evaluation. Failing both, the GC root an older client
+# built.
 env_root() {
   if [[ -n "${GOTG_PINNED_ATTR:-}" && "$1" == "$GOTG_PINNED_ATTR" ]]; then
     printf '%s' "$GOTG_PINNED_ENV"
     return 0
   fi
+  local spec env
+  for spec in "$GOTG_STATE_DIR"/games/*/share/gotg/spec.json; do
+    [[ -f "$spec" ]] || continue
+    env="$(jq -r --arg a "$1" 'select(.attr == $a) | .env // empty' "$spec" 2>/dev/null)"
+    if [[ -n "$env" && -d "$env" ]]; then
+      printf '%s' "$env"
+      return 0
+    fi
+  done
   printf '%s/%s' "$GOTG_ROOTS_DIR" "$1"
 }
 env_pinned() { [[ -n "${GOTG_PINNED_ATTR:-}" && "$1" == "$GOTG_PINNED_ATTR" ]]; }
@@ -357,76 +299,6 @@ _nix_drawn() {
   fi
 }
 
-_env_build_failed() {
-  local attr="$1" ref="$2"
-  die "could not build $attr from $ref.
-     Building an emulator is the one part of a launch that evaluates nix, and
-     Steam's environment is a poor place to do it. From a terminal:
-       nix build $ref -o $(env_root "$attr")
-     A launch through Steam leaves its output in $GOTG_LOG_DIR."
-}
-
-# The flake reference an environment is built from, after checking a local
-# flake is there to build it.
-env_ref() {
-  local attr="$1" flake
-  flake="$(gotg_flake)"
-  if flake_is_path "$flake"; then
-    [[ -f "$flake/flake.nix" ]] ||
-      die "no flake at $flake, so there is nothing to build $attr from.
-     Point at your checkout with GOTG_FLAKE or the 'flake' key in $GOTG_CONFIG_FILE,
-     or unset both to build straight from the repo over SSH."
-  fi
-  printf '%s#%s' "$flake" "$attr"
-}
-
-# A branch ref answers from nix's fetch cache for up to an hour, so a rebuild
-# meant to pick up a change could quietly rebuild the old head.
-_env_refresh_flag() {
-  flake_is_path "$(gotg_flake)" || printf -- '--refresh'
-}
-
-# Evaluate an environment without building it: seconds, where the build can
-# be minutes, and the part that fails when a definition is broken. The
-# picker's install asks this first so a broken environment still stops it
-# before a download that can run to tens of gigabytes.
-env_evaluate() {
-  local attr="$1" ref
-  ref="$(env_ref "$attr")"
-  local -a refresh=()
-  read -ra refresh <<<"$(_env_refresh_flag)"
-  _nix_drawn path-info --derivation "$ref" ${refresh[@]+"${refresh[@]}"}
-}
-
-# Build an environment and keep it alive with a GC root.
-env_build() {
-  local attr="$1" ref root
-  # Nix built it for this launch, as a dependency of the game that runs
-  # this; there is nothing to build, and its root is a store path.
-  if env_pinned "$attr"; then
-    env_is_built "$attr" || die "no gotg-play in $(env_root "$attr"), the environment this launch names"
-    return 0
-  fi
-  ref="$(env_ref "$attr")"
-  root="$(env_root "$attr")"
-  mkdir -p "$GOTG_ROOTS_DIR"
-
-  local -a refresh=()
-  read -ra refresh <<<"$(_env_refresh_flag)"
-
-  [[ -n "${GOTG_BUILD_QUIET:-}" ]] ||
-    log "building $attr from $ref — the first launch on a platform compiles its emulator"
-  if ! is_tty && has_display && have_zenity; then
-    _env_build_zenity "$ref" "$root" "$attr" ${refresh[@]+"${refresh[@]}"} || _env_build_failed "$attr" "$ref"
-  else
-    _nix_drawn build "$ref" -o "$root" ${refresh[@]+"${refresh[@]}"} || _env_build_failed "$attr" "$ref"
-  fi
-
-  env_is_built "$attr" ||
-    die "built $attr but $(env_bin "$attr") is missing — check src/client/env for that platform"
-  printf '%s\n' "$(env_build_key)" >"$root.by"
-}
-
 # The environment build `gotg install` started beside the download, if any:
 # waited for by whatever needs the built root (a recipe, the launcher).
 GOTG_ENV_BUILD_PID=""
@@ -436,88 +308,6 @@ env_build_wait() {
   local pid="$GOTG_ENV_BUILD_PID"
   GOTG_ENV_BUILD_PID=""
   wait "$pid" || die "the game is downloaded, but its emulator did not build (above)"
-}
-
-# What a root is built by: this client, and -- from a clean checkout, where
-# it costs a git call -- the tree it came from. Written beside the root when
-# it is built, compared on every launch. A URL flake's revision is not in it
-# on purpose: knowing it means asking the network, and the client's own
-# store path already changes with every upgrade.
-env_build_key() {
-  local flake key="$GOTG_ROOT" print
-  flake="$(gotg_flake)"
-  if flake_is_path "$flake"; then
-    print="$(flake_fingerprint "$flake")"
-    if [[ -z "$print" ]]; then
-      # A checkout with edits in it. The fingerprint is empty then -- it
-      # means "build and see" to sync -- and an empty one here was the same
-      # empty string every launch, so a root built from a dirty tree matched
-      # every later dirty tree and was never rebuilt. A day of uncommitted
-      # fixes to Four Swords Adventures launched the environment from the
-      # night before, every time. The edits themselves are the fingerprint:
-      # what a flake of this checkout would build is the commit plus them.
-      print="dirty:$(git -C "$flake" rev-parse HEAD 2>/dev/null):$(
-        git -C "$flake" diff HEAD 2>/dev/null | sha256sum | cut -c1-16
-      )"
-    fi
-    key+="|$print"
-  fi
-  printf '%s' "$key"
-}
-
-# Whether a built root was built by this client from this tree -- the one
-# thing env_ensure checks before it rebuilds. Asked by `complete ready` too:
-# a root that is about to be rebuilt is not ready, whatever is on disk.
-env_is_current() {
-  # Nix built it for this very launch.
-  env_pinned "$1" && return 0
-  local by
-  by="$(env_root "$1").by"
-  [[ ! -f "$by" || "$(cat "$by")" == "$(env_build_key)" ]]
-}
-
-env_ensure() {
-  local attr="$1"
-  if env_pinned "$attr"; then
-    env_is_built "$attr" || die "no gotg-play in $(env_root "$attr"), the environment this launch names"
-    return 0
-  fi
-  if ! env_is_built "$attr"; then
-    env_build "$attr"
-    return
-  fi
-  # Built by an older gotg, or from an older tree: rebuilt before it runs.
-  # A root only ever got built when it was missing, so a client upgraded
-  # under a person kept launching the environments the old one had built --
-  # the Deck after every `nix profile upgrade`, a checkout after every pull
-  # -- until somebody thought to run `gotg sync`. Best effort, like sync:
-  # a rebuild that fails leaves what is here, which still runs.
-  if ! env_is_current "$attr"; then
-    log "$attr was built by an older gotg; rebuilding it"
-    env_refresh "$attr" || warn "could not rebuild $attr — launching the build already here"
-  fi
-}
-
-# Rebuild something that is already here, tolerating failure. Used where the
-# point is to pick up a definition that has moved: if the flake cannot be
-# reached, what is already built still runs, and refusing to continue would be
-# worse than being one version behind. The subshell is what makes env_build's
-# die local — it ends the attempt rather than the command.
-env_refresh() {
-  # No dialog, ever. A refresh always has something runnable already -- its
-  # whole point is picking up a definition that moved -- so a progress window
-  # is news about work nobody is waiting on, and it lands in front of a game
-  # that is about to start. This is the one that kept appearing: every launch
-  # after a client upgrade goes through here (see env_ensure), and from Steam
-  # there is no terminal, so the dialog was what a person saw.
-  #
-  # A first build is the other case and keeps its dialog: nothing runs yet,
-  # the compile can take minutes, and a blank screen for that long is worse
-  # than a window.
-  (
-    export GOTG_NO_DIALOG=1
-    env_build "$1"
-  )
 }
 
 # The file handed to the emulator. Directory games need a glob (Wii U wants the

@@ -28,6 +28,7 @@ setup() {
   export WATCHER_LOG="$TEST_TMP/watcher.args"
   add_game n64 "usa.zelda.z64" "rom" "Zelda"
   gotg refresh
+  use_library
 }
 
 teardown() {

@@ -31,6 +31,7 @@ setup() {
   fake_env env-n64 '["saves/**"]' '["saves/*.o2r"]'
   STATE="$GOTG_ENV_STATE_DIR/env-n64"
   mkdir -p "$STATE/saves"
+  use_library
 }
 
 teardown() {

@@ -61,9 +61,9 @@ let
       expr = [ (forced games.psx.usa.crash_bandicoot) (forced games.n64.usa.donkey_kong_64) ];
       expected = [ false true ];
     };
-    testTheSpecFileIsTheOneTheAppRuns = {
+    testTheSpecFileIsTheOneTheGameCarries = {
       expr = lib.hasInfix (builtins.unsafeDiscardStringContext "${games.n64.usa.donkey_kong_64.gotgSpecFile}") (
-        builtins.unsafeDiscardStringContext games.n64.usa.donkey_kong_64.drvAttrs.text or ""
+        builtins.unsafeDiscardStringContext games.n64.usa.donkey_kong_64.drvAttrs.buildCommand or ""
       );
       expected = true;
     };

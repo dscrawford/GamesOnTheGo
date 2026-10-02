@@ -9,6 +9,7 @@ setup() {
   setup_env
   start_saves_service
   write_api_config
+  use_library
 }
 
 teardown() {
@@ -130,7 +131,7 @@ teardown() {
   gotg refresh
   gotg download usa.zeldab
   [ "$status" -ne 0 ]
-  [[ "$stderr" == *"gotg install usa.zeldab"* ]]
+  [[ "$stderr" == *"gotg update"* ]]
   [ ! -e "$GOTG_GAMES_DIR/n64/usa.zeldab" ]
 }
 
@@ -532,29 +533,22 @@ publish_bundle_game_plus_update() {
   [ "$(cat "$install/handler")" = single_file ]
 }
 
-@test "an environment built before it knew the extras handler is rebuilt for the top-up" {
+@test "an environment built before it knew the extras handler says to rebuild it, and leaves the game alone" {
   publish_bundle_game
   stub_bundle_recipe_env
   gotg refresh
   gotg download world.zelda
   [ "$status" -eq 0 ]
-  # An older root: the recipe declares no extras handler. The refresh that
-  # the client runs is stubbed to declare it, which is what a rebuild does.
+  # An older build: its recipe declares no extras handler. Nix builds
+  # environments now, as a game's dependency; `gotg update` is that rebuild.
   jq -n '{handlers: ["single_file"]}' >"$GOTG_ROOTS_DIR/env-switch/share/gotg/recipe.json"
   publish_bundle_game_plus_update
   gotg refresh
-  # A `nix build` that produces a root declaring it.
-  export GOTG_FLAKE="$TEST_TMP/flake" GOTG_NIX="$TEST_TMP/bin/nix"
-  mkdir -p "$GOTG_FLAKE" "$TEST_TMP/bin"
-  : >"$GOTG_FLAKE/flake.nix"
-  {
-    printf '#!%s\n' "$(command -v bash)"
-    printf "jq -n '{handlers: [\"single_file\", \"extras\"]}' >'%s'\n" "$GOTG_ROOTS_DIR/env-switch/share/gotg/recipe.json"
-  } >"$GOTG_NIX"
-  chmod +x "$GOTG_NIX"
   gotg download world.zelda
-  [ "$status" -eq 0 ]
-  [ -f "$GOTG_GAMES_DIR/switch/world.zelda/extras/update_1.4.2-u2.rar" ]
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"gotg update"* ]]
+  [ ! -e "$GOTG_GAMES_DIR/switch/world.zelda/extras/update_1.4.2-u2.rar" ]
+  [ -d "$GOTG_GAMES_DIR/switch/world.zelda" ]
 }
 
 @test "attached extras stage under their release directories and install as a bundle" {

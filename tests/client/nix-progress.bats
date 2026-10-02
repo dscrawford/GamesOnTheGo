@@ -73,13 +73,12 @@ JSON
   [[ "$output" == *$'stage\tbuild\t1\t1'* ]]
 }
 
-# --- env_build asks for it only when somebody is drawing it ----------------
+# --- a game's build asks for it only when somebody is drawing it --------------
 
 json_nix() {
   local mode="${1:-ok}"
-  export NIX_LOG="$TEST_TMP/nix.log" GOTG_FLAKE="$TEST_TMP/flake" GOTG_NIX="$TEST_TMP/bin/nix"
-  mkdir -p "$GOTG_FLAKE" "$TEST_TMP/bin"
-  : >"$GOTG_FLAKE/flake.nix"
+  export NIX_LOG="$TEST_TMP/nix.log" GOTG_NIX="$TEST_TMP/bin/nix"
+  mkdir -p "$TEST_TMP/bin"
   nix_json >"$TEST_TMP/nix.json"
   cat >"$GOTG_NIX" <<SHIM
 #!$(command -v bash)
@@ -94,7 +93,7 @@ SHIM
 
 @test "a build for the picker asks nix for its progress and draws it" {
   json_nix
-  GOTG_PROGRESS_LINES=1 GOTG_NO_DIALOG=1 run --separate-stderr env_build env-n64
+  GOTG_PROGRESS_LINES=1 GOTG_NO_DIALOG=1 run --separate-stderr library_build_once "$TEST_TMP/lib" n64.usa.zelda "$TEST_TMP/root"
   [ "$status" -eq 0 ]
   grep -q -- "--log-format internal-json" "$NIX_LOG"
   [[ "$stderr" == *$'stage\tbuild\t1\t1\tares-148'* ]]
@@ -103,14 +102,14 @@ SHIM
 
 @test "a build at a terminal is nix's own, untouched" {
   json_nix
-  GOTG_NO_DIALOG=1 run --separate-stderr env_build env-n64
+  GOTG_NO_DIALOG=1 run --separate-stderr library_build_once "$TEST_TMP/lib" n64.usa.zelda "$TEST_TMP/root"
   [ "$status" -eq 0 ]
   ! grep -q -- "internal-json" "$NIX_LOG"
 }
 
 @test "a build that fails for the picker still fails, and says why" {
   json_nix fail
-  GOTG_PROGRESS_LINES=1 GOTG_NO_DIALOG=1 run --separate-stderr env_build env-n64
+  GOTG_PROGRESS_LINES=1 GOTG_NO_DIALOG=1 run --separate-stderr library_build_once "$TEST_TMP/lib" n64.usa.zelda "$TEST_TMP/root"
   [ "$status" -ne 0 ]
-  [[ "$stderr" == *"could not build env-n64"* ]]
+  [[ "$stderr" == *"it broke"* ]]
 }

@@ -561,22 +561,16 @@ _recipe_declares() {
 _run_recipe() {
   local game="$1" handler="$2" staged="$3" dest="$4"
   local attr recipe
-  attr="$(env_attr "$game")"
-  # The environment may still be building beside the download.
+  attr="${GOTG_PINNED_ATTR:-$(env_attr "$game")}"
+  # The game may still be building beside the download (install's overlap).
   env_build_wait
   recipe="$(env_root "$attr")/bin/gotg-recipe"
-  # An environment that gains a recipe leaves every root built before it
-  # without one, and env_ensure only builds what is missing altogether — so the
-  # game would fail here on exactly the machines that already had it working.
-  # Rebuild once before believing the root, which is the trade install makes.
-  [[ -x "$recipe" ]] || env_refresh "$attr" || true
+  # A recipe the environment gained after this build -- `extras` arrived after
+  # the first bundles -- is a rebuild away, which `update` does.
   [[ -x "$recipe" ]] ||
-    die "$attr has no recipe for '$handler' built yet — run: gotg install $(manifest_field "$game" id)"
-  # The same again for a handler the root predates -- `extras` arrived after
-  # the first bundles were built.
-  _recipe_declares "$attr" "$handler" || env_refresh "$attr" || true
+    die "$attr has no recipe built for '$handler' -- rebuild it: gotg update"
   _recipe_declares "$attr" "$handler" ||
-    die "$attr declares no recipe for '$handler'"
+    die "$attr declares no recipe for '$handler' -- rebuild it: gotg update"
   log "processing $(manifest_field "$game" id) ($handler)"
   mkdir -p "$(dirname "$dest")"
   "$recipe" "$handler" "$staged" "$dest" ||

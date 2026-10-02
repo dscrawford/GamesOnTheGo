@@ -61,15 +61,32 @@
         else
           # The spec rides along as an attribute too: what a game would launch,
           # readable without building it (checks.library, `nix eval`).
-          (pkgs.writeShellApplication {
-            name = "gotg-${builtins.replaceStrings [ "." ] [ "-" ] name}";
-            text = ''
-              exec ${gotg}/bin/gotg launch --spec ${spec} "$@"
-            '';
-            meta = {
-              description = "${game.title or game.id} (${game.platform})${lib.optionalString (variant != null) ", ${variant}"}";
-            };
-          })
+          (
+            let
+              program = "gotg-${builtins.replaceStrings [ "." ] [ "-" ] name}";
+              launcher = pkgs.writeShellApplication {
+                name = program;
+                text = ''
+                  exec ${gotg}/bin/gotg launch --spec ${spec} "$@"
+                '';
+              };
+            in
+            # The program, and the spec beside it at share/gotg/spec.json: a
+            # client finds an environment's store path from the games built
+            # here by reading these, with no evaluation (env_root).
+            pkgs.runCommand "gotg-game-${name}"
+              {
+                meta = {
+                  mainProgram = program;
+                  description = "${game.title or game.id} (${game.platform})${lib.optionalString (variant != null) ", ${variant}"}";
+                };
+              }
+              ''
+                mkdir -p $out/bin $out/share/gotg
+                ln -s ${launcher}/bin/${program} $out/bin/${program}
+                ln -s ${spec} $out/share/gotg/spec.json
+              ''
+          )
           // {
             gotgSpec = fields;
             # The file itself, for `gotg qa --spec`: the very spec this game

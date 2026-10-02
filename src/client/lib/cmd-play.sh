@@ -1,45 +1,42 @@
 # shellcheck shell=bash
 # install / play / sync — the commands that touch nix and Steam.
 
-# Refresh rather than skip when a root is already there. This runs from a
-# terminal where nix is cheap and a cached build is quick, and the alternative
-# is what bit twice already: an environment whose definition has moved keeps
-# running the old one, silently, until somebody thinks to run sync.
-_install_env() {
-  local attr="$1"
-  if env_is_built "$attr"; then
-    env_refresh "$attr" ||
-      warn "could not rebuild $attr — carrying on with the one already built here"
-  else
-    env_build "$attr"
-  fi
-}
-
 cmd_install() {
   local want="${1:-}"
-  [[ -n "$want" ]] || die "usage: gotg install <id>"
+  [[ -n "$want" ]] || die "usage: gotg install <id> [variant]"
+  local variant="${2:-}"
   manifest_ensure
 
-  local game attr launcher
+  local library game lattr root launcher
+  library="$(gotg_library)"
+  [[ -n "$library" ]] || die "no library configured: a game is installed from one now.
+     Make one:  nix flake init -t github:dscrawford/GamesOnTheGo/feat/nix-games#library
+     then:      gotg library <that directory>"
   game="$(manifest_find "$want")"
-  attr="$(env_attr "$game")"
+  lattr="$(library_attr "$game" "$variant")"
+  root="$(library_games_dir)/$lattr"
 
   if [[ "${GOTG_PROGRESS_LINES:-}" == "1" ]] && ! game_is_installed "$game"; then
-    # For the picker, the emulator builds while the game downloads: two waits
-    # of minutes each, one after the other, were the whole of a first launch.
-    # Evaluated first, so a broken definition still stops it before a
-    # transfer that can run to tens of gigabytes; a recipe, which needs the
-    # built root, waits for it (env_build_wait).
-    env_evaluate "$attr" || die "could not evaluate $attr; nothing was downloaded"
-    _install_env "$attr" &
+    # For the picker, the game builds while its files download: two waits of
+    # minutes each, one after the other, were the whole of a first launch.
+    # The spec alone is built first -- an evaluation, cheap -- so a broken
+    # definition still stops it before a transfer that can run to tens of
+    # gigabytes, and the download knows the environment whose recipe it runs.
+    mkdir -p "$(library_games_dir)"
+    "$(nix_bin)" build "$library#$lattr.gotgSpecFile" -o "$root.spec" ||
+      die "could not evaluate $lattr from $library; nothing was downloaded"
+    launch_spec_load "$root.spec"
+    library_build "$library" "$lattr" &
     # shellcheck disable=SC2034 # read by env_build_wait, in env.sh
     GOTG_ENV_BUILD_PID=$!
     download_game "$game"
     env_build_wait
+    rm -f "$root.spec"
   else
-    _install_env "$attr"
-    # After the environment: a raw source that needs processing is processed
-    # by the recipe that environment carries.
+    library_build "$library" "$lattr" || die "could not build $lattr from $library"
+    # After the game's build: a raw source that needs processing is processed
+    # by the recipe its environment carries.
+    launch_spec_load "$root/share/gotg/spec.json"
     download_game "$game"
   fi
 
@@ -102,14 +99,13 @@ cmd_play() {
   done
   set -- "${rest[@]+"${rest[@]}"}"
 
-  # A library configured: the game is its Nix output (library-play.sh).
+  # A game is its library's Nix output (library-play.sh, docs/nix-games.md).
   local library
   library="$(gotg_library)"
-  if [[ -n "$library" ]]; then
-    library_play "$library" "$want" "$variant" "$want_version" "$@"
-  fi
-
-  play_launch "$want" "$variant" "$want_version" "$@"
+  [[ -n "$library" ]] || die "no library configured: a game is played from one now.
+     Make one:  nix flake init -t github:dscrawford/GamesOnTheGo/feat/nix-games#library
+     then:      gotg library <that directory>"
+  library_play "$library" "$want" "$variant" "$want_version" "$@"
 }
 
 # Everything from choosing the game to exec'ing it, shared by `play` and
@@ -203,7 +199,8 @@ play_prepare() {
   # Before the download, not after. A missing emulator is the failure most likely
   # to need a person, and finding that out at the end of a 10 GB transfer helps
   # nobody. Once built it is a symlink test, so the usual launch pays nothing.
-  env_ensure "$attr"
+  # The environment is the spec's, built by Nix as a dependency of the game.
+  env_is_built "$attr" || die "no gotg-play in $(env_root "$attr"), the environment this launch names"
   # The GL this machine loads if it has none of its own: see foreign-gl.sh.
   foreign_gl_ensure "$attr"
 
@@ -267,150 +264,12 @@ play_prepare() {
   export GOTG_GAME_VERSION="$version"
 }
 
-# Rebuild the GC roots after pulling a new version of the flake.
+# `sync` was every environment's GC root, rebuilt from the flake; a game is its
+# library's output now, and `update` rebuilds those -- and the client and the
+# picker Steam starts -- so `sync` is the name it had.
 cmd_sync() {
-  local flake force=""
-  # No dialog. Sync narrates itself, a line per environment, and a progress
-  # window on top of that is the same news twice — and under the installer,
-  # which runs a sync after every upgrade, it is a window nobody asked for.
-  export GOTG_NO_DIALOG=1
-  [[ "${1:-}" != "--force" && "${1:-}" != "-f" ]] || force=1
-  flake="$(gotg_update_flake)"
-  # A URL ref answers from nix's fetch cache for up to an hour; sync exists
-  # to pick up what just changed, so it pays for a fresh look at the head.
-  local -a refresh=()
-  if flake_is_path "$flake"; then
-    [[ -f "$flake/flake.nix" ]] || die "no flake at $flake (set GOTG_FLAKE or the 'flake' key in $GOTG_CONFIG_FILE)"
-  else
-    refresh=(--refresh)
-  fi
-
-  mkdir -p "$GOTG_STATE_DIR"
-  # The flake as it was the last time everything here was built from it. The
-  # same commit again is the same closure — nix would say so too, after an
-  # evaluation per environment that this is here to skip.
-  local stamp="$GOTG_STATE_DIR/sync.rev" fingerprint
-  fingerprint="$(flake_fingerprint "$flake")"
-  if [[ -z "$force" && -n "$fingerprint" && -f "$stamp" && "$(cat "$stamp")" == "$fingerprint" ]]; then
-    _sync_mark same gotg "at ${fingerprint:0:12}"
-    local root
-    for root in "$GOTG_ROOTS_DIR"/env-*; do
-      [[ -e "$root" ]] && _sync_mark same "$(basename "$root")"
-    done
-    log "${C_DIM}nothing changed since ${fingerprint:0:12}; gotg sync --force builds anyway${C_RESET}"
-    return 0
-  fi
-  rm -f "$stamp"
-
-  local before after
-  before="$(readlink -f "$GOTG_APP_ROOT" 2>/dev/null || true)"
-  "$(nix_bin)" build "$flake#gotg" -o "$GOTG_APP_ROOT" "${refresh[@]}" || die "could not build gotg from $flake"
-  after="$(readlink -f "$GOTG_APP_ROOT" 2>/dev/null || true)"
-  _sync_mark "$([[ "$before" != "$after" ]] && echo changed || echo same)" gotg
-
-  # The picker too, into a root of its own. The Steam entry runs whichever
-  # gotg-ui it finds, and finding it on PATH meant finding whichever build
-  # was on PATH when Steam started -- on a machine that develops this, three
-  # builds behind by the evening. The launcher looks here first. Best effort:
-  # a machine without the picker's dependencies still syncs its games.
-  before="$(readlink -f "$GOTG_UI_ROOT" 2>/dev/null || true)"
-  if "$(nix_bin)" build "$flake#gotg-ui" -o "$GOTG_UI_ROOT" "${refresh[@]}" 2>"$GOTG_STATE_DIR/sync-gotg-ui.log"; then
-    after="$(readlink -f "$GOTG_UI_ROOT" 2>/dev/null || true)"
-    _sync_mark "$([[ "$before" != "$after" ]] && echo changed || echo same)" gotg-ui
-  else
-    _sync_mark failed gotg-ui "$GOTG_STATE_DIR/sync-gotg-ui.log"
-  fi
-
-  # Only rebuild the environments that are already in use here. One line
-  # each, and a failure marks its line rather than ending the pass — a
-  # platform whose build broke should not keep the others stale.
-  #
-  # Several at a time: the builds are independent, most of a sync is waiting
-  # on nix, and a machine with a dozen environments spent that wait one
-  # environment at a time. The cap is what keeps a Deck from trying to
-  # compile twelve emulators at once; nix does its own scheduling under it.
-  local root name changed=0 failed=0
-  local -a wanted=()
-  if [[ -d "$GOTG_ROOTS_DIR" ]]; then
-    for root in "$GOTG_ROOTS_DIR"/*; do
-      [[ -e "$root" ]] || continue
-      name="$(basename "$root")"
-      # Anything that is not a well-formed environment name: a root from before
-      # environments existed, named after the emulator, or one left by a
-      # mistyped `nix build -o`. Checked against the same pattern env_attr
-      # produces, and skipped rather than fatal — one stray symlink in here
-      # should not stop every other environment from being rebuilt.
-      # The build-key file that sits beside every root. Skipped quietly
-      # rather than reported: sync writes these itself, and telling a person
-      # to `rm` a file the tool just made is noise every single run.
-      [[ "$name" == *.by ]] && continue
-      if ! [[ "$name" =~ $GOTG_ATTR_RE ]]; then
-        _sync_mark skipped "$name" "not an environment name; rm $root"
-        continue
-      fi
-      wanted+=("$name")
-      # Taken before anything starts: what the root pointed at when this sync
-      # began is what "changed" is measured against.
-      printf '%s\n' "$(readlink -f "$root" 2>/dev/null || true)" \
-        >"$GOTG_STATE_DIR/sync-$name.before"
-    done
-
-    local jobs="${GOTG_SYNC_JOBS:-4}"
-    [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || jobs=4
-    for name in "${wanted[@]+"${wanted[@]}"}"; do
-      # One slot at a time, so the cap is a cap rather than a suggestion.
-      while (($(jobs -rp | wc -l) >= jobs)); do wait -n; done
-      (
-        # From the flake the new client was just built from, not the running
-        # client's own source: the environments go with the client they are for.
-        if (GOTG_BUILD_QUIET=1 GOTG_FLAKE="$flake" env_build "$name") 2>"$GOTG_STATE_DIR/sync-$name.log"; then
-          printf 'built\n' >"$GOTG_STATE_DIR/sync-$name.result"
-        else
-          printf 'failed\n' >"$GOTG_STATE_DIR/sync-$name.result"
-        fi
-      ) &
-    done
-    wait
-
-    # Reported in the order they were found, never the order they finished:
-    # which build was quickest is not something to read a list by.
-    for name in "${wanted[@]+"${wanted[@]}"}"; do
-      before="$(cat "$GOTG_STATE_DIR/sync-$name.before" 2>/dev/null || true)"
-      rm -f "$GOTG_STATE_DIR/sync-$name.before"
-      if [[ "$(cat "$GOTG_STATE_DIR/sync-$name.result" 2>/dev/null || true)" != built ]]; then
-        _sync_mark failed "$name" "$GOTG_STATE_DIR/sync-$name.log"
-        failed=$((failed + 1))
-        continue
-      fi
-      after="$(readlink -f "$GOTG_ROOTS_DIR/$name" 2>/dev/null || true)"
-      if [[ "$before" != "$after" ]]; then
-        _sync_mark changed "$name"
-        changed=$((changed + 1))
-      else
-        _sync_mark same "$name"
-      fi
-    done
-  fi
-
-  # What the rebuilt roots name for a machine without GL of its own, fetched;
-  # what nothing names any more, let go.
-  foreign_gl_sync
-
-  ((changed == 0)) || log "${C_DIM}anything already open keeps its old environment until relaunched${C_RESET}"
-  ((failed == 0)) || die "$failed environment(s) did not build"
-  # Only a complete pass earns the stamp: a partial one must be paid for again.
-  [[ -z "$fingerprint" ]] || printf '%s\n' "$fingerprint" >"$stamp"
+  [[ "${1:-}" != "--force" && "${1:-}" != "-f" ]] || shift
+  log "${C_DIM}sync is gotg update now${C_RESET}"
+  cmd_update "$@"
 }
 
-# ● name — green for a root that moved, dim for one that did not, yellow for
-# a skip, red for a build that failed. The note is where to look next.
-_sync_mark() {
-  local state="$1" name="$2" note="${3:-}" dot
-  case "$state" in
-    changed) dot="${C_OK}●${C_RESET}" ;;
-    same) dot="${C_DIM}●${C_RESET}" ;;
-    skipped) dot="${C_WARN}●${C_RESET}" ;;
-    *) dot="${C_ERROR}●${C_RESET}" ;;
-  esac
-  printf '%s %-24s %s%s%s\n' "$dot" "$name" "$C_DIM" "${note:-$state}" "$C_RESET" >&2
-}

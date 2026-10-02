@@ -42,6 +42,7 @@ setup() {
   export GOTG_DANSTICK="$FAKE_BIN/danstick"
   export GOTG_DANSTICK_RS="$FAKE_BIN/danstick-rs"
   unset DANSTICK_SKIP_DAEMON_CHECK
+  use_library
 }
 
 teardown() { stop_saves_service; }

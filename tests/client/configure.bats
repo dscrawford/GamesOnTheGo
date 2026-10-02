@@ -15,6 +15,7 @@ setup() {
   write_api_config
   # A SNES game, so both env-snes and its per-game environment are reachable.
   add_game snes world.super_metroid.sfc "rom" "Super Metroid"
+  use_library
 }
 
 teardown() { stop_saves_service; }

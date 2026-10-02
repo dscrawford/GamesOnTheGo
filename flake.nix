@@ -124,6 +124,12 @@
               systems ? [ "x86_64-linux" ],
             }:
             {
+              # The client, the picker and the QA tools, as this library's
+              # gotg builds them: what `gotg update` puts where Steam starts
+              # them, and what `gotg qa` grades with.
+              packages = nixpkgs.lib.genAttrs systems (system: {
+                inherit (self.packages.${system}) gotg gotg-ui qa-tools;
+              });
               legacyPackages = nixpkgs.lib.genAttrs systems (
                 system:
                 library.forSystem {
@@ -162,8 +168,6 @@
         envs
         // rec {
           gotg = pkgs.callPackage ./src/client {
-            # This very source, for the environments it builds at run time.
-            ownFlake = self.outPath;
             inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) gotg-pads gotg-killswitch;
             inherit (danstick.packages.${pkgs.stdenv.hostPlatform.system}) danstick danstick-rs;
           };

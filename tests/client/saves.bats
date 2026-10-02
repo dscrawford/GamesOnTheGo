@@ -31,6 +31,7 @@ setup() {
 
   STATE="$GOTG_ENV_STATE_DIR/env-n64"
   mkdir -p "$STATE/saves"
+  use_library
 }
 
 teardown() {

@@ -13,6 +13,7 @@ setup() {
   setup_env
   start_saves_service
   write_api_config
+  use_library
 }
 
 teardown() { stop_saves_service; }
@@ -240,14 +241,16 @@ comp() {
 # the caller is the grid deciding between exec-now and a loader screen.
 
 ready_env() {
-  # A built environment for the platform, the shape env_is_built checks.
+  # The platform's environment, and the game's root built from the library
+  # (root_game) -- what library_current checks.
   export GOTG_ENV_DIR="$TEST_TMP/env"
   mkdir -p "$GOTG_ENV_DIR"
   : >"$GOTG_ENV_DIR/n64.nix"
   fake_env env-n64
+  root_game n64.usa.zelda
 }
 
-@test "ready answers 0 only when the env is built and the game is here" {
+@test "ready answers 0 only when the game's root is built and its files are here" {
   add_game n64 usa.zelda.z64 "rom" "Zelda"
   gotg refresh
   ready_env
@@ -260,21 +263,21 @@ ready_env() {
   [ "$status" -eq 0 ]
 }
 
-@test "a missing environment is not ready even with the game downloaded" {
+@test "a game with no root is not ready even with its files downloaded" {
   add_game n64 usa.zelda.z64 "rom" "Zelda"
   gotg refresh
   ready_env
   gotg download usa.zelda
-  rm -rf "$GOTG_ROOTS_DIR/env-n64"
+  rm -rf "$GOTG_STATE_DIR/games/n64.usa.zelda"
 
   gotg complete ready n64/usa.zelda
   [ "$status" -ne 0 ]
 }
 
-@test "an environment an older gotg built is not ready, because launching rebuilds it" {
+@test "a root the library has moved past is not ready, because launching rebuilds it" {
   # The picker execs into a launch it believes is ready, and the launch then
-  # rebuilt the environment with nothing on screen: a black Deck in Game Mode
-  # after every update. Not ready means the picker's own loading screen.
+  # rebuilt with nothing on screen: a black Deck in Game Mode after every
+  # update. Not ready means the picker's own loading screen.
   add_game n64 usa.zelda.z64 "rom" "Zelda"
   gotg refresh
   ready_env
@@ -282,7 +285,7 @@ ready_env() {
   gotg complete ready n64/usa.zelda
   [ "$status" -eq 0 ]
 
-  printf '/nix/store/00000000000000000000000000000000-gotg-0.0.1\n' >"$GOTG_ROOTS_DIR/env-n64.by"
+  printf 'a library as it was yesterday' >"$GOTG_STATE_DIR/games/n64.usa.zelda.by"
   gotg complete ready n64/usa.zelda
   [ "$status" -ne 0 ]
 }
@@ -341,12 +344,14 @@ ready_env() {
   : >"$GOTG_ENV_DIR/n64.nix"
   : >"$GOTG_ENV_DIR/games/n64/usa.zelda.hd.nix"
 
-  # The plain platform's environment is built, but "hd" is a different root.
+  # The plain game's root is built, but "hd" is a different root.
   fake_env env-n64
+  root_game n64.usa.zelda
   gotg complete ready n64/usa.zelda hd
   [ "$status" -ne 0 ]
 
   fake_env env-n64-usa_zelda-hd
+  root_game n64.usa.zelda.hd
   gotg complete ready n64/usa.zelda hd
   [ "$status" -eq 0 ]
 

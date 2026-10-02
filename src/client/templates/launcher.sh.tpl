@@ -37,7 +37,7 @@ if [[ ! -x "$GOTG" ]]; then
 fi
 if [[ -z "$GOTG" || ! -x "$GOTG" ]]; then
   echo "error: gotg not found. From a terminal, run:"
-  echo "  nix build @FLAKE@#gotg -o \"${XDG_STATE_HOME:-$HOME/.local/state}/gotg/app\""
+  echo "  gotg update    (or: nix build @FLAKE@#gotg -o \"${XDG_STATE_HOME:-$HOME/.local/state}/gotg/app\")"
   exit 1
 fi
 

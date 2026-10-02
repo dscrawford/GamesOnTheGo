@@ -72,14 +72,16 @@ complete_ready() {
      end' "$GOTG_CACHE_FILE" 2>/dev/null | head -1 || true)"
   [[ -n "$game" ]] || return 1
 
-  attr="$(env_attr "$game" "$variant" 2>/dev/null)" || return 1
-  env_is_built "$attr" || return 1
-  # Built, but by an older gotg: the launch would rebuild it first, with
-  # nothing on screen -- the picker has already handed the display over. On
-  # a Deck in Game Mode that was a black screen for as long as the build
-  # took, right after every update. Not ready, so the picker shows its own
-  # loading screen for the rebuild instead.
-  env_is_current "$attr" || return 1
+  # Its root built, from the library as it is now. A root the library has
+  # moved past would be rebuilt by the launch with nothing on screen -- the
+  # picker has already handed the display over; on a Deck in Game Mode that
+  # was a black screen for as long as the build took. Not ready, so the
+  # picker shows its own loading screen for the build instead.
+  local library lattr
+  library="$(gotg_library)"
+  [[ -n "$library" ]] || return 1
+  lattr="$(library_attr "$game" "$variant" 2>/dev/null)" || return 1
+  library_current "$library" "$lattr" || return 1
   game_is_installed "$game" || return 1
   # A positive token, not just exit 0: a client too old to know `ready` falls
   # through this file's catch-all `*) return 0` and would read as ready — the
