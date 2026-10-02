@@ -18,6 +18,7 @@ setup() {
   export GOTG_OS_RELEASE="$TMP/os-release"
   export GOTG_UDEV_PATH="$TMP/99-gotg-uinput.rules"
   export XDG_CONFIG_HOME="$TMP/config"
+  export GOTG_STATE_DIR="$TMP/state" GOTG_CONFIG_DIR="$TMP/config/gotg"
 }
 
 steamos() { printf 'ID=steamos\nID_LIKE=arch\nNAME="SteamOS"\n' >"$GOTG_OS_RELEASE"; }
@@ -149,8 +150,11 @@ load_installer() {
 
 # --- installing GOTG itself ----------------------------------------------------
 #
-# A stand-in `nix` answers `profile list --json` from $NIX_HAVE and records every
-# call, so each case is a machine in a known state and nothing really installs.
+# Nothing goes in a profile: a library is made (or the one here followed to
+# the newest), `#update` builds from it, and the profile entries an older
+# install left are taken out. A stand-in `nix` answers `profile list --json`
+# from $NIX_HAVE and records every call, so each case is a machine in a known
+# state and nothing really installs.
 
 stub_nix() {
   NIX_CALLS="$TMP/nix-calls"
@@ -172,39 +176,6 @@ stub_nix() {
   }
 }
 
-@test "a machine that already has GOTG upgrades it rather than adding it again" {
-  # The Deck this was tested on: `nix profile add` of a name already present
-  # is a warning and exit 0, so the old build stayed forever and the installer
-  # said it had installed GOTG.
-  other_linux
-  load_installer
-  stub_nix
-  NIX_HAVE="gotg gotg-ui" run install_gotg
-  [ "$status" -eq 0 ]
-  grep -qx "profile upgrade gotg gotg-ui" "$NIX_CALLS"
-  ! grep -q "profile add" "$NIX_CALLS"
-}
-
-@test "a fresh machine adds both" {
-  other_linux
-  load_installer
-  stub_nix
-  NIX_HAVE="" run install_gotg
-  [ "$status" -eq 0 ]
-  grep -qx "profile add $FLAKE#gotg $FLAKE#gotg-ui" "$NIX_CALLS"
-  ! grep -q "profile upgrade" "$NIX_CALLS"
-}
-
-@test "half an install is finished rather than redone" {
-  other_linux
-  load_installer
-  stub_nix
-  NIX_HAVE="gotg" run install_gotg
-  [ "$status" -eq 0 ]
-  grep -qx "profile upgrade gotg" "$NIX_CALLS"
-  grep -qx "profile add $FLAKE#gotg-ui" "$NIX_CALLS"
-}
-
 @test "flakes turned on system-wide are not written into the user's file too" {
   # The Deck again: a daemon install with flakes in /etc/nix/nix.conf.
   other_linux
@@ -214,25 +185,6 @@ stub_nix() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"already done"* ]]
   [ ! -e "$XDG_CONFIG_HOME/nix/nix.conf" ]
-}
-
-@test "a dry run changes nothing" {
-  other_linux
-  load_installer
-  stub_nix
-  DRY_RUN=1 NIX_HAVE="gotg gotg-ui" run install_gotg
-  [ "$status" -eq 0 ]
-  ! grep -q "profile upgrade" "$NIX_CALLS"
-  ! grep -q "profile add" "$NIX_CALLS"
-}
-
-@test "a dry run says what it would have done" {
-  other_linux
-  load_installer
-  stub_nix
-  DRY_RUN=1 NIX_HAVE="gotg" run install_gotg
-  [[ "$output" == *"would run: nix profile upgrade gotg"* ]]
-  [[ "$output" == *"would run: nix profile add"* ]]
 }
 
 @test "a dry run writes no nix.conf" {
@@ -250,8 +202,11 @@ stub_side_effects() {
   : >"$SIDE"
   sudo() { printf 'sudo %s\n' "$*" >>"$SIDE"; }
   curl() { printf 'curl %s\n' "$*" >>"$SIDE"; }
-  gotg() { printf 'gotg %s\n' "$*" >>"$SIDE"; }
   pgrep() { return 1; }
+  # The launcher the library builds, standing in: it records what it is asked.
+  mkdir -p "$GOTG_STATE_DIR/app/bin"
+  printf '#!%s\nprintf "gotg %%s\\n" "$*" >>%q\n' "$(command -v bash)" "$SIDE" >"$GOTG_STATE_DIR/app/bin/gotg"
+  chmod +x "$GOTG_STATE_DIR/app/bin/gotg"
 }
 
 @test "a dry run installs no Nix" {
@@ -291,7 +246,7 @@ stub_side_effects() {
   DRY_RUN=1 run add_to_steam
   [ "$status" -eq 0 ]
   [ ! -s "$SIDE" ]
-  [[ "$output" == *"would run: gotg steam picker"* ]]
+  [[ "$output" == *"would run: $GOTG_STATE_DIR/app/bin/gotg steam picker"* ]]
 }
 
 @test "a failed rule on SteamOS still puts the system partition back to read-only" {
@@ -350,16 +305,6 @@ stub_side_effects() {
   nix() { printf 'nix (Determinate Nix) something-odd\n'; }
   run check_nix_version
   [ "$status" -eq 0 ]
-}
-
-@test "a nix that cannot list a profile is treated as an empty one" {
-  other_linux
-  load_installer
-  stub_nix
-  nix() { [[ "$*" == "profile list --json" ]] && return 1; return 0; }
-  run install_gotg
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"installing GOTG"* ]]
 }
 
 # --- main's own arguments ------------------------------------------------------
@@ -533,7 +478,7 @@ EOF
   DRY_RUN=1 run add_to_steam
   [ "$status" -eq 0 ]
   [[ "$output" == *"would run: $GOTG_STEAM_BIN -shutdown"* ]]
-  [[ "$output" == *"would run: gotg steam picker"* ]]
+  [[ "$output" == *"would run: $GOTG_STATE_DIR/app/bin/gotg steam picker"* ]]
   [[ "$output" == *"would run: $GOTG_STEAM_BIN"* ]]
   [ ! -s "$SIDE" ]
 }
@@ -563,57 +508,22 @@ EOF
   [[ "$output" != *"No such device"* ]]
 }
 
-@test "an upgrade rebuilds the games already here" {
-  # A newer gotg launching yesterday's games is the Deck after every upgrade:
-  # the roots only ever caught up when somebody ran gotg update.
-  other_linux
-  load_installer
-  stub_nix
-  stub_side_effects
-  # Not under `run`: what install_gotg found is what rebuild_games reads.
-  NIX_HAVE="gotg gotg-ui" install_gotg 2>/dev/null
-  run rebuild_games
-  [ "$status" -eq 0 ]
-  grep -qx "gotg update" "$SIDE"
-  # A first install has nothing to catch up.
-  : >"$SIDE"
-  UPGRADED=0
-  NIX_HAVE="" install_gotg 2>/dev/null
-  run rebuild_games
-  ! grep -q "gotg update" "$SIDE"
-}
 
-# --- a library: where games are played from (docs/nix-games.md) --------------
-
-@test "a machine with no library gets one from the template, and gotg is told where" {
+@test "a fresh machine gets a library from the template, built, and gotg is told where" {
   other_linux
   export GOTG_LIBRARY_DIR="$TMP/library"
   load_installer
   stub_nix
   stub_side_effects
-  run ensure_library
+  NIX_HAVE="" run install_gotg
   [ "$status" -eq 0 ]
   grep -qx "flake new $TMP/library -t $FLAKE#library" "$NIX_CALLS"
+  grep -qx "run $TMP/library#update" "$NIX_CALLS"
   grep -qx "gotg library $TMP/library" "$SIDE"
+  ! grep -q "profile" "$NIX_CALLS" || ! grep -q "profile add\|profile upgrade" "$NIX_CALLS"
 }
 
-@test "a library already configured is left alone" {
-  other_linux
-  load_installer
-  stub_nix
-  stub_side_effects
-  gotg() {
-    printf 'gotg %s\n' "$*" >>"$SIDE"
-    [[ "$*" != library ]] || printf '/somewhere/mine\n'
-  }
-  run ensure_library
-  [ "$status" -eq 0 ]
-  ! grep -q "flake new" "$NIX_CALLS"
-  ! grep -q "gotg library /" "$SIDE"
-  [[ "$output" == *"/somewhere/mine"* ]]
-}
-
-@test "a library directory already there is used, not made again" {
+@test "a library already here follows this repository, and is rebuilt: that is the upgrade" {
   other_linux
   export GOTG_LIBRARY_DIR="$TMP/library"
   load_installer
@@ -621,21 +531,81 @@ EOF
   stub_side_effects
   mkdir -p "$TMP/library"
   : >"$TMP/library/flake.nix"
-  run ensure_library
+  run install_gotg
+  [ "$status" -eq 0 ]
   ! grep -q "flake new" "$NIX_CALLS"
-  grep -qx "gotg library $TMP/library" "$SIDE"
+  grep -qx "flake update gotg --flake $TMP/library" "$NIX_CALLS"
+  grep -qx "run $TMP/library#update" "$NIX_CALLS"
 }
 
-@test "a dry run makes no library" {
+@test "a library gotg was pointed at elsewhere is the one used" {
   other_linux
   export GOTG_LIBRARY_DIR="$TMP/library"
   load_installer
   stub_nix
   stub_side_effects
-  DRY_RUN=1 run ensure_library
+  mkdir -p "$TMP/mine" "$GOTG_CONFIG_DIR"
+  : >"$TMP/mine/flake.nix"
+  printf '{"library": "%s", "other": 1}\n' "$TMP/mine" >"$GOTG_CONFIG_DIR/config.json"
+  run install_gotg
   [ "$status" -eq 0 ]
+  grep -qx "flake update gotg --flake $TMP/mine" "$NIX_CALLS"
+  grep -qx "run $TMP/mine#update" "$NIX_CALLS"
   ! grep -q "flake new" "$NIX_CALLS"
-  ! grep -q "gotg library $TMP" "$SIDE"
   [ ! -e "$TMP/library" ]
-  [[ "$output" == *"would run:"* ]]
+}
+
+@test "gotg and gotg-ui from an older install are taken out of the profile, and only those" {
+  # Left there, they sit on PATH ahead of what the library builds.
+  other_linux
+  export GOTG_LIBRARY_DIR="$TMP/library"
+  load_installer
+  stub_nix
+  stub_side_effects
+  NIX_HAVE="gotg gotg-ui" run install_gotg
+  [ "$status" -eq 0 ]
+  grep -qx "profile remove gotg gotg-ui" "$NIX_CALLS"
+  : >"$NIX_CALLS"
+  NIX_HAVE="gotg-ui" run install_gotg
+  grep -qx "profile remove gotg-ui" "$NIX_CALLS"
+  : >"$NIX_CALLS"
+  NIX_HAVE="" run install_gotg
+  ! grep -q "profile remove" "$NIX_CALLS"
+}
+
+@test "a nix that cannot list a profile is treated as an empty one" {
+  other_linux
+  export GOTG_LIBRARY_DIR="$TMP/library"
+  load_installer
+  stub_side_effects
+  nix() { [[ "$*" == "profile list --json" ]] && return 1; return 0; }
+  run install_gotg
+  [ "$status" -eq 0 ]
+}
+
+@test "a dry run makes no library, builds nothing, and says what it would do" {
+  other_linux
+  export GOTG_LIBRARY_DIR="$TMP/library"
+  load_installer
+  stub_nix
+  stub_side_effects
+  DRY_RUN=1 NIX_HAVE="gotg gotg-ui" run install_gotg
+  [ "$status" -eq 0 ]
+  ! grep -q "flake new\|run \|profile remove" "$NIX_CALLS"
+  [ ! -e "$TMP/library" ]
+  [[ "$output" == *"would run: nix flake new $TMP/library"* ]]
+  [[ "$output" == *"would run: nix run $TMP/library#update"* ]]
+  [[ "$output" == *"would run: nix profile remove gotg gotg-ui"* ]]
+}
+
+@test "the done message points at the library's apps, not at a command" {
+  other_linux
+  export GOTG_LIBRARY_DIR="$TMP/library"
+  load_installer
+  stub_steps
+  run main
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nix run $TMP/library#ui"* ]]
+  [[ "$output" == *"nix run $TMP/library#login"* ]]
+  [[ "$output" != *"gotg-ui "* ]]
 }

@@ -13,6 +13,7 @@ setup() {
   export GOTG_UDEV_PATH="$TMP/99-gotg-uinput.rules"
   export GOTG_STATE_DIR="$TMP/state/gotg"
   export GOTG_CONFIG_DIR="$TMP/config/gotg"
+  export GOTG_LIBRARY_DIR="$TMP/config/gotg/library"
   printf 'ID=ubuntu\n' >"$GOTG_OS_RELEASE"
   # shellcheck disable=SC1090
   source "$UNINSTALLER"
@@ -26,7 +27,6 @@ setup() {
       printf '{"version":3,"elements":{%s}}\n' "$elements"
     fi
   }
-  gotg() { printf 'gotg %s\n' "$*" >>"$CALLS"; }
   sudo() { printf 'sudo %s\n' "$*" >>"$CALLS"; [[ "$1" != rm ]] || rm -f "${@: -1}"; }
 }
 
@@ -34,7 +34,27 @@ setup() {
   [ -z "$(cat "$CALLS")" ]
 }
 
-@test "the two commands are removed from the profile, and only the ones there" {
+# The launcher the library built, standing in: it records what it is asked.
+built_gotg() {
+  mkdir -p "$GOTG_STATE_DIR/app/bin"
+  printf '#!%s\nprintf "gotg %%s\\n" "$*" >>%q\n' "$(command -v bash)" "$CALLS" >"$GOTG_STATE_DIR/app/bin/gotg"
+  chmod +x "$GOTG_STATE_DIR/app/bin/gotg"
+}
+
+@test "what was built from the library goes, and the library with it; saves stay" {
+  built_gotg
+  mkdir -p "$GOTG_STATE_DIR/picker" "$GOTG_STATE_DIR/games/n64.usa.zelda" "$GOTG_STATE_DIR/saves" "$GOTG_LIBRARY_DIR"
+  : >"$GOTG_LIBRARY_DIR/flake.nix"
+  NIX_HAVE="" run remove_gotg
+  [ "$status" -eq 0 ]
+  [ ! -e "$GOTG_STATE_DIR/app" ]
+  [ ! -e "$GOTG_STATE_DIR/picker" ]
+  [ ! -e "$GOTG_STATE_DIR/games" ]
+  [ ! -e "$GOTG_LIBRARY_DIR" ]
+  [ -d "$GOTG_STATE_DIR/saves" ]
+}
+
+@test "gotg and gotg-ui from an older install are removed from the profile, and only the ones there" {
   NIX_HAVE="gotg gotg-ui" run remove_gotg
   [ "$status" -eq 0 ]
   grep -qx "nix profile remove gotg gotg-ui" "$CALLS"
@@ -51,10 +71,17 @@ setup() {
   [[ "$output" == *"nothing to do"* ]]
 }
 
-@test "the picker is taken out of Steam through gotg" {
+@test "the picker is taken out of Steam through the gotg that was built" {
+  built_gotg
   run remove_from_steam
   [ "$status" -eq 0 ]
   grep -qx "gotg steam remove picker" "$CALLS"
+}
+
+@test "with nothing built, Steam is not asked, and that is not an error" {
+  run remove_from_steam
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nothing to do"* ]]
 }
 
 @test "the udev rule is removed with sudo, and only when it is there" {
@@ -94,12 +121,15 @@ setup() {
 
 @test "a dry run changes nothing and says what it would have done" {
   NIX_HAVE="gotg gotg-ui"
+  built_gotg
   printf 'KERNEL=="uinput"\n' >"$GOTG_UDEV_PATH"
   mkdir -p "$GOTG_STATE_DIR"
   run main --dry-run --games
   [ "$status" -eq 0 ]
   [[ "$output" == *"would run: nix profile remove gotg gotg-ui"* ]]
-  [[ "$output" == *"would run: gotg steam remove picker"* ]]
+  [[ "$output" == *"would run: rm -rf $GOTG_STATE_DIR/app"* ]]
+  [[ "$output" == *"would run: $GOTG_STATE_DIR/app/bin/gotg steam remove picker"* ]]
+  [ -x "$GOTG_STATE_DIR/app/bin/gotg" ]
   [[ "$output" == *"would run: sudo rm -f $GOTG_UDEV_PATH"* ]]
   [[ "$output" == *"would run: rm -rf $GOTG_STATE_DIR"* ]]
   [ -e "$GOTG_UDEV_PATH" ]

@@ -3,8 +3,10 @@
 #
 #   curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/uninstall.sh | bash
 #
-# Removes the two commands from the Nix profile, the picker's Steam shortcut
-# and the udev rule install.sh wrote. Games and saves stay unless --games is
+# Removes what install.sh built from the library -- the launcher, the picker
+# and the games' roots, and the library itself -- the picker's Steam shortcut,
+# the udev rule it wrote, and gotg and gotg-ui from the Nix profile where an
+# older install put them. Games and saves stay unless --games is
 # given, and Nix stays regardless: it is a package manager, not part of GOTG,
 # and removing it is one command this prints at the end for whoever wants it.
 set -euo pipefail
@@ -13,6 +15,7 @@ OS_RELEASE="${GOTG_OS_RELEASE:-/etc/os-release}"
 UDEV_PATH="${GOTG_UDEV_PATH:-/etc/udev/rules.d/99-gotg-uinput.rules}"
 STATE_DIR="${GOTG_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/gotg}"
 CONFIG_DIR="${GOTG_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gotg}"
+LIBRARY_DIR="${GOTG_LIBRARY_DIR:-$CONFIG_DIR/library}"
 # How Nix got here, for the removal command said at the end. Overridable so
 # the tests can be each kind of machine in turn.
 NIX_INSTALLER_RECEIPT="${GOTG_NIX_INSTALLER_RECEIPT:-/nix/nix-installer}"
@@ -65,21 +68,31 @@ installed() {
 # --- the steps ---------------------------------------------------------------
 
 remove_from_steam() {
-  command -v gotg >/dev/null 2>&1 || { skip "no gotg here to ask about Steam"; return 0; }
+  local gotg="$STATE_DIR/app/bin/gotg"
+  [[ -x "$gotg" ]] || { skip "no gotg built here to ask about Steam"; return 0; }
   step "taking GOTG out of your Steam library"
-  change gotg steam remove picker || warn "could not remove the Steam shortcut; run: gotg steam remove picker"
+  change "$gotg" steam remove picker || warn "could not remove the Steam shortcut; run: $gotg steam remove picker"
 }
 
+# What the installer built from the library, and the library; then the
+# profile entries an older install left, if any.
 remove_gotg() {
-  command -v nix >/dev/null 2>&1 || { skip "no nix here, so nothing is installed"; return 0; }
-  local have=()
-  mapfile -t have < <(installed)
-  if ((${#have[@]} == 0)); then
-    skip "GOTG is not in the Nix profile"
-    return 0
+  local removed=0 root have=()
+  for root in "$STATE_DIR/app" "$STATE_DIR/picker" "$STATE_DIR/games" "$LIBRARY_DIR"; do
+    [[ -e "$root" ]] || continue
+    ((removed)) || step "removing what was built from the library, and the library"
+    change rm -rf "$root"
+    removed=1
+  done
+  if command -v nix >/dev/null 2>&1; then
+    mapfile -t have < <(installed)
+    if ((${#have[@]})); then
+      step "removing ${have[*]} from the Nix profile"
+      change nix profile remove "${have[@]}" || die "could not remove ${have[*]}"
+      removed=1
+    fi
   fi
-  step "removing ${have[*]} from the Nix profile"
-  change nix profile remove "${have[@]}" || die "could not remove ${have[*]}"
+  ((removed)) || skip "GOTG is not built or installed here"
 }
 
 remove_uinput_rule() {

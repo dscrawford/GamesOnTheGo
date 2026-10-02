@@ -23,8 +23,12 @@ NIX_INSTALLER="${GOTG_NIX_INSTALLER:-https://nixos.org/nix/install}"
 OS_RELEASE="${GOTG_OS_RELEASE:-/etc/os-release}"
 UDEV_PATH="${GOTG_UDEV_PATH:-/etc/udev/rules.d/99-gotg-uinput.rules}"
 UINPUT="${GOTG_UINPUT:-/dev/uinput}"
+# Where GOTG keeps what it built, and where gotg's own config is: the same
+# rule the client uses.
+STATE_DIR="${GOTG_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/gotg}"
+CONFIG_DIR="${GOTG_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gotg}"
 # Where a library is made when a machine has none (docs/nix-games.md).
-LIBRARY_DIR="${GOTG_LIBRARY_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gotg/library}"
+LIBRARY_DIR="${GOTG_LIBRARY_DIR:-$CONFIG_DIR/library}"
 
 C_OK=$'\e[32m'; C_WARN=$'\e[33m'; C_ERR=$'\e[31m'; C_DIM=$'\e[2m'; C_OFF=$'\e[0m'
 [[ -t 1 ]] || { C_OK=""; C_WARN=""; C_ERR=""; C_DIM=""; C_OFF=""; }
@@ -223,68 +227,71 @@ ensure_uinput() {
 }
 
 # --- gotg --------------------------------------------------------------------
+#
+# Nothing of GOTG goes in a profile. Games are played from a library
+# (docs/nix-games.md): a flake made from this repository's template, naming
+# the server and pinning its catalog, each game an output of it; the picker,
+# the Steam entries and the rebuild after an upgrade are its apps. What Steam
+# starts is the copy `#update` keeps under ~/.local/state/gotg, so a launch
+# never evaluates a flake.
 
-# Which of these the profile already holds, one per line.
-installed() {
-  nix profile list --json 2>/dev/null |
-    grep -oE '"(gotg|gotg-ui)":' | tr -d '":' | sort -u || true
+# The library a machine already uses, if gotg has been told of one: the
+# `library` key of its config, read without jq, which a Deck has only once
+# Nix is here.
+configured_library() {
+  [[ -f "$CONFIG_DIR/config.json" ]] || return 1
+  local lib
+  lib="$(grep -oE '"library"[[:space:]]*:[[:space:]]*"[^"]*"' "$CONFIG_DIR/config.json" | head -n1 | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/')"
+  [[ -n "$lib" && -f "$lib/flake.nix" ]] || return 1
+  printf '%s' "$lib"
 }
 
-UPGRADED=0
-install_gotg() {
-  local have want=() upgrade=() name
-  have="$(installed)"
-  for name in gotg gotg-ui; do
-    if grep -qx "$name" <<<"$have"; then
-      upgrade+=("$name")
-    else
-      want+=("$FLAKE#$name")
-    fi
-  done
-
-  # Upgraded, not re-added: adding a name the profile already has is a warning
-  # and exit 0, so a re-run left the old build in place and reported success.
-  if ((${#upgrade[@]})); then
-    step "upgrading ${upgrade[*]}"
-    change nix profile upgrade "${upgrade[@]}" || die "could not upgrade ${upgrade[*]}"
-    UPGRADED=1
-  fi
-  if ((${#want[@]})); then
-    step "installing GOTG from $FLAKE"
-    change nix profile add "${want[@]}" ||
-      die "could not install GOTG. For a private repository, set
-     NIX_CONFIG=\"extra-access-tokens = github.com=<token>\""
-  fi
-}
-
-# The games already built here follow an upgrade now rather than on each one's
-# next launch: a first launch that is also a rebuild is a long wait behind a
-# loader, and a build error is better read here. After ensure_library, since
-# an upgrade from before libraries has none until then.
-rebuild_games() {
-  ((UPGRADED)) || return 0
-  step "rebuilding the games already here"
-  change gotg update || warn "could not rebuild the games; run gotg update once you have logged in"
-}
-
-# Games are played from a library: a flake of this repository's template that
-# names the server and pins its catalog. One the person already set up is
-# theirs; otherwise one is made where config lives, and the client told.
+# A library: the one configured, the one in the usual place, or a new one
+# from the template. One already here follows this repository to the newest
+# -- that is what an upgrade is now.
 ensure_library() {
-  local current
-  current="$(gotg library 2>/dev/null || true)"
-  if [[ -n "$current" ]]; then
-    skip "games come from $current"
-    return 0
+  local known
+  if known="$(configured_library)"; then
+    LIBRARY_DIR="$known"
   fi
   if [[ -f "$LIBRARY_DIR/flake.nix" ]]; then
     skip "a library in $LIBRARY_DIR"
+    step "moving its gotg to the newest"
+    change nix flake update gotg --flake "$LIBRARY_DIR" ||
+      warn "could not update the library's gotg; what it has is what builds"
   else
     step "making a library in $LIBRARY_DIR"
     change nix flake new "$LIBRARY_DIR" -t "$FLAKE#library" ||
       die "could not make a library from $FLAKE#library"
   fi
-  change gotg library "$LIBRARY_DIR" || die "could not point gotg at $LIBRARY_DIR"
+}
+
+# The picker, the launcher and every game already here, built from the
+# library into the roots Steam starts; then gotg is told where the writable
+# copy of the library is, so the picker can move its catalog pin.
+build_library() {
+  step "building the picker, and any game already here, from $LIBRARY_DIR"
+  change nix run "$LIBRARY_DIR#update" || die "could not build GOTG from $LIBRARY_DIR"
+  change "$STATE_DIR/app/bin/gotg" library "$LIBRARY_DIR" ||
+    warn "could not point gotg at $LIBRARY_DIR; run: $STATE_DIR/app/bin/gotg library $LIBRARY_DIR"
+}
+
+# From before libraries: gotg and gotg-ui in the Nix profile. Left there they
+# sit on PATH ahead of what the library builds, a day older every day.
+leave_profile() {
+  local have=()
+  mapfile -t have < <(nix profile list --json 2>/dev/null |
+    grep -oE '"(gotg|gotg-ui)":' | tr -d '":' | sort -u || true)
+  ((${#have[@]})) || return 0
+  step "taking ${have[*]} out of the Nix profile: the library has them now"
+  change nix profile remove "${have[@]}" ||
+    warn "could not remove ${have[*]} from the profile; run: nix profile remove ${have[*]}"
+}
+
+install_gotg() {
+  ensure_library
+  build_library
+  leave_profile
 }
 
 # A yes-or-no put to the person, on the terminal if there is one. Through a
@@ -320,24 +327,25 @@ STEAM_BIN="${GOTG_STEAM_BIN:-steam}"
 # started again. Declined, or with nobody to ask: gotg queues the shortcut
 # itself, and the next `gotg steam` command run with Steam closed applies it.
 add_to_steam() {
-  # In a dry run gotg may not be installed yet, and is only named.
-  [[ "$DRY_RUN" == "1" ]] || command -v gotg >/dev/null 2>&1 || return 0
+  # The launcher the library built: in a dry run it may not be there yet.
+  local gotg="$STATE_DIR/app/bin/gotg"
+  [[ "$DRY_RUN" == "1" || -x "$gotg" ]] || return 0
   step "putting GOTG in your Steam library"
   if ! pgrep -x steam >/dev/null 2>&1; then
-    change gotg steam picker || warn "could not add the Steam shortcut; run 'gotg steam picker' yourself"
+    change "$gotg" steam picker || warn "could not add the Steam shortcut; run '$gotg steam picker' yourself"
     return 0
   fi
 
   if [[ "$DRY_RUN" == "1" ]]; then
     say "   Steam is open; it would be closed, GOTG added, and Steam started again"
     change "$STEAM_BIN" -shutdown
-    change gotg steam picker
+    change "$gotg" steam picker
     change "$STEAM_BIN"
     return 0
   fi
   if ! confirm "   Steam is open, and can only take a new entry while closed. Close it now?"; then
-    gotg steam picker >/dev/null 2>&1 || true
-    warn "the shortcut is queued. Close Steam, run: gotg steam picker
+    "$gotg" steam picker >/dev/null 2>&1 || true
+    warn "the shortcut is queued. Close Steam, run: $gotg steam picker
      and start Steam again -- it reads its library once, at startup."
     return 0
   fi
@@ -350,12 +358,12 @@ add_to_steam() {
     waited=$((waited + 1))
   done
   if pgrep -x steam >/dev/null 2>&1; then
-    gotg steam picker >/dev/null 2>&1 || true
+    "$gotg" steam picker >/dev/null 2>&1 || true
     warn "Steam did not close in ${STEAM_WAIT}s; the shortcut is queued. Close Steam, run:
-     gotg steam picker, and start Steam again."
+     $gotg steam picker, and start Steam again."
     return 0
   fi
-  gotg steam picker || warn "could not add the Steam shortcut; run 'gotg steam picker' yourself"
+  "$gotg" steam picker || warn "could not add the Steam shortcut; run '$gotg steam picker' yourself"
   say "   starting Steam again"
   # Detached: Steam must outlive this script, and its output is its own.
   (setsid "$STEAM_BIN" >/dev/null 2>&1 &)
@@ -386,8 +394,6 @@ main() {
   ensure_nix
   ensure_flakes
   install_gotg
-  ensure_library
-  rebuild_games
   ensure_uinput
   add_to_steam
 
@@ -398,9 +404,9 @@ main() {
   fi
   say "${C_OK}Done.${C_OFF}"
   say ""
-  say "  gotg login                sign in; the library's catalog needs it"
-  say "  gotg play <id>            download a game, build what runs it, play"
-  say "  gotg-ui                   the picker, for a controller and a sofa"
+  say "  nix run $LIBRARY_DIR#login       sign in: the token for your server"
+  say "  nix run $LIBRARY_DIR#ui          the picker, for a controller and a sofa"
+  say "  nix search $LIBRARY_DIR zelda    what there is; nix run ...#n64.usa.<id> plays one"
   say ""
   if is_steamos; then
     say "  Restart Steam to see GOTG in your library. It reads its shortcut file"
