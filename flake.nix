@@ -460,6 +460,23 @@
         in
         {
           login = verb "login";
+          # A game with nothing of GOTG set up: src/client/play-anywhere.sh.
+          play = {
+            type = "app";
+            program = "${
+              pkgs.writeShellApplication {
+                name = "gotg-play-anywhere";
+                runtimeInputs = [
+                  pkgs.jq
+                  pkgs.nix
+                ];
+                text = ''
+                  GOTG_FLAKE="''${GOTG_FLAKE:-path:${self}}"
+                  ${builtins.readFile ./src/client/play-anywhere.sh}
+                '';
+              }
+            }/bin/gotg-play-anywhere";
+          };
           admin = verb "admin";
           qa = verb "qa";
           controllers = verb "controllers";

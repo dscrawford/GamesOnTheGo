@@ -75,6 +75,16 @@ More: [docs/install.md](docs/install.md).
 
 ## Play
 
+With a token and nothing else -- no library, no install -- one line:
+
+```bash
+GOTG_TOKEN=… nix run github:dscrawford/GamesOnTheGo#play -- n64.usa.donkey_kong_64
+```
+
+It makes the library in `~/.config/gotg` from the token (which it keeps, so
+the next run needs only the game), and runs the game by the library's path.
+Everything below is the same library, by its registry name:
+
 ```console
 $ nix search gotg majora
 * legacyPackages.x86_64-linux.n64.usa.legend_of_zelda_majoras_mask

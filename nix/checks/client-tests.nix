@@ -34,6 +34,8 @@ pkgs.runCommand "check-client-tests"
       packages.gotg-uninstall
     ];
     GOTG_BIN = pkgs.lib.getExe packages.gotg;
+    # play-anywhere.bats reads the script, which is outside the package.
+    GOTG_PLAY_ANYWHERE = ../../src/client/play-anywhere.sh;
   }
   ''
     cp -r ${../../tests/client} tests

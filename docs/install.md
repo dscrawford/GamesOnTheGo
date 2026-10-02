@@ -35,6 +35,17 @@ curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawfo
 
 GOTG is a flake. Nix 2.30 or newer, with flakes on, needs no installer.
 
+One game, right now, with a token somebody gave you and nothing set up:
+
+```bash
+GOTG_TOKEN=… nix run github:dscrawford/GamesOnTheGo#play -- n64.usa.donkey_kong_64
+```
+
+That makes the library below in `~/.config/gotg/library`, keeps the token
+as `gotg login` would, and runs the game by the library's path. Controllers
+still want the udev rule further down; until then it is the keyboard and
+the mouse. The rest of this section is the same, by hand and named `gotg`.
+
 Make a library, and edit its `server` and catalog url to yours:
 
 ```bash
