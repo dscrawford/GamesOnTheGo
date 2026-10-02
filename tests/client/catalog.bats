@@ -315,3 +315,62 @@ teardown() {
   [[ "$output" == *"mods:"*"bse"* ]]
   [[ "$output" != *"60.fps"* ]]
 }
+
+# --- the catalog is the library's pin ------------------------------------------
+
+@test "with a library, refresh is its pinned catalog: a root, no service round trip" {
+  # Two catalogs -- the service's, and the one the library's lock names --
+  # are two answers to "what is there", and the one a launch builds from is
+  # the lock's. So that is the one the cache is, as a GC root to it.
+  printf '{"version":2,"games":[{"platform":"n64","id":"usa.pinned","title":"From the pin","handler":"single_file","files":[{"name":"usa.pinned.z64","size":1,"sha256":"x"}]}]}' \
+    >"$TEST_TMP/pinned.json"
+  export LIBRARY_CATALOG="$TEST_TMP/pinned.json"
+  use_library
+  stop_saves_service
+  gotg refresh
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"catalog updated: 1 game(s)"* ]]
+  [ -L "$GOTG_CACHE_FILE" ]
+  run jq -r '.games[0].title' "$GOTG_CACHE_FILE"
+  [ "$output" = "From the pin" ]
+  grep -qx "build $GOTG_LIBRARY#catalog -o $GOTG_CACHE_FILE" "$NIX_LOG"
+}
+
+@test "refresh moves the library's pin first, so what shows is what the server has now" {
+  use_library
+  gotg refresh
+  [ "$status" -eq 0 ]
+  [ "$(grep "catalog" "$NIX_LOG" | head -n1)" = "flake update catalog --flake $GOTG_LIBRARY" ]
+  grep -qx "build $GOTG_LIBRARY#catalog -o $GOTG_CACHE_FILE" "$NIX_LOG"
+}
+
+@test "a pin that cannot move still gives the catalog it has" {
+  # A library that is a store path, or a directory somebody else owns:
+  # `flake update` fails, and the lock as it is is still a catalog.
+  use_library
+  export NIX_FAIL_FLAKE_UPDATE=1
+  gotg refresh
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"could not update the library's catalog"* ]]
+  [ -L "$GOTG_CACHE_FILE" ]
+}
+
+@test "behind a library a cache never goes stale: the pin is the truth until it is moved" {
+  add_game n64 "usa.zelda.z64" "rom"
+  use_library
+  gotg refresh
+  : >"$NIX_LOG"
+  touch -d '3 days ago' "$GOTG_CACHE_FILE"
+  gotg complete ready usa.zelda
+  ! grep -q "catalog" "$NIX_LOG"
+}
+
+@test "a catalog from before the library was there is replaced, not written through" {
+  # The old cache was a file; nix's -o over a file is an error, not a root.
+  use_library
+  mkdir -p "$GOTG_STATE_DIR"
+  printf '{"version":2,"games":[]}' >"$GOTG_CACHE_FILE"
+  gotg refresh
+  [ "$status" -eq 0 ]
+  [ -L "$GOTG_CACHE_FILE" ]
+}

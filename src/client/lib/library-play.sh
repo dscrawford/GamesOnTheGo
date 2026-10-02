@@ -128,6 +128,31 @@ library_play() {
   exec "$exe" ${want_version:+--version "$want_version"} "$@"
 }
 
+# The library's pinned catalog, as the cache: `nix flake update catalog`
+# moves the pin to what the server has now (a library that is a store path,
+# or not ours to write, keeps the pin it has), and the cache becomes a GC
+# root to the file the lock names. Two catalogs -- the service's and the
+# lock's -- were two answers to "what is there", and a launch builds from
+# the lock's. Replacing the old cache file first: nix's -o over a regular
+# file is an error, not a root.
+library_catalog_refresh() {
+  local library="$1"
+  mkdir -p "$GOTG_STATE_DIR"
+  if ! "$(nix_bin)" flake update catalog --flake "$library" 2>"$GOTG_STATE_DIR/catalog-update.log"; then
+    warn "could not update the library's catalog; showing the one it has ($GOTG_STATE_DIR/catalog-update.log)"
+  fi
+  [[ -L "$GOTG_CACHE_FILE" ]] || rm -f "$GOTG_CACHE_FILE"
+  "$(nix_bin)" build "$library#catalog" -o "$GOTG_CACHE_FILE" || {
+    warn "could not read the catalog from $library"
+    return 1
+  }
+  manifest_cached || {
+    warn "the catalog $library pins is not valid GOTG JSON"
+    return 1
+  }
+  log "catalog updated: $(jq '.games | length' "$GOTG_CACHE_FILE") game(s)"
+}
+
 # `gotg library [ref]`: which library games are played from, or set it.
 cmd_library() {
   local ref="${1:-}"

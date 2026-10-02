@@ -157,6 +157,17 @@ Where "press A to install" lives is the one real decision: it is imperative
 by nature, so it is the picker's, with a `programs.gotg.games = [...]` module
 beside it for a NixOS or home-manager machine; both make the same roots.
 
+Steps, on `feat/no-client`:
+
+| # | Work | Verified by |
+|---|---|---|
+| 7.1 | the catalog is the library's pin: `#catalog` on a library, the client's cache a root to it, `refresh` moves the pin | bats; the local library |
+| 7.2 | apps: `gotg#{login,admin,qa,controllers,ui}`, a library's `#{ui,steam,update,login}` with the library baked in | bats; `nix run` each |
+| 7.3 | retire what only a person typed: `list`, `info`, `download`, `version`, `sync`; usage says what the launcher is | bats; docs |
+| 7.4 | the installer: Nix, uinput, a library, the Steam entry; no profile; `uninstall.sh` to match | install.bats; a fresh Deck |
+| 7.5 | docs: README, AGENTS, install.md; `.envrc`'s rev check reads the library's pin | -- |
+| 7.6 | `programs.gotg` home-manager module | a NixOS eval check |
+
 Sequencing: `feat/nix-games` merges first -- checked on the Deck, and
 `launch --spec` is the seam this cut runs along -- then phase 7 on its own
 branch. About phase 6's size: most of the bash stays (it is the launcher),

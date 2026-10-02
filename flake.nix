@@ -123,20 +123,28 @@
               catalog,
               systems ? [ "x86_64-linux" ],
             }:
+            let
+              pkgsFor =
+                system:
+                import nixpkgs {
+                  inherit system;
+                  config.allowUnfree = true;
+                };
+            in
             {
               # The client, the picker and the QA tools, as this library's
               # gotg builds them: what `gotg update` puts where Steam starts
-              # them, and what `gotg qa` grades with.
+              # them, and what `gotg qa` grades with. And the catalog the
+              # lock pins, buildable so a client can keep a root to it: that
+              # is its cache (library_catalog_refresh).
               packages = nixpkgs.lib.genAttrs systems (system: {
                 inherit (self.packages.${system}) gotg gotg-ui qa-tools;
+                catalog = (pkgsFor system).runCommand "gotg-catalog" { } "ln -s ${catalog} $out";
               });
               legacyPackages = nixpkgs.lib.genAttrs systems (
                 system:
                 library.forSystem {
-                  pkgs = import nixpkgs {
-                    inherit system;
-                    config.allowUnfree = true;
-                  };
+                  pkgs = pkgsFor system;
                   envs = nixpkgs.lib.filterAttrs (name: _: nixpkgs.lib.hasPrefix "env-" name) self.packages.${system};
                   inherit (self.packages.${system}) gotg;
                   envDir = ./src/client/env;

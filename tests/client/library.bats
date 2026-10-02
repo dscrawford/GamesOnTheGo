@@ -182,3 +182,4 @@ SHIM
   [ "$status" -eq 0 ]
   [ "$output" = $'env-n64-usa_zelda\nenv-snes' ]
 }
+

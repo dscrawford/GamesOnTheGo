@@ -10,7 +10,10 @@
 # resolver refuses fails to build, as the attribute's throw would.
 set -uo pipefail
 printf '%s\n' "$*" >>"${NIX_LOG:-/dev/null}"
-[[ "${1:-} ${2:-}" != "flake update" ]] || exit 0
+if [[ "${1:-} ${2:-}" == "flake update" ]]; then
+  [[ -z "${NIX_FAIL_FLAKE_UPDATE:-}" ]] || exit 1
+  exit 0
+fi
 [[ -z "${NIX_OFFLINE:-}" ]] || exit 1
 [[ "${1:-}" == build ]] || exit 1
 installable="${2:-}" out="" prev=""
@@ -31,6 +34,25 @@ case "$path" in
   gotg | gotg-ui | qa-tools)
     rm -rf "$out"
     mkdir -p "$out/bin"
+    exit 0
+    ;;
+  # The library's pinned catalog: LIBRARY_CATALOG stands in for the lock,
+  # else what the test service publishes -- which is what a netrc fetch of
+  # the catalog input gets. A file, as a `file+https` input is, reached
+  # through the -o symlink as nix leaves it.
+  catalog)
+    store="${TEST_TMP:-/tmp}/store"
+    mkdir -p "$store"
+    file="$store/catalog-$$.json"
+    if [[ -n "${LIBRARY_CATALOG:-}" ]]; then
+      cp "$LIBRARY_CATALOG" "$file"
+    else
+      conf="${GOTG_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gotg}/api.json"
+      url="$(jq -r '.url' "$conf")" token="$(jq -r '.token' "$conf")"
+      curl -fsS -u "gotg:$token" "$url/catalog" >"$file" || exit 1
+    fi
+    [[ -L "$out" || ! -e "$out" ]] || exit 1
+    ln -sfn "$file" "$out"
     exit 0
     ;;
 esac

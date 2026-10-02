@@ -20,6 +20,10 @@ manifest_cached() {
 
 manifest_is_stale() {
   manifest_cached || return 0
+  # Behind a library the pin is the truth until `refresh` moves it, or a
+  # game it lacks does (library_build): a cache aging out would have every
+  # launch move the pin on its own.
+  [[ -z "$(gotg_library)" || -n "${GOTG_LIBRARY_MOUNT:-}" ]] || return 1
   local age now mtime
   now="$(date +%s)"
   mtime="$(stat -c '%Y' "$GOTG_CACHE_FILE")"
@@ -31,6 +35,14 @@ manifest_is_stale() {
 # catalog makes the failure survivable, and a die here cannot be caught — it
 # exits straight through `manifest_refresh || fallback`.
 manifest_refresh() {
+  # With a library, the catalog is what its lock pins: the thing a launch
+  # builds from, and so the one thing to show (library_catalog_refresh).
+  # With the library mounted (QA in the cluster) the service's copy carries
+  # the paths a download copies from; that still comes from the service.
+  if [[ -n "$(gotg_library)" && -z "${GOTG_LIBRARY_MOUNT:-}" ]]; then
+    library_catalog_refresh "$(gotg_library)"
+    return
+  fi
   service_have || {
     warn "no service configured — run: gotg login"
     return 1
