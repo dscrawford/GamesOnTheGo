@@ -56,6 +56,7 @@ from ..catalog import CatalogStore, Conflict, SweepRefused
 from ..contract import ENTRY_ID_RE, PLATFORM_RE
 from ..saves import SavesStore
 from ..tokens import TOKEN_RE, Absent, Claimed, TokenStore, default_user
+from . import admin_page
 from .artcache import CONTENT_TYPES, ArtCache, extension_for
 
 USER_AGENT = "gotg-proxy/0.5.5"
@@ -289,6 +290,13 @@ class Config:
     # Where the fleet's tile pictures live — see artcache.py. Empty means this
     # deployment serves no art, which /art says with a 503.
     art_dir: str = ""
+    # Where administration lives when it has a listener of its own (the
+    # tailnet's): the public listener's 404 for /admin names it, so a CLI
+    # pointed at the old url is told rather than left guessing.
+    admin_url: str = ""
+    # The url people reach the service on, which a claim link is built from:
+    # the admin page is on another host and cannot know it otherwise.
+    public_url: str = ""
     # How hard anybody may lean on an upstream through this proxy, in requests
     # per second, with a burst for the ordinary case of one client opening a
     # grid. Cache hits are not counted: they cost the upstream nothing.
@@ -390,6 +398,7 @@ class Handler(BaseHTTPRequestHandler):
     limits: dict[str, RateLimiter]
     auth_cache: dict
     auth_cache_lock: threading.Lock
+    listener: str = "both"
     auth_cache_ttl: float
     auth_neg_ttl: float
 
@@ -1188,6 +1197,37 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle(self) -> None:
         path = self.path.lstrip("/")
+        clean = path.split("?")[0]
+        top = clean.split("/")[0]
+
+        # Which half of the service this listener is. "public" never has
+        # /admin -- gotg-api.dcraw.net reaches it straight from the internet,
+        # past anything Cloudflare could put in front -- and "admin" has
+        # nothing else: one more door to the saves and the upstream keys is not
+        # what a second listener is for. Decided before authentication, so
+        # neither answers differently for a token it should not take.
+        if self.listener == "public" and top == "admin":
+            where = f": it is at {self.config.admin_url}/admin/" if self.config.admin_url else ""
+            self._problem(404, f"administration is not on this listener{where}", close=True)
+            return
+        if self.listener == "admin" and top not in ("admin", "healthz"):
+            self._problem(404, "this listener serves administration only", close=True)
+            return
+
+        # The page and its parts: static, and holding no secret -- the token
+        # is typed into it -- so before authentication, as healthz is. Not on
+        # a deployment that holds no admin token (gotg-library): a page with
+        # nothing behind it is only a question.
+        if (
+            self.listener != "public"
+            and self.config.admin_token
+            and self.command in ("GET", "HEAD")
+            and clean in admin_page.ROUTES
+        ):
+            self.close_connection = True
+            body, content_type = admin_page.ROUTES[clean]
+            self._send_page(body, content_type)
+            return
 
         # Before authentication, and the only thing that is: kubelet has no
         # token, and a health check is not a credentialed operation.
@@ -1203,7 +1243,6 @@ class Handler(BaseHTTPRequestHandler):
         # The other pre-auth route: the claim code IS the credential, and only
         # as a POST — any other verb falls through to the 401 below. Same
         # close-before-body rule as healthz.
-        clean = path.split("?")[0]
         if self.command == "POST" and clean.split("/")[0] == "claim":
             self.close_connection = True
             if clean == "claim":
@@ -1419,6 +1458,14 @@ class Handler(BaseHTTPRequestHandler):
             self._problem(503, "this deployment holds no token store")
             return
 
+        if segments == ["info"]:
+            self._send(200, json.dumps({"public_url": self.config.public_url}).encode(), "application/json")
+            return
+
+        if segments == ["invites"] and self.command in ("GET", "HEAD"):
+            self._send(200, json.dumps({"invites": self.token_store.invites()}).encode(), "application/json")
+            return
+
         if segments == ["invites"]:
             if self.command != "POST":
                 self._problem(405, "minting an invite is a POST")
@@ -1461,7 +1508,23 @@ class Handler(BaseHTTPRequestHandler):
                 self._problem(404, f"nothing live to revoke for {segments[1]!r}")
             return
 
-        self._problem(404, "nothing lives at /admin but invites, tokens and scan")
+        self._problem(404, "nothing lives at /admin but info, invites, tokens and scan")
+
+    def _send_page(self, body: bytes, content_type: str) -> None:
+        """The admin page, as strict as a page can be: its own script and
+        style only, nothing framed, nothing cached, no referrer -- it is
+        typed an admin token into."""
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Security-Policy", admin_page.POLICY)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Frame-Options", "DENY")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802
         self._handle()
@@ -1491,8 +1554,15 @@ def make_server(
     art: ArtCache | None = None,
     auth_cache_ttl: float = 60.0,
     auth_neg_ttl: float = 5.0,
+    listener: str = "both",
 ) -> ThreadingHTTPServer:
-    """Threading, because one slow upstream must not block every other client."""
+    """Threading, because one slow upstream must not block every other client.
+
+    `listener` is which half of the service this socket is: "public" (no
+    /admin), "admin" (only /admin), or "both" -- one socket, as every
+    deployment was before administration moved to the tailnet."""
+    if listener not in ("public", "admin", "both"):
+        raise ValueError(f"not a listener: {listener!r}")
     handler = type(
         "BoundHandler",
         (Handler,),
@@ -1515,6 +1585,7 @@ def make_server(
             "auth_cache_lock": threading.Lock(),
             "auth_cache_ttl": auth_cache_ttl,
             "auth_neg_ttl": auth_neg_ttl,
+            "listener": listener,
         },
     )
     return ThreadingHTTPServer((host, port), handler)

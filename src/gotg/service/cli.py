@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -58,7 +59,25 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
         files_port_file=env.get("GOTG_FILES_PORT_FILE", ""),
         files_preferred_url=env.get("GOTG_FILES_PREFERRED_URL", "").rstrip("/"),
         legacy_user=env.get("GOTG_LEGACY_USER", "legacy"),
+        admin_url=env.get("GOTG_ADMIN_URL", "").rstrip("/"),
+        public_url=env.get("GOTG_PUBLIC_URL", "").rstrip("/"),
     ).validate()
+
+
+def admin_port_from_env(env: Mapping[str, str] | None = None) -> int | None:
+    """The port administration listens on, apart from everything else; None
+    keeps it on the one listener, as every deployment had it before."""
+    env = os.environ if env is None else env
+    raw = env.get("GOTG_ADMIN_PORT", "")
+    if not raw:
+        return None
+    try:
+        port = int(raw)
+    except ValueError:
+        raise ValueError(f"GOTG_ADMIN_PORT must be a port number, not {raw!r}") from None
+    if not 0 < port < 65536:
+        raise ValueError(f"GOTG_ADMIN_PORT must be a port number, not {raw!r}")
+    return port
 
 
 def token_store_from_env(env: Mapping[str, str] | None = None) -> TokenStore | None:
@@ -99,6 +118,9 @@ def main(argv: list[str] | None = None) -> int:
     port = int(os.environ.get("PORT", "8080"))
     try:
         config = config_from_env()
+        admin_port = admin_port_from_env()
+        if admin_port == port:
+            raise ValueError("GOTG_ADMIN_PORT must differ from PORT: it is the point of it")
         catalog = catalog_from_env()
         store = store_from_env()
         token_store = token_store_from_env()
@@ -128,17 +150,22 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         print("error: GOTG_STREAM_SLOTS must be a positive integer", file=sys.stderr)
         return 1
+    shared = {
+        "store": store,
+        "catalog": catalog,
+        "files_dir": files_dir,
+        "stream_slots": stream_slots,
+        "token_store": token_store,
+        "art": art,
+    }
     server = make_server(  # noqa: S104 — a container listens on all of its own
-        "0.0.0.0",
-        port,
-        config,
-        store,
-        catalog,
-        files_dir=files_dir,
-        stream_slots=stream_slots,
-        token_store=token_store,
-        art=art,
+        "0.0.0.0", port, config, listener="public" if admin_port else "both", **shared
     )
+    if admin_port:
+        # Its own socket, which the deployment exposes on the tailnet only:
+        # gotg-api.dcraw.net reaches the public one from the internet.
+        admin = make_server("0.0.0.0", admin_port, config, listener="admin", **shared)  # noqa: S104
+        threading.Thread(target=admin.serve_forever, name="admin", daemon=True).start()
     held = [name for name, on in (("steamgriddb", config.steamgriddb_key), ("igdb", config.igdb_client_id)) if on]
     saves = f"saves under {store.root}" if store else "no saves store"
     games = f"catalog at {catalog.db}" if catalog else "no catalog"
@@ -150,7 +177,11 @@ def main(argv: list[str] | None = None) -> int:
     else:
         tokens = "legacy token only"
     pictures = f"art cached at {art.root}" if art else "no art cache"
-    print(f"gotg service on :{port}, holding credentials for: {creds}; {saves}; {games}; {tokens}; {pictures}")
+    administration = f"administration on :{admin_port} only" if admin_port else "administration on this port"
+    print(
+        f"gotg service on :{port}, holding credentials for: {creds}; {saves}; {games}; {tokens}; {pictures};"
+        f" {administration}"
+    )
     server.serve_forever()
     return 0
 

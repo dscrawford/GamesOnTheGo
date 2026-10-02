@@ -323,3 +323,29 @@ nix_conf() { printf '%s/nix/nix.conf' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
   [ "$(jq -r .token "$GOTG_CONFIG_DIR/api.json")" = "$token" ]
   [[ "$stderr" != *"service URL"* ]]
 }
+
+# --- administration on the tailnet's listener ----------------------------------
+
+@test "with administration on its own listener, the CLI goes there and the claim link stays public" {
+  stop_saves_service
+  SERVICE_SPLIT_ADMIN=1 start_saves_service
+  write_api_config
+  GOTG_ADMIN_URL="http://127.0.0.1:$SERVICE_ADMIN_PORT" admin invite erin-deck
+  [ "$status" -eq 0 ]
+  [[ "$output" == "$GOTG_SERVICE_URL/claim/gotgi_"* ]]
+  # api.json's admin_url does the same, for a machine that administers often.
+  jq --arg a "http://127.0.0.1:$SERVICE_ADMIN_PORT" '. + {admin_url: $a}' "$GOTG_CONFIG_DIR/api.json" \
+    >"$GOTG_CONFIG_DIR/api.json.tmp" && mv "$GOTG_CONFIG_DIR/api.json.tmp" "$GOTG_CONFIG_DIR/api.json"
+  admin tokens
+  [ "$status" -eq 0 ]
+}
+
+@test "the public listener tells a CLI pointed at it where administration went" {
+  stop_saves_service
+  SERVICE_SPLIT_ADMIN=1 start_saves_service
+  write_api_config
+  admin tokens
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"404"* ]]
+  [[ "$stderr" == *"http://127.0.0.1:$SERVICE_ADMIN_PORT/admin/"* ]]
+}

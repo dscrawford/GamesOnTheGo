@@ -63,6 +63,10 @@ usage: gotg admin <command> [args]
 
 The admin token comes from GOTG_ADMIN_TOKEN:
   export GOTG_ADMIN_TOKEN="$(kubectl get secret gotg-api -o jsonpath='{.data.admin-token}' | base64 -d)"
+
+Administration is on the tailnet, not the public url: GOTG_ADMIN_URL, or
+`admin_url` in api.json, names it (gotg.dcraw.net's is http://100.64.0.1:30781).
+The same address in a browser is a page that does all of the above.
 EOF
 }
 
@@ -71,6 +75,18 @@ admin_url() {
   [[ -f "$file" ]] && url="$(jq -r '.url // empty' "$file" 2>/dev/null)"
   url="${url:-${GOTG_SERVICE_URL:-}}"
   [[ -n "$url" ]] || die "no service URL — run: gotg login (or set GOTG_SERVICE_URL)"
+  printf '%s' "${url%/}"
+}
+
+# Where /admin is: a deployment serves it on a listener of its own, the
+# tailnet's, and the public url answers it with a 404 naming the place. Said
+# by GOTG_ADMIN_URL or api.json's admin_url; the service url otherwise, for a
+# service that has one listener. A claim link is still on the service url --
+# that is where the person claiming it can reach.
+admin_api_url() {
+  local file="${GOTG_API_FILE:-$GOTG_CONFIG_DIR/api.json}" url="${GOTG_ADMIN_URL:-}"
+  [[ -n "$url" || ! -f "$file" ]] || url="$(jq -r '.admin_url // empty' "$file" 2>/dev/null)"
+  [[ -n "$url" ]] || url="$(admin_url)"
   printf '%s' "${url%/}"
 }
 
@@ -84,7 +100,7 @@ admin_curl() {
 
 admin_call() {
   local method="$1" path="$2" body="${3:-}" url reply http
-  url="$(admin_url)"
+  url="$(admin_api_url)"
   reply="$(mktemp)"
   # Expanded now on purpose: the path is gone by trap time. EXIT too, since
   # `die` never returns and an invite reply is a live credential in /tmp.

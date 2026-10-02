@@ -283,6 +283,18 @@ class TokenStore:
             row = conn.execute("SELECT user FROM tokens WHERE name = ? AND revoked_at IS NULL", (name,)).fetchone()
         return row["user"] if row else None
 
+    def invites(self) -> list[dict]:
+        """The invites still open: unclaimed, uncancelled, unexpired. Never a
+        code -- only its hash is kept, and not that either here."""
+        now = int(time.time())
+        with self._read() as conn:
+            rows = conn.execute(
+                "SELECT name, user, created_at, expires_at FROM invites"
+                " WHERE claimed_at IS NULL AND expires_at > ? ORDER BY created_at",
+                (now,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def tokens(self) -> list[dict]:
         with self._read() as conn:
             rows = conn.execute(

@@ -61,9 +61,17 @@ _start_saves_service_once() {
   export SERVICE_FILES_DIR="$TEST_TMP/service-files"
   export SERVICE_LIBRARY_DIR="$TEST_TMP/library"
   mkdir -p "$SERVICE_FILES_DIR" "$SERVICE_LIBRARY_DIR" "$TEST_TMP/service-state"
-  export SERVICE_PORT
+  export SERVICE_PORT SERVICE_ADMIN_PORT=""
   SERVICE_PORT="$(pick_port)"
-  PYTHONUNBUFFERED=1 GOTG_PROXY_TOKEN="test-token" GOTG_SAVES_DIR="$SAVES_DATA_DIR" \
+  # SERVICE_SPLIT_ADMIN=1: administration on a listener of its own, as the
+  # deployment has it (the tailnet's), and none on the public one.
+  local split=()
+  if [[ -n "${SERVICE_SPLIT_ADMIN:-}" ]]; then
+    SERVICE_ADMIN_PORT="$(pick_port)"
+    split=(GOTG_ADMIN_PORT="$SERVICE_ADMIN_PORT" GOTG_ADMIN_URL="http://127.0.0.1:$SERVICE_ADMIN_PORT"
+      GOTG_PUBLIC_URL="http://127.0.0.1:$SERVICE_PORT")
+  fi
+  env "${split[@]}" PYTHONUNBUFFERED=1 GOTG_PROXY_TOKEN="test-token" GOTG_SAVES_DIR="$SAVES_DATA_DIR" \
     GOTG_FILES_DIR="$SERVICE_FILES_DIR" \
     GOTG_LIBRARY_ROOTS="$SERVICE_LIBRARY_DIR" \
     GOTG_CATALOG_DB="$TEST_TMP/service-state/catalog.db" \
