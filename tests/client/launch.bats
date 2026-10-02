@@ -139,3 +139,18 @@ spec_for() {
   for i in $(seq 1 50); do [[ -s "$WATCHER_LOG" ]] && break; sleep 0.1; done
   [[ "$(cat "$WATCHER_LOG")" == *"--saves env-n64"* ]]
 }
+
+@test "nothing rebuilds the spec's environment, whoever asks" {
+  # QA refreshes the environment it grades, install does too: neither may
+  # point nix at a store path to build into.
+  load_client_libs
+  export GOTG_PINNED_ATTR=env-n64 GOTG_PINNED_ENV="$ENV_STORE"
+  run env_build env-n64
+  [ "$status" -eq 0 ]
+  run env_refresh env-n64
+  [ "$status" -eq 0 ]
+  ! grep -q "build" "$NIX_LOG" 2>/dev/null
+  rm "$ENV_STORE/bin/gotg-play"
+  run env_build env-n64
+  [ "$status" -ne 0 ]
+}

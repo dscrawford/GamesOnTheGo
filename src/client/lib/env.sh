@@ -401,6 +401,12 @@ env_evaluate() {
 # Build an environment and keep it alive with a GC root.
 env_build() {
   local attr="$1" ref root
+  # Nix built it for this launch, as a dependency of the game that runs
+  # this; there is nothing to build, and its root is a store path.
+  if env_pinned "$attr"; then
+    env_is_built "$attr" || die "no gotg-play in $(env_root "$attr"), the environment this launch names"
+    return 0
+  fi
   ref="$(env_ref "$attr")"
   root="$(env_root "$attr")"
   mkdir -p "$GOTG_ROOTS_DIR"

@@ -522,7 +522,7 @@ EOF
   # happens to be rooted here — a stale root was the first bug a real run ever
   # caught. Same trade install makes: refresh when possible, run regardless.
   local attr
-  attr="$(env_attr "$game" "$variant")"
+  attr="${GOTG_PINNED_ATTR:-$(env_attr "$game" "$variant")}"
   if env_is_built "$attr"; then
     env_refresh "$attr" || warn "could not rebuild $attr — grading the build already here"
   fi
