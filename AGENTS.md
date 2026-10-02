@@ -20,28 +20,29 @@ the picker here runs *this* checkout's client, whatever PATH it inherited. A fla
 the shell still runs it; `.envrc` lists anything untracked under `src/client`,
 `src/ui` or `config` on entry.
 
-`.envrc` also compares `~/.nix-profile`'s locked rev with HEAD, since that is
-what a launch from Steam or a bare terminal runs. Keep it current:
+`.envrc` also compares the library's `gotg` pin with HEAD, since that is what
+a launch from Steam or a bare terminal runs. Keep it current:
 
 ```bash
-git push && nix profile upgrade gotg gotg-ui   # the profile follows origin
-nix flake update gotg --flake "$(gotg library)" # the library follows it too
-gotg update                                    # and the copies Steam launches
+git push && nix flake update gotg --flake "$(gotg library)"   # the library follows origin
+nix run "$(gotg library)#update"                               # and the copies Steam launches
 ```
 
-Games are played from a **library** (`docs/nix-games.md`): a flake made from
-`templates/library` that pins this repository and the server's catalog, one
-output per game. `gotg play`/`install` build that output and keep it as a
-root under `~/.local/state/gotg/games/`; there is no other way to run a game.
+Nothing of GOTG is in a profile. Games are played from a **library**
+(`docs/nix-games.md`): a flake made from `templates/library` that pins this
+repository and the server's catalog, one output per game, and the apps a
+person runs -- `#ui`, `#steam`, `#update`, `#login` -- each knowing the library.
+`gotg` is the launcher inside every game output and behind the picker, never
+on PATH outside the dev shell; the picker's `gotg play`/`install` build a
+game's output and keep it as a root under `~/.local/state/gotg/games/`.
 
-The upgrade alone is not what Steam runs. Its picker entry starts
-`~/.local/state/gotg/picker` first and the client's `app` root beside it --
-both made by `gotg update` (`sync` is its old name) from the *library's* pin
-of this repository, both left where they were by `nix profile upgrade`.
-A Deck upgraded that way kept running the day-old picker, and a fix that
-had shipped looked like one that did not work. On a machine where a full
-update is too long for now, the two roots alone are `nix build <library>#gotg-ui
--o ~/.local/state/gotg/picker` and `#gotg -o ~/.local/state/gotg/app`.
+The pin alone is not what Steam runs. Its picker entry starts
+`~/.local/state/gotg/picker` first and the launcher's `app` root beside it --
+both made by `#update`, both left where they were by `nix flake update`. A
+Deck upgraded that way kept running the day-old picker, and a fix that had
+shipped looked like one that did not work. On a machine where a full update
+is too long for now, the two roots alone are `nix build <library>#gotg-ui -o
+~/.local/state/gotg/picker` and `#gotg -o ~/.local/state/gotg/app`.
 
 ## Build / Run
 
@@ -351,8 +352,8 @@ name-CRC, because SDL renames clones) and `keys.py`.
 - The Deck answers `ssh -i ~/.ssh/deck_debug deck@192.168.0.80` from here
   (no password; the default key is refused; tailnet 100.80.53.67). It runs
   Nix as a daemon install -- `nix` is `/nix/var/nix/profiles/default/bin/nix`,
-  not on a non-interactive PATH -- with `gotg`, `gotg-ui` and `gotg-seat` in
-  its profile from `github:dscrawford/GamesOnTheGo`. Anything long goes in a
+  not on a non-interactive PATH -- and a library under `~/.config/gotg`.
+  Anything long goes in a
   `systemd-run --user` unit: a job backgrounded in an ssh session dies with it.
   `tests/ui/fixtures/input-devices-steam-deck.txt` and the `hidraw-steam-deck/`
   tree were captured against its real `/proc` and `/sys`.

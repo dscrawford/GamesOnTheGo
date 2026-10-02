@@ -1,11 +1,12 @@
 # GamesOnTheGo (GOTG)
 
 A game library you host once and play anywhere. A server holds the catalog,
-artwork and saves; a client on each machine (a desktop, a Steam Deck) fetches a
-game on first launch, builds the emulator or port it needs with Nix, maps
-whatever controllers are plugged in, and runs it — from a terminal, from
-Steam, or from a controller-driven picker. Saves go back to the server, so a
-game picked up on the Deck continues where the desktop left it.
+artwork and saves; on each machine (a desktop, a Steam Deck) every game is a
+Nix flake output -- `nix run` fetches it on first launch, builds the emulator
+or port it needs, maps whatever controllers are plugged in, and runs it --
+from a terminal, from Steam, or from a controller-driven picker. Saves go back
+to the server, so a game picked up on the Deck continues where the desktop
+left it.
 
 **GOTG ships no games and downloads none from anyone but your own server.**
 It is a library manager and launcher for games you have obtained legally:
@@ -18,8 +19,9 @@ indexer at material you do not have the right to copy.
 |---|---|---|
 | [indexer](src/gotg/indexer/) | searches a folder for games and indexes them into the catalog, hardlinked into `/Games` | CronJob |
 | [service](src/gotg/service/) | serves the catalog, artwork and saves | Deployment |
-| [client](src/client/) | `gotg` — fetch, build, launch | Desktop, Steam Deck |
-| [picker](src/ui/) | `gotg-ui` — controller-driven game grid | Desktop, Steam Deck |
+| [library](templates/library/) | a flake naming your server and pinning its catalog; every game an output | Desktop, Steam Deck |
+| [launcher](src/client/) | `gotg` — what a game's output runs: fetch, saves, controllers, overlay | inside every game |
+| [picker](src/ui/) | `nix run <library>#ui` — controller-driven game grid | Desktop, Steam Deck |
 
 ## Install
 
@@ -29,33 +31,23 @@ Steam Deck (Desktop Mode, Konsole) or any Linux without Nix:
 curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install.sh | bash
 ```
 
-Already have Nix? It is a flake, so no installer:
+Nothing goes in a profile. Games are played from a **library**: a small flake
+that names your server and pins its catalog, each game one of its outputs
+([docs/nix-games.md](docs/nix-games.md)). The installer makes one in
+`~/.config/gotg/library` and builds the picker from it. With Nix already here,
+by hand:
 
 ```bash
-nix profile add github:dscrawford/GamesOnTheGo#gotg github:dscrawford/GamesOnTheGo#gotg-ui
-```
-
-Or run it without installing anything:
-
-```bash
-nix run github:dscrawford/GamesOnTheGo#gotg-ui
-```
-
-NixOS or home-manager: add `github:dscrawford/GamesOnTheGo` as a flake input
-and put `.packages.${system}.gotg` and `.gotg-ui` in your package list.
-
-Games are played from a **library**: a small flake that names your server and
-pins its catalog, each game one of its outputs ([docs/nix-games.md](docs/nix-games.md)).
-The installer makes one in `~/.config/gotg/library`; by hand:
-
-```bash
-nix flake new ~/.config/gotg/library -t github:dscrawford/GamesOnTheGo#library
-gotg library ~/.config/gotg/library   # then edit its server and catalog url
-gotg login                            # also lets Nix fetch the catalog (a netrc)
+nix flake new ~/.config/gotg/library -t github:dscrawford/GamesOnTheGo#library   # edit its server and catalog url
+nix run ~/.config/gotg/library#login              # the token; also lets Nix fetch the catalog (a netrc)
 nix run ~/.config/gotg/library#n64.usa.donkey_kong_64
 ```
 
-Upgrade: re-run the installer, or `nix profile upgrade gotg gotg-ui --refresh && gotg update`. The `gotg update` is not optional: the picker Steam launches is a copy of its own, and only update refreshes it -- without it Game Mode keeps running the old picker, whatever the profile says. `nix flake update catalog` in the library picks up games added on the server; the picker does that itself for a game its lock does not have yet.
+Upgrade: re-run the installer, or in the library `nix flake update gotg` then
+`nix run .#update`. The update is not optional: the picker Steam launches is a
+copy of its own, and only that refreshes it -- without it Game Mode keeps
+running the old picker. `nix flake update catalog` picks up games added on
+the server; the picker does that itself for a game its lock does not have yet.
 
 Uninstall (games and saves stay; `--games` removes them too; Nix stays, and it says how to remove that):
 
@@ -74,39 +66,37 @@ Details, and what the installer does besides: [docs/install.md](docs/install.md)
 - Pattern: `^[a-z]{3,5}\.[a-z0-9][a-z0-9_]*$`; region is `usa`, `eur`, `jpn` or `world`.
 - Unique per platform, not globally. Qualify when ambiguous: `snes/usa.mario_is_missing`.
 
-## Client
+## Playing
+
+Everything is `nix run` on the library. `nix registry add gotg ~/.config/gotg/library`
+makes it `gotg#…` from anywhere.
 
 ```bash
-gotg login                          # service URL + token → ~/.config/gotg/config.json (0600)
-gotg login --claim <url>            # redeem an invite link instead
-gotg refresh                        # re-fetch the catalog
-
-gotg list [pattern] [page]          # regex on id, title, platform; * = installed here
-gotg list --platform snes --installed --all --limit 100
-gotg info <id>                      # size, path, installed, mods
-gotg install <id>                   # download + build from the library + write launcher
-gotg play <id> [variant]            # build it if needed, then launch
-gotg play <id> --version 1.4.2      # a particular game update
-gotg versions <id> [variant]        # installed updates; * = the one that runs
-gotg uninstall <id>                 # removes game and launchers; saves stay
-gotg configure <id> [variant]       # the emulator's own settings
-gotg configure storage list|add|remove|default <dir>
-gotg library [<ref>]                # which library games come from
-gotg update                         # rebuild gotg, the picker and every game here
-gotg version
+nix run ~/.config/gotg/library#login                        # the token for your server
+nix run ~/.config/gotg/library#login -- --claim <url>       # redeem an invite link instead
+nix search ~/.config/gotg/library zelda                     # what there is
+nix run ~/.config/gotg/library#n64.usa.donkey_kong_64       # play: fetched and built on first run
+nix run ~/.config/gotg/library#usa.donkey_kong_64           # the short form, for an id on one platform
+nix run ~/.config/gotg/library#n64.usa.legend_of_zelda_ocarina_of_time_rev2.rando   # a variant
+nix run ~/.config/gotg/library#switch.world.legend_of_zelda_tears_of_the_kingdom -- --version 1.4.2   # a game update
+nix run ~/.config/gotg/library#ui                           # the picker
+nix run ~/.config/gotg/library#steam -- picker              # the picker in Steam, as "Games On The Go"
+nix run ~/.config/gotg/library#update                       # rebuild the picker and every game built here
+nix flake update catalog --flake ~/.config/gotg/library     # games added on the server since
 ```
 
-Every command takes `-h`/`--help`. Tab completion: `source ~/.local/state/gotg/app/share/bash-completion/completions/gotg`.
-
-![gotg list zelda and gotg info](docs/demos/gotg-find.gif)
+Behind every game is the launcher, `gotg`, which the library builds and
+nobody installs: `~/.local/state/gotg/app/bin/gotg`. The `gotg …` lines below
+are that program; it answers `help`. Admin and QA are `nix run
+github:dscrawford/GamesOnTheGo#admin` and `#qa`.
 
 Launch log: `~/.local/state/gotg/logs/<id>.log`.
 
 ## Picker
 
 ```bash
-gotg-ui                             # the grid
-gotg steam picker                   # put it in Steam as "Games On The Go"
+nix run ~/.config/gotg/library#ui                 # the grid
+nix run ~/.config/gotg/library#steam -- picker    # put it in Steam as "Games On The Go"
 ```
 
 | Pad | Keyboard | Does |
@@ -170,12 +160,12 @@ It needs `/dev/uinput` writable and nothing else; each test starts a danstick of
 ## Steam
 
 ```bash
-gotg steam add <id> [variant]       # launcher + shortcut + artwork
-gotg steam remove <id> [variant]
-gotg steam list
-gotg steam pending                  # changes queued while Steam is running
-gotg steam art <id> [variant] [--force]
-gotg steam art <id> --from <file|url> [--as tile|capsule|hero|logo|icon]
+nix run ~/.config/gotg/library#steam -- add <id> [variant]    # launcher + shortcut + artwork
+nix run ~/.config/gotg/library#steam -- remove <id> [variant]
+nix run ~/.config/gotg/library#steam -- list
+nix run ~/.config/gotg/library#steam -- pending               # changes queued while Steam is running
+nix run ~/.config/gotg/library#steam -- art <id> [variant] [--force]
+nix run ~/.config/gotg/library#steam -- art <id> --from <file|url> [--as tile|capsule|hero|logo|icon]
 ```
 
 Close Steam before changes apply; restart it to see them — it reads that file once, at startup, and rewrites it from memory when it exits.
@@ -185,9 +175,9 @@ What Steam does not tell you, and what it cost to find out: [docs/steam.md](docs
 ## Variants
 
 ```bash
-gotg play usa.super_mario_sunshine bse
-gotg play usa.super_mario_64 pc-4p
-gotg play world.legend_of_zelda_tears_of_the_kingdom 120fps --version 1.4.2
+nix run ~/.config/gotg/library#gamecube.usa.super_mario_sunshine.bse
+nix run ~/.config/gotg/library#n64.usa.super_mario_64.pc-4p
+nix run ~/.config/gotg/library#switch.world.legend_of_zelda_tears_of_the_kingdom.120fps -- --version 1.4.2
 ```
 
 | Game | Variants |
@@ -207,14 +197,11 @@ gotg play world.legend_of_zelda_tears_of_the_kingdom 120fps --version 1.4.2
 | `switch/world.paper_mario_the_thousand_year_door` | `60fps` |
 | `switch/world.super_mario_rpg` | `120fps` |
 
-A variant whose version range matches nothing installed is hidden; `gotg info <id>` shows why:
-
-```
-disabled:  enhanced (needs 1.1.0 to 1.4.2)
-```
+A variant whose version range matches nothing installed is hidden from the
+picker; `gotg complete disabled <id>` names it.
 
 Native ports, not emulated: Ocarina of Time and Master Quest (Ship of Harkinian), Majora's Mask (2 Ship 2 Harkinian), Donkey Kong 64 (recomp), Snowboard Kids 2 (recomp), Super Smash Bros. (BattleShip), Pikmin (Open Nectar), Super Mario 64 `pc` (sm64coopdx), Paper Mario `recut` (Wine), Animal Crossing (ACGC PC Port, Wine), Super Smash Bros. Melee (melee-pc).
-Any of those can be put back on the emulator for a launch: `gotg play <id> emulate`, or the same row in the picker. A port is younger than the emulator it replaces, so this is how you find out which of the two has the bug.
+Any of those can be put back on the emulator for a launch: the `.emulate` attribute (`nix run …#n64.usa.donkey_kong_64.emulate`), or the same row in the picker. A port is younger than the emulator it replaces, so this is how you find out which of the two has the bug.
 
 ## Saves
 
@@ -235,6 +222,8 @@ gotg saves keep   <id> [variant] here|remote    # settle one
 - Wii U saves are not synced yet.
 
 ## Admin
+
+`nix run github:dscrawford/GamesOnTheGo#admin -- …`; `gotg admin` for short.
 
 ```bash
 gotg admin invite alice-deck [--ttl <days>] [--user <user>]   # prints a claim url
@@ -263,7 +252,9 @@ $ gotg admin scan
 
 | File | Contents |
 |---|---|
-| `~/.config/gotg/config.json` | service URL, token, `flake` |
+| `~/.config/gotg/config.json` | `library`: the writable library games are built from |
+| `~/.config/gotg/library/` | the library flake: server, catalog pin (`flake.lock`) |
+| `~/.config/gotg/netrc` | the token, for Nix to fetch the catalog |
 | `~/.config/gotg/api.json` | `{"url": "...", "token": "..."}` |
 | `~/.config/gotg/steamgriddb.json` | `{"api_key": "..."}` |
 | `~/.config/gotg/video.json` | `{"resolution": "default\|native\|720p\|1080p\|1440p\|4k\|5k\|1x…8x"}` (Dolphin) |
@@ -275,17 +266,17 @@ $ gotg admin scan
 
 | Variable | Effect |
 |---|---|
-| `GOTG_FLAKE` | flake to build from (else `flake` in config, `~/Documents/GOTG`, `github:dscrawford/GamesOnTheGo`) |
+| `GOTG_LIBRARY` | the library to build from (else `library` in config, else the one an app was run from) |
 | `GOTG_KILLSWITCH=0` / `GOTG_KILLSWITCH_OVERLAY=0` | disable the stop combo / its overlay |
 | `GOTG_KILLSWITCH_HOLD_MS` | stop-combo hold time (default 3000) |
 | `GOTG_CONFIG` | picker config directory |
 | `GOTG_ADMIN_TOKEN`, `GOTG_INDEX_TOKEN` | admin and importer credentials |
 | `GOTG_ART_DIR`, `GOTG_UPSTREAM_RATE` | service: art cache, upstream requests/s |
 
-Private flake:
+Private repository:
 
 ```bash
-NIX_CONFIG="extra-access-tokens = github.com=github_pat_…" gotg play <id>
+NIX_CONFIG="extra-access-tokens = github.com=github_pat_…" nix run ~/.config/gotg/library#update
 ```
 
 ## Environments
@@ -303,8 +294,11 @@ src/client/env/games/<platform>/<id>.<variant>.nix   a variant
 
 ## QA
 
+`nix run github:dscrawford/GamesOnTheGo#qa -- …`; `gotg qa` for short.
+
 ```bash
 gotg qa <id> [variant]              # run headless for a minute with a virtual pad; grade boot, audio, video, input
+gotg qa --spec <file>               # a game exactly as its output would launch it
 gotg qa <id> --machine deck         # as a Steam Deck: no host GL, X11 only, C locale (also: deck-desktop)
 GOTG_QA_HOST_DECK=deck@10.0.0.5 gotg qa <id> --machine deck   # run it on the real Deck when it answers, stand in when it does not
 gotg qa <id> --bless                # store this run's frame as the golden image
@@ -320,7 +314,7 @@ Every run says which machine it exercised — the real one or a stand-in — bec
 
 ```bash
 nix develop                         # gotg, gotg-ui from the working tree; uv, ruff, shellcheck, bats
-nix flake check                     # 1211 python tests, 667 client tests, ruff, shellcheck, drift checks
+nix flake check                     # python tests, client tests, ruff, shellcheck, drift checks
 uv lock                             # after changing pyproject.toml
 ```
 

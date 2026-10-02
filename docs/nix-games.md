@@ -1,9 +1,10 @@
 # Games as Nix outputs
 
-Status: on `feat/nix-games` -- phases 0 to 6 done; 5 checked on a real Deck,
-6's fresh Deck from nothing still to do. A game is played only from its
-library: `gotg play` with none configured says how to make one, and the
-installer makes one.
+Status: phases 0 to 6 on `feat/nix-games`, 7.1-7.5 on `feat/no-client`; the
+fresh Deck from nothing (6 and 7.4) and the home-manager module (7.6) still to
+do. Nothing of GOTG goes in a profile: the installer makes a library and
+builds from it, and `gotg` is the launcher inside every game and behind the
+picker.
 
 Verified, against a local copy of the service on 127.0.0.1 (nothing reached
 the real server): a library flake fetched the catalog through a netrc and

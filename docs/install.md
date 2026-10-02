@@ -1,8 +1,11 @@
 # Installing GOTG
 
-This installs the client. It comes with no games: the library it connects to is
-one you host, filled with games you own and have dumped yourself or bought
-digitally. See the note at the top of the [README](../README.md).
+This installs Nix and makes a **library**: a flake in `~/.config/gotg/library`
+that names your server and pins its catalog, each game an output of it
+([nix-games.md](nix-games.md)). Nothing goes in a Nix profile. It comes with
+no games: the server it names is one you host, filled with games you own and
+have dumped yourself or bought digitally. See the note at the top of the
+[README](../README.md).
 
 ## On a Steam Deck
 
@@ -32,41 +35,31 @@ curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawfo
 
 GOTG is a flake. Nix 2.30 or newer, with flakes on, needs no installer.
 
-Install both commands into your profile:
+Make a library, and edit its `server` and catalog url to yours:
 
 ```bash
-nix profile add github:dscrawford/GamesOnTheGo#gotg github:dscrawford/GamesOnTheGo#gotg-ui
+nix flake new ~/.config/gotg/library -t github:dscrawford/GamesOnTheGo#library
+nix run ~/.config/gotg/library#login     # the token; written to ~/.config/gotg and a netrc for Nix
+nix run ~/.config/gotg/library#ui        # the picker, straight from it
 ```
 
-Upgrade them later:
+Upgrade later, in the library:
 
 ```bash
-nix profile upgrade gotg gotg-ui
+nix flake update gotg && nix run .#update
 ```
 
-Try the picker without installing:
+Steam needs a built copy to start, which `#update` keeps under
+`~/.local/state/gotg`; that is the one thing a plain `nix run` does not do.
 
-```bash
-nix run github:dscrawford/GamesOnTheGo#gotg-ui
-```
-
-NixOS or home-manager, as a flake input:
-
-```nix
-inputs.gotg.url = "github:dscrawford/GamesOnTheGo";
-```
-
-```nix
-environment.systemPackages = [
-  inputs.gotg.packages.${pkgs.stdenv.hostPlatform.system}.gotg
-  inputs.gotg.packages.${pkgs.stdenv.hostPlatform.system}.gotg-ui
-];
-```
+NixOS or home-manager: the library is a flake input like any other, and its
+`packages.<system>.gotg-ui` and `legacyPackages.<system>.<platform>.<region>.<game>`
+are packages. A `programs.gotg` module is planned.
 
 Two things the installer would have done, which you do once by hand:
 
 ```bash
-gotg steam picker
+nix run ~/.config/gotg/library#steam -- picker
 ```
 
 ```bash
@@ -104,12 +97,13 @@ mean vendoring a prebuilt runtime blob into a flake whose entire point is that
 nothing is prebuilt or unpinned.
 
 What actually helps on a Deck is the Steam shortcut, and that is what the
-installer writes: `gotg steam picker`.
+installer writes: `nix run <library>#steam -- picker`.
 
 ## What the installer does
 
-Each step checks first, so running it again only upgrades GOTG. To see what it
-would do without doing it:
+Each step checks first, so running it again only upgrades GOTG: the library's
+`gotg` pin is moved to the newest and what is built here is rebuilt. To see
+what it would do without doing it:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install.sh | bash -s -- --dry-run
@@ -119,9 +113,11 @@ curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawfo
 | --- | --- |
 | install Nix | SteamOS 3.5+ ships `/nix` already, bind-mounted to the home partition and kept across updates; the installer just takes ownership and runs the single-user install. Elsewhere it uses the official multi-user installer. |
 | turn on flakes | GOTG is a flake and they are still behind a flag |
-| `nix profile add` / `upgrade` | `gotg` and `gotg-ui`, from `github:dscrawford/GamesOnTheGo`; upgraded in place when already there |
+| a library | `nix flake new ~/.config/gotg/library -t github:dscrawford/GamesOnTheGo#library`, or the one here followed to the newest `gotg` |
+| `nix run <library>#update` | builds the launcher, the picker and every game already built here into `~/.local/state/gotg`, where Steam starts them; then tells gotg where the library is |
+| leave the profile | `gotg` and `gotg-ui` from an older install are taken out of the Nix profile, where they would shadow the library's copies |
 | a udev rule | danstick publishes each controller as a new device through `/dev/uinput`, and cannot open it without permission. The rule tags it `uaccess`, which gives it to whoever is logged in at the seat. |
-| a Steam shortcut | so Game Mode can launch the picker ([the gotchas](steam.md)). Steam only takes a new entry while closed, so with Steam open the installer asks, closes it, adds GOTG, and starts it again; declined, the entry is queued and `gotg steam picker` with Steam closed applies it |
+| a Steam shortcut | so Game Mode can launch the picker ([the gotchas](steam.md)). Steam only takes a new entry while closed, so with Steam open the installer asks, closes it, adds GOTG, and starts it again; declined, the entry is queued and `~/.local/state/gotg/app/bin/gotg steam picker` with Steam closed applies it |
 
 ## After a SteamOS update
 
@@ -137,7 +133,8 @@ rule.
 | | |
 | --- | --- |
 | Nix store | `/nix` — on the Deck, the home partition, via Valve's own bind mount |
-| GOTG and the picker | your Nix profile (`nix profile list`) |
+| the library | `~/.config/gotg/library` (`flake.lock` is which catalog and which GOTG) |
+| the launcher, the picker, each game's build | `~/.local/state/gotg/{app,picker,games}`, GC roots `#update` keeps |
 | games and saves | `$XDG_STATE_HOME/gotg`, i.e. `~/.local/state/gotg` |
 | the udev rule | `/etc/udev/rules.d/99-gotg-uinput.rules` — the one thing an update removes |
 
@@ -147,11 +144,12 @@ rule.
 curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/uninstall.sh | bash
 ```
 
-Or, with GOTG installed, `gotg-uninstall`; with Nix, `nix run github:dscrawford/GamesOnTheGo#uninstall`.
+Or, with Nix, `nix run github:dscrawford/GamesOnTheGo#uninstall`.
 
-It takes the two commands out of the Nix profile, the picker out of Steam,
-and the udev rule off the system partition. `--dry-run` shows the steps
-without taking them.
+It removes what was built from the library and the library itself, takes the
+picker out of Steam, the udev rule off the system partition, and `gotg` and
+`gotg-ui` out of the Nix profile where an older install put them. `--dry-run`
+shows the steps without taking them.
 
 Games, saves and settings stay in `~/.local/state/gotg` and `~/.config/gotg`
 unless you ask:
