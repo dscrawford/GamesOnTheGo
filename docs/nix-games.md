@@ -1,15 +1,20 @@
 # Games as Nix outputs
 
-Status: in progress on `feat/nix-games` -- phases 0 to 5 done; 6, retiring
-the old path, waits on a real Deck. `gotg play` with no library configured is
-what it always was.
+Status: in progress on `feat/nix-games` -- phases 0 to 5 done and checked
+on a real Deck; 6, retiring the old path, is next. `gotg play` with no
+library configured is what it always was.
 
 Verified, against a local copy of the service on 127.0.0.1 (nothing reached
 the real server): a library flake fetched the catalog through a netrc and
 updated its pin with `nix flake update catalog`; DK64, Melee and Four Swords
 Adventures 2p (its split-screen sway) ran from their outputs' specs under
 `gotg qa --spec` and passed. Pretending to be a Deck on this NVIDIA desktop
-fails as it does on master: nixpkgs' mesa drives no NVIDIA card.
+fails as it does on master: nixpkgs' mesa drives no NVIDIA card. On the real
+Deck -- the library flake pinned to this branch, its catalog through a netrc
+from the same local service over an ssh tunnel, isolated config and state --
+DK64's output built in ~14 minutes, fetched and rooted the mesa its
+environment names (no /run/opengl-driver there), and passed `gotg qa --spec`
+on the Deck's own GPU.
 
 ## What it is
 
