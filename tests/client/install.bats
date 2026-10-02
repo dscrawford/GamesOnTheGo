@@ -171,6 +171,11 @@ stub_nix() {
         ;;
       "config show experimental-features") printf '%s\n' "${NIX_FEATURES:-}" ;;
       "--version") printf 'nix (Nix) %s\n' "${NIX_VERSION:-2.30.0}" ;;
+      "flake new "*)
+        # The template, as far as the server goes: named twice.
+        mkdir -p "$3"
+        printf 'url = "file+https://gotg.dcraw.net/catalog";\nserver = "https://gotg.dcraw.net";\n' >"$3/flake.nix"
+        ;;
     esac
     return 0
   }
@@ -608,4 +613,57 @@ EOF
   [[ "$output" == *"nix run $TMP/library#ui"* ]]
   [[ "$output" == *"nix run $TMP/library#login"* ]]
   [[ "$output" != *"gotg-ui "* ]]
+}
+
+@test "the library is of the template's server unless another is given" {
+  other_linux
+  export GOTG_LIBRARY_DIR="$TMP/library"
+  load_installer
+  stub_nix
+  stub_side_effects
+  run install_gotg
+  [ "$status" -eq 0 ]
+  grep -qx 'server = "https://gotg.dcraw.net";' "$TMP/library/flake.nix"
+}
+
+@test "--server is written into the new library, catalog url and all" {
+  other_linux
+  export GOTG_LIBRARY_DIR="$TMP/library"
+  load_installer
+  stub_nix
+  stub_side_effects
+  SERVER="https://games.example.org/" run install_gotg
+  [ "$status" -eq 0 ]
+  grep -qx 'server = "https://games.example.org";' "$TMP/library/flake.nix"
+  grep -qx 'url = "file+https://games.example.org/catalog";' "$TMP/library/flake.nix"
+  ! grep -q "dcraw" "$TMP/library/flake.nix"
+}
+
+@test "GOTG_SERVER and --server both set it; a library already here is left as it is" {
+  other_linux
+  export GOTG_LIBRARY_DIR="$TMP/library" GOTG_SERVER="https://games.example.org"
+  load_installer
+  [ "$SERVER" = "https://games.example.org" ]
+  stub_steps
+  run main --server https://other.example.org --dry-run
+  [ "$status" -eq 0 ]
+  stub_nix
+  stub_side_effects
+  mkdir -p "$TMP/library"
+  printf 'server = "https://mine.example.org";\n' >"$TMP/library/flake.nix"
+  run install_gotg
+  [ "$status" -eq 0 ]
+  grep -qx 'server = "https://mine.example.org";' "$TMP/library/flake.nix"
+}
+
+@test "a dry run says the server it would write, and writes nothing" {
+  other_linux
+  export GOTG_LIBRARY_DIR="$TMP/library"
+  load_installer
+  stub_nix
+  stub_side_effects
+  DRY_RUN=1 SERVER="https://games.example.org" run install_gotg
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"would run: replace https://gotg.dcraw.net with https://games.example.org"* ]]
+  [ ! -e "$TMP/library" ]
 }

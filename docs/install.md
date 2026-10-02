@@ -120,11 +120,13 @@ what it would do without doing it:
 curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install.sh | bash -s -- --dry-run
 ```
 
+Another server than the default: `bash -s -- --server https://games.example.org`.
+
 | step | why |
 | --- | --- |
 | install Nix | SteamOS 3.5+ ships `/nix` already, bind-mounted to the home partition and kept across updates; the installer just takes ownership and runs the single-user install. Elsewhere it uses the official multi-user installer. |
 | turn on flakes | GOTG is a flake and they are still behind a flag |
-| a library | `nix flake new ~/.config/gotg/library -t github:dscrawford/GamesOnTheGo#library`, or the one here followed to the newest `gotg` |
+| a library | `nix flake new ~/.config/gotg/library -t github:dscrawford/GamesOnTheGo#library`, of `https://gotg.dcraw.net` unless `--server <url>` (or `GOTG_SERVER`) says another; or the one here followed to the newest `gotg` |
 | `nix run <library>#update` | builds the launcher, the picker and every game already built here into `~/.local/state/gotg`, where Steam starts them; then tells gotg where the library is |
 | leave the profile | `gotg` and `gotg-ui` from an older install are taken out of the Nix profile, where they would shadow the library's copies |
 | a udev rule | danstick publishes each controller as a new device through `/dev/uinput`, and cannot open it without permission. The rule tags it `uaccess`, which gives it to whoever is logged in at the seat. |

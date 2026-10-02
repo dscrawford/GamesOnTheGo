@@ -27,8 +27,12 @@ UINPUT="${GOTG_UINPUT:-/dev/uinput}"
 # rule the client uses.
 STATE_DIR="${GOTG_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/gotg}"
 CONFIG_DIR="${GOTG_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gotg}"
-# Where a library is made when a machine has none (docs/nix-games.md).
+# Where a library is made when a machine has none (docs/nix-games.md), and
+# the server it is a library of: the template names one, and a machine on
+# another says so with --server or GOTG_SERVER.
 LIBRARY_DIR="${GOTG_LIBRARY_DIR:-$CONFIG_DIR/library}"
+SERVER="${GOTG_SERVER:-https://gotg.dcraw.net}"
+TEMPLATE_SERVER="https://gotg.dcraw.net"
 
 C_OK=$'\e[32m'; C_WARN=$'\e[33m'; C_ERR=$'\e[31m'; C_DIM=$'\e[2m'; C_OFF=$'\e[0m'
 [[ -t 1 ]] || { C_OK=""; C_WARN=""; C_ERR=""; C_DIM=""; C_OFF=""; }
@@ -260,10 +264,25 @@ ensure_library() {
     change nix flake update gotg --flake "$LIBRARY_DIR" ||
       warn "could not update the library's gotg; what it has is what builds"
   else
-    step "making a library in $LIBRARY_DIR"
+    step "making a library in $LIBRARY_DIR, of $SERVER"
     change nix flake new "$LIBRARY_DIR" -t "$FLAKE#library" ||
       die "could not make a library from $FLAKE#library"
+    set_library_server
   fi
+}
+
+# The template is a library of one server; this machine's may be another.
+# Both places the template names it -- the server, and the catalog's url --
+# so a library and the netrc its login writes agree on the host.
+set_library_server() {
+  [[ "$SERVER" != "$TEMPLATE_SERVER" ]] || return 0
+  [[ "$SERVER" == http://* || "$SERVER" == https://* ]] || die "--server wants an http(s) url: $SERVER"
+  local flake="$LIBRARY_DIR/flake.nix"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    change replace "$TEMPLATE_SERVER" with "${SERVER%/}" in "$flake"
+    return 0
+  fi
+  sed -i "s|$TEMPLATE_SERVER|${SERVER%/}|g" "$flake" || die "could not write $SERVER into $flake"
 }
 
 # The picker, the launcher and every game already here, built from the
@@ -373,12 +392,21 @@ add_to_steam() {
 
 main() {
   local arg
-  for arg in "$@"; do
+  while (($#)); do
+    arg="$1"
+    shift
     case "$arg" in
       --dry-run | -n) DRY_RUN=1 ;;
+      --server)
+        [[ $# -gt 0 ]] || die "--server wants a url"
+        SERVER="$1"
+        shift
+        ;;
+      --server=*) SERVER="${arg#--server=}" ;;
       -h | --help)
-        say "usage: install.sh [--dry-run]"
-        say "  --dry-run   print what would change, change nothing"
+        say "usage: install.sh [--dry-run] [--server <url>]"
+        say "  --dry-run       print what would change, change nothing"
+        say "  --server <url>  the GOTG server the library is of (default $TEMPLATE_SERVER; also GOTG_SERVER)"
         exit 0
         ;;
       *) die "unknown option: $arg (try --help)" ;;

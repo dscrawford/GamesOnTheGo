@@ -31,6 +31,8 @@ Steam Deck (Desktop Mode, Konsole) or any Linux without Nix:
 curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install.sh | bash
 ```
 
+`bash -s -- --server https://games.example.org` for a server other than `gotg.dcraw.net`.
+
 Nothing goes in a profile. Games are played from a **library**: a small flake
 that names your server and pins its catalog, each game one of its outputs
 ([docs/nix-games.md](docs/nix-games.md)). The installer makes one in
