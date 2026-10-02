@@ -1,7 +1,15 @@
 # Games as Nix outputs
 
-Status: in progress on `feat/nix-games` -- phases 0 to 4 done. `gotg play`
-keeps working until the last phase retires it.
+Status: in progress on `feat/nix-games` -- phases 0 to 5 done; 6, retiring
+the old path, waits on a real Deck. `gotg play` with no library configured is
+what it always was.
+
+Verified, against a local copy of the service on 127.0.0.1 (nothing reached
+the real server): a library flake fetched the catalog through a netrc and
+updated its pin with `nix flake update catalog`; DK64, Melee and Four Swords
+Adventures 2p (its split-screen sway) ran from their outputs' specs under
+`gotg qa --spec` and passed. Pretending to be a Deck on this NVIDIA desktop
+fails as it does on master: nixpkgs' mesa drives no NVIDIA card.
 
 ## What it is
 
@@ -104,7 +112,7 @@ choosing one the lock does not have yet updates the `catalog` input first.
 | 2 | `gotg launch --spec`: the play path from a JSON spec, minus environment building; `gotg play` shares it (`play_launch`) | bats moved over; QA through `gotg play` |
 | 3 | per-game outputs from `mkLibrary`, variants, unique-id aliases, laziness | an eval check that one game forces no other; dry runs; QA through an attribute |
 | 4 | the library flake template, registry, netrc for the catalog | a second library against the test service |
-| 5 | picker, Steam, QA and `#update` on per-game roots | picker tests; Steam bats; controller e2e; QA desktop and `--machine deck`; the Deck |
+| 5 | `gotg qa --spec`; `gotg play` through a configured library (so the picker and Steam), per-game roots, `gotg update` | picker tests; Steam bats; controller e2e; QA desktop and `--machine deck`; the Deck |
 | 6 | retire `play`, `install`, `sync`, `refresh` and the bash resolver; installer installs Nix and the registry entry | all checks; a fresh Deck from nothing |
 
 ## Watch
