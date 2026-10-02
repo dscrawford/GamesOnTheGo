@@ -32,7 +32,8 @@ right to copy.
 Steam Deck (Desktop Mode, Konsole) or any Linux:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install.sh | bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawford/GamesOnTheGo/master/install.sh \
+  | bash -s -- --server https://gotg.example.org --claim <invite url>
 ```
 
 What it does, step by step (`bash -s -- --dry-run` prints this and changes nothing):
@@ -41,10 +42,10 @@ What it does, step by step (`bash -s -- --dry-run` prints this and changes nothi
   GOTG — installing onto this machine
 ==> Nix is here (already done)
 ==> flakes are on (already done)
-==> making a library in /home/you/.config/gotg/library, of https://gotg.dcraw.net
+==> making a library in /home/you/.config/gotg/library, of https://gotg.example.org
    would run: nix flake new /home/you/.config/gotg/library -t github:dscrawford/GamesOnTheGo#library
-==> signing in to https://gotg.dcraw.net (the token, from whoever runs it)
-   would run: nix run github:dscrawford/GamesOnTheGo#login -- --server https://gotg.dcraw.net
+==> signing in with the invite link
+   would run: nix run github:dscrawford/GamesOnTheGo#login -- --claim <invite url>
 ==> building the picker, and any game already here, from /home/you/.config/gotg/library
    would run: nix run /home/you/.config/gotg/library#update
    would run: /home/you/.local/state/gotg/app/bin/gotg library /home/you/.config/gotg/library
@@ -57,9 +58,9 @@ Dry run done. Nothing was changed.
 
 Nothing goes in a Nix profile. The **library** is the install: a flake in
 `~/.config/gotg/library` naming your server and pinning its catalog, each game
-an output of it ([docs/nix-games.md](docs/nix-games.md)). `--server
-https://games.example.org` makes it a library of another server;
-`--claim <url>` signs in with an invite link. With Nix already here, the
+an output of it ([docs/nix-games.md](docs/nix-games.md)). `--server` names
+the GOTG server it is a library of; `--claim <url>` signs in with an invite
+link from its admin, or without one the token is asked for. With Nix already here, the
 whole of it by hand:
 
 ```bash
@@ -78,7 +79,7 @@ More: [docs/install.md](docs/install.md).
 With a token and nothing else -- no library, no install -- one line:
 
 ```bash
-GOTG_TOKEN=… nix run github:dscrawford/GamesOnTheGo#play -- n64.usa.donkey_kong_64
+GOTG_SERVER=https://gotg.example.org GOTG_TOKEN=… nix run github:dscrawford/GamesOnTheGo#play -- n64.usa.donkey_kong_64
 ```
 
 It makes the library in `~/.config/gotg` from the token (which it keeps, so
@@ -296,17 +297,19 @@ $ gotg admin scan
 1 added, 1 missing since 2026-08-14T09:11:02Z — 2431 in the catalog
 ```
 
-Administration is on the tailnet only: `http://100.64.0.1:30781/admin/`
-in a browser is a page to invite someone (it hands you the claim link and the
-command they run), see every token and when it was last used, and revoke one.
-The public url answers `/admin` with a 404 saying so; the service splits it
-off with `GOTG_ADMIN_PORT` (and `GOTG_ADMIN_URL`, `GOTG_PUBLIC_URL`).
+Administration can live on a listener of its own, kept off the public
+internet: set `GOTG_ADMIN_PORT` (with `GOTG_ADMIN_URL`, where it is reached,
+and `GOTG_PUBLIC_URL`, where claim links point) and expose that port only on
+a private network. The public listener then answers `/admin` with a 404 that
+says where it went. In a browser, `<admin url>/admin/` is a page to invite
+someone (it hands you the claim link and the command they run), see every
+token and when it was last used, and revoke one.
 
 From a terminal, the same, with `admin_url` in `~/.config/gotg/api.json` or
 `GOTG_ADMIN_URL`: `invite <name>` prints a claim url for one person and device
 (`nix run gotg#login -- --claim <url>` redeems it); `tokens`, `revoke <name>`;
 `import [--follow] [--match <re>]` runs the indexer now; `art warm|status|search|set`;
-`scan` is the library pod's, `GOTG_ADMIN_URL=http://100.64.0.1:30782`.
+`scan` asks whichever deployment holds the catalog.
 `nix run github:dscrawford/GamesOnTheGo#admin`.
 
 ## home-manager

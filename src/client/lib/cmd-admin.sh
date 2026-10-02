@@ -64,9 +64,9 @@ usage: gotg admin <command> [args]
 The admin token comes from GOTG_ADMIN_TOKEN:
   export GOTG_ADMIN_TOKEN="$(kubectl get secret gotg-api -o jsonpath='{.data.admin-token}' | base64 -d)"
 
-Administration is on the tailnet, not the public url: GOTG_ADMIN_URL, or
-`admin_url` in api.json, names it (gotg.dcraw.net's is http://100.64.0.1:30781).
-The same address in a browser is a page that does all of the above.
+A service can keep administration on a listener of its own, off the public
+url: GOTG_ADMIN_URL, or `admin_url` in api.json, names it. The same address
+in a browser is a page that does all of the above.
 EOF
 }
 
