@@ -341,12 +341,14 @@ name-CRC, because SDL renames clones) and `keys.py`.
   line: pads opened and whether they are clones, every press and its
   verdict, danstick events and commands, keyboard nodes held). Two real bugs
   were found that way in one evening; neither reproduced with fake pads.
-- The Deck answers `ssh deck@192.168.0.80` from here with no password (it
-  also has a tailnet name, `steamdeck`/100.80.53.67). Nothing of GOTG's is
-  installed on it -- no `gotg`, no `danstick` -- so an on-device check means
-  copying the modules over and running them against its real `/proc` and
-  `/sys`, which is how `tests/ui/fixtures/input-devices-steam-deck.txt` and
-  the `hidraw-steam-deck/` tree were captured.
+- The Deck answers `ssh -i ~/.ssh/deck_debug deck@192.168.0.80` from here
+  (no password; the default key is refused; tailnet 100.80.53.67). It runs
+  Nix as a daemon install -- `nix` is `/nix/var/nix/profiles/default/bin/nix`,
+  not on a non-interactive PATH -- with `gotg`, `gotg-ui` and `gotg-seat` in
+  its profile from `github:dscrawford/GamesOnTheGo`. Anything long goes in a
+  `systemd-run --user` unit: a job backgrounded in an ssh session dies with it.
+  `tests/ui/fixtures/input-devices-steam-deck.txt` and the `hidraw-steam-deck/`
+  tree were captured against its real `/proc` and `/sys`.
 - **A Deck calls itself a Steam Controller.** Its built-in controls report
   `Vendor=28de Product=1205` under the name `Valve Software Steam
   Controller`, character for character what a Puck reports, so no name rule
