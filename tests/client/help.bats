@@ -36,7 +36,7 @@ setup() { setup_env; }
   gotg help
   [ "$status" -eq 0 ]
   [[ "$output" == *"the launcher"* ]]
-  [[ "$output" == *"nix run <library>#ui"* ]]
+  [[ "$output" == *"nix run gotg#ui"* ]]
   [[ "$output" != *"  list "* ]]
 }
 

@@ -39,14 +39,15 @@ Make a library, and edit its `server` and catalog url to yours:
 
 ```bash
 nix flake new ~/.config/gotg/library -t github:dscrawford/GamesOnTheGo#library
-nix run ~/.config/gotg/library#login     # the token; written to ~/.config/gotg and a netrc for Nix
-nix run ~/.config/gotg/library#ui        # the picker, straight from it
+nix registry add gotg ~/.config/gotg/library   # so it is gotg#… from anywhere (the installer does this)
+nix run gotg#login                             # the token; written to ~/.config/gotg and a netrc for Nix
+nix run gotg#ui                                # the picker, straight from it
 ```
 
-Upgrade later, in the library:
+Upgrade later:
 
 ```bash
-nix flake update gotg && nix run .#update
+nix flake update gotg --flake ~/.config/gotg/library && nix run gotg#update
 ```
 
 Steam needs a built copy to start, which `#update` keeps under
@@ -64,13 +65,13 @@ programs.gotg = {
 };
 ```
 
-The token stays `nix run <library>#login`'s: an option would copy it into
+The token stays `nix run gotg#login`'s: an option would copy it into
 the world-readable store.
 
 Two things the installer would have done, which you do once by hand:
 
 ```bash
-nix run ~/.config/gotg/library#steam -- picker
+nix run gotg#steam -- picker
 ```
 
 ```bash
@@ -108,7 +109,7 @@ mean vendoring a prebuilt runtime blob into a flake whose entire point is that
 nothing is prebuilt or unpinned.
 
 What actually helps on a Deck is the Steam shortcut, and that is what the
-installer writes: `nix run <library>#steam -- picker`.
+installer writes: `nix run gotg#steam -- picker`.
 
 ## What the installer does
 
@@ -127,7 +128,7 @@ Another server than the default: `bash -s -- --server https://games.example.org`
 | install Nix | SteamOS 3.5+ ships `/nix` already, bind-mounted to the home partition and kept across updates; the installer just takes ownership and runs the single-user install. Elsewhere it uses the official multi-user installer. |
 | turn on flakes | GOTG is a flake and they are still behind a flag |
 | a library | `nix flake new ~/.config/gotg/library -t github:dscrawford/GamesOnTheGo#library`, of `https://gotg.dcraw.net` unless `--server <url>` (or `GOTG_SERVER`) says another; or the one here followed to the newest `gotg` |
-| `nix run <library>#update` | builds the launcher, the picker and every game already built here into `~/.local/state/gotg`, where Steam starts them; then tells gotg where the library is |
+| `nix run <library>#update` | builds the launcher, the picker and every game already built here into `~/.local/state/gotg`, where Steam starts them; then tells gotg where the library is, which also names it `gotg` in your flake registry: `nix run gotg#ui` |
 | leave the profile | `gotg` and `gotg-ui` from an older install are taken out of the Nix profile, where they would shadow the library's copies |
 | a udev rule | danstick publishes each controller as a new device through `/dev/uinput`, and cannot open it without permission. The rule tags it `uaccess`, which gives it to whoever is logged in at the seat. |
 | a Steam shortcut | so Game Mode can launch the picker ([the gotchas](steam.md)). Steam only takes a new entry while closed, so with Steam open the installer asks, closes it, adds GOTG, and starts it again; declined, the entry is queued and `~/.local/state/gotg/app/bin/gotg steam picker` with Steam closed applies it |

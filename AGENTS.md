@@ -25,13 +25,15 @@ a launch from Steam or a bare terminal runs. Keep it current:
 
 ```bash
 git push && nix flake update gotg --flake "$(gotg library)"   # the library follows origin
-nix run "$(gotg library)#update"                               # and the copies Steam launches
+nix run gotg#update                                            # and the copies Steam launches
 ```
 
 Nothing of GOTG is in a profile. Games are played from a **library**
 (`docs/nix-games.md`): a flake made from `templates/library` that pins this
 repository and the server's catalog, one output per game, and the apps a
 person runs -- `#ui`, `#steam`, `#update`, `#login` -- each knowing the library.
+`gotg library <dir>` also names it `gotg` in the user's flake registry, which
+is why everything is `nix run gotg#…` and `nix search gotg …`.
 `gotg` is the launcher inside every game output and behind the picker, never
 on PATH outside the dev shell; the picker's `gotg play`/`install` build a
 game's output and keep it as a root under `~/.local/state/gotg/games/`.
@@ -41,7 +43,7 @@ The pin alone is not what Steam runs. Its picker entry starts
 both made by `#update`, both left where they were by `nix flake update`. A
 Deck upgraded that way kept running the day-old picker, and a fix that had
 shipped looked like one that did not work. On a machine where a full update
-is too long for now, the two roots alone are `nix build <library>#gotg-ui -o
+is too long for now, the two roots alone are `nix build gotg#gotg-ui -o
 ~/.local/state/gotg/picker` and `#gotg -o ~/.local/state/gotg/app`.
 
 ## Build / Run

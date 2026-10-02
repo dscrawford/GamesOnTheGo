@@ -25,6 +25,8 @@ setup() {
       local elements="" name
       for name in ${NIX_HAVE:-}; do elements+="${elements:+,}\"$name\":{}"; done
       printf '{"version":3,"elements":{%s}}\n' "$elements"
+    elif [[ "$*" == "registry list" && -n "${NIX_REGISTRY:-}" ]]; then
+      printf 'user   flake:gotg path:%s\n' "$NIX_REGISTRY"
     fi
   }
   sudo() { printf 'sudo %s\n' "$*" >>"$CALLS"; [[ "$1" != rm ]] || rm -f "${@: -1}"; }
@@ -52,6 +54,15 @@ built_gotg() {
   [ ! -e "$GOTG_STATE_DIR/games" ]
   [ ! -e "$GOTG_LIBRARY_DIR" ]
   [ -d "$GOTG_STATE_DIR/saves" ]
+}
+
+@test "the registry name goes too, and only when it is there" {
+  NIX_REGISTRY="$GOTG_LIBRARY_DIR" run remove_gotg
+  [ "$status" -eq 0 ]
+  grep -qx "nix registry remove gotg" "$CALLS"
+  : >"$CALLS"
+  NIX_REGISTRY="" run remove_gotg
+  ! grep -q "registry remove" "$CALLS"
 }
 
 @test "gotg and gotg-ui from an older install are removed from the profile, and only the ones there" {

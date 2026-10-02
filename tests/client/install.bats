@@ -610,8 +610,9 @@ EOF
   stub_steps
   run main
   [ "$status" -eq 0 ]
-  [[ "$output" == *"nix run $TMP/library#ui"* ]]
-  [[ "$output" == *"nix run $TMP/library#login"* ]]
+  [[ "$output" == *"nix run gotg#ui"* ]]
+  [[ "$output" == *"nix run gotg#login"* ]]
+  [[ "$output" == *"gotg names $TMP/library"* ]]
   [[ "$output" != *"gotg-ui "* ]]
 }
 

@@ -86,16 +86,17 @@ usage() {
   cat <<'EOF'
 gotg is the launcher: what every game built from a library runs, and what
 the picker asks. Nothing here is meant to be typed. From a library made by
-`nix flake new <dir> -t <gotg>#library`:
+`nix flake new <dir> -t <gotg>#library` and named gotg in the flake registry
+(`gotg library <dir>` does that; `nix registry add gotg <dir>` by hand):
 
-  nix search <library> zelda                 what it has
-  nix run <library>#n64.usa.donkey_kong_64   a game
-  nix run <library>#ui                       the picker
-  nix run <library>#steam -- picker          the picker in Steam; `add <id>` a game
-  nix run <library>#update                   rebuild the picker and every game here
-  nix run <library>#login                    the token for its server
+  nix search gotg zelda                  what it has
+  nix run gotg#n64.usa.donkey_kong_64    a game
+  nix run gotg#ui                        the picker
+  nix run gotg#steam -- picker           the picker in Steam; `add <id>` a game
+  nix run gotg#update                    rebuild the picker and every game here
+  nix run gotg#login                     the token for its server
 
-and from gotg itself: nix run <gotg>#{admin,qa,controllers}.
+and from this repository: nix run github:dscrawford/GamesOnTheGo#{admin,qa,controllers}.
 
 usage: gotg <command> [args]
 

@@ -175,6 +175,15 @@ cmd_library() {
   fi
   config_patch "$(jq -nc --arg l "$ref" '{library: $l}')"
   log "games are played from $ref"
+  # And `gotg` in Nix's registry for this user, so it is `nix run gotg#ui`
+  # and `nix search gotg zelda` from anywhere -- a path repeated on every
+  # line was the whole of the interface's length. Best effort: a registry
+  # Nix will not write leaves the long form, which still works.
+  if "$(nix_bin)" registry add gotg "$ref" 2>/dev/null; then
+    log "and \`gotg\` names it: nix run gotg#ui, nix search gotg zelda"
+  else
+    warn "could not add gotg to the flake registry; nix run $ref#ui still works"
+  fi
 }
 
 # Every game with a root rebuilt from the library -- and the client and picker

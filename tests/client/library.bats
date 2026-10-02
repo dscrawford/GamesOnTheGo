@@ -48,6 +48,7 @@ if [[ "$1 $2" == "flake update" ]]; then
   : >"$TEST_TMP/catalog-updated"
   exit 0
 fi
+[[ "$1" != registry ]] || exit 0
 [[ -z "${NIX_OFFLINE:-}" ]] || exit 1
 out="" prev="" installable=""
 for arg in "$@"; do
@@ -142,6 +143,8 @@ SHIM
   [ "$status" -eq 0 ]
   gotg library
   [ "$output" = "$TEST_TMP/mylib" ]
+  # And names it gotg for Nix: the short form of everything.
+  grep -qx "registry add gotg $TEST_TMP/mylib" "$NIX_LOG"
 }
 
 @test "gotg library refuses a directory with no flake in it" {

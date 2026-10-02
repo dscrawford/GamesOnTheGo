@@ -432,9 +432,10 @@ main() {
   fi
   say "${C_OK}Done.${C_OFF}"
   say ""
-  say "  nix run $LIBRARY_DIR#login       sign in: the token for your server"
-  say "  nix run $LIBRARY_DIR#ui          the picker, for a controller and a sofa"
-  say "  nix search $LIBRARY_DIR zelda    what there is; nix run ...#n64.usa.<id> plays one"
+  say "  nix run gotg#login        sign in: the token for your server"
+  say "  nix run gotg#ui           the picker, for a controller and a sofa"
+  say "  nix search gotg zelda     what there is; nix run gotg#n64.usa.<id> plays one"
+  say "  (gotg names $LIBRARY_DIR in your flake registry)"
   say ""
   if is_steamos; then
     say "  Restart Steam to see GOTG in your library. It reads its shortcut file"

@@ -85,6 +85,12 @@ remove_gotg() {
     removed=1
   done
   if command -v nix >/dev/null 2>&1; then
+    # The registry name `gotg library` gave it.
+    if nix registry list 2>/dev/null | grep -qE '^user +flake:gotg '; then
+      step "taking gotg out of the flake registry"
+      change nix registry remove gotg || warn "could not remove gotg from the flake registry; run: nix registry remove gotg"
+      removed=1
+    fi
     mapfile -t have < <(installed)
     if ((${#have[@]})); then
       step "removing ${have[*]} from the Nix profile"

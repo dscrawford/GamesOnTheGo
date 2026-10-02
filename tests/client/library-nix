@@ -15,6 +15,7 @@ if [[ "${1:-} ${2:-}" == "flake update" ]]; then
   exit 0
 fi
 [[ -z "${NIX_OFFLINE:-}" ]] || exit 1
+[[ "${1:-}" != registry ]] || exit 0
 [[ "${1:-}" == build ]] || exit 1
 installable="${2:-}" out="" prev=""
 for arg in "$@"; do
