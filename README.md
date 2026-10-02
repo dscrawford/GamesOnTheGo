@@ -296,9 +296,17 @@ $ gotg admin scan
 1 added, 1 missing since 2026-08-14T09:11:02Z — 2431 in the catalog
 ```
 
-`invite <name>` prints a claim url for one person and device (`nix run
-gotg#login -- --claim <url>` redeems it); `tokens`, `revoke <name>`; `import
-[--follow] [--match <re>]` runs the indexer now; `art warm|status|search|set`.
+Administration is on the tailnet only: `http://100.64.0.1:30781/admin/`
+in a browser is a page to invite someone (it hands you the claim link and the
+command they run), see every token and when it was last used, and revoke one.
+The public url answers `/admin` with a 404 saying so; the service splits it
+off with `GOTG_ADMIN_PORT` (and `GOTG_ADMIN_URL`, `GOTG_PUBLIC_URL`).
+
+From a terminal, the same, with `admin_url` in `~/.config/gotg/api.json` or
+`GOTG_ADMIN_URL`: `invite <name>` prints a claim url for one person and device
+(`nix run gotg#login -- --claim <url>` redeems it); `tokens`, `revoke <name>`;
+`import [--follow] [--match <re>]` runs the indexer now; `art warm|status|search|set`;
+`scan` is the library pod's, `GOTG_ADMIN_URL=http://100.64.0.1:30782`.
 `nix run github:dscrawford/GamesOnTheGo#admin`.
 
 ## home-manager
