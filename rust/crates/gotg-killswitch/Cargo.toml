@@ -19,6 +19,9 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # gamescope's overlay atom, an empty input shape and keeping on top, over
 # a connection of our own to the same X server.
 x11rb = { version = "0.14", features = ["shape"] }
+# The panel's mode under gamescope, which paints its external overlay at
+# output pixels while Steam's X screen may be another size entirely.
+drm = "0.15"
 # The picker's controller drawings, rasterised at whatever size the bar is.
 # No text or system fonts: the drawings have none, and fontdb would scan the
 # machine's fonts at start.

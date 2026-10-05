@@ -16,6 +16,7 @@ pub mod leaders;
 pub mod loading;
 pub mod menu;
 pub mod native;
+pub mod output;
 pub mod overlay;
 pub mod padlink;
 pub mod painter;
