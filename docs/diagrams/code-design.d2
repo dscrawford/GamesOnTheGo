@@ -31,7 +31,7 @@ client: "src/client — bash CLI + nix recipes" {
   direction: right
   cmds: "lib/cmd-*.sh\nplay · install · steam\nsaves · admin · complete"
   envs: "env/*.nix recipes\nemulator + args template\n{target} {state} {fullscreen}"
-  variants: "env/games/ variants\nrogue (decomp build)\nrecut (Wine) · BIOS wiring"
+  variants: "env/games/ variants\nrogue (decomp build)\npaperboat (port) · BIOS wiring"
 
   cmds -> envs: "nix build, then exec"
   variants -> envs: "extend base.args"

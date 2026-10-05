@@ -1,7 +1,7 @@
 # Donkey Kong 64 — Rekongpiled, the N64Recomp/RT64 static recompilation, in
 # place of ares: RT64 rendering, framerate decoupled from game speed, and a mod
-# runtime. The same family as the Paper Mario ReCut beside it, and the easier
-# one — upstream ships a native Linux build, so there is no Wine prefix, just
+# runtime. The same family as Paper Mario ReCut (since replaced by PaperBoat), and
+# the easier one — upstream ships a native Linux build, so there is no Wine prefix, just
 # the binary patched onto nixpkgs' libraries in pkgs/dk64recomp.
 #
 # Two things about this port shape the file:
@@ -13,8 +13,8 @@
 #     writing into the player's real home. Redirecting HOME is what actually
 #     isolates it, and everything below is relative to that.
 #
-#   * **The ROM goes through the launcher's picker, once.** Unlike the ReCut,
-#     which documents a path to drop the ROM at, this one stores the ROM
+#   * **The ROM goes through the launcher's picker, once.** Unlike ReCut,
+#     which documented a path to drop the ROM at, this one stores the ROM
 #     itself after you choose it ("check_all_stored_roms" in the binary) and
 #     the FAQ answers "how do I choose a different ROM?" with "you don't".
 #     So the recipe below leaves a bare .z64 in the games directory and the

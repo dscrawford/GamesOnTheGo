@@ -381,6 +381,9 @@
           # Super Smash Bros. (N64) — the libultraship port, not a recomp.
           battleship = pkgs.callPackage ./pkgs/battleship { SDL2 = sdl3s.sdl2; };
 
+          # Paper Mario — PaperBoat, Harbour Masters' libultraship port.
+          paperboat = pkgs.callPackage ./pkgs/paperboat { SDL2 = sdl3s.sdl2; };
+
           # Snowboard Kids 2: Recompiled — the same N64Recomp/RT64 stack as
           # dk64recomp above, and likewise not in nixpkgs.
           snowboardkids2recomp = pkgs.callPackage ./pkgs/snowboardkids2recomp { SDL2 = sdl3s.sdl2; };

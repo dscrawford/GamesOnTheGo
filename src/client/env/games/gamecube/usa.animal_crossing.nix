@@ -3,8 +3,8 @@
 # translation layer putting the GameCube's GX calls onto OpenGL 3.3. Not
 # Dolphin, and not a recompilation either.
 #
-# Like Paper Mario ReCut next door it is **published for Windows only**, so
-# this runs it under Wine. Unlike ReCut it is a 32-bit build — checked, not
+# Like Paper Mario ReCut, which Paper Mario ran on before PaperBoat, it is
+# **published for Windows only**, so this runs it under Wine. Unlike ReCut it is a 32-bit build — checked, not
 # assumed: both PE files in the release are "PE32 ... Intel i386". That
 # decides the Wine attribute. winePackages.stagingFull is a pure i386 build
 # and is in the binary cache; wineWowPackages is not cached and would compile
@@ -114,7 +114,7 @@ in
     if [ ! -f "$app/AnimalCrossing.exe" ]; then
       echo "first run: unpacking the Animal Crossing PC port ${version}" >&2
       # Unpacked over rather than replaced. The obvious `rm -rf "$app"` first
-      # is what ReCut does and it is wrong here, because rom/ lives inside
+      # is what ReCut did and it is wrong here, because rom/ lives inside
       # this directory: a QA run that had been handed a converted disc threw
       # it away and spent itself converting another one.
       mkdir -p "$app"

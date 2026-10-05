@@ -69,11 +69,14 @@ qa_seed_bootstrap() {
   local attr="$1" scratch="$2" real o2r dest derived
   real="$GOTG_STATE_DIR/env/$attr"
   [[ -d "$real" ]] || return 0
+  # The version stamp travels with the archive: the ports' preLaunch removes
+  # any archive whose stamp is missing, so an archive copied without it would
+  # be deleted before the game started, and the run would sit at the wizard.
   while IFS= read -r -d '' o2r; do
     dest="$scratch/$attr/${o2r#"$real"/}"
     mkdir -p "$(dirname "$dest")"
     cp -f "$o2r" "$dest"
-  done < <(find "$real" -name '*.o2r' -print0 2>/dev/null)
+  done < <(find "$real" \( -name '*.o2r' -o -name .gotg-archive-version \) -print0 2>/dev/null)
 
   # The same idea for the ports that make a directory rather than one
   # archive, and for the same reason: Pikmin's assets are 642MB and take

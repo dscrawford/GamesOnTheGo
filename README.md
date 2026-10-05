@@ -197,8 +197,8 @@ gotg controllers apply [<id>|--all]  # write bindings without launching
 $ nix run gotg#steam -- list
 Legend Of Zelda - Majora's Mask
   /home/you/Games/n64/play-usa.legend_of_zelda_majoras_mask.sh
-Paper Mario (recut)
-  /home/you/Games/n64/play-usa.paper_mario-recut.sh
+Paper Mario (paperboat)
+  /home/you/Games/n64/play-usa.paper_mario-paperboat.sh
 Games On The Go
   /home/you/.local/state/gotg/launchers/gotg-ui.sh
 ```
@@ -224,7 +224,7 @@ env-n64-usa_legend_of_zelda_ocarina_of_time_rev2-rando
 | `n64.usa.super_mario_64` | `pc`, `pc-2p`, `pc-3p`, `pc-4p` (sm64coopdx, split-screen) |
 | `n64.usa.legend_of_zelda_majoras_mask` | `rando` |
 | `n64.usa.legend_of_zelda_ocarina_of_time_rev2` | `rando`, `2p`, `3p`, `4p` (Anchor co-op, split-screen) |
-| `n64.usa.paper_mario` | `recut` |
+| `n64.usa.paper_mario` | `paperboat` |
 | `gba.world.pokemon_emerald_version` | `rogue` |
 | `switch.world.legend_of_zelda_breath_of_the_wild` | `60fps`, `120fps` (needs 1.6.0) |
 | `switch.world.legend_of_zelda_tears_of_the_kingdom` | `60fps`, `120fps`, `enhanced` (needs 1.1.0–1.4.2) |
@@ -241,7 +241,7 @@ One whose version range matches nothing installed is hidden from the picker.
 Native ports, not emulated: Ocarina of Time and Master Quest (Ship of
 Harkinian), Majora's Mask (2 Ship 2 Harkinian), Donkey Kong 64 (recomp),
 Snowboard Kids 2 (recomp), Super Smash Bros. (BattleShip), Pikmin (Open
-Nectar), Super Mario 64 `pc` (sm64coopdx), Paper Mario `recut` (Wine), Animal
+Nectar), Super Mario 64 `pc` (sm64coopdx), Paper Mario `paperboat` (PaperBoat), Animal
 Crossing (ACGC PC Port, Wine), Super Smash Bros. Melee (melee-pc). Each has
 an `.emulate` attribute that puts it back on the emulator: a port is younger
 than what it replaces, and that is how you find out which of the two has the
