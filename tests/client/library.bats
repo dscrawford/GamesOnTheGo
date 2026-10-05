@@ -44,6 +44,7 @@ library_nix() {
   cat >"$GOTG_NIX" <<'SHIM'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$NIX_LOG"
+printf '%s\n' "${NIX_CONFIG:-}" >>"$TEST_TMP/nix-config.log"
 if [[ "$1 $2" == "flake update" ]]; then
   : >"$TEST_TMP/catalog-updated"
   exit 0
@@ -59,6 +60,10 @@ done
 [[ -n "$out" ]] || exit 1
 if [[ -n "${LIBRARY_LACKS:-}" && "$installable" == *"#$LIBRARY_LACKS" && ! -e "$TEST_TMP/catalog-updated" ]]; then
   echo "error: flake does not provide attribute '$LIBRARY_LACKS'" >&2
+  exit 1
+fi
+if [[ -n "${LIBRARY_STALE:-}" && ! -e "$TEST_TMP/catalog-updated" ]]; then
+  echo "error: mismatch in field 'narHash' of input '{\"type\":\"file\",\"url\":\"https://gotg.example/catalog\"}'" >&2
   exit 1
 fi
 rm -rf "$out"; mkdir -p "$out/bin"
@@ -77,6 +82,35 @@ SHIM
   [ -x "$(GAMES)/n64.usa.zelda/bin/gotg-game" ]
 }
 
+# The catalog is a private flake input, fetched with the token login keeps
+# in a netrc. A nix.conf that is not the user's to write (Home Manager's, in
+# the store) never named it, and a build died on the catalog's 401: so every
+# nix this runs is handed the netrc, unless Nix has one of its own.
+@test "a build is handed the netrc login keeps" {
+  export GOTG_SYSTEM_NETRC="$TEST_TMP/no-system-netrc"
+  printf 'machine 127.0.0.1 login gotg password tok\n' >"$GOTG_CONFIG_DIR/netrc"
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  grep -qx "netrc-file = $GOTG_CONFIG_DIR/netrc" "$TEST_TMP/nix-config.log"
+}
+
+@test "a netrc Nix already reads is not hidden behind ours" {
+  export GOTG_SYSTEM_NETRC="$TEST_TMP/system-netrc"
+  : >"$GOTG_SYSTEM_NETRC"
+  printf 'machine 127.0.0.1 login gotg password tok\n' >"$GOTG_CONFIG_DIR/netrc"
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  ! grep -q "netrc-file" "$TEST_TMP/nix-config.log"
+}
+
+@test "no netrc, nothing handed" {
+  export GOTG_SYSTEM_NETRC="$TEST_TMP/no-system-netrc"
+  rm -f "$GOTG_CONFIG_DIR/netrc"
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  ! grep -q "netrc-file" "$TEST_TMP/nix-config.log"
+}
+
 @test "a variant is an attribute of its game" {
   printf '{}' >"$GOTG_ENV_DIR/n64.nix"
   mkdir -p "$GOTG_ENV_DIR/games/n64"
@@ -91,6 +125,17 @@ SHIM
   gotg play usa.zelda
   [ "$status" -eq 0 ]
   grep -qx "flake update catalog --flake $GOTG_LIBRARY" "$NIX_LOG"
+  [[ "$output" == *"n64.usa.zelda ran with:"* ]]
+}
+
+# The lock pins the catalog by hash. Once that file has left the store, Nix
+# fetches the url again, the server has moved on, and the hash is not the
+# lock's: the same answer as a game the pin lacks -- move the pin, once.
+@test "a catalog the server has moved past updates the pin, once, and runs" {
+  export LIBRARY_STALE=1 TEST_TMP
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [ "$(grep -cx "flake update catalog --flake $GOTG_LIBRARY" "$NIX_LOG")" = 1 ]
   [[ "$output" == *"n64.usa.zelda ran with:"* ]]
 }
 

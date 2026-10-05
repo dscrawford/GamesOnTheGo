@@ -61,15 +61,17 @@ library_attr() {
 
 # Build one game into its root. A game the library's pinned catalog does not
 # have yet -- added on the website since the lock -- updates the pin once and
-# is tried again.
+# is tried again. So does a pin the server has moved past: the lock names the
+# catalog by hash, and once that file has left the store Nix fetches the url
+# again, gets today's, and refuses it as a narHash mismatch.
 library_build() {
   local library="$1" attr="$2" root err rc=0
   root="$(library_games_dir)/$attr"
   mkdir -p "$(library_games_dir)"
   err="$(mktemp)"
   (library_build_once "$library" "$attr" "$root") 2>"$err" || rc=$?
-  if ((rc != 0)) && grep -q "does not provide attribute" "$err"; then
-    log "$attr is newer than the library's catalog; updating it"
+  if ((rc != 0)) && grep -q "does not provide attribute\|mismatch in field 'narHash'" "$err"; then
+    log "$attr is newer than the library's catalog, or the catalog has moved on; updating it"
     "$(nix_bin)" flake update catalog --flake "$library" >&2 || true
     rc=0
     (library_build_once "$library" "$attr" "$root") 2>"$err" || rc=$?

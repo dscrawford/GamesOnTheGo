@@ -170,6 +170,31 @@ login_netrc() {
   log "Nix will fetch the catalog with $netrc (netrc-file, in $conf)"
 }
 
+# Whether Nix already reads a netrc of its own: one this user's nix.conf
+# names, or the system's.
+nix_reads_a_netrc() {
+  local conf="${XDG_CONFIG_HOME:-$HOME/.config}/nix/nix.conf"
+  if [[ -f "$conf" ]] && grep -qE '^[[:space:]]*netrc-file[[:space:]]*=' "$conf"; then
+    return 0
+  fi
+  [[ -e "${GOTG_SYSTEM_NETRC:-/etc/nix/netrc}" ]]
+}
+
+# Every nix this client runs is handed the netrc login keeps, through
+# NIX_CONFIG. Writing nix.conf at login was the only way it ever reached Nix,
+# and a nix.conf Home Manager generates cannot be written: the library's
+# build then died on the catalog's 401 with the token sitting beside it.
+# Not where Nix has a netrc of its own, whose other credentials ours would
+# hide; login says there what to add to it.
+nix_hand_netrc() {
+  local netrc="$GOTG_CONFIG_DIR/netrc"
+  [[ -s "$netrc" ]] || return 0
+  [[ "${NIX_CONFIG:-}" != *netrc-file* ]] || return 0
+  nix_reads_a_netrc && return 0
+  export NIX_CONFIG="netrc-file = $netrc${NIX_CONFIG:+
+$NIX_CONFIG}"
+}
+
 cmd_login() {
   local url token name="" server=""
   # `nix run <library>#login`: the library knows its server, so the one

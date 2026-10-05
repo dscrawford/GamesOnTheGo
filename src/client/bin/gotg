@@ -160,6 +160,8 @@ main() {
   [[ $# -gt 0 ]] && shift || true
   # Before anything names a path: the games directory may be configured.
   storage_init
+  # Before any nix: the library's catalog is fetched with the token.
+  nix_hand_netrc
 
   # Every leaf command answers -h/--help. The group commands handle their own.
   case "$cmd" in
