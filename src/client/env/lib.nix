@@ -76,6 +76,12 @@
   # an env-snes shared by every SNES title.
   saves ? [ ],
   saveExcludes ? [ ],
+  # Files the game makes from its ROM -- an extracted asset archive -- that
+  # are the same on every machine and cost a person prompts to make. Globs
+  # under {state}, synced as a set of their own (<name>-derived) so that a
+  # second machine skips making them and the saves stay small. See the
+  # client's env.sh.
+  derived ? [ ],
   # Where this emulator kept its saves before it was told to write them under
   # {state}. Read by `gotg saves adopt`, which copies them forward.
   legacyPaths ? [ ],
@@ -495,6 +501,20 @@ pkgs.runCommand "gotg-env-${name}"
     mkdir -p $out/bin $out/share/gotg
     ln -s ${app}/bin/gotg-play $out/bin/gotg-play
     cp ${pkgs.writeText "saves.json" (builtins.toJSON manifest)} $out/share/gotg/saves.json
+    ${lib.optionalString (derived != [ ]) ''
+      cp ${
+        pkgs.writeText "derived.json" (
+          builtins.toJSON {
+            version = 1;
+            name = "${name}-derived";
+            saves = derived;
+            excludes = [ ];
+            legacy = [ ];
+            saveStates = false;
+          }
+        )
+      } $out/share/gotg/derived.json
+    ''}
     # The mesa gotg-play points at on a machine without GL of its own, named
     # rather than depended on: the client fetches it there (foreign-gl.nix).
     echo ${foreignGlParts.path} >$out/share/gotg/foreign-gl

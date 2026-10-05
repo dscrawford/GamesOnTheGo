@@ -177,16 +177,27 @@ env_is_built() { [[ -x "$(env_bin "$1")" ]]; }
 # The writable directory an environment keeps its settings and saves in. The
 # generated wrapper computes the same path and prefers GOTG_ENV_STATE, which
 # cmd_play exports from here, so the two cannot drift apart.
+# A game's files made from its ROM -- PaperBoat's pm64.o2r, behind a set of
+# prompts -- are the same on every machine, so they travel too, as a save set
+# of their own named <attr>-derived: in the saves, every generation would
+# carry 40 MB again. Same state directory, a second manifest (`derived` in
+# the environment). No environment name ends so; lib.nix makes the names.
+DERIVED_SUFFIX=-derived
+
 env_state_dir() {
   validate_attr "$1"
-  printf '%s/%s' "${GOTG_ENV_STATE_DIR:-$GOTG_STATE_DIR/env}" "$1"
+  printf '%s/%s' "${GOTG_ENV_STATE_DIR:-$GOTG_STATE_DIR/env}" "${1%"$DERIVED_SUFFIX"}"
 }
 
 # What an environment says is worth backing up, emitted by its derivation and
 # read straight from the GC root — a file read, not a nix evaluation.
 env_saves_manifest() {
   validate_attr "$1"
-  printf '%s/share/gotg/saves.json' "$(env_root "$1")"
+  if [[ "$1" == *"$DERIVED_SUFFIX" ]]; then
+    printf '%s/share/gotg/derived.json' "$(env_root "${1%"$DERIVED_SUFFIX"}")"
+  else
+    printf '%s/share/gotg/saves.json' "$(env_root "$1")"
+  fi
 }
 
 # Which ares console this environment's bindings belong to, if any. Absent for

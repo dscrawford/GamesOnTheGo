@@ -19,12 +19,14 @@
 #     as it is. So the zip stays a zip and the first launch takes the .z64
 #     out of it, as ReCut did.
 #
-#   * **The first launch asks twice.** It extracts pm64.o2r with its own
-#     wizard: "No O2R files found. Generate one now?" and then "ROMs found
-#     ... Generate the game files from them?" -- Yes to both, then it plays.
-#     A ROM on the command line does not skip either (read from
+#   * **The first launch anywhere asks twice.** It extracts pm64.o2r with
+#     its own wizard: "No O2R files found. Generate one now?" and then "ROMs
+#     found ... Generate the game files from them?" -- Yes to both, then it
+#     plays. A ROM on the command line does not skip either (read from
 #     src/port/Engine.cpp), so the ROM is staged where the wizard scans, the
-#     same way harkinianPort does it, and no launch after that asks again.
+#     same way harkinianPort does it. The archive is then `derived`: pushed
+#     with the saves, pulled by every other machine before it launches, so
+#     only the first machine ever sees the wizard.
 {
   pkgs,
   gotgPkgs,
@@ -77,9 +79,17 @@ in
     fi
   '';
 
-  # JSON saves, one per slot plus globals, and the settings beside them.
-  # The archive is rebuilt from the ROM by the first launch anywhere, and the
-  # staged ROM is refetchable, so neither travels.
+  # The archive and its stamp travel on their own, once per PaperBoat
+  # version: a second machine pulls them before this preLaunch looks, and
+  # never sees the wizard.
+  derived = [
+    "boat/${archive}"
+    "boat/.gotg-archive-version"
+  ];
+
+  # JSON saves, one per slot plus globals, and the settings beside them --
+  # not the archive, which would ride along 40 MB in every generation, nor
+  # the staged ROM, which is refetchable.
   saves = [
     "boat/saves/**"
     "boat/paperboat.cfg.json"

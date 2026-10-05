@@ -95,3 +95,6 @@ is worth nothing — break it once to see it bite before trusting it.
   actually writes before believing either.
 - **Saves are declared, not discovered.** `saves`/`saveExcludes` globs travel
   between machines; anything derived from the ROM does not belong in them.
+  What the ROM makes behind a prompt (PaperBoat's `pm64.o2r`) goes in
+  `derived` instead: its own set, `<attr>-derived`, pushed once per change
+  and pulled by a machine that has none, so only the first one is asked.

@@ -246,7 +246,19 @@ saves_cmd_push() {
   local attr
   for attr in "${attrs[@]}"; do
     saves_push_one "$attr" "$force"
+    saves_push_derived "$attr"
   done
+}
+
+# The made files beside a push, never at its cost: a set the service refuses
+# -- a second machine that made its own before it synced -- is said, and the
+# saves that went up stay up. Not forced: whichever copy got there first is
+# as good as this one.
+saves_push_derived() {
+  local derived="$1$DERIVED_SUFFIX"
+  [[ -f "$(env_saves_manifest "$derived")" ]] || return 0
+  (saves_push_one "$derived" no) ||
+    warn "$derived: not pushed; the saves were"
 }
 
 saves_push_one() {

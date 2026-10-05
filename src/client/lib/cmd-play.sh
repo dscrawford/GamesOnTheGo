@@ -227,6 +227,12 @@ play_prepare() {
     saves_tmp_init
     saves_pull_auto "$attr"
   ) || warn "could not take the latest save for $attr — launching with what is here"
+  # And the files made from the ROM, by the same rule: only onto nothing
+  # newer here, so a machine that never made them skips making them.
+  (
+    saves_tmp_init
+    saves_pull_auto "$attr$DERIVED_SUFFIX"
+  ) || warn "could not take $attr's made files — the game will make its own"
 
   # Point the emulator at whatever controller is actually plugged in, every
   # launch, so a new pad needs no visit to a settings screen. Never fatal: a
