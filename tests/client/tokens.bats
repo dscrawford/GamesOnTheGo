@@ -307,6 +307,23 @@ nix_conf() { printf '%s/nix/nix.conf' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
   [[ "$stderr" == *"/somewhere/else"* ]]
 }
 
+@test "a nix.conf Home Manager owns is left alone, and the setting is said" {
+  # A symlink into the read-only store: appending to it failed the login
+  # after the claim was spent and the token saved.
+  export GOTG_SYSTEM_NETRC="$TEST_TMP/no-system-netrc"
+  mkdir -p "$(dirname "$(nix_conf)")"
+  printf 'experimental-features = nix-command flakes\n' >"$TEST_TMP/hm-nix.conf"
+  chmod 444 "$TEST_TMP/hm-nix.conf"
+  ln -s "$TEST_TMP/hm-nix.conf" "$(nix_conf)"
+  local code
+  code="$(invite_code alice-deck)"
+  gotg login --claim "$GOTG_SERVICE_URL/claim/$code"
+  [ "$status" -eq 0 ]
+  ! grep -q '^netrc-file' "$TEST_TMP/hm-nix.conf"
+  [[ "$stderr" == *"netrc-file = $GOTG_CONFIG_DIR/netrc"* ]]
+  [[ "$stderr" != *"$(jq -r .token "$GOTG_CONFIG_DIR/api.json")"* ]]
+}
+
 @test "login --server takes the url from the library, and asks only for the token" {
   # `nix run <library>#login`: the library knows its server, so the one
   # question left is the token. No terminal, no zenity: the token is read

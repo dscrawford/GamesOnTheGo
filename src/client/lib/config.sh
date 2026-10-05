@@ -157,6 +157,14 @@ login_netrc() {
     warn "  machine $host login gotg password <the token in $netrc>"
     return 0
   fi
+  # A nix.conf that is a symlink is somebody's generated file -- Home
+  # Manager's, into the read-only store -- and appending to it failed the
+  # whole login after the claim was spent. Its source is where this goes.
+  if [[ -L "$conf" || (-e "$conf" && ! -w "$conf") ]]; then
+    warn "$conf is generated (Home Manager?). For a library flake's catalog, add to its nix settings:"
+    warn "  netrc-file = $netrc"
+    return 0
+  fi
   mkdir -p "$(dirname "$conf")"
   printf 'netrc-file = %s\n' "$netrc" >>"$conf"
   log "Nix will fetch the catalog with $netrc (netrc-file, in $conf)"
