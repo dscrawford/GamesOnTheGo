@@ -62,6 +62,10 @@ if [[ -n "${LIBRARY_LACKS:-}" && "$installable" == *"#$LIBRARY_LACKS" && ! -e "$
   echo "error: flake does not provide attribute '$LIBRARY_LACKS'" >&2
   exit 1
 fi
+if [[ -n "${LIBRARY_GONE:-}" && "$installable" == *"#$LIBRARY_GONE" ]]; then
+  echo "error: flake does not provide attribute '$LIBRARY_GONE'" >&2
+  exit 1
+fi
 if [[ -n "${LIBRARY_STALE:-}" && ! -e "$TEST_TMP/catalog-updated" ]]; then
   echo "error: mismatch in field 'narHash' of input '{\"type\":\"file\",\"url\":\"https://gotg.example/catalog\"}'" >&2
   exit 1
@@ -210,6 +214,25 @@ SHIM
   [ "$(grep -c '#n64\.' "$NIX_LOG")" = 1 ]
   grep -qF "build $GOTG_LIBRARY#gotg -o $GOTG_STATE_DIR/app" "$NIX_LOG"
   grep -qF "build $GOTG_LIBRARY#gotg-ui -o $GOTG_STATE_DIR/picker" "$NIX_LOG"
+}
+
+# A variant the library dropped -- Paper Mario's recut, when PaperBoat took
+# its place -- left a root that failed every update after it, for good. Gone
+# is not broken: it is said, with how to let it go, and the update succeeds.
+@test "update says a game the library no longer has is gone, and does not fail on it" {
+  printf '{}' >"$GOTG_ENV_DIR/n64.nix"
+  mkdir -p "$GOTG_ENV_DIR/games/n64"
+  : >"$GOTG_ENV_DIR/games/n64/usa.zelda.rando.nix"
+  gotg play usa.zelda
+  gotg play usa.zelda rando
+  : >"$NIX_LOG"
+  export LIBRARY_GONE=n64.usa.zelda.rando TEST_TMP
+  gotg update
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"n64.usa.zelda.rando is no longer in the library"* ]]
+  [[ "$stderr" == *"rm $(GAMES)/n64.usa.zelda.rando"* ]]
+  [ -e "$(GAMES)/n64.usa.zelda.rando" ]
+  grep -qF "build $GOTG_LIBRARY#n64.usa.zelda -o $(GAMES)/n64.usa.zelda" "$NIX_LOG"
 }
 
 @test "what is built here is what the games' specs name, and what roots/ still holds" {

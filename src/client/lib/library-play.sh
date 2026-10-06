@@ -76,6 +76,13 @@ library_build() {
     rc=0
     (library_build_once "$library" "$attr" "$root") 2>"$err" || rc=$?
   fi
+  # Still missing after the catalog moved: the library no longer has it at
+  # all -- a variant replaced, as PaperBoat replaced Paper Mario's recut.
+  # Gone is not broken, and says so with its own status.
+  if ((rc != 0)) && grep -q "does not provide attribute" "$err"; then
+    rm -f "$err"
+    return 3
+  fi
   ((rc != 0)) || library_stamp "$library" >"$root.by"
   # What nix and the dialog said, whatever came of it: a dialog that could
   # not start is worth knowing about on a build that worked.
@@ -213,8 +220,14 @@ cmd_update() {
     # A root's stamp and an install's spec sit beside it; they are not games.
     [[ "$attr" != *.by && "$attr" != *.spec ]] || continue
     [[ "$attr" =~ ^[a-z0-9][a-z0-9_-]*\.[a-z]{3,5}\.[a-z0-9][a-z0-9_]*(\.[a-z0-9][a-z0-9_-]*)?$ ]] || continue
-    if library_build "$library" "$attr"; then
+    local rc=0
+    library_build "$library" "$attr" || rc=$?
+    if ((rc == 0)); then
       log "$attr: up to date"
+    elif ((rc == 3)); then
+      # Not removed for the person: the last build still runs, saves and
+      # all, and may be the one they wanted.
+      warn "$attr is no longer in the library; its last build still runs. To let it go: rm $root $root.by"
     else
       warn "$attr: could not rebuild; the build already here still runs"
       failed=$((failed + 1))
