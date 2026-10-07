@@ -134,9 +134,11 @@ impl Drawing {
 /// The bar's height on a screen this tall: big enough to read from a sofa,
 /// small enough to leave the game alone. A number rather than worked out
 /// from the surface, because on layer-shell the surface *is* the bar and on
-/// X11 it is the whole screen.
+/// X11 it is the whole screen. A share of the screen with no ceiling: a cap
+/// of 128 px, set for desktop monitors, made it 5.9% of a 4K television
+/// against 8.5% of the Deck's own screen. A floor, for a little window.
 pub fn bar_height(screen_height: i32) -> f32 {
-    (screen_height as f32 * 0.085).clamp(48.0, 128.0).round()
+    (screen_height as f32 * 0.085).max(48.0).round()
 }
 
 /// How far a rebind pulls the bar down: room for a controller's drawing big
@@ -1316,6 +1318,22 @@ pub fn build(scene: &Scene, drawing: &mut Drawing) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_bar_is_the_same_share_of_a_television_as_of_a_deck() {
+        // Capped at 128 px, it was 5.9% of a 4K television against 8.5% of
+        // the Deck's own screen: thin from the sofa, the one place it is read.
+        let share = |height: i32| bar_height(height) / height as f32;
+        assert!(
+            (share(2160) - share(800)).abs() < 0.002,
+            "{} vs {}",
+            share(2160),
+            share(800)
+        );
+        assert_eq!(bar_height(2160), 184.0);
+        // Still never too small to read on a little window.
+        assert_eq!(bar_height(300), 48.0);
+    }
     use crate::pairing::{HOLDS_MAX, JOINED_MAX};
 
     fn near(a: f32, b: f32, tolerance: f32) -> bool {
