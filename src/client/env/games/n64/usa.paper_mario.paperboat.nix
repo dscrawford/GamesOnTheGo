@@ -46,6 +46,10 @@ in
 {
   emulator = port;
   bin = "Paperboat";
+  # A port, not the platform emulator: `gotg play <id> emulate` is the way
+  # back to ares when this one misbehaves, as it is for DK64 and the
+  # Harkinian ports.
+  nativePort = true;
   # A wired Xbox 360 pad, to this port, as ReCut had and this replacement
   # lost. libultraship reads pads through SDL2 and the gamecontrollerdb.txt
   # it ships, and a clone mirroring the Deck's own controls (28de:1205, a
