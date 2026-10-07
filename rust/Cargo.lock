@@ -262,6 +262,7 @@ dependencies = [
 name = "gotg-killswitch"
 version = "0.3.0"
 dependencies = [
+ "bitflags",
  "drm",
  "fontdue",
  "libc",
@@ -272,6 +273,7 @@ dependencies = [
  "wayland-backend",
  "wayland-client",
  "wayland-protocols-wlr",
+ "wayland-scanner",
  "wayland-sys",
  "x11rb",
  "yaml-rust2",

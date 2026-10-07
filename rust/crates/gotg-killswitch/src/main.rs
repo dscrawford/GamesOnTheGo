@@ -81,6 +81,7 @@ const USAGE: &str =
     "usage: gotg-killswitch --pid <pid> [--platform P] [--hold-ms N] [--grace-ms N] [--poll-ms N]
                        [--quiet] [--no-overlay] [--overlay-only]
                        [--saves ENV --client PATH]
+       gotg-killswitch --output    the size the overlay takes under gamescope, and why
 
 Watches every controller SDL can see. When both shoulders (or both
 triggers) and Start are held together for the hold time, the process
@@ -463,6 +464,23 @@ fn main() {
     // The painter: this program again, drawing what it is sent.
     if args.len() == 1 && args[0] == "--paint" {
         std::process::exit(painter::paint());
+    }
+    // What the overlay would size itself to under gamescope, and from what:
+    // for a person at a docked Deck, where nothing else says.
+    if args.len() == 1 && args[0] == "--output" {
+        let active = gotg_killswitch::output::active_connector();
+        let lit = gotg_killswitch::output::lit_connectors();
+        println!(
+            "gamescope drives: {}",
+            active.as_deref().unwrap_or("? (no answer)")
+        );
+        println!("lit connectors:   {lit:?}");
+        let painted = gotg_killswitch::output::painted(active.as_deref(), &lit, (0, 0));
+        println!(
+            "overlay size:     {}x{} (0x0: the X screen's)",
+            painted.0, painted.1
+        );
+        return;
     }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         print!("{USAGE}");

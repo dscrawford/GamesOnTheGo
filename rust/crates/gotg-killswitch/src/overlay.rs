@@ -160,40 +160,23 @@ fn steam_display() -> String {
     found.unwrap_or_else(|| ":0".to_owned())
 }
 
-/// The pid of the gamescope that owns `display`, from the `GAMESCOPE_PID` it
-/// sets on that server's root window.
-fn gamescope_pid(display: &str) -> Option<u32> {
-    let (connection, screen) = RustConnection::connect(Some(display)).ok()?;
-    let root = connection.setup().roots.get(screen)?.root;
-    let atom = connection
-        .intern_atom(true, b"GAMESCOPE_PID")
-        .ok()?
-        .reply()
-        .ok()?
-        .atom;
-    if atom == 0 {
-        return None;
-    }
-    connection
-        .get_property(false, root, atom, AtomEnum::CARDINAL, 0, 1)
-        .ok()?
-        .reply()
-        .ok()?
-        .value32()?
-        .next()
-}
-
 /// Where gamescope's overlay window goes and how big it is: from the top
 /// left, at the size gamescope paints it -- see `output` for why that is
 /// not the X screen's.
-fn gamescope_screen(pid: Option<u32>, x_screen: SDL_Rect) -> SDL_Rect {
-    let drives = pid.is_some_and(output::process_holds_card);
-    let lit = if drives { output::lit_modes() } else { Vec::new() };
+fn gamescope_screen(x_screen: SDL_Rect) -> SDL_Rect {
+    let active = output::active_connector();
+    let lit = if active.is_some() {
+        output::lit_connectors()
+    } else {
+        Vec::new()
+    };
     let x_size = (x_screen.w.max(1) as u32, x_screen.h.max(1) as u32);
-    let (w, h) = output::painted(drives, &lit, x_size);
+    let (w, h) = output::painted(active.as_deref(), &lit, x_size);
     eprintln!(
-        "gotg-killswitch: gamescope paints at {w}x{h} (Steam's X screen {}x{}, lit {lit:?})",
-        x_screen.w, x_screen.h
+        "gotg-killswitch: gamescope paints at {w}x{h} (drives {}, Steam's X screen {}x{}, lit {lit:?})",
+        active.as_deref().unwrap_or("?"),
+        x_screen.w,
+        x_screen.h
     );
     SDL_Rect {
         x: 0,
@@ -505,11 +488,9 @@ impl Overlay {
     pub fn open() -> Result<Self, NoOverlay> {
         let kind = choose();
         let fail = |why: String| NoOverlay { kind, why };
-        let mut gamescope = None;
         if kind == Kind::Gamescope {
             let display = steam_display();
             eprintln!("gotg-killswitch: gamescope overlay on Steam's display {display}");
-            gamescope = gamescope_pid(&display);
             // SAFETY: the painter is one thread, and nothing has read the
             // environment for X11 yet: SDL is not initialised.
             unsafe { std::env::set_var("DISPLAY", display) };
@@ -551,7 +532,7 @@ impl Overlay {
             };
             SDL_GetDisplayBounds(SDL_GetPrimaryDisplay(), &mut screen);
             if kind == Kind::Gamescope {
-                screen = gamescope_screen(gamescope, screen);
+                screen = gamescope_screen(screen);
             }
             overlay.screen_height = screen.h;
             let bar = bar_height(screen.h) as i64;

@@ -4,68 +4,126 @@
 //! `paint_window`): the window's buffer lands on the panel one pixel for one,
 //! from the top-left corner. Steam's X screen, which is where the window
 //! lives, is whatever size Steam last asked for through
-//! `GAMESCOPE_XWAYLAND_MODE_CONTROL`, and on a Deck docked to a television
-//! that stayed the Deck's own. Sized to the X screen, the overlay was a
-//! 1280x800 picture in the top-left corner of a 4K panel: small, and nowhere
-//! near the middle. mangoapp, the slot's other tenant, is sent the output's
-//! size by gamescope over a message queue only it reads, and resizes itself.
+//! `GAMESCOPE_XWAYLAND_MODE_CONTROL`: on a Deck docked to a 4K television it
+//! was 1920x1080. Sized to the X screen, the overlay was a quarter of the
+//! panel in its top-left corner: small, and nowhere near the middle.
 //!
-//! Nothing gamescope publishes to anybody else carries that size -- not its
-//! control protocol, not the wl_output it gives each X server (that is the
-//! nested size again). KMS does: on a Deck gamescope drives the panel itself,
-//! and the mode on its CRTC is the output's. Read once per painter, which is
-//! once each time the bar comes down: a handful of ioctls in the painter's
-//! process, nowhere near the kill switch's loop.
+//! The panel's size is the mode on the CRTC of the connector gamescope
+//! drives, which KMS gives anybody holding the card node -- and logind gives
+//! that to whoever has the seat. Which connector is gamescope's to say:
+//! `gamescope_control`'s `active_display_info` names it (`DP-3`), and names
+//! no connector at all when gamescope is nested (`SDLWindow`, `Wayland`,
+//! `Headless`), where the X screen is the size to use after all.
 //!
-//! Nested -- gamescope in a window on somebody's desktop -- the CRTCs are the
-//! desktop's, not gamescope's, so KMS is asked only when the gamescope that
-//! owns Steam's display holds a card node open itself.
+//! The first version guessed instead: KMS was asked only when the gamescope
+//! owning Steam's display held a card node, read off /proc/<pid>/fd. SteamOS
+//! gives gamescope CAP_SYS_NICE, which makes it undumpable, which makes its
+//! fd directory root's: "Permission denied", no KMS, and the overlay stayed
+//! a quarter of the television. Asking is cheaper than guessing: one
+//! roundtrip on gamescope's socket and a handful of ioctls, once per painter.
 
 use std::fs::File;
 use std::os::fd::{AsFd, BorrowedFd};
-use std::path::{Path, PathBuf};
+use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
+use std::time::Duration;
 
 use drm::control::Device as _;
+use wayland_client::globals::{GlobalListContents, registry_queue_init};
+use wayland_client::protocol::wl_registry::WlRegistry;
+use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
+
+/// gamescope's private control protocol, generated from the copy of its XML
+/// beside this crate (protocols/, from ValveSoftware/gamescope).
+#[allow(missing_debug_implementations, clippy::all, unused_imports)]
+pub mod gamescope_control {
+    use wayland_client;
+    use wayland_client::protocol::*;
+
+    pub mod __interfaces {
+        use wayland_client::protocol::__interfaces::*;
+        wayland_scanner::generate_interfaces!("protocols/gamescope-control.xml");
+    }
+    use self::__interfaces::*;
+
+    wayland_scanner::generate_client_code!("protocols/gamescope-control.xml");
+}
+
+use gamescope_control::gamescope_control::{Event as ControlEvent, GamescopeControl};
 
 /// Width and height in pixels.
 pub type Size = (u32, u32);
 
-/// What gamescope's overlay is painted at: the largest lit CRTC when
-/// gamescope drives the panels, else the X screen. Largest, because a docked
-/// Deck that kept its own screen lit too paints the overlay on the
-/// television, which is the bigger of the two. Nothing lit, or KMS not
-/// gamescope's, and the X screen is all there is to go on.
-pub fn painted(gamescope_drives_kms: bool, lit: &[Size], x_screen: Size) -> Size {
-    if !gamescope_drives_kms {
-        return x_screen;
-    }
-    lit.iter()
-        .copied()
+/// What gamescope's overlay is painted at: the mode on the connector
+/// gamescope says it drives, else the X screen. A name KMS does not have --
+/// a nested gamescope's `SDLWindow` -- or no answer at all, and the X screen
+/// is all there is to go on.
+pub fn painted(active: Option<&str>, lit: &[(String, Size)], x_screen: Size) -> Size {
+    active
+        .and_then(|name| lit.iter().find(|(connector, _)| connector == name))
+        .map(|&(_, size)| size)
         .filter(|&(w, h)| w > 0 && h > 0)
-        .max_by_key(|&(w, h)| u64::from(w) * u64::from(h))
         .unwrap_or(x_screen)
 }
 
-/// Whether one of these open files is a KMS card node. A render node
-/// (`renderD128`) is what any Vulkan program holds, nested gamescope
-/// included; only the compositor driving the panels holds `card0`.
-pub fn holds_card<P: AsRef<Path>>(open: impl IntoIterator<Item = P>) -> bool {
-    open.into_iter().any(|path| {
-        path.as_ref()
-            .strip_prefix("/dev/dri")
-            .ok()
-            .and_then(Path::to_str)
-            .is_some_and(|name| name.starts_with("card"))
-    })
+/// A connector's name as KMS and gamescope both spell it: libdrm's type
+/// name and the type's own number, `DP-3`, `eDP-1`, `HDMI-A-1`.
+pub fn connector_name(kind: &str, id: u32) -> String {
+    format!("{kind}-{id}")
 }
 
-/// Whether process `pid` has a card node open: what it has open, read off
-/// /proc. Ours to read, since gamescope runs as the same user.
-pub fn process_holds_card(pid: u32) -> bool {
-    let Ok(fds) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
-        return false;
+#[derive(Debug, Default)]
+struct Asked {
+    connector: Option<String>,
+}
+
+impl Dispatch<WlRegistry, GlobalListContents> for Asked {
+    fn event(
+        _: &mut Self,
+        _: &WlRegistry,
+        _: <WlRegistry as Proxy>::Event,
+        _: &GlobalListContents,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<GamescopeControl, ()> for Asked {
+    fn event(
+        state: &mut Self,
+        _: &GamescopeControl,
+        event: ControlEvent,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let ControlEvent::ActiveDisplayInfo { connector_name, .. } = event {
+            state.connector = Some(connector_name);
+        }
+    }
+}
+
+/// The connector gamescope drives, from `active_display_info`, which it
+/// sends to every client that binds `gamescope_control` (version 2 and on).
+/// None where there is no gamescope to ask, or it does not answer in half a
+/// second -- a read timeout on the socket, so a gamescope that has wedged
+/// costs the painter that and no more.
+pub fn active_connector() -> Option<String> {
+    let name = PathBuf::from(std::env::var_os("GAMESCOPE_WAYLAND_DISPLAY")?);
+    let socket = if name.is_absolute() {
+        name
+    } else {
+        PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?).join(name)
     };
-    holds_card(fds.flatten().filter_map(|fd| std::fs::read_link(fd.path()).ok()))
+    let stream = UnixStream::connect(socket).ok()?;
+    stream.set_read_timeout(Some(Duration::from_millis(500))).ok()?;
+    let connection = Connection::from_socket(stream).ok()?;
+    let (globals, mut queue) = registry_queue_init::<Asked>(&connection).ok()?;
+    let _control: GamescopeControl = globals.bind(&queue.handle(), 2..=2, ()).ok()?;
+    let mut asked = Asked::default();
+    queue.roundtrip(&mut asked).ok()?;
+    asked.connector
 }
 
 struct Card(File);
@@ -79,32 +137,38 @@ impl AsFd for Card {
 impl drm::Device for Card {}
 impl drm::control::Device for Card {}
 
-/// The mode on every lit CRTC of every card. Reading resources and CRTCs
-/// needs neither DRM master nor authentication, only the node, which logind
-/// opens to whoever has the seat.
-pub fn lit_modes() -> Vec<Size> {
+/// Every lit connector of every card, by name, with the mode on its CRTC.
+/// Reading resources, connectors, encoders and CRTCs needs neither DRM
+/// master nor authentication, only the node.
+pub fn lit_connectors() -> Vec<(String, Size)> {
     let Ok(nodes) = std::fs::read_dir("/dev/dri") else {
         return Vec::new();
     };
     let cards: Vec<PathBuf> = nodes
         .flatten()
         .map(|node| node.path())
-        .filter(|path| holds_card([path]))
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("card"))
+        })
         .collect();
     cards
         .iter()
         .filter_map(|path| File::open(path).ok().map(Card))
         .flat_map(|card| {
-            let crtcs = card
+            let connectors = card
                 .resource_handles()
-                .map(|resources| resources.crtcs().to_vec())
+                .map(|resources| resources.connectors().to_vec())
                 .unwrap_or_default();
-            crtcs
+            connectors
                 .into_iter()
-                .filter_map(|crtc| card.get_crtc(crtc).ok()?.mode())
-                .map(|mode| {
-                    let (w, h) = mode.size();
-                    (u32::from(w), u32::from(h))
+                .filter_map(|handle| {
+                    let connector = card.get_connector(handle, false).ok()?;
+                    let crtc = card.get_encoder(connector.current_encoder()?).ok()?.crtc()?;
+                    let (w, h) = card.get_crtc(crtc).ok()?.mode()?.size();
+                    let name = connector_name(connector.interface().as_str(), connector.interface_id());
+                    Some((name, (u32::from(w), u32::from(h))))
                 })
                 .collect::<Vec<_>>()
         })
@@ -115,53 +179,69 @@ pub fn lit_modes() -> Vec<Size> {
 mod tests {
     use super::*;
 
-    const DECK: Size = (1280, 800);
+    const STEAMS_SCREEN: Size = (1920, 1080);
     const TV: Size = (3840, 2160);
+    const DECK: Size = (800, 1280);
 
-    #[test]
-    fn a_docked_deck_paints_at_the_televisions_size_not_steams_screen() {
-        assert_eq!(painted(true, &[TV], DECK), TV);
+    fn lit(connectors: &[(&str, Size)]) -> Vec<(String, Size)> {
+        connectors
+            .iter()
+            .map(|&(name, size)| (name.to_owned(), size))
+            .collect()
     }
 
     #[test]
-    fn with_both_screens_lit_the_bigger_one_is_where_it_goes() {
-        assert_eq!(painted(true, &[DECK, TV], DECK), TV);
-        assert_eq!(painted(true, &[TV, DECK], DECK), TV);
+    fn a_docked_deck_paints_at_the_televisions_size_not_steams_screen() {
+        // What the Deck reported on the television: DP-3 at 3840x2160 and a
+        // 1920x1080 X screen.
+        assert_eq!(painted(Some("DP-3"), &lit(&[("DP-3", TV)]), STEAMS_SCREEN), TV);
+    }
+
+    #[test]
+    fn with_both_screens_lit_the_one_gamescope_names_is_where_it_goes() {
+        let both = lit(&[("eDP-1", DECK), ("DP-3", TV)]);
+        assert_eq!(painted(Some("DP-3"), &both, STEAMS_SCREEN), TV);
+        assert_eq!(painted(Some("eDP-1"), &both, STEAMS_SCREEN), DECK);
     }
 
     #[test]
     fn nested_gamescope_keeps_the_x_screen() {
+        // Its connector is its window, which KMS has never heard of; the
+        // desktop's own monitors are lit, and not gamescope's.
+        let desktop = lit(&[("DP-1", TV)]);
+        for nested in ["SDLWindow", "Wayland", "Headless"] {
+            assert_eq!(
+                painted(Some(nested), &desktop, STEAMS_SCREEN),
+                STEAMS_SCREEN,
+                "{nested}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_answer_or_nonsense_falls_back_to_the_x_screen() {
+        assert_eq!(painted(None, &lit(&[("DP-3", TV)]), STEAMS_SCREEN), STEAMS_SCREEN);
+        assert_eq!(painted(Some("DP-3"), &[], STEAMS_SCREEN), STEAMS_SCREEN);
         assert_eq!(
-            painted(false, &[TV], DECK),
-            DECK,
-            "the desktop's CRTCs are not gamescope's"
+            painted(Some("DP-3"), &lit(&[("DP-3", (0, 0))]), STEAMS_SCREEN),
+            STEAMS_SCREEN
         );
     }
 
     #[test]
-    fn nothing_lit_or_nonsense_falls_back_to_the_x_screen() {
-        assert_eq!(painted(true, &[], DECK), DECK);
-        assert_eq!(painted(true, &[(0, 0), (1920, 0)], DECK), DECK);
+    fn connectors_are_named_as_gamescope_names_them() {
+        // DRMBackend.cpp: "%s-%d" of drmModeGetConnectorTypeName and the id.
+        assert_eq!(connector_name("DP", 3), "DP-3");
+        assert_eq!(connector_name("eDP", 1), "eDP-1");
+        assert_eq!(connector_name("HDMI-A", 1), "HDMI-A-1");
     }
 
-    #[test]
-    fn only_a_card_node_counts_as_driving_the_panels() {
-        assert!(holds_card(["/dev/null", "/dev/dri/card0"]));
-        assert!(holds_card(["/dev/dri/card1"]));
-        assert!(
-            !holds_card(["/dev/dri/renderD128"]),
-            "every Vulkan program holds one"
-        );
-        assert!(!holds_card(["/dev/dri", "/home/deck/card0", "socket:[123]"]));
-        assert!(!holds_card(Vec::<&str>::new()));
-    }
-
-    /// This machine's lit modes, to see the KMS read work on real hardware:
-    /// `cargo test -p gotg-killswitch -- --ignored --nocapture lit_modes`.
+    /// This machine's lit connectors, to see the KMS read work on real
+    /// hardware: `cargo test -p gotg-killswitch -- --ignored --nocapture lit_`.
     #[test]
     #[ignore = "reads this machine's /dev/dri"]
-    fn lit_modes_on_this_machine() {
-        let lit = lit_modes();
+    fn lit_connectors_on_this_machine() {
+        let lit = lit_connectors();
         eprintln!("lit: {lit:?}");
         assert!(!lit.is_empty());
     }
