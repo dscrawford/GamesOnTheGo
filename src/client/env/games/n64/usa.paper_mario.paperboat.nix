@@ -46,6 +46,18 @@ in
 {
   emulator = port;
   bin = "Paperboat";
+  # A wired Xbox 360 pad, to this port, as ReCut had and this replacement
+  # lost. libultraship reads pads through SDL2 and the gamecontrollerdb.txt
+  # it ships, and a clone mirroring the Deck's own controls (28de:1205, a
+  # hidraw pad with no SDL mapping as an evdev device) was in no database:
+  # on the Deck nothing moved, the left stick included, while every pad SDL
+  # knew by heart worked at a desk. 045e:028e is the one every SDL maps.
+  # The identity also makes the clone the same GUID on every machine, so the
+  # port mapping in paperboat.cfg.json, which travels with the saves, fits
+  # wherever it lands -- and it puts the overlay on the generic walk, whose
+  # right stick and left trigger are the C buttons and Z this port reads;
+  # the N64 walk lit neither. See docs/requests/look-like-an-xbox-pad.md.
+  padIdentity = "xbox360";
   # Its settings are inside the game, behind Esc; there is no launcher.
   configurable = false;
   isolate = true;
