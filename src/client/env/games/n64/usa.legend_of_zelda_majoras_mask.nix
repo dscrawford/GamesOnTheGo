@@ -11,5 +11,6 @@ helpers.harkinianPort {
   port = pkgs._2ship2harkinian;
   bin = "2s2h";
   appName = "2ship";
+  config = "2ship2harkinian.json";
   archives = [ "mm.o2r" ];
 }

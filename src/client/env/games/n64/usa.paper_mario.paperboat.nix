@@ -34,6 +34,7 @@
   pkgs,
   gotgPkgs,
   lib,
+  helpers,
   ...
 }:
 let
@@ -76,21 +77,12 @@ in
     mkdir -p "$SHIP_HOME"
     cd "$SHIP_HOME"
 
-    # The port's own menu, from a pad. libultraship opens it on Esc or F1
-    # and -- only while its gControlNav cvar is set -- on the pad's Back
-    # (Gui.cpp, TOGGLE_PAD_BTN). It ships off, and the checkbox that turns
-    # it on ("Menu Controller Navigation") is inside the menu a pad cannot
-    # open: on the Deck, Select did nothing and there was no keyboard to
-    # press Esc on. Said here when the file does not say, so a first launch
-    # anywhere has it, and a person who turned it off in the menu stays
-    # heard. The file travels with the saves.
-    paperboat_cfg="$SHIP_HOME/paperboat.cfg.json"
-    if [ ! -e "$paperboat_cfg" ]; then
-      printf '{"CVars":{"gControlNav":1}}\n' >"$paperboat_cfg"
-    elif ! jq -e '.CVars.gControlNav != null' "$paperboat_cfg" >/dev/null 2>&1; then
-      jq '.CVars.gControlNav = 1' "$paperboat_cfg" >"$paperboat_cfg.gotg-tmp" \
-        && mv -f "$paperboat_cfg.gotg-tmp" "$paperboat_cfg"
-    fi
+    # Select opens the port's own menu: see menuFromPad. libultraship's
+    # default name for the cvar; PaperBoat does not prefix it.
+    ${helpers.menuFromPad {
+      file = ''"$SHIP_HOME/paperboat.cfg.json"'';
+      cvar = "gControlNav";
+    }}
 
     # An archive belongs to the port version that made it -- 2Ship taught
     # that one (see harkinianPort): an outdated archive stops on a modal no

@@ -72,7 +72,7 @@ let
     (import ./emulators/ares.nix { inherit pkgs lib; })
     (import ./emulators/dolphin.nix { inherit pkgs lib discArchiveRecipe; })
     (import ./emulators/ryujinx.nix { inherit pkgs lib; })
-    (import ./emulators/harkinian.nix { inherit lib steps; })
+    (import ./emulators/harkinian.nix { inherit pkgs lib steps; })
   ];
 
   # What a mod does to one game's own files, one game per file.

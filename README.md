@@ -173,7 +173,9 @@ every press lighting the presser's icon beside the button it hit; A rebinds
 yours, A held then left/right moves your seat, X takes a controller out of
 its seat, Y turns its game port off or on, a save to load, and **Exit** (held)
 stops the game and pushes its saves. **L + R + Start** held three seconds
-stops any game.
+stops any game. In the libultraship ports (Paper Mario, Ocarina of Time,
+Majora's Mask, Smash) **Select** opens the port's own menu -- its settings,
+enhancements and controller screen -- which they ship with that turned off.
 
 Only pads danstick has published move the picker -- the keyboard takes a seat
 too (hold `Space`), and a controller that is also a keyboard (a Steam

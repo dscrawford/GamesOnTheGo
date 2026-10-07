@@ -49,11 +49,20 @@ helpers.harkinianPort {
   bin = "BattleShip";
   # nativePort comes from the helper: everything it builds is a port.
   archives = [ "BattleShip.o2r" ];
+  config = "BattleShip.cfg.json";
+  # libultraship's own name for it; this port does not prefix its cvars.
+  menuCvar = "gControlNav";
 }
 // {
+  # This replaces the helper's preLaunch, so what that one does for the
+  # menu is asked for here again.
   preLaunch = ''
     run="''${XDG_DATA_HOME:-$HOME/.local/share}/${appName}"
     mkdir -p "$run"
+    ${helpers.menuFromPad {
+      file = ''"$run/BattleShip.cfg.json"'';
+      cvar = "gControlNav";
+    }}
 
     # Relinked every launch rather than copied once: an upgrade of the port
     # changes the store path, and a stale copy of its shaders beside a new

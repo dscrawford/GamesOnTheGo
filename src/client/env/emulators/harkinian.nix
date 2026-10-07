@@ -1,8 +1,44 @@
 # The HarbourMasters native ports. Split out of helpers.nix: what each of these
 # needs to be driven correctly is its own body of knowledge, and they were only
 # ever neighbours in one file.
-{ lib, steps }:
 {
+  lib,
+  pkgs,
+  steps,
+}:
+let
+  # The port's own menu, from a pad.
+  #
+  # libultraship opens its menu on Esc or F1 and -- only while the controller
+  # navigation cvar is set -- on the pad's Back (Gui.cpp, TOGGLE_PAD_BTN; its
+  # ImGui patch is what lets Back be read while the menu is closed). The cvar
+  # ships off, and the checkbox that turns it on ("Menu Controller
+  # Navigation", under Settings) is inside the menu a pad cannot open: on the
+  # Deck, Select did nothing in PaperBoat and there was no keyboard to press
+  # Esc on. So a launch says it when the file does not say either way -- a
+  # first launch anywhere has it, and a person who turned it off in the menu
+  # stays heard. The settings file travels with each port's saves.
+  #
+  # `cvar` is the port's name for it, which each one compiles in: libultraship's
+  # default is gControlNav (PaperBoat, BattleShip); SoH and 2Ship prefix theirs
+  # (gSettings.ControlNav). A dot is a level of JSON, as libultraship's Config
+  # stores it; `file` is a shell expression for the settings file.
+  menuFromPad =
+    { file, cvar }:
+    ''
+      lus_cfg=${file}
+      lus_cvar='["CVars"] + ("${cvar}" | split("."))'
+      if [ ! -e "$lus_cfg" ]; then
+        jq -n "setpath($lus_cvar; 1)" >"$lus_cfg"
+      elif [ "$(jq -r "getpath($lus_cvar) == null" "$lus_cfg" 2>/dev/null)" = true ]; then
+        jq "setpath($lus_cvar; 1)" "$lus_cfg" >"$lus_cfg.gotg-tmp" \
+          && mv -f "$lus_cfg.gotg-tmp" "$lus_cfg"
+      fi
+    '';
+in
+{
+  inherit menuFromPad;
+
   # The HarbourMasters ports — Ship of Harkinian, 2 Ship 2 Harkinian — are native
   # ports rather than emulators, and take the ROM differently from anything else
   # here. They read it once, extract it into an .o2r archive kept beside their
@@ -23,16 +59,25 @@
   #   archives  the archive names that mean "already bootstrapped"; any one of
   #             them is enough, since a Master Quest ROM produces oot-mq.o2r
   #             where a retail one produces oot.o2r
+  #   config    the settings file libultraship keeps beside the archive
+  #             (shipofharkinian.json, 2ship2harkinian.json); carried with the
+  #             saves, and where `menuFromPad` writes
+  #   menuCvar  the port's name for the controller-navigation cvar; the two
+  #             Zelda ports prefix libultraship's default
   harkinianPort =
     {
       port,
       bin,
       appName,
       archives,
+      config,
+      menuCvar ? "gSettings.ControlNav",
     }:
     {
       emulator = port;
       inherit bin;
+      # jq, for the settings file `menuFromPad` edits.
+      path = [ pkgs.jq ];
       # Ports, all of them -- that is what this helper is. `emulate` is the
       # way back to ares.
       nativePort = true;
@@ -70,7 +115,7 @@
       # settings file beside them, which is small and worth keeping in step.
       saves = [
         "data/${appName}/saves/**"
-        "data/${appName}/${appName}*.json"
+        "data/${appName}/${config}"
       ];
       # The .o2r is tens of megabytes and is rebuilt from the ROM by the first
       # run on any machine, so uploading it would be paying to move something
@@ -101,6 +146,11 @@
       # bump that did not need it costs a minute of extraction once.
       preLaunch = ''
         harkinian_data="''${XDG_DATA_HOME:-$HOME/.local/share}/${appName}"
+        mkdir -p "$harkinian_data"
+        ${menuFromPad {
+          file = ''"$harkinian_data/${config}"'';
+          cvar = menuCvar;
+        }}
         harkinian_stamp="$harkinian_data/.gotg-archive-version"
         if [ "$(cat "$harkinian_stamp" 2>/dev/null)" != "${lib.getVersion port}" ]; then
           rm -f ${lib.concatMapStringsSep " " (a: ''"$harkinian_data/${a}"'') archives}

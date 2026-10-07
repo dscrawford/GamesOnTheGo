@@ -12,6 +12,7 @@ helpers.harkinianPort {
   port = pkgs.shipwright;
   bin = "soh";
   appName = "soh";
+  config = "shipofharkinian.json";
   archives = [
     "oot.o2r"
     "oot-mq.o2r"

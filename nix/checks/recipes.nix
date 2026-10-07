@@ -20,6 +20,7 @@ let
         bin = "probe-port";
         appName = "probe";
         archives = [ "probe.o2r" ];
+        config = "probe.json";
       };
   # Stands in for the port's first run: it says it ran and leaves an archive,
   # as extraction does. Its version is what the archive is stamped with.
@@ -163,7 +164,13 @@ assert pkgs.lib.assertMsg (
 assert pkgs.lib.assertMsg (
   (overrides."n64/usa.donkey_kong_64" or { }).unzip or false
 ) "src/client/data/overrides.json must mark n64/usa.donkey_kong_64 unzip, to match its recipe";
-pkgs.runCommand "check-recipes" { nativeBuildInputs = [ pkgs.zip ]; } ''
+pkgs.runCommand "check-recipes" {
+  # jq: the Harkinian probe's preLaunch edits the port's settings file (menuFromPad).
+  nativeBuildInputs = [
+    pkgs.zip
+    pkgs.jq
+  ];
+} ''
   export HOME=$TMPDIR
   mkdir -p $TMPDIR/bin
 
