@@ -721,6 +721,44 @@ EOF
   [ "$SDL_JOYSTICK_HIDAPI" = 0 ]
 }
 
+@test "clones that are Xbox 360 pads put every other pad out of the game's sight" {
+  # A grabbed pad is silent, not gone: SDL still lists the raw pad danstick
+  # holds and Steam's copy of it, both before the clones on a Deck. ImGui's
+  # SDL backend opens the first game controller only, so PaperBoat's Select
+  # reached a pad that said nothing while the game played on.
+  export GOTG_DANSTICK_RUNTIME="$TEST_TMP/danstick-rt-360"
+  mkdir -p "$GOTG_DANSTICK_RUNTIME"
+  cat >"$GOTG_DANSTICK_RUNTIME/env.sh" <<'EOF'
+SDL_GAMECONTROLLERCONFIG='0300724d5e0400008e02000001000000,danstick Player 1,a:b0,
+0300324c5e0400008e02000002000000,danstick Player 2,a:b0,'
+export SDL_GAMECONTROLLERCONFIG
+EOF
+  danstick_launch_ready
+  [ "$SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT" = "0x045e/0x028e" ]
+}
+
+@test "mirrored clones hide nothing, since their ids are the pads' own" {
+  export GOTG_DANSTICK_RUNTIME="$TEST_TMP/danstick-rt-mirror"
+  mkdir -p "$GOTG_DANSTICK_RUNTIME"
+  cat >"$GOTG_DANSTICK_RUNTIME/env.sh" <<'EOF'
+SDL_GAMECONTROLLERCONFIG='0300724d5e0400008e02000001000000,danstick Player 1,a:b0,
+03000000de280000041300000a000000,danstick Player 2,a:b0,'
+export SDL_GAMECONTROLLERCONFIG
+EOF
+  danstick_launch_ready
+  [ -z "${SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT+x}" ]
+}
+
+@test "somebody who set the ignore list themselves keeps it" {
+  export SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT="0x1234/0x5678"
+  export GOTG_DANSTICK_RUNTIME="$TEST_TMP/danstick-rt-360-kept"
+  mkdir -p "$GOTG_DANSTICK_RUNTIME"
+  echo "export SDL_GAMECONTROLLERCONFIG=0300724d5e0400008e02000001000000,danstick Player 1,a:b0," \
+    >"$GOTG_DANSTICK_RUNTIME/env.sh"
+  danstick_launch_ready
+  [ "$SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT" = "0x1234/0x5678" ]
+}
+
 @test "and a launch that met no danstick keeps it, because a raw puck needs it" {
   # The hint is the only reason a Steam Controller works at all without
   # danstick: it has no evdev node to fall back to.

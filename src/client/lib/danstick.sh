@@ -298,9 +298,39 @@ danstick_launch_ready() {
   # into the game. Only when danstick actually published something, though: a
   # launch with no daemon has no clone to protect and every reason to keep
   # the hint, which is the one thing that makes a raw puck work at all.
-  if [[ -n "$(danstick_sdl_config 2>/dev/null || true)" ]]; then
+  local config
+  config="$(danstick_sdl_config 2>/dev/null || true)"
+  if [[ -n "$config" ]]; then
     export SDL_JOYSTICK_HIDAPI=0 SDL_JOYSTICK_HIDAPI_STEAM=0
+    # And every pad that is not a clone out of the game's sight, when the
+    # clones can be told apart by their ids -- which is what the Xbox 360
+    # identity is for. A grabbed pad is silent, not gone: SDL still lists the
+    # raw pad danstick holds and Steam's copy of it, and on a Deck both come
+    # before the clones. PaperBoat's menu opens on Back through ImGui, whose
+    # SDL backend opens *the first* game controller and no other
+    # (GamepadMode_AutoFirst); so Select did nothing, while the game, which
+    # reads every pad, played on. Any program that takes the first pad has
+    # the same hole. Somebody who set the hint themselves keeps theirs.
+    if danstick_clones_are_360 "$config" && [[ -z "${SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT+x}" ]]; then
+      export SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT="0x045e/0x028e"
+    fi
   fi
+}
+
+# Whether every clone in danstick's SDL mapping wears the wired Xbox 360
+# pad's ids. The GUID carries them: bytes 4-5 the vendor, 8-9 the product,
+# little-endian -- `5e04` and `8e02` as the hex reads. Under `mirror` each
+# clone has the pad's own ids instead, and a list of those would be a list
+# of every pad in the room, so nothing is hidden then.
+danstick_clones_are_360() {
+  local line guid seen=0
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    guid="${line:0:32}"
+    [[ "${guid:8:4}" == 5e04 && "${guid:16:4}" == 8e02 ]] || return 1
+    seen=1
+  done <<<"$1"
+  ((seen))
 }
 
 # Launch, with danstick's mappings in the environment.
