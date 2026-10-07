@@ -52,9 +52,11 @@ pub struct Scene<'a> {
     pub fractions: &'a [f32],
     pub players: &'a [i32],
     pub hold_icons: &'a [u8],
-    /// Seats just taken, oldest first, and their drawings.
+    /// The seats on the bar, by player, and their drawings; a bit of
+    /// `joined_fresh` per entry says which were just taken and get a tick.
     pub joined: &'a [i32],
     pub joined_icons: &'a [u8],
+    pub joined_fresh: u32,
     /// 0..1 through the exit hold; 0 when not held.
     pub exit_progress: f64,
     /// The panel a rebind pulls down, in pixels: see [`panel_height`].
@@ -1296,8 +1298,12 @@ pub fn build(scene: &Scene, drawing: &mut Drawing) {
             picture: false,
         };
         drawing.sprites.push(sprite);
-        let (tx, ty) = (x(at) + icon_height * 0.5, cy + icon_height * 0.32);
-        tick(&mut drawing.over, tx, ty, bar * 0.13, bar * 0.045, colour);
+        // The tick is for the seat just taken; the rest of the line is there
+        // so its place in it can be read.
+        if scene.joined_fresh >> at & 1 == 1 {
+            let (tx, ty) = (x(at) + icon_height * 0.5, cy + icon_height * 0.32);
+            tick(&mut drawing.over, tx, ty, bar * 0.13, bar * 0.045, colour);
+        }
     }
     let offset = scene.joined.len();
     let holds = scene.fractions.iter().zip(scene.players).zip(scene.hold_icons);
@@ -2118,6 +2124,7 @@ mod tests {
             &Scene {
                 joined: &[1],
                 joined_icons: &[4],
+                joined_fresh: 1,
                 ..down(0.0)
             },
             &mut drawing,
@@ -2130,6 +2137,41 @@ mod tests {
             (4, 1.0, player_colour(1))
         );
         assert!(!drawing.over.vertices.is_empty(), "and its tick over it");
+    }
+
+    #[test]
+    fn the_seats_already_taken_line_up_before_the_new_one_without_a_tick() {
+        let mut drawing = Drawing::default();
+        build(
+            &Scene {
+                joined: &[1, 2, 3],
+                joined_icons: &[4, 4, 5],
+                joined_fresh: 0b100,
+                ..down(0.0)
+            },
+            &mut drawing,
+        );
+        assert_eq!(drawing.sprites.len(), 3, "every seat, whole");
+        assert!(drawing.sprites.iter().all(|sprite| sprite.revealed == 1.0));
+        assert!(
+            drawing.sprites.windows(2).all(|pair| pair[0].cx < pair[1].cx),
+            "left to right is the player number"
+        );
+        let ticks = drawing.over.vertices.len();
+        build(
+            &Scene {
+                joined: &[1, 2, 3],
+                joined_icons: &[4, 4, 5],
+                joined_fresh: 0b111,
+                ..down(0.0)
+            },
+            &mut drawing,
+        );
+        assert_eq!(
+            drawing.over.vertices.len(),
+            3 * ticks,
+            "one tick, for the one seat just taken"
+        );
     }
 
     #[test]

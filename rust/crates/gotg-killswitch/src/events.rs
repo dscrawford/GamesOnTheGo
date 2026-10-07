@@ -320,6 +320,12 @@ pub fn apply(event: &Event, pairing: &mut Pairing, now: f64, icon_of: &mut dyn F
             for seat in seated {
                 pairing.seated(&seat.node, &seat.name, seat.player);
             }
+            // And who they are, for the line the bar draws beside a join.
+            let seats: Vec<(i32, u8)> = seated
+                .iter()
+                .map(|seat| (seat.player, icon_of(&seat.node, &seat.name)))
+                .collect();
+            pairing.seats(&seats);
         }
         // The rebind's, not the joining picture's: see `rebind`.
         Event::Mapping { .. }

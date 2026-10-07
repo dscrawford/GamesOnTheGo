@@ -16,14 +16,21 @@
 //!   - A reading smaller than the last one is a new press, at the back.
 //!   - Between readings the fill carries on at the hold's own rate, and never
 //!     steps backwards when the next reading lands a hair behind it.
+//!   - While anybody is holding or has just joined, every seat already taken
+//!     is drawn too, in seat order, the new one ticked. The bar used to show
+//!     the one pad that had just joined and nothing else, and a second
+//!     player had no way to tell from it which player they had become: the
+//!     order of the drawings is the player number, which is the one thing
+//!     somebody picking up a pad mid-game wants to know.
 //!
 //! No clock of its own: the loop passes the time, so a test can.
 
 /// Holds drawn at once. Eight people holding buttons is a party this screen
 /// has no room to draw anyway; a ninth pushes out the oldest.
 pub const HOLDS_MAX: usize = 8;
-/// Seats shown as just taken at once.
-pub const JOINED_MAX: usize = 4;
+/// Seats drawn on the bar at once: every seat danstick has, so the line
+/// is the menu's.
+pub const JOINED_MAX: usize = crate::menu::SEATS_MAX;
 /// A key longer than this is cut: two keys sharing their first 95 bytes are
 /// two device paths nobody has.
 pub const KEY_MAX: usize = 95;
@@ -59,11 +66,22 @@ struct Joined {
     at: f64,
 }
 
+/// One seat on the bar: whose, which drawing, and whether it was just
+/// taken (ticked) or was already there (the rest of the line).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Shown {
+    pub player: i32,
+    pub icon: u8,
+    pub fresh: bool,
+}
+
 /// The picture of who is joining.
 #[derive(Debug, Clone)]
 pub struct Pairing {
     holds: Vec<Hold>,
     joined: Vec<Joined>,
+    /// Who is seated, as the last `state` said: (player, drawing), by seat.
+    seats: Vec<(i32, u8)>,
     /// The length danstick was asked for, to carry fills between readings.
     hold_seconds: f64,
     /// How many seats danstick's last `state` had; None until one arrives,
@@ -92,6 +110,7 @@ impl Pairing {
         Self {
             holds: Vec::with_capacity(HOLDS_MAX),
             joined: Vec::with_capacity(JOINED_MAX),
+            seats: Vec::new(),
             hold_seconds,
             room: None,
         }
@@ -100,6 +119,15 @@ impl Pairing {
     /// A `state` said this many seats are taken; None for no daemon.
     pub fn room(&mut self, seated: Option<usize>) {
         self.room = seated;
+    }
+
+    /// A `state` said who is seated: each seat's player and drawing. Drawn
+    /// beside a hold or a fresh join so the order can be read off the bar.
+    pub fn seats(&mut self, seats: &[(i32, u8)]) {
+        let mut seats: Vec<(i32, u8)> = seats.iter().copied().filter(|&(player, _)| player > 0).collect();
+        seats.sort_by_key(|&(player, _)| player);
+        seats.dedup_by_key(|&mut (player, _)| player);
+        self.seats = seats;
     }
 
     /// Nobody is seated and nobody is joining: a game with no controller,
@@ -257,6 +285,41 @@ impl Pairing {
             .into_iter()
             .map(|joined| (joined.player, joined.icon))
             .collect()
+    }
+
+    /// The seats to draw, by player: nothing when the bar has no reason to
+    /// be down, otherwise everybody seated, the ones that joined in the last
+    /// [`JOINED_SHOWN`] seconds marked fresh. A claim lands before the
+    /// `state` that lists its seat, so a fresh seat the list lacks is drawn
+    /// from the claim.
+    pub fn line(&mut self, now: f64) -> Vec<Shown> {
+        if !self.busy(now) {
+            return Vec::new();
+        }
+        let mut line: Vec<Shown> = self
+            .seats
+            .iter()
+            .map(|&(player, icon)| {
+                let joined = self.joined.iter().find(|joined| joined.player == player);
+                Shown {
+                    player,
+                    icon: joined.map_or(icon, |joined| joined.icon),
+                    fresh: joined.is_some(),
+                }
+            })
+            .collect();
+        for joined in &self.joined {
+            if !line.iter().any(|shown| shown.player == joined.player) {
+                line.push(Shown {
+                    player: joined.player,
+                    icon: joined.icon,
+                    fresh: true,
+                });
+            }
+        }
+        line.sort_by_key(|shown| shown.player);
+        line.truncate(JOINED_MAX);
+        line
     }
 
     /// Whether there is anything to show.
@@ -454,6 +517,37 @@ mod tests {
         let joined: Vec<i32> = p.joined(at).into_iter().map(|(player, _)| player).collect();
         assert_eq!(joined.len(), JOINED_MAX);
         assert!(joined.contains(&9) && !joined.contains(&1));
+    }
+
+    #[test]
+    fn the_line_is_every_seat_in_order_with_the_new_one_ticked() {
+        let mut p = fresh();
+        p.seats(&[(1, 3), (2, 5)]);
+        assert!(p.line(10.0).is_empty(), "nothing to say until somebody joins");
+        // The claim says seat 3 before the state lists it.
+        p.claim("/dev/input/event7", "", 3, 7, 10.0);
+        let line = p.line(10.1);
+        assert_eq!(
+            line.iter()
+                .map(|s| (s.player, s.icon, s.fresh))
+                .collect::<Vec<_>>(),
+            [(1, 3, false), (2, 5, false), (3, 7, true)]
+        );
+        // The state arrives: the same line, and nothing drawn twice.
+        p.seats(&[(2, 5), (3, 7), (1, 3)]);
+        assert_eq!(p.line(10.2), line);
+        // The moment passes and the line goes with it.
+        assert!(p.line(10.0 + JOINED_SHOWN + 0.1).is_empty());
+    }
+
+    #[test]
+    fn a_hold_alone_brings_the_seats_down_with_it() {
+        let mut p = fresh();
+        p.seats(&[(1, 3)]);
+        p.progress("/dev/input/event9", "", 0.4, 2, 6, 10.0);
+        let line = p.line(10.01);
+        assert_eq!(line.len(), 1, "the seat already taken, beside the hold");
+        assert!(!line[0].fresh, "and not ticked: it is not new");
     }
 
     #[test]

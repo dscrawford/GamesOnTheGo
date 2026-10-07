@@ -12,14 +12,14 @@
 //! Encoded field by field in native byte order: both ends are this binary.
 
 use crate::menu::{Browse, Listed};
-use crate::pairing::{HOLDS_MAX, Hold, JOINED_MAX};
+use crate::pairing::{HOLDS_MAX, Hold, JOINED_MAX, Shown};
 
 /// "GOSV", so a torn or foreign read is refused.
 pub const MAGIC: u32 = 0x5653_4f47;
 
-/// Bytes on the pipe: six words, the five arrays a word per entry, the
+/// Bytes on the pipe: seven words, the five arrays a word per entry, the
 /// rebind's thirteen words, the menu's, and one for what the bar is saying.
-pub const SIZE: usize = 4 * (6 + HOLDS_MAX * 3 + JOINED_MAX * 2 + REBIND_WORDS + MENU_WORDS + 1);
+pub const SIZE: usize = 4 * (7 + HOLDS_MAX * 3 + JOINED_MAX * 2 + REBIND_WORDS + MENU_WORDS + 1);
 
 /// Owner, rows, focus, carried, two fills, the icons, the off mask, the
 /// console, each seat's presses in two words and sticks in one, testing, and
@@ -171,6 +171,8 @@ pub struct Frame {
     joined: [i32; JOINED_MAX],
     joined_icon: [u8; JOINED_MAX],
     joined_count: usize,
+    /// Which of `joined` were just taken (ticked), a bit per entry.
+    joined_fresh: u32,
     /// On the wire as player 0 when there is none.
     pub rebind: Option<Rebinding>,
     /// On the wire as owner 0 when there is none.
@@ -182,8 +184,8 @@ pub struct Frame {
 
 impl Frame {
     /// Filled from what the kill switch knows, cut to what a frame holds.
-    /// `joined` is (player, drawing), as `Pairing::joined` gives it.
-    pub fn pack(position: f64, exit_progress: f64, holds: &[Hold], joined: &[(i32, u8)]) -> Self {
+    /// `joined` is the seat line, as `Pairing::line` gives it.
+    pub fn pack(position: f64, exit_progress: f64, holds: &[Hold], joined: &[Shown]) -> Self {
         let mut frame = Self {
             position: position as f32,
             exit_progress: exit_progress as f32,
@@ -196,9 +198,12 @@ impl Frame {
             frame.hold_player[i] = hold.player;
             frame.hold_icon[i] = hold.icon;
         }
-        for (i, &(player, icon)) in joined.iter().take(JOINED_MAX).enumerate() {
-            frame.joined[i] = player;
-            frame.joined_icon[i] = icon;
+        for (i, shown) in joined.iter().take(JOINED_MAX).enumerate() {
+            frame.joined[i] = shown.player;
+            frame.joined_icon[i] = shown.icon;
+            if shown.fresh {
+                frame.joined_fresh |= 1 << i;
+            }
         }
         frame
     }
@@ -238,9 +243,14 @@ impl Frame {
         &self.hold_icon[..self.hold_count]
     }
 
-    /// Seats just taken, oldest first.
+    /// The seats on the bar, by player.
     pub fn joined(&self) -> &[i32] {
         &self.joined[..self.joined_count]
+    }
+
+    /// Which of them were just taken, a bit per entry of `joined`.
+    pub fn joined_fresh(&self) -> u32 {
+        self.joined_fresh
     }
 
     /// The drawing for each seat just taken.
@@ -262,6 +272,7 @@ impl Frame {
         put((self.hold_count as u32).to_ne_bytes());
         put((self.joined_count as u32).to_ne_bytes());
         put(u32::from(self.nobody).to_ne_bytes());
+        put(self.joined_fresh.to_ne_bytes());
         self.hold_fraction
             .iter()
             .for_each(|value| put(value.to_ne_bytes()));
@@ -353,7 +364,7 @@ impl Frame {
         if u32::from_ne_bytes(word(0)) != MAGIC || hold_count > HOLDS_MAX || joined_count > JOINED_MAX {
             return None;
         }
-        let holds = 6;
+        let holds = 7;
         let joined = holds + 3 * HOLDS_MAX;
         let rebind = joined + 2 * JOINED_MAX;
         let player = i32::from_ne_bytes(word(rebind));
@@ -428,6 +439,7 @@ impl Frame {
             joined: std::array::from_fn(|i| i32::from_ne_bytes(word(joined + i))),
             joined_icon: std::array::from_fn(|i| icon(joined + JOINED_MAX + i)),
             joined_count,
+            joined_fresh: u32::from_ne_bytes(word(6)) & ((1u32 << joined_count) - 1),
         })
     }
 }
@@ -445,9 +457,18 @@ mod tests {
         }
     }
 
+    fn shown(player: i32, icon: u8, fresh: bool) -> Shown {
+        Shown { player, icon, fresh }
+    }
+
     #[test]
     fn a_frame_carries_what_the_bar_draws() {
-        let frame = Frame::pack(0.75, 0.0, &[hold(0.25, 2, 5), hold(0.5, 3, 9)], &[(1, 4)]);
+        let frame = Frame::pack(
+            0.75,
+            0.0,
+            &[hold(0.25, 2, 5), hold(0.5, 3, 9)],
+            &[shown(1, 4, false), shown(2, 6, true)],
+        );
         let back = Frame::decode(&frame.encode());
         assert_eq!(
             back.as_ref(),
@@ -457,7 +478,8 @@ mod tests {
         assert_eq!(frame.hold_player(), [2, 3], "holds in order");
         assert_eq!(frame.hold_fraction(), [0.25, 0.5]);
         assert_eq!(frame.hold_icon(), [5, 9], "each with its pad's drawing");
-        assert_eq!((frame.joined(), frame.joined_icon()), (&[1][..], &[4][..]));
+        assert_eq!((frame.joined(), frame.joined_icon()), (&[1, 2][..], &[4, 6][..]));
+        assert_eq!(frame.joined_fresh(), 0b10, "only the second was just taken");
     }
 
     #[test]
@@ -640,7 +662,7 @@ mod tests {
     #[test]
     fn packing_more_than_fits_is_cut() {
         let holds = vec![hold(0.1, 1, 0); HOLDS_MAX + 3];
-        let frame = Frame::pack(1.0, 0.0, &holds, &[(1, 0); JOINED_MAX + 2]);
+        let frame = Frame::pack(1.0, 0.0, &holds, &[shown(1, 0, true); JOINED_MAX + 2]);
         assert_eq!(
             (frame.hold_fraction().len(), frame.joined().len()),
             (HOLDS_MAX, JOINED_MAX)
@@ -651,7 +673,7 @@ mod tests {
     #[test]
     fn decode_accepts_exactly_the_maximum_counts() {
         let holds = vec![hold(0.5, 1, 2); HOLDS_MAX];
-        let frame = Frame::pack(1.0, 0.0, &holds, &[(1, 2); JOINED_MAX]);
+        let frame = Frame::pack(1.0, 0.0, &holds, &[shown(1, 2, false); JOINED_MAX]);
         assert_eq!(
             Frame::decode(&frame.encode()),
             Some(frame),

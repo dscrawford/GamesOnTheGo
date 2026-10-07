@@ -866,7 +866,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         let mut moving = false;
         if showing {
             let holds = pairing.now(clock);
-            let joined = pairing.joined(clock);
+            let joined = pairing.line(clock);
             // A rebind panel shows what is pressed, so it is redrawn at the
             // frame rate for as long as it is down.
             moving = bar.moving(clock)

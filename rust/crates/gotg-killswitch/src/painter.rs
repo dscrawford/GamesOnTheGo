@@ -259,6 +259,7 @@ pub fn paint() -> i32 {
             hold_icons: frame.hold_icon(),
             joined: frame.joined(),
             joined_icons: frame.joined_icon(),
+            joined_fresh: frame.joined_fresh(),
             exit_progress: f64::from(frame.exit_progress),
         };
         scene::build(&scene, &mut drawing);
@@ -428,7 +429,16 @@ mod tests {
         };
         let (old, new) = (
             Frame::pack(0.2, 0.0, &[], &[]),
-            Frame::pack(0.9, 0.0, &[hold], &[(1, 0)]),
+            Frame::pack(
+                0.9,
+                0.0,
+                &[hold],
+                &[crate::pairing::Shown {
+                    player: 1,
+                    icon: 0,
+                    fresh: true,
+                }],
+            ),
         );
         let mut bytes = old.encode().to_vec();
         bytes.extend_from_slice(&new.encode());
