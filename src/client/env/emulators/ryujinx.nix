@@ -112,17 +112,43 @@ in
   #
   # 0 is 4GiB, 1 is 6GiB, 2 is 8GiB, 3 is 12GiB -- read off the emulator's own
   # MemoryConfiguration enum rather than guessed.
-  ryujinxDram = size: { preLaunch = configEdit [ ".dram_size = ${toString size}" ]; };
+  #
+  # Not on a Deck. Its 16 GB are shared with the GPU and the texture cache
+  # grows with the emulated DRAM (Ryubing 1.2.67), so the platform keeps the
+  # console's 4 GiB there (switch.nix) and the mod that needed more is the
+  # one left out on a Deck (ryujinxModOnly's onDeck).
+  ryujinxDram = size: {
+    preLaunch = ''
+      if [ "''${GOTG_MACHINE:-}" != deck ]; then
+        ${configEdit [ ".dram_size = ${toString size}" ]}
+      fi
+    '';
+  };
 
   # A mod directory and nothing else: no frame rate, no memory. For a game
   # that installs several, where saying the same vsync three times would be
   # three chances to say it differently.
+  #
+  # onDeck = false is a mod a Deck cannot afford -- a 1080p render on a
+  # 1280x800 panel that also wants 8 GiB of emulated DRAM -- and on a Deck it
+  # is removed if an earlier launch put it there, since mods live in the
+  # machine's own state and an installed one stays installed.
   ryujinxModOnly =
-    { titleId, name, dir }:
+    {
+      titleId,
+      name,
+      dir,
+      onDeck ? true,
+    }:
     {
       preLaunch = ''
         contents="$XDG_CONFIG_HOME/Ryujinx/mods/contents/${titleId}"
-        if [ ! -d "$contents/${name}" ]; then
+        if ${if onDeck then "false" else ''[ "''${GOTG_MACHINE:-}" = deck ]''}; then
+          if [ -d "$contents/${name}" ]; then
+            rm -rf "$contents/${name}"
+            echo "removed the ${name} mod: not for a Deck" >&2
+          fi
+        elif [ ! -d "$contents/${name}" ]; then
           mkdir -p "$contents/${name}"
           cp -R --no-preserve=mode ${lib.escapeShellArg dir}/. "$contents/${name}/"
           echo "installed the ${name} mod" >&2

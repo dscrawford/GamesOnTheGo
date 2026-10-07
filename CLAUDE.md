@@ -360,6 +360,14 @@ name-CRC, because SDL renames clones) and `keys.py`.
   `systemd-run --user` unit: a job backgrounded in an ssh session dies with it.
   `tests/ui/fixtures/input-devices-steam-deck.txt` and the `hidraw-steam-deck/`
   tree were captured against its real `/proc` and `/sys`.
+- **A launch knows which machine it is on.** `src/client/env/machine.sh`,
+  embedded in every environment's launcher, sets `GOTG_MACHINE` (`deck` when
+  DMI says Jupiter/Galileo) and `GOTG_EXTERNAL_DISPLAY` (a DRM connector
+  other than the panel is `connected`; a Deck's dock is a DP connector). A
+  preLaunch with a machine default reads them -- Ryujinx on a Deck is
+  handheld 720p unless a television is on, with the console's 4 GiB
+  (`switch.nix`, `ryujinxDram`, the UltraCam profiles). Both are settable by
+  hand, which is how a test or a person overrides the guess.
 - **A Deck calls itself a Steam Controller.** Its built-in controls report
   `Vendor=28de Product=1205` under the name `Valve Software Steam
   Controller`, character for character what a Puck reports, so no name rule

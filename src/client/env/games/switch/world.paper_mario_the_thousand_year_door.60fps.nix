@@ -59,6 +59,10 @@ base
       titleId = "0100ecd018ebe000";
       name = "1080p";
       dir = helpers.paperMarioTtydMod "1920x1080 v1.0.1";
+      # A 1080p render on a 1280x800 panel, and the 8 GiB of emulated DRAM
+      # it needs on 16 GB shared with the GPU: the 60fps patch alone is the
+      # Deck's variant.
+      onDeck = false;
     }).preLaunch
     + (helpers.ryujinxModOnly {
       titleId = "0100ecd018ebe000";

@@ -32,6 +32,15 @@ in
   # A preLaunch for one frame-rate and resolution. fps is the cap; the
   # emulator's own vsync is set beside it so the display keeps up — the
   # Switch's 60 Hz mode below 60, a custom rate above it.
+  #
+  # On a Deck the same variant is a different profile, chosen at launch by
+  # GOTG_MACHINE: the cap no higher than 60 (a 90 Hz panel has no 120 to
+  # show, and DynamicFPS makes a cap the game cannot hold a dropped frame
+  # rather than slow motion), the docked render no larger than 1080p (the
+  # dock's television; on the panel the mod's own Handheld line, 720p,
+  # applies), shadows at 512 and the console's 4 GiB. What a Deck reaches in
+  # this game is a stable 30 at best; the profile is what keeps a miss from
+  # being felt. docs/research/switch-on-deck.md.
   totkUltraCam =
     {
       fps,
@@ -42,7 +51,22 @@ in
       dram ? 2,
     }:
     let
-      mainIni = pkgs.writeText "Main.ini" ''
+      deck = {
+        fps = lib.min fps 60;
+        width = lib.min width 1920;
+        height = lib.min height 1080;
+        shadows = lib.min shadows 512;
+        dram = 0;
+      };
+      iniFor =
+        {
+          fps,
+          width,
+          height,
+          shadows,
+          ...
+        }:
+        pkgs.writeText "Main.ini" ''
         [FPS]
         Buffer = 8
         MaxFPS = ${toString fps}.0
@@ -70,11 +94,22 @@ in
         ForceDocked = False
         Shadows = ${toString shadows}
       '';
-      vsync =
+      mainIni = iniFor {
+        inherit
+          fps
+          width
+          height
+          shadows
+          ;
+      };
+      deckIni = iniFor deck;
+      vsyncFor =
+        fps:
         if fps <= 60 then
           ".vsync_mode = 0 | .enable_custom_vsync_interval = false"
         else
           ".vsync_mode = 2 | .enable_custom_vsync_interval = true | .custom_vsync_interval = ${toString fps}";
+      configFor = profile: ".dram_size = ${toString profile.dram} | ${vsyncFor profile.fps}";
     in
     {
       preLaunch = ''
@@ -99,11 +134,18 @@ in
         mkdir -p "$config"
         [ -d "$config/Config" ] && rm -rf "$config/Config"
         # Written on every launch: the frame rate is the variant, not a
-        # preference the mod's own menu should be able to lose.
-        cp --no-preserve=mode ${mainIni} "$config/Config"
+        # preference the mod's own menu should be able to lose. A Deck gets
+        # its own profile (see above).
+        if [ "''${GOTG_MACHINE:-}" = deck ]; then
+          cp --no-preserve=mode ${deckIni} "$config/Config"
+          ultracam_config='${configFor deck}'
+        else
+          cp --no-preserve=mode ${mainIni} "$config/Config"
+          ultracam_config='${configFor { inherit fps dram; }}'
+        fi
 
         if [ -f "$ryujinx/Config.json" ]; then
-          if ${pkgs.jq}/bin/jq '.dram_size = ${toString dram} | ${vsync}' \
+          if ${pkgs.jq}/bin/jq "$ultracam_config" \
             "$ryujinx/Config.json" >"$ryujinx/Config.json.gotg"; then
             mv "$ryujinx/Config.json.gotg" "$ryujinx/Config.json"
           else

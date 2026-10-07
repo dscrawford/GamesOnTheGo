@@ -376,6 +376,13 @@ let
         *) [ -t 1 ] || gotg_fullscreen=${lib.escapeShellArg fullscreenFlag} ;;
       esac
 
+      # Which machine this is, and whether a television is on it: GOTG_MACHINE
+      # and GOTG_EXTERNAL_DISPLAY, for a preLaunch that has a machine default
+      # (Ryujinx on a Deck). The function is machine.sh beside this file,
+      # embedded so the launcher stays one self-contained script.
+      ${builtins.readFile ./machine.sh}
+      gotg_machine_detect
+
       ${preLaunch}
 
       # Out of the store, or from anything but `gotg play`, the game simply

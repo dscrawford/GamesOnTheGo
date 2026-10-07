@@ -30,6 +30,11 @@ let
   };
 in
 {
+  # On a Deck the variant is a different profile, chosen at launch: the cap
+  # no higher than 60, and -- since this mod has one render size, not the
+  # TotK mod's docked/handheld pair -- 720p on the panel and no more than
+  # 1080p on a dock's television (GOTG_EXTERNAL_DISPLAY). See totkUltraCam
+  # and docs/research/switch-on-deck.md.
   botwUltraCam =
     {
       fps,
@@ -46,7 +51,13 @@ in
       # over. Written out in full rather than edited in place: the file is the
       # variant, and a mod menu that rewrote a key would otherwise leave this
       # environment quietly running something else next launch.
-      ini = pkgs.writeText "maxlastbreath.ini" ''
+      iniFor =
+        {
+          fps,
+          width,
+          height,
+        }:
+        pkgs.writeText "maxlastbreath.ini" ''
         [Resolution]
         MaxFramerate = ${toString fps}
         MenuFPS = 60
@@ -69,13 +80,28 @@ in
         [Benchmark]
         Benchmark = 0
       '';
+      ini = iniFor { inherit fps width height; };
+      deckFps = lib.min fps 60;
+      deckPanelIni = iniFor {
+        fps = deckFps;
+        width = 1280;
+        height = 720;
+      };
+      deckTvIni = iniFor {
+        fps = deckFps;
+        width = lib.min width 1920;
+        height = lib.min height 1080;
+      };
       # The console's own 60Hz at or below 60; a custom rate above it, since
       # the emulated display is what the game's frames are handed to.
-      vsync =
+      vsyncFor =
+        fps:
         if fps <= 60 then
           ".vsync_mode = 0 | .enable_custom_vsync_interval = false"
         else
           ".vsync_mode = 2 | .enable_custom_vsync_interval = true | .custom_vsync_interval = ${toString fps}";
+      vsync = vsyncFor fps;
+      deckVsync = vsyncFor deckFps;
     in
     {
       preLaunch = ''
@@ -90,10 +116,20 @@ in
             echo "installed UltraCam ($name)" >&2
           fi
         done
-        cp --no-preserve=mode ${ini} "$mod/romfs/UltraCam/maxlastbreath.ini"
+        if [ "''${GOTG_MACHINE:-}" = deck ]; then
+          if [ "''${GOTG_EXTERNAL_DISPLAY:-0}" = 1 ]; then
+            cp --no-preserve=mode ${deckTvIni} "$mod/romfs/UltraCam/maxlastbreath.ini"
+          else
+            cp --no-preserve=mode ${deckPanelIni} "$mod/romfs/UltraCam/maxlastbreath.ini"
+          fi
+          ultracam_vsync='${deckVsync}'
+        else
+          cp --no-preserve=mode ${ini} "$mod/romfs/UltraCam/maxlastbreath.ini"
+          ultracam_vsync='${vsync}'
+        fi
 
         if [ -f "$ryujinx/Config.json" ]; then
-          if ${pkgs.jq}/bin/jq '${vsync}' \
+          if ${pkgs.jq}/bin/jq "$ultracam_vsync" \
             "$ryujinx/Config.json" >"$ryujinx/Config.json.gotg"; then
             mv "$ryujinx/Config.json.gotg" "$ryujinx/Config.json"
           else

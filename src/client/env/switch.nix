@@ -102,6 +102,25 @@ in
         rm -f "$gotg_ryujinx_config.gotg"
       fi
     fi
+    # A Deck's defaults. Ryujinx's own is docked mode -- a 1080p render for a
+    # 1280x800 panel, 2.25 times the pixels, on a machine that gains nothing
+    # when docked -- so on a Deck the console is handheld unless a television
+    # is actually connected; and the emulated DRAM stays the console's 4 GiB,
+    # because since Ryubing 1.2.67 the texture cache grows with it and the
+    # Deck's 16 GB are shared with the GPU. Written on every launch, so what a
+    # dock changes between evenings is followed; the mods' own helpers read
+    # the same machine (ryujinxDram, the UltraCam profiles). Everything else
+    # in the config is already what the Deck guides and EmuDeck ship. See
+    # docs/research/switch-on-deck.md.
+    if [ "''${GOTG_MACHINE:-}" = deck ] && [ -f "$gotg_ryujinx_config" ]; then
+      if ${pkgs.jq}/bin/jq --argjson docked "$([ "''${GOTG_EXTERNAL_DISPLAY:-0}" = 1 ] && echo true || echo false)" \
+        '.docked_mode = $docked | .dram_size = 0' \
+        "$gotg_ryujinx_config" >"$gotg_ryujinx_config.gotg"; then
+        mv "$gotg_ryujinx_config.gotg" "$gotg_ryujinx_config"
+      else
+        rm -f "$gotg_ryujinx_config.gotg"
+      fi
+    fi
 
     # Ryujinx reads updates and DLC only from games/<title>/{updates,dlc}.json,
     # and a launch by path skips the library screen that writes them — so they

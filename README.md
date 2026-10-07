@@ -236,6 +236,14 @@ env-n64-usa_legend_of_zelda_ocarina_of_time_rev2-rando
 | `switch.world.paper_mario_the_thousand_year_door` | `60fps` |
 | `switch.world.super_mario_rpg` | `120fps` |
 
+On a Steam Deck the Switch variants are the same names with a Deck
+profile: handheld 720p unless a television is connected, the console's own
+4 GiB, caps no higher than 60 with UltraCam's DynamicFPS turning a miss into
+a dropped frame rather than slow motion, and Paper Mario's 1080p mod left
+out. The launcher tells a Deck by its firmware name (`GOTG_MACHINE=deck`)
+and a television by the kernel's connectors (`GOTG_EXTERNAL_DISPLAY=1`);
+both can be set by hand. Why: `docs/research/switch-on-deck.md`.
+
 A variant is a file: `src/client/env/games/<platform>/<id>.<variant>.nix`,
 beside `<id>.nix` for one game's settings and `<platform>.nix` for the rest.
 One whose version range matches nothing installed is hidden from the picker.
