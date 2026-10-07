@@ -383,6 +383,8 @@
 
           # Paper Mario — PaperBoat, Harbour Masters' libultraship port.
           paperboat = pkgs.callPackage ./pkgs/paperboat { SDL2 = sdl3s.sdl2; };
+          # Its asset extractor, run by the launch instead of PaperBoat's wizard.
+          paperboat-torch = pkgs.callPackage ./pkgs/paperboat-torch { };
 
           # Snowboard Kids 2: Recompiled — the same N64Recomp/RT64 stack as
           # dk64recomp above, and likewise not in nixpkgs.

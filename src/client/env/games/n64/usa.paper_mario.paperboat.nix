@@ -1,5 +1,5 @@
 # Paper Mario — PaperBoat, Harbour Masters' native port on the Paper Mario DX
-# decompilation. `gotg play usa.paper_mario paperboat`. It replaced ReCut, the
+# decompilation. `nix run gotg#usa.paper_mario.paperboat`. It replaced ReCut, the
 # Windows-only static recompilation this variant used to run under Wine: this
 # one ships for Linux, renders through libultraship (resolution scaling,
 # interpolated frame rates, aspect ratios, a mod menu), and is the same
@@ -19,12 +19,17 @@
 #     as it is. So the zip stays a zip and the first launch takes the .z64
 #     out of it, as ReCut did.
 #
-#   * **The first launch asks twice.** It extracts pm64.o2r with its own
-#     wizard: "No O2R files found. Generate one now?" and then "ROMs found
-#     ... Generate the game files from them?" -- Yes to both, then it plays.
-#     A ROM on the command line does not skip either (read from
-#     src/port/Engine.cpp), so the ROM is staged where the wizard scans, the
-#     same way harkinianPort does it, and no launch after that asks again.
+#   * **The archive is made by a command, not by its wizard.** PaperBoat
+#     extracts pm64.o2r behind two popups ("No O2R files found. Generate one
+#     now?", "ROMs found ...") that a ROM on the command line does not skip
+#     (src/port/Engine.cpp), and every machine asked again. Torch, the
+#     extractor PaperBoat links in, is packaged on its own (pkgs/paperboat-
+#     torch) and run here as BattleShip runs it: same commit, same options,
+#     the same config.yml and asset yamls from PaperBoat's own package.
+#     Checked against an archive the wizard made from the same ROM: all
+#     60,824 entries alike, version and portVersion included; the wizard's
+#     has one more, audio/portVersion, a copy of the stamp nothing reads.
+#     About thirty seconds, once per machine and PaperBoat version.
 {
   pkgs,
   gotgPkgs,
@@ -33,7 +38,8 @@
 }:
 let
   port = gotgPkgs.paperboat;
-  # The archive the wizard makes. Matched against the port's own list
+  torch = gotgPkgs.paperboat-torch;
+  # The archive config.yml names. Matched against the port's own list
   # (sRomArchives); only the US cartridge is supported, so only one name.
   archive = "pm64.o2r";
 in
@@ -60,26 +66,33 @@ in
     fi
 
     if [ ! -e "$SHIP_HOME/${archive}" ]; then
-      echo "first run: staging the ROM for PaperBoat's extractor -- answer Yes twice" >&2
-      rm -rf "$state/.rom"
-      mkdir -p "$state/.rom"
-      unzip -q -o "$install" -d "$state/.rom"
-      paperboat_rom="$(find "$state/.rom" -name '*.z64' | head -1)"
+      echo "first run: extracting game assets from $install -- half a minute, once" >&2
+      paperboat_work="$state/.extract"
+      rm -rf "$paperboat_work"
+      mkdir -p "$paperboat_work/rom" "$paperboat_work/out"
+      unzip -q -o "$install" -d "$paperboat_work/rom"
+      paperboat_rom="$(find "$paperboat_work/rom" -name '*.z64' | head -1)"
       [ -n "$paperboat_rom" ] || { echo "no .z64 inside $install" >&2; exit 1; }
-      # A copy: the wizard scans for ROMs by reading files, and the staged
-      # tree is removed straight after.
-      cp -f "$paperboat_rom" "$SHIP_HOME/gotg-extract.z64"
-      rm -rf "$state/.rom"
+      # -s is where config.yml and the asset yamls are: PaperBoat's own, so
+      # the recipe is the one this port reads. -u writes portVersion, as
+      # PaperBoat's extractor does. Into a scratch directory and then moved,
+      # so an extraction that is stopped leaves no half an archive behind.
+      (cd "$paperboat_work" && ${torch}/bin/torch o2r \
+        -s "${port}/share/paperboat" -d "$paperboat_work/out" \
+        -u "${lib.getVersion port}" "$paperboat_rom" >"$paperboat_work/torch.log" 2>&1) || {
+        tail -20 "$paperboat_work/torch.log" >&2
+        echo "could not extract PaperBoat's assets from $install" >&2
+        exit 1
+      }
+      mv -f "$paperboat_work/out/${archive}" "$SHIP_HOME/${archive}"
       printf '%s' "${lib.getVersion port}" >"$paperboat_stamp"
-    else
-      # Only needed until the archive exists.
-      rm -f "$SHIP_HOME/gotg-extract.z64"
+      rm -rf "$paperboat_work"
     fi
   '';
 
   # JSON saves, one per slot plus globals, and the settings beside them.
-  # The archive is rebuilt from the ROM by the first launch anywhere, and the
-  # staged ROM is refetchable, so neither travels.
+  # The archive is made from the ROM by the first launch anywhere, so it
+  # does not travel.
   saves = [
     "boat/saves/**"
     "boat/paperboat.cfg.json"

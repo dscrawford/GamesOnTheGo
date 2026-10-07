@@ -36,6 +36,7 @@ let
     snowboardkids2recomp = pkgs.callPackage ../../../pkgs/snowboardkids2recomp { SDL2 = sdl3s.sdl2; };
     battleship = pkgs.callPackage ../../../pkgs/battleship { SDL2 = sdl3s.sdl2; };
     paperboat = pkgs.callPackage ../../../pkgs/paperboat { SDL2 = sdl3s.sdl2; };
+    paperboat-torch = pkgs.callPackage ../../../pkgs/paperboat-torch { };
     open-nectar = pkgs.callPackage ../../../pkgs/open-nectar { };
     melee-pc = pkgs.callPackage ../../../pkgs/melee-pc { };
     # nixpkgs' Ryubing with the JIT cache size upstream Ryujinx shipped; see
