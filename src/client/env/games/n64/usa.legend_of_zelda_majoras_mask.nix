@@ -12,5 +12,7 @@ helpers.harkinianPort {
   bin = "2s2h";
   appName = "2ship";
   config = "2ship2harkinian.json";
+  # 2Ship names this one without its settings prefix (BenMenuSettings.cpp).
+  settings.refresh = "gMatchRefreshRate";
   archives = [ "mm.o2r" ];
 }

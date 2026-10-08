@@ -50,18 +50,27 @@ helpers.harkinianPort {
   # nativePort comes from the helper: everything it builds is a port.
   archives = [ "BattleShip.o2r" ];
   config = "BattleShip.cfg.json";
-  # libultraship's own name for it; this port does not prefix its cvars.
-  menuCvar = "gControlNav";
+  # No lus-cvars.cmake: libultraship's Compat.h fallbacks, unprefixed
+  # (gControlNav, gMSAAValue...), and no frame-rate interpolation to match a
+  # refresh rate with.
+  settings = {
+    prefix = "g";
+    refresh = null;
+  };
 }
 // {
   # This replaces the helper's preLaunch, so what that one does for the
-  # menu is asked for here again.
+  # settings is asked for here again.
   preLaunch = ''
     run="''${XDG_DATA_HOME:-$HOME/.local/share}/${appName}"
     mkdir -p "$run"
-    ${helpers.menuFromPad {
+    ${helpers.lusSettings {
       file = ''"$run/BattleShip.cfg.json"'';
-      cvar = "gControlNav";
+      unsaid = {
+        gControlNav = 1;
+        gSdlWindowedFullscreen = 1;
+        gMSAAValue = 4;
+      };
     }}
 
     # Relinked every launch rather than copied once: an upgrade of the port

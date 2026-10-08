@@ -176,6 +176,9 @@ stops the game and pushes its saves. **L + R + Start** held three seconds
 stops any game. In the libultraship ports (Paper Mario, Ocarina of Time,
 Majora's Mask, Smash) **Select** opens the port's own menu -- its settings,
 enhancements and controller screen -- which they ship with that turned off.
+The same launch leaves them full screen at the screen's own resolution, the
+frame rate matched to its refresh and 4x MSAA, as defaults: anything changed
+in the port's menu stays changed.
 
 Only pads danstick has published move the picker -- the keyboard takes a seat
 too (hold `Space`), and a controller that is also a keyboard (a Steam
@@ -226,7 +229,7 @@ env-n64-usa_legend_of_zelda_ocarina_of_time_rev2-rando
 | `n64.usa.super_mario_64` | `pc`, `pc-2p`, `pc-3p`, `pc-4p` (sm64coopdx, split-screen) |
 | `n64.usa.legend_of_zelda_majoras_mask` | `rando` |
 | `n64.usa.legend_of_zelda_ocarina_of_time_rev2` | `rando`, `2p`, `3p`, `4p` (Anchor co-op, split-screen) |
-| `n64.usa.paper_mario` | `paperboat` |
+| `n64.usa.paper_mario` | `paperboat` (MasterKillua's Refolded textures, when the library serves `n64/paperboat-hd.o2r`) |
 | `gba.world.pokemon_emerald_version` | `rogue` |
 | `switch.world.legend_of_zelda_breath_of_the_wild` | `60fps`, `120fps` (needs 1.6.0) |
 | `switch.world.legend_of_zelda_tears_of_the_kingdom` | `60fps`, `120fps`, `enhanced` (needs 1.1.0–1.4.2) |

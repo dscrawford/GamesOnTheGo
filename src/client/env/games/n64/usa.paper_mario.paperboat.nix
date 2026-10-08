@@ -93,13 +93,19 @@ in
     mkdir -p "$SHIP_HOME"
     cd "$SHIP_HOME"
 
-    # Select opens the port's own menu: see menuFromPad. PaperBoat's
-    # cmake/lus-cvars.cmake prefixes libultraship's name, as the Zelda ports
-    # do -- gSettings.ControlNav. (A launch wrote the unprefixed gControlNav
-    # for a day; the game kept the key and ignored it.)
-    ${helpers.menuFromPad {
+    # The port's settings as a launch leaves them: see lusSettings. Names
+    # off PaperBoat's cmake/lus-cvars.cmake and PaperboatMenuSettings.cpp --
+    # it prefixes libultraship's, as the Zelda ports do. (A launch wrote the
+    # unprefixed gControlNav for a day; the game kept the key and ignored
+    # it.)
+    ${helpers.lusSettings {
       file = ''"$SHIP_HOME/paperboat.cfg.json"'';
-      cvar = "gSettings.ControlNav";
+      unsaid = {
+        "gSettings.ControlNav" = 1;
+        "gSettings.SdlWindowedFullscreen" = 1;
+        "gSettings.MatchRefreshRate" = 1;
+        "gSettings.MSAAValue" = 4;
+      };
     }}
 
     # An archive belongs to the port version that made it -- 2Ship taught

@@ -7,39 +7,65 @@
   steps,
 }:
 let
-  # The port's own menu, from a pad.
+  # A libultraship port's settings, as a launch leaves them.
   #
-  # libultraship opens its menu on Esc or F1 and -- only while the controller
-  # navigation cvar is set -- on the pad's Back (Gui.cpp, TOGGLE_PAD_BTN; its
-  # ImGui patch is what lets Back be read while the menu is closed). The cvar
-  # ships off, and the checkbox that turns it on ("Menu Controller
-  # Navigation", under Settings) is inside the menu a pad cannot open: on the
-  # Deck, Select did nothing in PaperBoat and there was no keyboard to press
-  # Esc on. So a launch says it when the file does not say either way -- a
-  # first launch anywhere has it, and a person who turned it off in the menu
-  # stays heard. The settings file travels with each port's saves.
+  # `unsaid` is cvar -> value, each written only when the file does not say
+  # either way: a first launch anywhere has them, and a person who changed
+  # one in the port's menu stays heard. The settings file travels with each
+  # port's saves. What goes in it, and why:
   #
-  # `cvar` is the port's name for it, which each one compiles in -- read it
-  # off the port's own cmake/lus-cvars.cmake, not the game's config file:
-  # libultraship's default is gControlNav (BattleShip, which has no such
-  # file); SoH, 2Ship and PaperBoat set "${CVAR_PREFIX_SETTING}.ControlNav",
-  # gSettings.ControlNav. A dot is a level of JSON, as libultraship's Config
-  # stores it; `file` is a shell expression for the settings file.
-  menuFromPad =
-    { file, cvar }:
+  #   - The menu from a pad. libultraship opens its menu on Esc or F1 and --
+  #     only while the controller navigation cvar is set -- on the pad's Back
+  #     (Gui.cpp, TOGGLE_PAD_BTN; its ImGui patch is what lets Back be read
+  #     while the menu is closed). It ships off, and the checkbox that turns
+  #     it on is inside the menu a pad cannot open: on the Deck, Select did
+  #     nothing in PaperBoat and there was no keyboard to press Esc on.
+  #   - Full screen at the screen's resolution. Full screen in libultraship is
+  #     a mode switch to Window.Fullscreen.Width x Height, 1280x720 unless
+  #     somebody changed it: 720p stretched over a 4K television, letterboxed
+  #     on a Deck's 800 lines. "SDL windowed fullscreen" is a borderless
+  #     window the size of the desktop instead -- the screen's own
+  #     resolution, whatever is plugged in, and no mode switch.
+  #   - The frame rate the screen has. The ports interpolate to a chosen rate
+  #     (20 or 30 unless changed); "match refresh rate" follows the display,
+  #     165 on a desk, 90 on a Deck OLED, 60 on a television.
+  #   - 4x MSAA. Cheap on N64 geometry at any resolution these run at.
+  #
+  # Every name is read off the port's own cmake/lus-cvars.cmake (or, for a
+  # port without one, libultraship's Compat.h fallbacks), not inferred from
+  # the config file -- that guess cost a day with PaperBoat's menu. A dot is a
+  # level of JSON, as libultraship's Config stores it. `file` is a shell
+  # expression for the settings file.
+  #
+  # And, each launch rather than when unsaid: Window.Fullscreen.Enabled from
+  # how the game was started (lib.nix's gotg_fullscreen -- Steam and the
+  # picker full screen, a terminal not), since that is how every other
+  # environment here decides it and the ports have no flag for it.
+  lusSettings =
+    { file, unsaid }:
+    let
+      path = cvar: ''["CVars"] + ("${cvar}" | split("."))'';
+      value = v: if builtins.isBool v then (if v then "1" else "0") else toString v;
+      program = lib.concatStringsSep " | " (
+        lib.mapAttrsToList (
+          cvar: v: "(if getpath(${path cvar}) == null then setpath(${path cvar}; ${value v}) else . end)"
+        ) unsaid
+        ++ [ ".Window.Fullscreen.Enabled = $fs" ]
+      );
+    in
     ''
       lus_cfg=${file}
-      lus_cvar='["CVars"] + ("${cvar}" | split("."))'
+      lus_fs="$([ -n "''${gotg_fullscreen:-}" ] && echo true || echo false)"
       if [ ! -e "$lus_cfg" ]; then
-        jq -n "setpath($lus_cvar; 1)" >"$lus_cfg"
-      elif [ "$(jq -r "getpath($lus_cvar) == null" "$lus_cfg" 2>/dev/null)" = true ]; then
-        jq "setpath($lus_cvar; 1)" "$lus_cfg" >"$lus_cfg.gotg-tmp" \
+        jq -n --argjson fs "$lus_fs" '{} | ${program}' >"$lus_cfg"
+      else
+        jq --argjson fs "$lus_fs" '${program}' "$lus_cfg" >"$lus_cfg.gotg-tmp" \
           && mv -f "$lus_cfg.gotg-tmp" "$lus_cfg"
       fi
     '';
 in
 {
-  inherit menuFromPad;
+  inherit lusSettings;
 
   # The HarbourMasters ports — Ship of Harkinian, 2 Ship 2 Harkinian — are native
   # ports rather than emulators, and take the ROM differently from anything else
@@ -63,9 +89,12 @@ in
   #             where a retail one produces oot.o2r
   #   config    the settings file libultraship keeps beside the archive
   #             (shipofharkinian.json, 2ship2harkinian.json); carried with the
-  #             saves, and where `menuFromPad` writes
-  #   menuCvar  the port's name for the controller-navigation cvar; the two
-  #             Zelda ports prefix libultraship's default
+  #             saves, and where `lusSettings` writes
+  #   settings  the port's names for libultraship's cvars, read off its
+  #             cmake/lus-cvars.cmake: `prefix` is CVAR_PREFIX_SETTING with
+  #             its dot ("gSettings."; BattleShip has none and "g"), and
+  #             `refresh` the match-refresh-rate cvar, which each port names
+  #             for itself (2Ship: gMatchRefreshRate) or lacks (null)
   harkinianPort =
     {
       port,
@@ -73,12 +102,22 @@ in
       appName,
       archives,
       config,
-      menuCvar ? "gSettings.ControlNav",
+      settings ? { },
     }:
+    let
+      prefix = settings.prefix or "gSettings.";
+      refresh = settings.refresh or "gSettings.MatchRefreshRate";
+      unsaid = {
+        "${prefix}ControlNav" = 1;
+        "${prefix}SdlWindowedFullscreen" = 1;
+        "${prefix}MSAAValue" = 4;
+      }
+      // lib.optionalAttrs (refresh != null) { "${refresh}" = 1; };
+    in
     {
       emulator = port;
       inherit bin;
-      # jq, for the settings file `menuFromPad` edits.
+      # jq, for the settings file `lusSettings` edits.
       path = [ pkgs.jq ];
       # Ports, all of them -- that is what this helper is. `emulate` is the
       # way back to ares.
@@ -149,9 +188,9 @@ in
       preLaunch = ''
         harkinian_data="''${XDG_DATA_HOME:-$HOME/.local/share}/${appName}"
         mkdir -p "$harkinian_data"
-        ${menuFromPad {
+        ${lusSettings {
           file = ''"$harkinian_data/${config}"'';
-          cvar = menuCvar;
+          inherit unsaid;
         }}
         harkinian_stamp="$harkinian_data/.gotg-archive-version"
         if [ "$(cat "$harkinian_stamp" 2>/dev/null)" != "${lib.getVersion port}" ]; then
