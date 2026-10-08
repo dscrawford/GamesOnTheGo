@@ -276,7 +276,7 @@ updates_json() {
   while IFS= read -r game; do
     [[ -n "$game" ]] || continue
     install="$(game_installed_path "$game")" || continue
-    [[ -d "$install" ]] || continue
+    # A plain-file install lacks every release; the top-up moves it into the bundle.
     [[ -n "$(_extras_missing "$install" "$game")" ]] || continue
     key="$(manifest_field "$game" platform)/$(manifest_field "$game" id)"
     attrs["$key"]="${attrs[$key]:-}"

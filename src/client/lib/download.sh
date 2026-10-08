@@ -502,9 +502,9 @@ _top_up_extras() {
   # rebuild away (`gotg update`); until then the game runs as it is, and the
   # catalog's new release waits.
   local attr
-  attr="${GOTG_PINNED_ATTR:-$(env_attr "$game")}"
   env_build_wait
-  if [[ ! -x "$(env_root "$attr")/bin/gotg-recipe" ]] || ! _recipe_declares "$attr" extras; then
+  attr="$(_extras_env "$game")"
+  if ! _recipe_takes "$attr" extras; then
     warn "$title has extras this build of $attr cannot install -- rebuild it: gotg update"
     return 0
   fi
@@ -514,7 +514,36 @@ _top_up_extras() {
   staged="$(download_partial_path "$id")"
   with_lock "$GOTG_STATE_DIR/locks/$id.lock" 3600 \
     "timed out waiting for another gotg process to finish downloading $id" \
-    _top_up_extras_locked "$game" "$staged" "$title" "$install" "$missing" "$legacy"
+    _top_up_extras_locked "$game" "$staged" "$title" "$install" "$missing" "$legacy" "$attr"
+}
+
+_recipe_takes() {
+  [[ -x "$(env_root "$1")/bin/gotg-recipe" ]] && _recipe_declares "$1" "$2"
+}
+
+# The environment whose recipe installs this game's extras: the plain one, or
+# a variant's build when that is the fresh one here -- a game played only
+# through its port has no plain root, and the port's recipe is the platform's.
+_extras_env() {
+  local game="$1" attr id platform spec other
+  attr="${GOTG_PINNED_ATTR:-$(env_attr "$game")}"
+  _recipe_takes "$attr" extras && {
+    printf '%s' "$attr"
+    return 0
+  }
+  id="$(manifest_field "$game" id)"
+  platform="$(manifest_field "$game" platform)"
+  for spec in "$GOTG_STATE_DIR/games/$platform.$id"*/share/gotg/spec.json; do
+    [[ -f "$spec" ]] || continue
+    other="$(jq -r --arg id "$id" --arg p "$platform" \
+      'select(.game.id == $id and .game.platform == $p) | .attr // empty' "$spec" 2>/dev/null)"
+    [[ -n "$other" ]] || continue
+    if _recipe_takes "$other" extras; then
+      printf '%s' "$other"
+      return 0
+    fi
+  done
+  printf '%s' "$attr"
 }
 
 # A plain <id>.<ext> becomes <id>/<id>.<ext>; an empty <id>/ left by a failed
@@ -532,12 +561,12 @@ _bundle_in_place() {
 
 # _top_up_extras' fetch, under the game's lock.
 _top_up_extras_locked() {
-  local game="$1" staged="$2" title="$3" install="$4" missing="$5" legacy="${6:-}"
+  local game="$1" staged="$2" title="$3" install="$4" missing="$5" legacy="${6:-}" attr="${7:-}"
   service_have || die "no service configured — run: gotg login"
 
   _fetch_members "$game" "$staged" "$title" "$(jq -cR . <<<"$missing" | jq -cs .)"
   [[ -z "$legacy" ]] || _bundle_in_place "$game" "$legacy" "$install"
-  _run_recipe "$game" extras "$staged" "$install"
+  _run_recipe "$game" extras "$staged" "$install" "$attr"
   rm -rf "$staged"
   log "added to $install: $(tr '\n' ' ' <<<"$missing")"
 }
@@ -553,7 +582,7 @@ _recipe_declares() {
 _run_recipe() {
   local game="$1" handler="$2" staged="$3" dest="$4"
   local attr recipe
-  attr="${GOTG_PINNED_ATTR:-$(env_attr "$game")}"
+  attr="${5:-${GOTG_PINNED_ATTR:-$(env_attr "$game")}}"
   # The game may still be building beside the download (install's overlap).
   env_build_wait
   recipe="$(env_root "$attr")/bin/gotg-recipe"

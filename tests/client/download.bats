@@ -703,6 +703,33 @@ SHIM
   [[ "$output" == *"env-n64 launched with: $install/usa.paper_mario.z64"* ]]
 }
 
+@test "a game played only through its port installs its extras with the port's build" {
+  add_game n64 "usa.paper_mario.z64" "rom-bytes" "Paper Mario"
+  gotg refresh
+  gotg download usa.paper_mario
+  [ "$status" -eq 0 ]
+
+  publish_mod_game
+  stub_n64_bundle_recipe_env
+  # The plain environment's root is an old build; the port's, named by a
+  # built game root, is fresh and carries the platform's recipe.
+  jq -n '{handlers: ["single_file"]}' >"$GOTG_ROOTS_DIR/env-n64/share/gotg/recipe.json"
+  local port="$GOTG_ROOTS_DIR/env-n64-usa_paper_mario-paperboat"
+  mkdir -p "$port/bin" "$port/share/gotg" "$GOTG_STATE_DIR/games/n64.usa.paper_mario.paperboat/share/gotg"
+  cp "$GOTG_ROOTS_DIR/env-n64/bin/gotg-recipe" "$port/bin/gotg-recipe"
+  jq -n '{handlers: ["single_file", "extras"]}' >"$port/share/gotg/recipe.json"
+  jq -n --arg env "$port" '{attr: "env-n64-usa_paper_mario-paperboat", env: $env, game: {id: "usa.paper_mario", platform: "n64"}}' \
+    >"$GOTG_STATE_DIR/games/n64.usa.paper_mario.paperboat/share/gotg/spec.json"
+  gotg refresh
+
+  gotg download usa.paper_mario
+  [ "$status" -eq 0 ]
+  [[ "$stderr" != *"cannot install"* ]]
+  local install="$GOTG_GAMES_DIR/n64/usa.paper_mario"
+  [ "$(cat "$install/usa.paper_mario.z64")" = rom-bytes ]
+  [ "$(cat "$install/extras/mod_refolded-paperboat-hd.o2r")" = hd-pack ]
+}
+
 @test "an n64 rom installed before its mod release is moved into a bundle in place" {
   add_game n64 "usa.paper_mario.z64" "rom-bytes" "Paper Mario"
   gotg refresh
