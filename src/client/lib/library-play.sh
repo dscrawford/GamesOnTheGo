@@ -160,11 +160,19 @@ library_catalog_refresh() {
   if ! "$(nix_bin)" flake update catalog --flake "$library" 2>"$GOTG_STATE_DIR/catalog-update.log"; then
     warn "could not update the library's catalog; showing the one it has ($GOTG_STATE_DIR/catalog-update.log)"
   fi
-  [[ -L "$GOTG_CACHE_FILE" ]] || rm -f "$GOTG_CACHE_FILE"
+  # A cache that is a file (fetched from the service) waits aside until the
+  # pin has built, so a build that fails leaves a catalog rather than none.
+  local kept=""
+  if [[ -e "$GOTG_CACHE_FILE" && ! -L "$GOTG_CACHE_FILE" ]]; then
+    kept="$GOTG_CACHE_FILE.prev"
+    mv -f "$GOTG_CACHE_FILE" "$kept"
+  fi
   "$(nix_bin)" build "$library#catalog" -o "$GOTG_CACHE_FILE" || {
+    [[ -z "$kept" ]] || mv -f "$kept" "$GOTG_CACHE_FILE"
     warn "could not read the catalog from $library"
     return 1
   }
+  [[ -z "$kept" ]] || rm -f "$kept"
   manifest_cached || {
     warn "the catalog $library pins is not valid GOTG JSON"
     return 1

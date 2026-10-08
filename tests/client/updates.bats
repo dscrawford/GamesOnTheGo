@@ -81,6 +81,11 @@ case "$1 $2" in
     done
     exit 1 ;;
 esac
+if [[ "$1" == build && "$*" == *"#catalog"* ]]; then
+  [[ -n "${LIBRARY_CATALOG:-}" ]] || exit 1
+  prev=""; for arg in "$@"; do [[ "$prev" == "-o" ]] && { rm -f "$arg"; ln -sfn "$LIBRARY_CATALOG" "$arg"; exit 0; }; prev="$arg"; done
+  exit 1
+fi
 if [[ "$1" == build && "$*" == *"--print-out-paths"* ]]; then
   for arg in "$@"; do case "$arg" in *"#"*) echo "$TEST_TMP/store/${arg#*#}-out" ;; esac; done
   exit 0
@@ -346,6 +351,35 @@ wants() { export EVAL_GAMES_JSON="$1"; }
   [ "$status" -eq 0 ]
   [ "$(jq -c '.games | map(.key)' <<<"$output")" = '["n64/usa.paper_mario"]' ]
   [ "$(jq -c '.games[0].reasons' <<<"$output")" = '["extras"]' ]
+}
+
+@test "a check refreshes the library's catalog first, so a mod attached since shows" {
+  local dir="$SERVICE_LIBRARY_DIR/n64"
+  mkdir -p "$dir/mods" "$GOTG_GAMES_DIR/n64"
+  printf 'rom' >"$dir/usa.paper_mario.z64"
+  printf 'rom' >"$GOTG_GAMES_DIR/n64/usa.paper_mario.z64"
+  printf 'pack' >"$dir/mods/paperboat-hd.o2r"
+  add_member_game n64 usa.paper_mario "Paper Mario" single_file "$(jq -n --arg d "$dir" --arg a "$(sha a)" --arg b "$(sha b)" \
+    '[{name: "usa.paper_mario.z64", path: ($d + "/usa.paper_mario.z64"), size_bytes: 3, mtime: 1, sha256: $a},
+      {name: "extras/mod_refolded/paperboat-hd.o2r", path: ($d + "/mods/paperboat-hd.o2r"), size_bytes: 4, mtime: 1, sha256: $b}]')"
+  curl -sf -H "Authorization: Bearer $(jq -r .token "$GOTG_CONFIG_DIR/api.json")" "$GOTG_SERVICE_URL/catalog" >"$TEST_TMP/catalog.json"
+  export LIBRARY_CATALOG="$TEST_TMP/catalog.json"
+  gotg update --check --force
+  [ "$status" -eq 0 ]
+  grep -qx "flake update catalog --flake $GOTG_LIBRARY" "$NIX_LOG"
+  gotg complete updates
+  [ "$(jq -c '.games | map(.key)' <<<"$output")" = '["n64/usa.paper_mario"]' ]
+  [ "$(jq -c '.games[0].reasons' <<<"$output")" = '["extras"]' ]
+}
+
+@test "a check whose catalog cannot be read keeps the one it has" {
+  export FAIL_MATCH='#catalog'
+  gotg update --check --force
+  [ "$status" -eq 0 ]
+  jq -e '.games | length > 0' "$GOTG_CACHE_FILE" >/dev/null
+  gotg complete updates
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.games | length' <<<"$output")" = 0 ]
 }
 
 # --- one game brought up to date -------------------------------------------------

@@ -173,6 +173,9 @@ _updates_check_locked() {
     fi
   fi
   local attrs=() want apps
+  # The catalog moves on its own (a mod attached since); a refresh that
+  # fails leaves the one here.
+  manifest_refresh >/dev/null 2>&1 || true
   mapfile -t attrs < <(library_root_attrs)
   # An evaluation that answers nothing, or not an object, keeps the last.
   want="$(updates_eval_games "$library" "${attrs[@]}")"
