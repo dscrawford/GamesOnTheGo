@@ -533,3 +533,101 @@ overlay_frames() {
   [[ "$stderr" == *"version 1 launch spec"* ]]
   [ ! -d "$GOTG_STATE_DIR/qa/runs" ]
 }
+
+# --- the steps of a run ------------------------------------------------------
+#
+# cmd_qa is a sequence of _qa_* functions sharing QA_* globals; the ones that
+# decide something are asked directly, with no game, pad or compositor.
+
+@test "qa step: arguments become the request, with the defaults for the rest" {
+  _qa_parse_args usa.zelda 60fps --duration 30 --bless --machine deck --overlay-at 5
+  [ "$QA_WANT" = usa.zelda ]
+  [ "$QA_VARIANT" = 60fps ]
+  [ "$QA_DURATION" = 30 ]
+  [ "$QA_BOOT_WAIT" = 15 ]
+  [ "$QA_BLESS" = 1 ]
+  [ "$QA_MACHINE" = deck ]
+  [ "$QA_OVERLAY_AT" = 5 ]
+  [ -z "$QA_HELP" ]
+  _qa_parse_args usa.zelda
+  [ "$QA_DURATION" = 60 ] && [ "$QA_MACHINE" = desktop ] && [ -z "$QA_BLESS" ]
+}
+
+@test "qa step: a third word and an unknown flag are refused" {
+  run _qa_parse_args a b c
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unexpected argument: c"* ]]
+  run _qa_parse_args a --nope
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown option: --nope"* ]]
+}
+
+@test "qa step: --help is flagged, not run" {
+  run _qa_parse_args --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"usage: gotg qa"* ]]
+}
+
+@test "qa step: seconds must be whole and an overlay must fit in the run" {
+  QA_WANT=x QA_MACHINE=desktop QA_BOOT_WAIT=15 QA_OVERLAY_AT="" QA_DURATION=abc
+  run _qa_check_args
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"take whole seconds"* ]]
+  QA_DURATION=60 QA_OVERLAY_AT=52
+  run _qa_check_args
+  [ "$status" -eq 0 ]
+  QA_OVERLAY_AT=53
+  run _qa_check_args
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"leaves no room for the overlay in a 60s run"* ]]
+  QA_WANT=""
+  QA_OVERLAY_AT=""
+  run _qa_check_args
+  [[ "$output" == *"usage: gotg qa"* ]]
+}
+
+@test "qa step: the real machine is chosen only when it is asked for and answers" {
+  stub_ssh
+  export GOTG_QA_HOST_DECK="deck@192.168.0.80"
+  QA_MACHINE=desktop
+  [ -z "$(_qa_choose_host)" ]
+  QA_MACHINE=deck
+  SSH_EXIT=0 run _qa_choose_host
+  [ "$output" = "deck@192.168.0.80" ]
+  SSH_EXIT=255 run --separate-stderr _qa_choose_host
+  [ -z "$output" ]
+  [[ "$stderr" == *"did not answer"* ]]
+}
+
+@test "qa step: a remote run is given every flag that was asked for" {
+  QA_WANT=usa.zelda QA_VARIANT=60fps QA_DURATION=30 QA_BOOT_WAIT=10 QA_BLESS=1 QA_OVERLAY_AT=5
+  [ "$(_qa_remote_args | tr '\n' ' ')" = "usa.zelda 60fps --duration 30 --boot-wait 10 --bless --overlay-at 5 " ]
+  QA_VARIANT="" QA_BLESS="" QA_OVERLAY_AT=""
+  [ "$(_qa_remote_args | tr '\n' ' ')" = "usa.zelda --duration 30 --boot-wait 10 " ]
+}
+
+@test "qa step: the virtual pad is the last Xbox 360 identity in the list" {
+  run _qa_pad_key <<<'[{"identity":"030000005e0400008e02000014010000","slot":0},
+    {"identity":"030000005e0400008e02000099990000","slot":1}]'
+  [ "$output" = "030000005e0400008e02000099990000/1" ]
+  run _qa_pad_key <<<'[{"identity":"03000000046d0000c21600000000","slot":0}]'
+  [ "$output" = "null/null" ]
+}
+
+@test "qa step: a golden is trusted only for the timings it was blessed with" {
+  printf x >"$TEST_TMP/g.png"
+  jq -n '{duration: 30, boot_wait: 10}' >"$TEST_TMP/g.png.json"
+  run _qa_golden_matches "$TEST_TMP/g.png" 30 10
+  [ "$status" -eq 0 ]
+  run _qa_golden_matches "$TEST_TMP/g.png" 60 10
+  [ "$status" -ne 0 ]
+  run _qa_golden_matches "$TEST_TMP/none.png" 30 10
+  [ "$status" -ne 0 ]
+}
+
+@test "qa step: the report names each axis as pass, FAIL or skip" {
+  run _qa_verdict_lines <<<'{"checks":{"boots":{"pass":true},"audio":{"pass":false},"graphics":{"pass":null}}}'
+  [[ "$output" == *"  boots     pass"* ]]
+  [[ "$output" == *"  audio     FAIL"* ]]
+  [[ "$output" == *"  graphics  skip"* ]]
+}

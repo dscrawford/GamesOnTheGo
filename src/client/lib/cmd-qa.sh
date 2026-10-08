@@ -354,8 +354,28 @@ qa_where() {
   fi
 }
 
-cmd_qa() {
-  local want="" variant="" duration=60 boot_wait=15 bless="" machine="desktop" overlay_at="" spec=""
+# `gotg qa` is a sequence of steps, each its own function below, in the order
+# cmd_qa runs them. They share a run through these globals rather than through
+# a dozen arguments each (a step that sets one says so):
+#
+#   QA_WANT QA_VARIANT QA_DURATION QA_BOOT_WAIT QA_BLESS QA_MACHINE
+#   QA_OVERLAY_AT QA_SPEC   what was asked for     (_qa_parse_args)
+#   QA_HELP                 1 when --help was shown (_qa_parse_args)
+#   QA_GAME                 the catalog entry       (_qa_resolve_game)
+#   QA_KILLSWITCH           the overlay binary      (_qa_preflight)
+#   QA_ID QA_PLATFORM       of the game as prepared (_qa_prepare_game)
+#   QA_AUDIO_PID            the parecord to stop    (_qa_start_audio)
+#   QA_CAGE_STATUS          how the session ended   (_qa_run_session)
+#
+# QA_PAD_PID, QA_SINK_MODULE and QA_ROUTER_PID are the ones qa_cleanup reads
+# from the EXIT trap; they are globals for that reason and no other.
+
+# Step 1, the arguments. Sets the QA_* request globals above; a typo is
+# refused here, before anything is built. Separate from _qa_check_args because
+# --rerun re-enters the loop with a recorded argument list.
+_qa_parse_args() {
+  QA_WANT="" QA_VARIANT="" QA_DURATION=60 QA_BOOT_WAIT=15 QA_BLESS="" QA_MACHINE="desktop"
+  QA_OVERLAY_AT="" QA_SPEC="" QA_HELP=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -h | --help)
@@ -387,20 +407,21 @@ usage: gotg qa <id> [variant] [--duration N] [--boot-wait N] [--bless] [--machin
 
   Artifacts and verdict.json land under ~/.local/state/gotg/qa/runs.
 EOF
+        QA_HELP=1
         return 0
         ;;
-      --duration) duration="${2:-}"; shift 2 ;;
-      --boot-wait) boot_wait="${2:-}"; shift 2 ;;
-      --bless) bless=1; shift ;;
-      --machine) machine="${2:-}"; shift 2 ;;
-      --overlay-at) overlay_at="${2:-}"; shift 2 ;;
+      --duration) QA_DURATION="${2:-}"; shift 2 ;;
+      --boot-wait) QA_BOOT_WAIT="${2:-}"; shift 2 ;;
+      --bless) QA_BLESS=1; shift ;;
+      --machine) QA_MACHINE="${2:-}"; shift 2 ;;
+      --overlay-at) QA_OVERLAY_AT="${2:-}"; shift 2 ;;
       # A game as its Nix output runs it: the spec a library's game carries
       # (cmd-launch.sh), checked now, before anything is built or fetched.
       --spec)
         launch_spec_load "${2:-}"
-        spec="$2"
-        want="$LAUNCH_WANT"
-        variant="$LAUNCH_VARIANT"
+        QA_SPEC="$2"
+        QA_WANT="$LAUNCH_WANT"
+        QA_VARIANT="$LAUNCH_VARIANT"
         shift 2
         ;;
       --rerun)
@@ -415,56 +436,84 @@ EOF
         ;;
       -*) die "unknown option: $1 (gotg qa --help)" ;;
       *)
-        if [[ -z "$want" ]]; then want="$1"
-        elif [[ -z "$variant" ]]; then variant="$1"
+        if [[ -z "$QA_WANT" ]]; then QA_WANT="$1"
+        elif [[ -z "$QA_VARIANT" ]]; then QA_VARIANT="$1"
         else die "unexpected argument: $1"; fi
         shift
         ;;
     esac
   done
-  [[ -n "$want" ]] || die "usage: gotg qa <id> [variant] [--duration N] [--boot-wait N] [--bless]"
-  [[ "$duration" =~ ^[0-9]+$ && "$boot_wait" =~ ^[0-9]+$ ]] ||
+}
+
+# Step 2, whether what was asked makes sense: an id, whole seconds, an overlay
+# that fits in the run, a machine that has a profile. All of it before
+# anything is built or downloaded: a typo here is the cheapest thing to be
+# wrong about after the id.
+_qa_check_args() {
+  [[ -n "$QA_WANT" ]] || die "usage: gotg qa <id> [variant] [--duration N] [--boot-wait N] [--bless]"
+  [[ "$QA_DURATION" =~ ^[0-9]+$ && "$QA_BOOT_WAIT" =~ ^[0-9]+$ ]] ||
     die "--duration and --boot-wait take whole seconds"
-  [[ -z "$overlay_at" || "$overlay_at" =~ ^[0-9]+$ ]] || die "--overlay-at takes whole seconds"
+  [[ -z "$QA_OVERLAY_AT" || "$QA_OVERLAY_AT" =~ ^[0-9]+$ ]] || die "--overlay-at takes whole seconds"
   # The join and the exit ring take six seconds from N (qa/session.sh); a run
   # that ends inside them grades a bar that was never finished.
-  [[ -z "$overlay_at" ]] || ((10#$overlay_at + 8 <= 10#$duration)) ||
-    die "--overlay-at $overlay_at leaves no room for the overlay in a ${duration}s run (needs N + 8 <= duration)"
-  # Checked before anything is built or downloaded: a typo here is the
-  # cheapest thing to be wrong about after the id.
-  qa_machine_env "$machine" >/dev/null
+  [[ -z "$QA_OVERLAY_AT" ]] || ((10#$QA_OVERLAY_AT + 8 <= 10#$QA_DURATION)) ||
+    die "--overlay-at $QA_OVERLAY_AT leaves no room for the overlay in a ${QA_DURATION}s run (needs N + 8 <= duration)"
+  qa_machine_env "$QA_MACHINE" >/dev/null
+}
 
-  # The real machine, if there is one and it answers. Everything after this
-  # point is the stand-in.
+# Step 3, where the run happens. Prints the host of the real machine when the
+# profile names one and it answers; prints nothing when the stand-in here is
+# to do it (the machine is the desktop, no host is configured, or it did not
+# answer -- which is said, because the run is then not what was asked for).
+_qa_choose_host() {
   local host=""
-  if [[ "$machine" != desktop ]] && host="$(qa_host_for "$machine")"; then
-    if qa_host_reachable "$host"; then
-      log "running $(qa_where "$machine" "$host")"
-      local -a there=("$want")
-      [[ -z "$variant" ]] || there+=("$variant")
-      there+=(--duration "$duration" --boot-wait "$boot_wait")
-      [[ -z "$bless" ]] || there+=(--bless)
-      [[ -z "$overlay_at" ]] || there+=(--overlay-at "$overlay_at")
-      "$(qa_ssh_bin)" -o BatchMode=yes "$host" gotg qa "${there[@]}"
-      return
-    fi
-    warn "$host did not answer; $(qa_where "$machine")"
-    host=""
+  [[ "$QA_MACHINE" != desktop ]] || return 0
+  host="$(qa_host_for "$QA_MACHINE")" || return 0
+  if qa_host_reachable "$host"; then
+    printf '%s' "$host"
+    return 0
   fi
+  warn "$host did not answer; $(qa_where "$QA_MACHINE")" >&2
+}
 
-  # The game first: an id that is not in the catalog is the cheapest thing
-  # to be wrong about. A game imported since the cache was written is the
-  # usual thing a QA run is for, so one refresh before giving up on it.
+# The arguments a remote `gotg qa` is given to repeat this run there. Its own
+# function because it is the part a flag can be forgotten from.
+_qa_remote_args() {
+  local -a there=("$QA_WANT")
+  [[ -z "$QA_VARIANT" ]] || there+=("$QA_VARIANT")
+  there+=(--duration "$QA_DURATION" --boot-wait "$QA_BOOT_WAIT")
+  [[ -z "$QA_BLESS" ]] || there+=(--bless)
+  [[ -z "$QA_OVERLAY_AT" ]] || there+=(--overlay-at "$QA_OVERLAY_AT")
+  printf '%s\n' "${there[@]}"
+}
+
+# Step 3b, the run goes to the real machine at $1; its status is ours.
+_qa_run_there() {
+  local host="$1" arg
+  local -a there=()
+  log "running $(qa_where "$QA_MACHINE" "$host")"
+  while IFS= read -r arg; do there+=("$arg"); done < <(_qa_remote_args)
+  "$(qa_ssh_bin)" -o BatchMode=yes "$host" gotg qa "${there[@]}"
+}
+
+# Step 4, the game, in the catalog. An id that is not there is the cheapest
+# thing to be wrong about. A game imported since the cache was written is the
+# usual thing a QA run is for, so one refresh before giving up on it.
+# Sets QA_GAME.
+_qa_resolve_game() {
   manifest_cached || manifest_ensure
-  local game
-  if ! game="$(manifest_find "$want" 2>/dev/null)"; then
+  if ! QA_GAME="$(manifest_find "$QA_WANT" 2>/dev/null)"; then
     manifest_refresh || true
-    game="$(manifest_find "$want")"
+    QA_GAME="$(manifest_find "$QA_WANT")"
   fi
+}
 
-  # Asked for and nothing to draw it: said here, not found as a failed axis.
-  local killswitch=""
-  [[ -z "$overlay_at" ]] || killswitch="$(killswitch_bin)" ||
+# Step 5, what the machine must have, said before anything is built: the
+# overlay's binary if it was asked for and nothing to draw it (not found
+# later as a failed axis), the uinput node, the QA tools. Sets QA_KILLSWITCH.
+_qa_preflight() {
+  QA_KILLSWITCH=""
+  [[ -z "$QA_OVERLAY_AT" ]] || QA_KILLSWITCH="$(killswitch_bin)" ||
     die "--overlay-at needs gotg-killswitch, and there is none on PATH or in GOTG_KILLSWITCH_BIN"
 
   [[ -w /dev/uinput ]] ||
@@ -472,32 +521,19 @@ EOF
      Add yourself to the group that owns it (usually 'input') and log in again."
 
   qa_tools_ensure
+}
 
-  local rundir
-  rundir="$(qa_new_rundir)"
-  mkdir -p "$rundir/env-state"
-
-  # What this run is, before it starts: one that dies half way is still one
-  # somebody may want to repeat.
-  qa_record_run "$rundir" "$want" "$variant" "$machine" "$duration" "$boot_wait" "$bless" "$overlay_at" "$spec"
-
-  # Scratch launch state, set before play_prepare so every helper that derives
-  # a path from env_state_dir agrees on it.
-  export GOTG_ENV_STATE_DIR="$rundir/env-state"
-  # No zenity: this is a terminal (or CI) workflow even when a display exists.
-  export GOTG_NO_DIALOG=1
-
-  # The pad first: pads_configure inside play_prepare must see it, and the
-  # emulator must find it already present when SDL first scans /dev/input.
-  # Not locals: the EXIT trap runs after this function's scope is gone.
-  QA_PAD_PID="" QA_SINK_MODULE=""
-  trap qa_cleanup EXIT
-
+# Step 6, the virtual pad, started and waited for. The pad first:
+# pads_configure inside play_prepare must see it, and the emulator must find
+# it already present when SDL first scans /dev/input. Sets QA_PAD_PID.
+# $1 the run directory.
+_qa_start_pad() {
+  local rundir="$1"
   # The QA python, not the client's: only one of them has evdev, and which
   # `python3` resolves to depends on how the two got onto PATH.
   local padlog="$rundir/pad.log"
   gotg-qa-python "$GOTG_ROOT/qa/pad.py" --ready-file "$rundir/pad-ready" \
-    --boot-wait "$boot_wait" --chord-file "$rundir/chord" >"$padlog" 2>&1 &
+    --boot-wait "$QA_BOOT_WAIT" --chord-file "$rundir/chord" >"$padlog" 2>&1 &
   QA_PAD_PID=$!
   local waited=0
   while [[ ! -e "$rundir/pad-ready" ]]; do
@@ -506,50 +542,71 @@ EOF
     waited=$((waited + 1))
     [[ "$waited" -lt 50 ]] || die "virtual pad never came up: $(cat "$padlog")"
   done
+}
 
-  # Seat the virtual pad as player 1 for this run only; the machine's own
-  # controllers.json, likely pinned to a real pad, stays untouched. SDL renames
-  # the pad to its mapping's name, so it is matched on the GUID's vendor and
-  # product bytes instead (045e/028e little-endian); the last match wins,
-  # taking ours over a real wired pad with the same silicon.
-  local pad_key
-  pad_key="$("$(pads_bin)" 2>/dev/null |
-    jq -r '[.[] | select(.identity | test("^0300....5e0400008e02"))][-1] | "\(.identity)/\(.slot)"')"
+# The seat key ("identity/slot") of the virtual pad in gotg-pads' JSON list on
+# stdin, or "null/null" when there is none. SDL renames the pad to its
+# mapping's name, so it is matched on the GUID's vendor and product bytes
+# instead (045e/028e little-endian); the last match wins, taking ours over a
+# real wired pad with the same silicon.
+_qa_pad_key() {
+  jq -r '[.[] | select(.identity | test("^0300....5e0400008e02"))][-1] | "\(.identity)/\(.slot)"'
+}
+
+# Step 7, seat the virtual pad as player 1 for this run only; the machine's
+# own controllers.json, likely pinned to a real pad, stays untouched.
+# $1 the run directory.
+_qa_seat_pad() {
+  local rundir="$1" pad_key
+  pad_key="$("$(pads_bin)" 2>/dev/null | _qa_pad_key)"
   if [[ -n "$pad_key" && "$pad_key" != "null/null" ]]; then
     jq -n --arg key "$pad_key" '{order: [$key]}' >"$rundir/controllers.json"
     export GOTG_PADS_ORDER_FILE="$rundir/controllers.json"
   else
     warn "could not find the virtual pad among SDL's controllers — bindings may go to a real one"
   fi
+}
 
-  # An id is its game as the library builds it, graded as that -- built
-  # fresh rather than whatever root is here: a stale root was the first bug
-  # a real run ever caught. A spec (--spec) already is one.
-  if [[ -z "${GOTG_PINNED_ATTR:-}" ]]; then
-    local library lattr
-    library="$(gotg_library)"
-    [[ -n "$library" ]] || die "no library configured: gotg qa runs a game as its library builds it.
+# Step 8, an id is its game as the library builds it, graded as that -- built
+# fresh rather than whatever root is here: a stale root was the first bug a
+# real run ever caught. A spec (--spec) already is one. Sets QA_WANT to the
+# built spec's.
+_qa_build_game() {
+  [[ -z "${GOTG_PINNED_ATTR:-}" ]] || return 0
+  local library lattr
+  library="$(gotg_library)"
+  [[ -n "$library" ]] || die "no library configured: gotg qa runs a game as its library builds it.
      gotg library <ref>, or gotg qa --spec <file>"
-    lattr="$(library_attr "$game" "$variant")"
-    library_build "$library" "$lattr" || die "could not build $lattr from $library"
-    launch_spec_load "$(library_games_dir)/$lattr/share/gotg/spec.json"
-    want="$LAUNCH_WANT"
-  fi
+  lattr="$(library_attr "$QA_GAME" "$QA_VARIANT")"
+  library_build "$library" "$lattr" || die "could not build $lattr from $library"
+  launch_spec_load "$(library_games_dir)/$lattr/share/gotg/spec.json"
+  QA_WANT="$LAUNCH_WANT"
+}
 
-  play_prepare "$want" "$variant"
-  # A machine without GL of its own -- a Deck -- has the game load nixpkgs'
-  # mesa (GOTG_FOREIGN_GL in its profile, applied inside the session), so the
-  # mesa it names is fetched here as a real Deck's launch would fetch it.
-  if [[ "$(jq -r --arg m "$machine" '.[$m].env.GOTG_FOREIGN_GL // ""' "$(qa_machines_json)")" == 1 ]]; then
+# Step 9, the game prepared as a launch would prepare it, into the run's
+# scratch state. A machine without GL of its own -- a Deck -- has the game
+# load nixpkgs' mesa (GOTG_FOREIGN_GL in its profile, applied inside the
+# session), so the mesa it names is fetched here as a real Deck's launch
+# would fetch it. Sets QA_ID, QA_PLATFORM (and play_prepare's PLAY_*).
+# $1 the run directory.
+_qa_prepare_game() {
+  local rundir="$1"
+  play_prepare "$QA_WANT" "$QA_VARIANT"
+  if [[ "$(jq -r --arg m "$QA_MACHINE" '.[$m].env.GOTG_FOREIGN_GL // ""' "$(qa_machines_json)")" == 1 ]]; then
     GOTG_FOREIGN_GL=1 foreign_gl_ensure "$PLAY_ATTR"
   fi
-  local id platform
-  id="$(manifest_field "$PLAY_GAME" id)"
-  platform="$(manifest_field "$PLAY_GAME" platform)"
+  QA_ID="$(manifest_field "$PLAY_GAME" id)"
+  QA_PLATFORM="$(manifest_field "$PLAY_GAME" platform)"
 
   qa_seed_bootstrap "$PLAY_ATTR" "$rundir/env-state"
   qa_require_bootstrap "$PLAY_ATTR" "$rundir/env-state"
+}
 
+# Step 10, the null sink, the recorder on its monitor, and the router that
+# moves the emulator onto it. Sets QA_SINK_MODULE, QA_AUDIO_PID and
+# QA_ROUTER_PID. $1 the run directory.
+_qa_start_audio() {
+  local rundir="$1"
   # A null sink of our own: the run is silent in the room, and the monitor
   # source is the recording. Unique per run so two runs cannot cross-record.
   QA_SINK_MODULE="$(pactl load-module module-null-sink "sink_name=gotgqa$$" rate=48000)" ||
@@ -559,27 +616,37 @@ EOF
   # attaches to a monitor source and captures pure zeros while parecord hears
   # it fine. Runs until the session is over and it is stopped.
   parecord --device="gotgqa$$.monitor" --file-format=wav "$rundir/audio.wav" &
-  local audio_pid=$!
+  QA_AUDIO_PID=$!
 
   qa_audio_route "$rundir" "gotgqa$$" &
   QA_ROUTER_PID=$!
+}
 
-  # The machine this run pretends to be. Applied by the session, to the game
-  # alone: the recorder, the pad and cage itself stay what they are here --
-  # except for GL, which the tools need too and a Deck does not have.
+# Step 11, the machine this run pretends to be. Applied by the session, to
+# the game alone: the recorder, the pad and cage itself stay what they are
+# here -- except for GL, which the tools need too and a Deck does not have.
+# $1 the run directory.
+_qa_apply_machine() {
+  local rundir="$1"
   if qa_host_lacks_gl; then
     log "the compositor and recorder use nixpkgs' mesa (no host GL)"
     eval "$(gotg-qa-gl-env)"
   fi
-  qa_machine_env "$machine" "$rundir/machine-bin" >"$rundir/machine.env"
-  printf '%s\n' "$machine" >"$rundir/machine"
-  log "running $(manifest_field "$PLAY_GAME" title) headless for ${duration}s $(qa_where "$machine" "$host")"
+  qa_machine_env "$QA_MACHINE" "$rundir/machine-bin" >"$rundir/machine.env"
+  printf '%s\n' "$QA_MACHINE" >"$rundir/machine"
+}
+
+# Step 12, the recording itself: the game inside a headless cage, driven by
+# qa/session.sh. Sets QA_CAGE_STATUS. $1 the run directory.
+_qa_run_session() {
+  local rundir="$1"
+  log "running $(manifest_field "$PLAY_GAME" title) headless for ${QA_DURATION}s $(qa_where "$QA_MACHINE" "${QA_HOST:-}")"
   # SDL_AUDIODRIVER (and SDL3's spelling): route SDL-audio emulators through
   # libpulse, the one backend that honors PULSE_SINK — SDL's native-pipewire
   # pick plays to the person's speakers and records nothing here. The outer
   # timeout is the backstop for a session whose teardown wedges; the session
   # owns the graceful path.
-  local cage_status=0
+  QA_CAGE_STATUS=0
   # GOTG_FULLSCREEN=0: with no tty the wrappers default to fullscreen, and
   # the fullscreen handoff through cage's XWayland WM is a coin toss — when it
   # loses, the viewport comes up black and stays black. Windowed is the one
@@ -595,53 +662,121 @@ EOF
     WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
     GOTG_FULLSCREEN=0 \
     PULSE_SINK="gotgqa$$" SDL_AUDIODRIVER=pulseaudio SDL_AUDIO_DRIVER=pulseaudio \
-    GOTG_QA_DIR="$rundir" GOTG_QA_DURATION="$duration" \
-    GOTG_QA_OVERLAY_AT="$overlay_at" GOTG_QA_KILLSWITCH="$killswitch" \
-    timeout -k 10 "$((duration + 90))" \
+    GOTG_QA_DIR="$rundir" GOTG_QA_DURATION="$QA_DURATION" \
+    GOTG_QA_OVERLAY_AT="$QA_OVERLAY_AT" GOTG_QA_KILLSWITCH="$QA_KILLSWITCH" \
+    timeout -k 10 "$((QA_DURATION + 90))" \
     cage -- "$GOTG_ROOT/qa/session.sh" "$(env_bin "$PLAY_ATTR")" "$PLAY_TARGET" \
-    >"$rundir/session.log" 2>&1 || cage_status=$?
+    >"$rundir/session.log" 2>&1 || QA_CAGE_STATUS=$?
 
-  kill -INT "$audio_pid" 2>/dev/null || true
-  wait "$audio_pid" 2>/dev/null || true
+  kill -INT "$QA_AUDIO_PID" 2>/dev/null || true
+  wait "$QA_AUDIO_PID" 2>/dev/null || true
 
   [[ -f "$rundir/status" ]] ||
-    die "the session never ran the emulator (cage exited $cage_status) — see $rundir/session.log"
+    die "the session never ran the emulator (cage exited $QA_CAGE_STATUS) — see $rundir/session.log"
+}
 
-  # The golden frame, if this game has one, or this run's frame becoming it.
-  # Taken near the end of the run — the most-progressed, most-settled screen —
-  # and only compared against a run with the same timings, because the frame a
-  # game shows at second N is a function of when the pad started pressing.
-  local golden
-  golden="$(qa_golden_path "$platform" "$id")"
-  if [[ -n "$bless" ]]; then
+# Whether the golden frame at $1 was blessed with this run's timings ($2
+# duration, $3 boot-wait). The frame a game shows at second N is a function
+# of when the pad started pressing, so a golden is only compared against a run
+# with the same ones.
+_qa_golden_matches() {
+  local golden="$1" duration="$2" boot_wait="$3"
+  local blessed wanted
+  blessed="$(jq -c . "$golden.json" 2>/dev/null)"
+  wanted="$(jq -nc --argjson d "$duration" --argjson b "$boot_wait" '{duration: $d, boot_wait: $b}')"
+  [[ "$blessed" == "$wanted" ]]
+}
+
+# Step 13, the golden frame, if this game has one, or this run's frame
+# becoming it. Taken near the end of the run — the most-progressed,
+# most-settled screen. A golden is put in the run directory only when its
+# timings match; otherwise it is said not to be graded. $1 the run directory.
+_qa_golden() {
+  local rundir="$1" golden
+  golden="$(qa_golden_path "$QA_PLATFORM" "$QA_ID")"
+  if [[ -n "$QA_BLESS" ]]; then
     mkdir -p "$(dirname "$golden")"
-    qa_frame "$rundir/video.mkv" "$((duration - 2))" "$golden"
-    jq -n --argjson d "$duration" --argjson b "$boot_wait" \
+    qa_frame "$rundir/video.mkv" "$((QA_DURATION - 2))" "$golden"
+    jq -n --argjson d "$QA_DURATION" --argjson b "$QA_BOOT_WAIT" \
       '{duration: $d, boot_wait: $b}' >"$golden.json"
     log "blessed: $golden"
   fi
   if [[ -f "$golden" ]]; then
-    if [[ "$(jq -c . "$golden.json" 2>/dev/null)" == "$(jq -nc --argjson d "$duration" --argjson b "$boot_wait" '{duration: $d, boot_wait: $b}')" ]]; then
+    if _qa_golden_matches "$golden" "$QA_DURATION" "$QA_BOOT_WAIT"; then
       cp "$golden" "$rundir/golden.png"
     else
-      warn "golden for $id was blessed with different timings — graphics not graded (re-bless, or match its --duration/--boot-wait)"
+      warn "golden for $QA_ID was blessed with different timings — graphics not graded (re-bless, or match its --duration/--boot-wait)"
     fi
   fi
+}
 
-  local verdict_status=0
-  qa_verdict "$rundir" "$boot_wait" "$duration" || verdict_status=$?
+# The per-axis lines of a verdict.json on stdin: name padded to ten, then
+# pass, FAIL (the check said false) or skip (it did not run).
+_qa_verdict_lines() {
+  jq -r '.checks | to_entries[] |
+    "  " + (.key + "        " | .[0:10]) +
+    (if .value.pass == true then "pass" elif .value.pass == false then "FAIL" else "skip" end)'
+}
+
+# Step 14, grade the recording and say how it went; the exit status is the
+# verdict's. $1 the run directory.
+_qa_report() {
+  local rundir="$1" verdict_status=0
+  qa_verdict "$rundir" "$QA_BOOT_WAIT" "$QA_DURATION" || verdict_status=$?
 
   log ""
   log "run:     $rundir"
-  log "machine: $machine"
-  jq -r '.checks | to_entries[] |
-    "  " + (.key + "        " | .[0:10]) +
-    (if .value.pass == true then "pass" elif .value.pass == false then "FAIL" else "skip" end)' \
-    "$rundir/verdict.json" >&2
+  log "machine: $QA_MACHINE"
+  _qa_verdict_lines <"$rundir/verdict.json" >&2
   if [[ "$verdict_status" -eq 0 ]]; then
-    success "pass: $id"
+    success "pass: $QA_ID"
   else
     log "$(jq -c '.checks' "$rundir/verdict.json")"
-    die "FAIL: $id — captures and verdict.json are in $rundir"
+    die "FAIL: $QA_ID — captures and verdict.json are in $rundir"
   fi
+}
+
+cmd_qa() {
+  _qa_parse_args "$@"
+  [[ -z "$QA_HELP" ]] || return 0
+  _qa_check_args
+
+  # The real machine, if there is one and it answers. Everything after this
+  # point is the stand-in.
+  QA_HOST="$(_qa_choose_host)"
+  if [[ -n "$QA_HOST" ]]; then
+    _qa_run_there "$QA_HOST"
+    return
+  fi
+
+  _qa_resolve_game
+  _qa_preflight
+
+  local rundir
+  rundir="$(qa_new_rundir)"
+  mkdir -p "$rundir/env-state"
+
+  # What this run is, before it starts: one that dies half way is still one
+  # somebody may want to repeat.
+  qa_record_run "$rundir" "$QA_WANT" "$QA_VARIANT" "$QA_MACHINE" "$QA_DURATION" "$QA_BOOT_WAIT" "$QA_BLESS" "$QA_OVERLAY_AT" "$QA_SPEC"
+
+  # Scratch launch state, set before play_prepare so every helper that derives
+  # a path from env_state_dir agrees on it.
+  export GOTG_ENV_STATE_DIR="$rundir/env-state"
+  # No zenity: this is a terminal (or CI) workflow even when a display exists.
+  export GOTG_NO_DIALOG=1
+
+  # Not locals: the EXIT trap runs after this function's scope is gone.
+  QA_PAD_PID="" QA_SINK_MODULE=""
+  trap qa_cleanup EXIT
+
+  _qa_start_pad "$rundir"
+  _qa_seat_pad "$rundir"
+  _qa_build_game
+  _qa_prepare_game "$rundir"
+  _qa_start_audio "$rundir"
+  _qa_apply_machine "$rundir"
+  _qa_run_session "$rundir"
+  _qa_golden "$rundir"
+  _qa_report "$rundir"
 }

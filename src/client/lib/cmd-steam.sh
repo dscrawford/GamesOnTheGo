@@ -426,6 +426,37 @@ steam_check_api_perms() {
   [[ ! -f "$file" ]] || config_check_perms "$file"
 }
 
+# Which SteamGridDB the artwork helper is pointed at, as ART_BASE (its
+# --base-url/--api-key arguments) and ART_SAY_KEY ("yes" when no key was found
+# anywhere and the news is worth printing). Separate because it is a choice
+# among four sources -- an explicit override, the cluster proxy by this
+# machine's own token, a key of its own, none -- and the fetch is not.
+_steam_art_source() {
+  local proxy="" proxy_token="" key
+  ART_BASE=() ART_SAY_KEY="no"
+  proxy="$(steam_api_field url)" || proxy=""
+  proxy_token="$(steam_api_field token)" || proxy_token=""
+
+  if [[ -n "${GOTG_STEAMGRIDDB_URL:-}" ]]; then
+    # An explicit override wins over everything, including the proxy.
+    ART_BASE=(--base-url "$GOTG_STEAMGRIDDB_URL")
+    key="$(steam_api_key)"
+    [[ -z "$key" ]] || ART_BASE+=(--api-key "$key")
+    [[ -n "$key" ]] || ART_SAY_KEY="yes"
+  elif [[ -n "$proxy" && -n "$proxy_token" ]]; then
+    # The client sends its own token; the proxy swaps in the real key. Nothing
+    # about the helper changes — it is the same API under a prefix.
+    ART_BASE=(--base-url "$proxy/steamgriddb" --api-key "$proxy_token")
+  else
+    key="$(steam_api_key)"
+    if [[ -n "$key" ]]; then
+      ART_BASE=(--api-key "$key")
+    else
+      ART_SAY_KEY="yes"
+    fi
+  fi
+}
+
 # Best-effort by design: a shortcut with no picture is a working shortcut.
 #
 # Two sources. SteamGridDB is better when it has the game, but needs a key;
@@ -438,33 +469,11 @@ steam_fetch_artwork() {
 
   # Overridable so the tests can point at a stand-in rather than the real
   # service, the same seam GOTG_STEAM_SHORTCUTS provides for Steam's own file.
-  local base=() lr=() key say_key="no"
+  local lr=()
   [[ -z "${GOTG_LIBRETRO_URL:-}" ]] || lr=(--libretro-url "$GOTG_LIBRETRO_URL")
 
   steam_check_api_perms
-
-  local proxy="" proxy_token=""
-  proxy="$(steam_api_field url)" || proxy=""
-  proxy_token="$(steam_api_field token)" || proxy_token=""
-
-  if [[ -n "${GOTG_STEAMGRIDDB_URL:-}" ]]; then
-    # An explicit override wins over everything, including the proxy.
-    base=(--base-url "$GOTG_STEAMGRIDDB_URL")
-    key="$(steam_api_key)"
-    [[ -z "$key" ]] || base+=(--api-key "$key")
-    [[ -n "$key" ]] || say_key="yes"
-  elif [[ -n "$proxy" && -n "$proxy_token" ]]; then
-    # The client sends its own token; the proxy swaps in the real key. Nothing
-    # about the helper changes — it is the same API under a prefix.
-    base=(--base-url "$proxy/steamgriddb" --api-key "$proxy_token")
-  else
-    key="$(steam_api_key)"
-    if [[ -n "$key" ]]; then
-      base=(--api-key "$key")
-    else
-      say_key="yes"
-    fi
-  fi
+  _steam_art_source
 
   # A mod's own title leads the search; the game it is a mod of stands
   # behind it, and is always what libretro is asked for.
@@ -480,7 +489,7 @@ steam_fetch_artwork() {
     --platform "$(manifest_field "$game" platform)" \
     --playlists "$GOTG_DATA/libretro-playlists.json" \
     --cache-dir "$GOTG_STATE_DIR/libretro" \
-    "${base[@]}" "${lr[@]}" "$@")" || rc=$?
+    "${ART_BASE[@]}" "${lr[@]}" "$@")" || rc=$?
 
   # A picture named by hand is the one case that is not best-effort: somebody
   # typed a path, so a path that cannot be used is an error rather than a
@@ -493,6 +502,15 @@ steam_fetch_artwork() {
     return 0
   }
 
+  _steam_art_report "$result"
+}
+
+# The news about a fetch, from the helper's JSON ($1): what was written, how
+# many files came from where, or why there were none. Said once, at the end,
+# are the ways to get a SteamGridDB key -- and only when ART_SAY_KEY is "yes",
+# since only then would it have made a difference.
+_steam_art_report() {
+  local result="$1"
   local wrote
   wrote="$(jq -r '.wrote // empty' <<<"$result")"
   if [[ -n "$wrote" ]]; then
@@ -515,7 +533,7 @@ steam_fetch_artwork() {
   fi
 
   # Said once, at the end, and only when it would have made a difference.
-  if [[ "$say_key" == "yes" ]]; then
+  if [[ "$ART_SAY_KEY" == "yes" ]]; then
     log ""
     log "No SteamGridDB key. libretro-thumbnails needs none and was used instead;"
     log "for Switch games, which it has none of, either point at the cluster"

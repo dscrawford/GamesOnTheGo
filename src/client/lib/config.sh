@@ -172,90 +172,139 @@ nix_hand_netrc() {
 $NIX_CONFIG}"
 }
 
-cmd_login() {
-  local url token name="" server=""
-  # `nix run <library>#login`: the library knows its server, so the one
-  # question left is the token.
+# `gotg login` is a sequence of steps; they share the answer to "who, where,
+# with what" through these globals, set by the step named:
+#
+#   LOGIN_SERVER   the --server given             (_login_parse_args)
+#   LOGIN_CLAIM    the --claim given, trailing / stripped (_login_parse_args)
+#   LOGIN_URL      the service, no trailing /      (_login_claim_parts, _login_ask)
+#   LOGIN_CODE     the claim code from the link    (_login_claim_parts)
+#   LOGIN_TOKEN    the bearer token                (_login_claim_exchange, _login_ask)
+#   LOGIN_NAME     whose token it is, claims only  (_login_claim_exchange)
+
+# Step 1, the arguments: `nix run <library>#login` passes --server, because
+# the library knows its server and the one question left is the token.
+_login_parse_args() {
+  LOGIN_SERVER="" LOGIN_CLAIM="" LOGIN_URL="" LOGIN_CODE="" LOGIN_TOKEN="" LOGIN_NAME=""
   if [[ "${1:-}" == "--server" ]]; then
-    server="${2:-}"
-    [[ -n "$server" ]] || die "usage: gotg login [--claim <url>] [--server <url>]"
+    LOGIN_SERVER="${2:-}"
+    [[ -n "$LOGIN_SERVER" ]] || die "usage: gotg login [--claim <url>] [--server <url>]"
     shift 2
   fi
   if [[ "${1:-}" == "--claim" ]]; then
-    local claim="${2:-}"
-    [[ -n "$claim" ]] || die "usage: gotg login [--claim <url>]"
-    claim="${claim%/}"
-    [[ "$claim" == http://*/claim/* || "$claim" == https://*/claim/* ]] ||
-      die "not a claim url: $claim"
-    url="${claim%%/claim/*}"
-    url_is_private_or_tls "$url" ||
-      die "that claim link is http, which hands the token to the network: $url"
-    local code="${claim##*/claim/}"
-    # A link that has been through a chat client arrives with tracking on it.
-    code="${code%%\?*}"
-    [[ "$code" =~ ^gotgi_[A-Za-z0-9_-]{40,50}$ ]] || die "not a claim url: $claim"
-
-    # One POST, one token: the reply is the only time the plaintext exists
-    # outside the config file about to be written.
-    local reply http
-    reply="$(mktemp)"
-    # Expanded now on purpose: the path is gone by trap time. EXIT too, since
-    # `die` exits without returning and would leave the plaintext in /tmp.
-  # shellcheck disable=SC2064
-    trap "rm -f '$reply'" RETURN EXIT
-    # The code rides the body, not the URL: every log between here and the
-    # service keeps the request line, and this is live until spent. printf is
-    # a builtin, so unlike jq the code never reaches a world-readable cmdline.
-    http="$(printf '{"code":"%s"}' "$code" |
-      curl -sS -o "$reply" -w '%{http_code}' --connect-timeout 10 --max-time 30 \
-        -X POST --data-binary @- "$url/claim")" || die "could not reach $url"
-    if [[ "$http" != 200 ]]; then
-      die "claim failed: $(printable "$(jq -r '.error // "the service answered '"$http"'"' "$reply" 2>/dev/null)")"
-    fi
-    token="$(jq -r '.token // empty' "$reply")"
-    name="$(printable "$(jq -r '.name // empty' "$reply")")"
-    [[ -n "$token" ]] || die "the claim reply carried no token"
-  else
-    if [[ -n "$server" ]]; then
-      url="$server"
-    else
-      url="$(prompt_line "GOTG service URL [https://gotg.dcraw.net]: " "https://gotg.dcraw.net")"
-    fi
-    url="${url%/}"
-    [[ "$url" == http://* || "$url" == https://* ]] || die "service must be an http(s) URL: $url"
-    url_is_private_or_tls "$url" ||
-      die "that url is http, which sends the token in the clear: $url"
-    token="$(prompt_secret "Token: ")"
-    [[ -n "$token" ]] || die "a token is required"
+    LOGIN_CLAIM="${2:-}"
+    [[ -n "$LOGIN_CLAIM" ]] || die "usage: gotg login [--claim <url>]"
+    LOGIN_CLAIM="${LOGIN_CLAIM%/}"
   fi
-  # The shape every bearer token has; anything else would also corrupt the
-  # curl config the token is spliced into.
-  [[ "$token" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || die "token contains characters no bearer token uses"
+}
 
-  # Via curl --config on stdin, never argv: /proc/<pid>/cmdline is
-  # world-readable and this token does not expire. whoami is served by every
-  # pod; /catalog only by the library — and a claimed token deserves a check
-  # of the machinery that minted it.
-  local probe="/catalog"
+# Step 2a, a claim link taken apart and refused unless it is one: the service
+# URL (which must be private or TLS, or the token crosses the network) and the
+# code. Sets LOGIN_URL and LOGIN_CODE. $1 the link.
+_login_claim_parts() {
+  local claim="$1"
+  [[ "$claim" == http://*/claim/* || "$claim" == https://*/claim/* ]] ||
+    die "not a claim url: $claim"
+  LOGIN_URL="${claim%%/claim/*}"
+  url_is_private_or_tls "$LOGIN_URL" ||
+    die "that claim link is http, which hands the token to the network: $LOGIN_URL"
+  LOGIN_CODE="${claim##*/claim/}"
+  # A link that has been through a chat client arrives with tracking on it.
+  LOGIN_CODE="${LOGIN_CODE%%\?*}"
+  [[ "$LOGIN_CODE" =~ ^gotgi_[A-Za-z0-9_-]{40,50}$ ]] || die "not a claim url: $claim"
+}
+
+# Step 2b, the claim spent: one POST, one token. The reply is the only time
+# the plaintext exists outside the config file about to be written, so it is
+# read here and removed here. Sets LOGIN_TOKEN and LOGIN_NAME.
+_login_claim_exchange() {
+  local reply http
+  reply="$(mktemp)"
+  # Expanded now on purpose: the path is gone by trap time. EXIT too, since
+  # `die` exits without returning and would leave the plaintext in /tmp.
+  # shellcheck disable=SC2064
+  trap "rm -f '$reply'" RETURN EXIT
+  # The code rides the body, not the URL: every log between here and the
+  # service keeps the request line, and this is live until spent. printf is
+  # a builtin, so unlike jq the code never reaches a world-readable cmdline.
+  http="$(printf '{"code":"%s"}' "$LOGIN_CODE" |
+    curl -sS -o "$reply" -w '%{http_code}' --connect-timeout 10 --max-time 30 \
+      -X POST --data-binary @- "$LOGIN_URL/claim")" || die "could not reach $LOGIN_URL"
+  if [[ "$http" != 200 ]]; then
+    die "claim failed: $(printable "$(jq -r '.error // "the service answered '"$http"'"' "$reply" 2>/dev/null)")"
+  fi
+  LOGIN_TOKEN="$(jq -r '.token // empty' "$reply")"
+  LOGIN_NAME="$(printable "$(jq -r '.name // empty' "$reply")")"
+  [[ -n "$LOGIN_TOKEN" ]] || die "the claim reply carried no token"
+}
+
+# Step 2c, no claim: the server (given or asked for) and a token typed in.
+# Sets LOGIN_URL and LOGIN_TOKEN.
+_login_ask() {
+  if [[ -n "$LOGIN_SERVER" ]]; then
+    LOGIN_URL="$LOGIN_SERVER"
+  else
+    LOGIN_URL="$(prompt_line "GOTG service URL [https://gotg.dcraw.net]: " "https://gotg.dcraw.net")"
+  fi
+  LOGIN_URL="${LOGIN_URL%/}"
+  [[ "$LOGIN_URL" == http://* || "$LOGIN_URL" == https://* ]] || die "service must be an http(s) URL: $LOGIN_URL"
+  url_is_private_or_tls "$LOGIN_URL" ||
+    die "that url is http, which sends the token in the clear: $LOGIN_URL"
+  LOGIN_TOKEN="$(prompt_secret "Token: ")"
+  [[ -n "$LOGIN_TOKEN" ]] || die "a token is required"
+}
+
+# Step 3, the shape every bearer token has; anything else would also corrupt
+# the curl config the token is spliced into. $1 the token.
+_login_check_token() {
+  [[ "$1" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || die "token contains characters no bearer token uses"
+}
+
+# Step 4, the service must accept the token. Via curl --config on stdin,
+# never argv: /proc/<pid>/cmdline is world-readable and this token does not
+# expire. whoami is served by every pod; /catalog only by the library — and a
+# claimed token deserves a check of the machinery that minted it.
+# $1 url, $2 token, $3 the name a claim gave (empty for a typed token).
+_login_probe() {
+  local url="$1" token="$2" name="$3" probe="/catalog"
   [[ -z "$name" ]] || probe="/auth/whoami"
   printf 'header = "Authorization: Bearer %s"\n' "$token" |
     curl --config - -fsS --connect-timeout 10 --max-time 30 "$url$probe" >/dev/null 2>&1 ||
     die "the service at $url did not accept that token"
+}
 
-  local file patch
+# Step 5, api.json: the url and token, and the name when a claim gave one,
+# merged into whatever else the file holds, mode 600. $1 url, $2 token, $3 name.
+_login_save() {
+  local url="$1" token="$2" name="$3" file patch
   file="${GOTG_API_FILE:-$GOTG_CONFIG_DIR/api.json}"
   mkdir -p "$(dirname "$file")"
   patch="$(jq -n --arg url "$url" --arg token "$token" --arg name "$name" \
     '{url: $url, token: $token} + (if $name != "" then {name: $name} else {} end)')"
   json_merge_file "$file" "$patch" 600
   log "saved $file (mode 600)${name:+ — you are $name}"
+}
 
-  login_netrc "$url" "$token"
-
-  # The File Browser era left a password behind; a dead credential in a 0600
-  # file is still a credential.
+# Step 6, the File Browser era left a password behind; a dead credential in a
+# 0600 file is still a credential.
+_login_warn_old_password() {
   if [[ -f "$GOTG_CONFIG_FILE" ]] && jq -e '.password' "$GOTG_CONFIG_FILE" >/dev/null 2>&1; then
     warn "the old File Browser password in $GOTG_CONFIG_FILE is no longer used;"
     warn "remove it with: jq 'del(.username, .password, .server, .remote_root)' $GOTG_CONFIG_FILE"
   fi
+}
+
+cmd_login() {
+  _login_parse_args "$@"
+  if [[ -n "$LOGIN_CLAIM" ]]; then
+    _login_claim_parts "$LOGIN_CLAIM"
+    _login_claim_exchange
+  else
+    _login_ask
+  fi
+  _login_check_token "$LOGIN_TOKEN"
+  _login_probe "$LOGIN_URL" "$LOGIN_TOKEN" "$LOGIN_NAME"
+  _login_save "$LOGIN_URL" "$LOGIN_TOKEN" "$LOGIN_NAME"
+  login_netrc "$LOGIN_URL" "$LOGIN_TOKEN"
+  _login_warn_old_password
 }
