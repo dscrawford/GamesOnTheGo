@@ -268,11 +268,6 @@ class Preparer:
         return time.monotonic() - self.started
 
     @property
-    def title(self) -> str:
-        """What the loader's heading is about: the game, or GOTG itself."""
-        return self.game.title if self.game is not None else "GOTG"
-
-    @property
     def running(self) -> bool:
         # And until the reader has drained the pipe: exit comes before the last lines.
         if self.process is None:

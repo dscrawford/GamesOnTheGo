@@ -28,6 +28,11 @@ gotg_library() {
 
 library_games_dir() { printf '%s/games' "$GOTG_STATE_DIR"; }
 
+# What a root's name under games/ may be: platform.region.name, a variant
+# after it. The one gate between a directory listing or a cache file and the
+# Nix expression updates.sh evaluates, so it is named once.
+GOTG_ROOT_ATTR_RE='^[a-z0-9][a-z0-9_-]*\.[a-z]{3,5}\.[a-z0-9][a-z0-9_]*(\.[a-z0-9][a-z0-9_-]*)?$'
+
 # What a library is, as of now: its flake.lock's hash for a directory, the
 # reference itself for anything else (a URL is re-resolved by `update`).
 library_stamp() {
@@ -197,65 +202,66 @@ cmd_library() {
 
 # GOTG itself brought up to date, from the picker's chip: the library's pin
 # moved to the head of where it came from (and its catalog with it), the
-# client and the picker built from there, and only then the two roots Steam
-# starts swapped to them -- each an atomic symlink and a GC root of its own
-# (`nix build <store path> -o`), so nothing is half-done at any moment and
-# a failure before the swap leaves the machine exactly as it was: the lock
-# is put back from its copy. Games are not rebuilt here; the picker that
-# restarts shows an exclamation mark where their roots moved, and Play or
-# Update does each one. The last line names the picker now at its root, for
-# the running picker to restart into.
+# client and the picker built from there with nothing pointed at them yet,
+# and only then the two roots Steam starts swapped to them, each an atomic
+# symlink and a GC root of its own (`nix build <store path> -o`). Anything
+# that fails -- or a cancel from the loader, which is a TERM to the group --
+# undoes all of it: the roots relinked to what they pointed at (the symlink
+# is what Nix's gcroot names, so relinking it keeps the root) and the lock
+# back from its copy, so the machine is exactly as it was. Games are not
+# rebuilt here; the picker that restarts shows an exclamation mark where
+# their roots moved, and Play or Update does each one. The last line names
+# the picker now at its root, for the running picker to restart into.
 #
 # The check that follows runs as the *new* client, so a fix to the check
 # ships with the update.
 library_update_self() {
-  local library app_out ui_out
+  local library app_out ui_out app_was ui_was
   library="$(gotg_library)"
   [[ -n "$library" ]] || die "no library configured: set GOTG_LIBRARY, or \`library\` in $GOTG_CONFIG_FILE"
   [[ -d "$library" && -w "$library" && "$library" != /nix/store/* ]] ||
     die "the library at $library is not a directory this can write; its pin cannot be moved from here"
+  [[ -f "$library/flake.lock" ]] || die "the library at $library has no flake.lock to move"
   mkdir -p "$GOTG_STATE_DIR/locks"
   exec 9>"$GOTG_STATE_DIR/locks/library.lock"
   flock 9
   export GOTG_NO_DIALOG=1
+  app_was="$(readlink "$GOTG_APP_ROOT" 2>/dev/null || true)"
+  ui_was="$(readlink "$GOTG_UI_ROOT" 2>/dev/null || true)"
   cp -f "$library/flake.lock" "$library/flake.lock.before-update"
-  _library_update_restore() {
+  _update_self_relink() {
+    if [[ -n "$2" ]]; then
+      ln -sfn "$2" "$1"
+    elif [[ -L "$1" ]]; then
+      rm -f "$1"
+    fi
+  }
+  _update_self_undo() {
+    trap - TERM INT HUP
+    _update_self_relink "$GOTG_APP_ROOT" "$app_was"
+    _update_self_relink "$GOTG_UI_ROOT" "$ui_was"
     [[ -f "$library/flake.lock.before-update" ]] || return 0
     mv -f "$library/flake.lock.before-update" "$library/flake.lock"
     warn "the library's lock is back as it was; nothing was changed"
   }
+  _update_self_fail() {
+    _update_self_undo
+    die "$1"
+  }
+  trap '_update_self_undo; exit 143' TERM INT HUP
   log "moving the library to the newest gotg"
-  "$(nix_bin)" flake update gotg catalog --flake "$library" >&2 || {
-    _library_update_restore
-    die "could not move the library's pin"
-  }
-  # Built with nothing pointed at them yet: a build that fails leaves both
-  # roots as they were. Drawn for the picker's loading screen, then asked
-  # for their paths, which is instant the second time.
-  _nix_drawn build "$library#gotg" "$library#gotg-ui" --no-link || {
-    _library_update_restore
-    die "could not build gotg from $library"
-  }
-  app_out="$("$(nix_bin)" build "$library#gotg" --no-link --print-out-paths)" || {
-    _library_update_restore
-    die "could not build gotg from $library"
-  }
-  ui_out="$("$(nix_bin)" build "$library#gotg-ui" --no-link --print-out-paths)" || {
-    _library_update_restore
-    die "could not build the picker from $library"
-  }
-  "$(nix_bin)" build "$app_out" -o "$GOTG_APP_ROOT" || {
-    _library_update_restore
-    die "could not place gotg at $GOTG_APP_ROOT"
-  }
-  "$(nix_bin)" build "$ui_out" -o "$GOTG_UI_ROOT" || {
-    _library_update_restore
-    die "could not place the picker at $GOTG_UI_ROOT"
-  }
+  "$(nix_bin)" flake update gotg catalog --flake "$library" >&2 || _update_self_fail "could not move the library's pin"
+  # Drawn for the picker's loading screen, then asked for the paths, which
+  # is instant the second time.
+  _nix_drawn build "$library#gotg" "$library#gotg-ui" --no-link || _update_self_fail "could not build gotg and the picker from $library"
+  app_out="$("$(nix_bin)" build "$library#gotg" --no-link --print-out-paths)" || _update_self_fail "could not build gotg from $library"
+  ui_out="$("$(nix_bin)" build "$library#gotg-ui" --no-link --print-out-paths)" || _update_self_fail "could not build the picker from $library"
+  "$(nix_bin)" build "$app_out" -o "$GOTG_APP_ROOT" || _update_self_fail "could not place gotg at $GOTG_APP_ROOT"
+  "$(nix_bin)" build "$ui_out" -o "$GOTG_UI_ROOT" || _update_self_fail "could not place the picker at $GOTG_UI_ROOT"
+  trap - TERM INT HUP
   rm -f "$library/flake.lock.before-update"
   log "gotg: up to date"
   log "gotg-ui: up to date"
-  # What is out of date now, as the new client sees it; best effort.
   if [[ -x "$GOTG_APP_ROOT/bin/gotg" ]]; then
     "$GOTG_APP_ROOT/bin/gotg" update --check --force >/dev/null 2>&1 || true
   fi
@@ -289,8 +295,7 @@ library_update_game() {
     fi
   done < <(library_root_attrs)
   ((found > 0)) || log "$key has no build here yet; a play will make one"
-  # And the install's missing releases, when the catalog is here to ask.
-  if manifest_cached && game="$(manifest_find "$key" 2>/dev/null)" && [[ -n "$game" ]]; then
+  if manifest_cached && game="$(manifest_find "$key" 2>/dev/null)"; then
     _top_up_extras "$game"
   fi
   ((failed == 0)) || die "$failed build(s) of $key did not finish"
@@ -305,7 +310,7 @@ library_root_attrs() {
     [[ -e "$root" ]] || continue
     attr="$(basename "$root")"
     [[ "$attr" != *.by && "$attr" != *.spec ]] || continue
-    [[ "$attr" =~ ^[a-z0-9][a-z0-9_-]*\.[a-z]{3,5}\.[a-z0-9][a-z0-9_]*(\.[a-z0-9][a-z0-9_-]*)?$ ]] || continue
+    [[ "$attr" =~ $GOTG_ROOT_ATTR_RE ]] || continue
     printf '%s\n' "$attr"
   done
 }
@@ -314,9 +319,6 @@ library_root_attrs() {
 # Steam starts, which it re-exports (mkLibrary) -- then the GL a machine
 # without its own needs, for what they now name.
 #
-# `--check [--force]` is the question instead of the work: what is out of
-# date here, as JSON (updates.sh), for the picker. `<platform>/<id>` is the
-# work for one game: the picker's Update row.
 cmd_update() {
   local library root attr failed=0
   case "${1:-}" in

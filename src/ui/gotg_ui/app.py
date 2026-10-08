@@ -37,7 +37,7 @@ from .menu import Menu
 from .nav import Nav
 from .prepare import Preparer, is_ready
 from .recent import Recent
-from .restart import Restart
+from .restart import Restart, said_root, usable
 from .saves_choice import HERE, REMOTE, Choice
 from .saves_choice import check as check_saves
 from .saves_choice import when as saves_when
@@ -55,7 +55,6 @@ TILE = config.colour("theme.colours.tile", (38, 38, 44))
 TILE_SELECTED = config.colour("theme.colours.tile_selected", (58, 104, 148))
 TEXT = config.colour("theme.colours.text", (232, 232, 236))
 TEXT_DIM = config.colour("theme.colours.text_dim", (150, 150, 158))
-# An update waiting: the exclamation mark on a tile.
 ATTENTION = config.colour("theme.colours.attention", (232, 176, 64))
 # The menu's list, a shade off the background.
 PANEL = config.colour("theme.colours.panel", (26, 26, 30))
@@ -100,8 +99,7 @@ def draw_badge(screen, tile) -> None:
 def draw_alert_badge(screen, tile) -> None:
     """An exclamation mark where the download arrow would be: this game is
     here, and the library would build it differently now, or has attached a
-    release the install lacks (updates.py). Drawn like the arrow, so the two
-    read as the same badge saying two things."""
+    release the install lacks (updates.py)."""
     r = max(10, tile.width // 14)
     cx, cy = tile.x + r + 6, tile.y + r + 6
     pygame.draw.aacircle(screen, BACKGROUND, (cx, cy), r + 2)
@@ -111,14 +109,21 @@ def draw_alert_badge(screen, tile) -> None:
     pygame.draw.aacircle(screen, BACKGROUND, (cx, cy + r // 2), max(1, stroke // 2 + 1))
 
 
+_chip_labels: dict[str, object] = {}
+
+
 def draw_chip(screen, font_at, text: str | None):
     """The words at the top right -- "Update available", and what follows a
     press -- on a rounded chip in the attention colour, or nothing. Returns
-    the rect drawn, for a click to be matched against; None when nothing."""
+    the chip's Tile, for a click to be matched against; None when nothing.
+    The label is rendered once per wording: it is on every frame for as
+    long as it shows."""
     if not text:
         return None
     width, height = screen.get_size()
-    label = font_at(18).render(text, True, BACKGROUND)
+    label = _chip_labels.get(text)
+    if label is None:
+        label = _chip_labels[text] = font_at(18).render(text, True, BACKGROUND)
     chip = corner(width, height, label.get_width(), label.get_height())
     pygame.draw.rect(screen, ATTENTION, chip.rect, border_radius=chip.height // 2)
     at = (chip.x + (chip.width - label.get_width()) // 2, chip.y + (chip.height - label.get_height()) // 2)
@@ -746,9 +751,10 @@ def draw_prepare(
 
     if game is None:
         # `gotg update self`: GOTG itself, the roots Steam starts, and then a
-        # restart into the new picker. Nothing is changed until it is done.
+        # restart into the new picker; the client's lines say what became
+        # of the library when it fails.
         if failed:
-            heading = "could not update GOTG — nothing was changed"
+            heading = "could not update GOTG"
             hint = "B / Escape — back to the grid   ·   full log: gotg update self"
             colour = (224, 96, 96)
         else:
@@ -858,12 +864,18 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
     # Asked once, up front, and again only after an uninstall: the answer is
     # a walk of the whole catalog against the disk, not a per-frame question.
     browser = Browser(library, installed=installed_games())
-    # What is out of date, from the client's cache; and, since the client
-    # answered (so it knows the question), the check that refreshes that
-    # cache, behind the grid.
-    report = updates.ask()
-    browser.set_outdated(updates.outdated(report, browser.installed))
-    update_check: updates.Check | None = updates.Check() if report is not None else None
+    # What is out of date, from the client's cache -- asked on a worker, as
+    # every later refresh is: the answer is two subprocesses, a quarter of a
+    # second on a desk and more on a Deck, which is frames the grid would
+    # otherwise drop (CLAUDE.md's budget is 16.7 ms). The first answer lands
+    # a moment after the first frame; and once the client has answered (so
+    # it knows the question), the check that refreshes its cache runs
+    # behind the grid.
+    report: updates.Report | None = None
+    badge_asker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="badges")
+    badges: Future | None = badge_asker.submit(lambda: (installed_games(), updates.ask()))
+    update_check: updates.Check | None = None
+    check_started = False
     # The chip: what the report says, or the loop's own word for a while
     # after a press (updates.chip). `chip_rect` is where it was drawn, for a
     # click; `chip_until` when a transient word gives way to the report's.
@@ -873,10 +885,28 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
     restart: Restart | None = None
 
     def refresh_badges() -> None:
-        nonlocal report
-        browser.set_installed(installed_games())
-        report = updates.ask()
+        """Ask again what is here and what is out of date, off the loop; the
+        answer is applied when it lands (below)."""
+        nonlocal badges
+        badges = badge_asker.submit(lambda: (installed_games(), updates.ask()))
+
+    def apply_badges() -> None:
+        nonlocal badges, report, update_check, check_started
+        if badges is None or not badges.done():
+            return
+        try:
+            here, said = badges.result()
+        except Exception as error:  # noqa: BLE001 - a badge must never stop the grid
+            trace.say("badges-failed", why=str(error))
+            badges = None
+            return
+        badges = None
+        report = said
+        browser.set_installed(here)
         browser.set_outdated(updates.outdated(report, browser.installed))
+        if not check_started and report is not None:
+            check_started = True
+            update_check = updates.Check.start_after(report)
 
     def say_chip(phase: str | None, seconds: float = 6.0) -> None:
         nonlocal chip_phase, chip_until
@@ -884,21 +914,23 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
         chip_until = time.monotonic() + seconds
 
     def self_update() -> None:
-        """The chip pressed: `gotg update self` through the loader, unless
-        something else is running -- two writers of the library's lock would
-        queue, and a person would see neither."""
+        """The chip pressed: restart into a newer picker already at the root,
+        or `gotg update self` through the loader -- unless something else is
+        running, since two writers of the library's lock would queue and a
+        person would see neither."""
         nonlocal preparer, after_prepare, prepare_failed
-        words = updates.chip(report, updates.self_root(), chip_phase if time.monotonic() < chip_until else None)
-        if words is None:
+        if chip_phase == "updating" and time.monotonic() < chip_until:
             return
-        if words == updates.RESTART_TO_UPDATE and report is not None and report.picker:
-            # The root already holds a newer picker: nothing to build.
-            finish_restart(report.picker)
-            return
-        if words != updates.UPDATE_AVAILABLE:
+        # The report's word, not the transient one: "failed" ten seconds ago
+        # is no reason to refuse the second press.
+        words = updates.chip(report, updates.self_root())
+        if words not in (updates.RESTART_TO_UPDATE, updates.UPDATE_AVAILABLE):
             return
         if installs.keys or preparer is not None:
             say_chip("busy")
+            return
+        if words == updates.RESTART_TO_UPDATE and report is not None and report.picker:
+            finish_restart(report.picker)
             return
         trace.say("self-update")
         preparer = Preparer(None, ["update", "self"])
@@ -908,14 +940,18 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
 
     def finish_restart(root: str) -> None:
         """The new picker is at `root`: become it, keeping the pid the daemon
-        follows. In the dev shell (no GOTG_UI_SELF) the running picker is the
-        checkout, so nothing to restart into: Steam's copy is current, and the
-        chip says so for a while."""
+        follows. Nothing to restart into when this picker already is that
+        root, or when it is the dev shell's checkout (no GOTG_UI_SELF): then
+        Steam's copy is current and the chip says which for a while."""
         nonlocal restart, running
         mine = updates.self_root()
-        if mine is None or root == mine:
-            say_chip("updated", 10.0)
+        if mine is None or os.path.normpath(root) == os.path.normpath(mine):
+            say_chip("up-to-date" if mine is not None else "updated-here", 10.0)
             refresh_badges()
+            return
+        if not usable(root):
+            trace.say("restart-refused", root=root)
+            say_chip("failed", 10.0)
             return
         trace.say("restart", root=root)
         restart = Restart(root)
@@ -1085,9 +1121,7 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
             installs.cancel(game.key)
             return
         if verb == "update":
-            # The same ring as an install: `gotg update <platform>/<id>`
-            # rebuilds the game's roots and fetches what its install lacks.
-            installs.start(game, argv=("update",))
+            installs.start(game, verb="update")
             return
         if verb == "uninstall":
             # Through the loader like steam-add, so what was removed is read
@@ -1519,8 +1553,6 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
                         # for options, so that is what it opens.
                         panel = Filters()
                     elif pressed == pads.BACK:
-                        # Select: the chip at the top right, when it says
-                        # something. The grid left Select unbound.
                         self_update()
 
             # Installs running behind the grid: one landing is a badge, and
@@ -1530,7 +1562,8 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
                 forget_versions()
             if update_check is not None and update_check.done():
                 update_check = None
-                browser.set_outdated(updates.outdated(updates.ask(), browser.installed))
+                refresh_badges()
+            apply_badges()
             # The saves answer: a conflict is a choice, anything else starts
             # the game. No answer at all (no client, no service, too slow)
             # starts it too -- a launch is never held on a question.
@@ -1563,19 +1596,14 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
                     if after_prepare is None:
                         preparer = None  # steam add done — back to the grid
                     elif after_prepare == "self-update":
-                        # The client's last line names the picker now at the
-                        # root Steam starts; an older client that said nothing
-                        # is read as "the root, as it is".
-                        said = [line for line in reversed(preparer.tail(40)) if line.startswith("picker\t")]
-                        root = said[0].split("\t", 1)[1].strip() if said else ""
-                        if not root and report is not None and report.picker:
-                            root = report.picker
+                        # An older client says nothing: the root, as it is.
+                        root = said_root(preparer.tail(40)) or (report.picker if report is not None else None)
                         preparer = None
                         after_prepare = None
                         if root:
                             finish_restart(root)
                         else:
-                            say_chip("updated", 10.0)
+                            say_chip("up-to-date", 10.0)
                             refresh_badges()
                     elif after_prepare in ("install", "uninstall"):
                         refresh_badges()
@@ -1756,10 +1784,9 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
         # terminal, so nothing else will ever stop it.
         if preparer is not None and (chosen is None or preparer.game != chosen[0]):
             preparer.cancel()
-        # Nor the update check: an evaluation left running under the game
-        # would take its CPU on a Deck.
         if update_check is not None:
             update_check.stop()
+        badge_asker.shutdown(wait=False, cancel_futures=True)
         # danstick goes on listening for a hold. It used to be told to stop
         # here, on the theory that a game has its own idea of what a button
         # does -- but the daemon seats only pads that hold no seat, so a

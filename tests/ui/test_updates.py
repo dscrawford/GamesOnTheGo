@@ -51,6 +51,20 @@ def test_nothing_garbage_and_a_version_not_spoken_all_say_nothing():
     assert parse("not json") is None
     assert parse("[]") is None
     assert parse(report(version=2)) is None
+    assert parse(report(version="1")) is None
+    # True == 1 in Python; a boolean is not the version.
+    assert parse(report(version=True)) is None
+    assert parse(report()[:-5]) is None
+
+
+def test_a_bare_string_where_a_list_belongs_is_not_spelled_out_letter_by_letter():
+    r = parse(report(games=[{"key": "n64/usa.x", "attrs": "xy", "reasons": "build"}]))
+    assert r is not None
+    assert r.games == {}
+    r = parse(report(games=[{"key": "n64/usa.x", "attrs": "xy", "reasons": ["build", 7]}]))
+    assert r is not None
+    assert r.games[("n64", "usa.x")].attrs == ()
+    assert r.games[("n64", "usa.x")].reasons == ("build",)
 
 
 def test_a_game_with_a_bad_key_or_no_reasons_is_left_out():
@@ -78,21 +92,25 @@ def test_the_chip_truth_table():
 
     behind = parse(report())
     gotg = {"available": False, "behind": False, "unbuilt": False, "picker": "/nix/store/x-gotg-ui"}
-    current = parse(report(gotg=gotg))
+    current = parse(report(gotg={**gotg, "picker_current": True}))
     assert chip(behind, "/nix/store/x-gotg-ui") == UPDATE_AVAILABLE
     assert chip(current, "/nix/store/x-gotg-ui") is None
-    # The root already holds a newer picker than the one running.
+    # The root holds the picker the lock wants, and this is not it: a restart.
     assert chip(current, "/nix/store/old-gotg-ui") == RESTART_TO_UPDATE
+    # The root holds some other picker -- older, say -- and the lock does not
+    # vouch for it: no restart offered into it.
+    assert chip(parse(report(gotg=gotg)), "/nix/store/newer-gotg-ui") is None
     # The dev shell: no self, so never "restart", but "available" still shows.
     assert chip(behind, None) == UPDATE_AVAILABLE
     assert chip(current, None) is None
     # Nothing to say, and nowhere to write a pin.
     assert chip(None, "/nix/store/x-gotg-ui") is None
     assert chip(parse(report(writable=False)), "/nix/store/x-gotg-ui") is None
-    # The loop's own word wins.
+    # The loop's own word wins; one it does not know is nothing.
     assert chip(behind, None, phase="updating") == UPDATING
     assert chip(None, None, phase="failed") == UPDATE_FAILED
     assert chip(behind, None, phase="busy") == AFTER_INSTALLS
+    assert chip(behind, None, phase="nonsense") is None
 
 
 def stub(tmp_path, body: str, monkeypatch) -> None:

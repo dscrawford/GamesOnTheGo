@@ -50,7 +50,7 @@ def test_a_preparer_with_no_game_runs_the_verb_bare_and_is_about_gotg(bin_env, t
     while preparer.running:
         pass
     assert (tmp_path / "argv").read_text().split() == ["update", "self"]
-    assert preparer.title == "GOTG"
+    assert preparer.game is None
 
 
 # --- is_ready -----------------------------------------------------------------

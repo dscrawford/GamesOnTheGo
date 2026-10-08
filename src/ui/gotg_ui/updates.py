@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 from collections.abc import Iterable, Mapping
@@ -51,6 +52,9 @@ class Report:
     stale: bool
     pending: bool
     picker: str | None
+    # Whether the root Steam starts is what the lock wants: the one case a
+    # picker running from elsewhere should restart into it.
+    picker_current: bool
     games: Mapping[tuple[str, str], GameUpdate]
 
 
@@ -61,7 +65,7 @@ def parse(text: str) -> Report | None:
         data = json.loads(text or "")
     except (TypeError, ValueError):
         return None
-    if not isinstance(data, dict) or data.get("version") != VERSION:
+    if not isinstance(data, dict) or type(data.get("version")) is not int or data["version"] != VERSION:
         return None
     gotg = data.get("gotg") if isinstance(data.get("gotg"), dict) else {}
     games: dict[tuple[str, str], GameUpdate] = {}
@@ -74,8 +78,8 @@ def parse(text: str) -> Report | None:
         platform, sep, game_id = key.partition("/")
         if not (sep and platform and game_id):
             continue
-        attrs = tuple(a for a in (item.get("attrs") or []) if isinstance(a, str))
-        reasons = tuple(r for r in (item.get("reasons") or []) if isinstance(r, str))
+        attrs = tuple(a for a in _strings(item.get("attrs")))
+        reasons = tuple(r for r in _strings(item.get("reasons")))
         if reasons:
             games[(platform, game_id)] = GameUpdate((platform, game_id), attrs, reasons)
     picker = gotg.get("picker")
@@ -87,13 +91,20 @@ def parse(text: str) -> Report | None:
         stale=bool(data.get("stale")),
         pending=bool(data.get("pending")),
         picker=picker if isinstance(picker, str) and picker else None,
+        picker_current=bool(gotg.get("picker_current")),
         games=games,
     )
 
 
+def _strings(value: object) -> list[str]:
+    """The strings in a list, and nothing from anything else: a bare string
+    here would be iterated letter by letter."""
+    return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+
 def outdated(report: Report | None, installed: Iterable[tuple[str, str]]) -> frozenset[tuple[str, str]]:
-    """The installed games with an update waiting. Installed is the client's
-    word too; a game the report names that is not here any more is nothing."""
+    """The installed games with an update waiting; a game the report names
+    that is no longer installed is dropped."""
     if report is None:
         return frozenset()
     here = set(installed)
@@ -122,32 +133,33 @@ UPDATE_AVAILABLE = "Update available"
 RESTART_TO_UPDATE = "Restart to update"
 UPDATING = "Updating…"
 UPDATE_FAILED = "Update failed"
-UPDATED = "Updated — this picker runs the checkout"
+UPDATED_HERE = "Updated — this picker runs the checkout"
+UP_TO_DATE = "Already up to date"
 AFTER_INSTALLS = "Update after installs finish"
 
 
-def chip(report: Report | None, self_root: str | None, phase: str | None = None) -> str | None:
+PHASES = {
+    "updating": UPDATING,
+    "failed": UPDATE_FAILED,
+    "updated-here": UPDATED_HERE,
+    "up-to-date": UP_TO_DATE,
+    "busy": AFTER_INSTALLS,
+}
+
+
+def chip(report: Report | None, running_root: str | None, phase: str | None = None) -> str | None:
     """The words at the top right, or None for none.
 
-    `self_root` is the store path this picker runs from (GOTG_UI_SELF, set by
-    the packaged wrapper and not by the dev shell). A root Steam starts that
-    already holds a newer picker than this one needs only a restart. A
-    library that cannot be written -- a store copy, from `nix run <lib>#ui`
+    A library that cannot be written -- a store copy, from `nix run <lib>#ui`
     with nothing configured -- can be behind all it likes: no chip, since
     nothing here could move its pin. `phase` is the loop's word while an
     update runs or has just ended, and wins.
     """
-    if phase == "updating":
-        return UPDATING
-    if phase == "failed":
-        return UPDATE_FAILED
-    if phase == "updated":
-        return UPDATED
-    if phase == "busy":
-        return AFTER_INSTALLS
+    if phase is not None:
+        return PHASES.get(phase)
     if report is None or not report.writable:
         return None
-    if self_root and report.picker and report.picker != self_root:
+    if running_root and report.picker_current and report.picker and report.picker != running_root:
         return RESTART_TO_UPDATE
     if report.available:
         return UPDATE_AVAILABLE
@@ -171,23 +183,34 @@ class Check:
 
     def __init__(self) -> None:
         self.process: subprocess.Popen | None
+        # `nice` as a prefix rather than a preexec_fn: a preexec_fn forces the
+        # fork-and-exec path, copying a pygame process's page tables, and is
+        # unsafe with other threads alive, which the picker has. A Steam
+        # launch has no Nix PATH, so a missing nice is simply not used.
+        nice = shutil.which("nice")
+        prefix = [nice, "-n", "10"] if nice else []
         try:
             self.process = subprocess.Popen(  # noqa: S603 — argv is ours, shell=False
-                [gotg_bin(), "update", "--check"],
+                [*prefix, gotg_bin(), "update", "--check"],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
-                preexec_fn=lambda: os.nice(10),  # noqa: PLW1509 — a single-threaded child
             )
         except OSError:
             self.process = None
+
+    @classmethod
+    def start_after(cls, report: Report | None) -> Check | None:
+        """The check, once the client has answered the quick question --
+        and so is known to speak `--check`; None otherwise."""
+        return cls() if report is not None else None
 
     def done(self) -> bool:
         return self.process is None or self.process.poll() is not None
 
     def stop(self) -> None:
-        if self.process is None or self.process.poll() is not None:
+        if self.done():
             return
         try:
             os.killpg(self.process.pid, signal.SIGTERM)

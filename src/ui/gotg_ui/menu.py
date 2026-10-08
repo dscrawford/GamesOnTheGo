@@ -86,7 +86,6 @@ class Menu:
         self.columns = max(1, columns)
         self.installed = installed
         self.installing = installing
-        # An update waiting for a game that is here (updates.py).
         self.outdated = outdated
         # Which of the plain game (None) and its mods have saves of their own.
         self.saves = saves

@@ -73,7 +73,10 @@ updates_eval_games() {
     printf '{}'
     return 0
   }
-  local attrs
+  local attr attrs
+  for attr in "$@"; do
+    [[ "$attr" =~ $GOTG_ROOT_ATTR_RE ]] || die "refusing to evaluate an attribute named $attr"
+  done
   attrs="$(printf '%s\n' "$@" | jq -R . | jq -cs .)"
   timeout "${GOTG_UPDATE_EVAL_TIMEOUT:-120}" "$(nix_bin)" eval --json \
     "$library#legacyPackages.$(updates_system)" --apply "
@@ -94,7 +97,6 @@ updates_eval_games() {
     " 2>/dev/null || true
 }
 
-# And for the client and the picker: { gotg, ui } as store paths.
 updates_eval_apps() {
   timeout "${GOTG_UPDATE_EVAL_TIMEOUT:-120}" "$(nix_bin)" eval --json \
     "$1#packages.$(updates_system)" \
@@ -103,22 +105,44 @@ updates_eval_apps() {
 
 # A root that already is what the library would build is current, whatever
 # its stamp says: the stamp is re-written so a launch does not run a build
-# that would conclude the same thing (library_current).
+# that would conclude the same thing (library_current). Only for the lock
+# the evaluation was made against: a lock that moved meanwhile -- a refresh,
+# an `update self` pressed while the check ran -- makes the wants answers
+# about nothing, and stamping old builds with the new lock's hash would be
+# the Deck's week again, with a stamp this time saying it was fine.
 updates_restamp() {
-  local library="$1" cache attr want root stamp
+  local library="$1" evaluated="$2" cache attr want root stamp
   cache="$(updates_cache_file)"
   stamp="$(library_stamp "$library")"
+  [[ "$stamp" == "$evaluated" ]] || return 0
+  [[ "$(jq -r '.stamp // ""' "$cache" 2>/dev/null)" == "$evaluated" ]] || return 0
   while IFS=$'\t' read -r attr want; do
     [[ -n "$attr" && -n "$want" && "$want" != null ]] || continue
+    [[ "$attr" =~ $GOTG_ROOT_ATTR_RE ]] || continue
     root="$(library_games_dir)/$attr"
     [[ -e "$root" && "$(readlink -f "$root")" == "$want" ]] || continue
     [[ "$(cat "$root.by" 2>/dev/null)" == "$stamp" ]] || printf '%s' "$stamp" >"$root.by"
   done < <(jq -r '.want // {} | to_entries[] | "\(.key)\t\(.value // "null")"' "$cache" 2>/dev/null)
 }
 
-# The work: ask upstream, evaluate, write the cache. Once per TTL unless
-# --force; under a lock, since the picker's worker and a terminal may both
-# ask. Offline keeps the last answer and says it is stale.
+# Whether the cache is for this lock and younger than the interval.
+_updates_fresh() {
+  local cache="$1" stamp="$2" now="$3" at cstamp
+  [[ -s "$cache" ]] || return 1
+  # Joined on the unit separator, not a tab: bash collapses runs of a
+  # whitespace separator, so an empty field would shift the ones after it.
+  IFS=$'\x1f' read -r cstamp at < <(jq -r '[.stamp // "", (.checked_at // 0 | tostring)] | join("\u001f")' "$cache" 2>/dev/null) || return 1
+  [[ "$cstamp" == "$stamp" && "$at" =~ ^[0-9]+$ ]] || return 1
+  ((now - at < ${GOTG_UPDATE_CHECK_TTL:-21600}))
+}
+
+# The work: ask upstream, evaluate, write the cache. Once per interval
+# unless --force; under a lock, since the picker's worker and a terminal
+# may both ask -- and the interval is read again under it, so the second
+# asker finds the first one's answer rather than doing the work twice.
+# Anything that fails -- offline, an evaluation refused -- keeps the last
+# answer for that part and marks the cache stale; a failed evaluation
+# written as "nothing out of date" would have been believed for six hours.
 updates_check() {
   local force=0
   [[ "${1:-}" != "--force" ]] || force=1
@@ -128,17 +152,14 @@ updates_check() {
   cache="$(updates_cache_file)"
   stamp="$(library_stamp "$library")"
   now="$(date +%s)"
-  if ((force == 0)) && [[ -s "$cache" ]]; then
-    local at cstamp
-    at="$(jq -r '.checked_at // 0' "$cache" 2>/dev/null || echo 0)"
-    cstamp="$(jq -r '.stamp // ""' "$cache" 2>/dev/null || true)"
-    if [[ "$cstamp" == "$stamp" ]] && ((now - at < ${GOTG_UPDATE_CHECK_TTL:-21600})); then
-      return 0
-    fi
-  fi
+  ((force)) || ! _updates_fresh "$cache" "$stamp" "$now" || return 0
   mkdir -p "$GOTG_STATE_DIR/locks"
   exec 9>"$GOTG_STATE_DIR/locks/updates.lock"
   flock 9
+  ((force)) || ! _updates_fresh "$cache" "$stamp" "$now" || {
+    exec 9>&-
+    return 0
+  }
 
   local url="" latest="" stale=false
   url="$(updates_gotg_original "$library")"
@@ -151,25 +172,46 @@ updates_check() {
   fi
   local attrs=() want apps
   mapfile -t attrs < <(library_root_attrs)
+  # An evaluation that answers nothing, or not an object, keeps the last.
   want="$(updates_eval_games "$library" "${attrs[@]}")"
-  [[ -n "$want" ]] || want='{}'
+  if ! jq -e 'type == "object"' <<<"$want" >/dev/null 2>&1; then
+    stale=true
+    want="$(jq -c '.want // {} | select(type == "object")' "$cache" 2>/dev/null || true)"
+    [[ -n "$want" ]] || want='{}'
+  fi
   apps="$(updates_eval_apps "$library")"
-  [[ -n "$apps" ]] || apps='{}'
-  jq -n --arg stamp "$stamp" --argjson at "$now" --arg url "$url" --arg latest "$latest" \
+  if ! jq -e 'type == "object"' <<<"$apps" >/dev/null 2>&1; then
+    stale=true
+    apps="$(jq -c '{gotg: .app_want, ui: .ui_want}' "$cache" 2>/dev/null || true)"
+    [[ -n "$apps" ]] || apps='{}'
+  fi
+  if jq -n --arg stamp "$stamp" --argjson at "$now" --arg url "$url" --arg latest "$latest" \
     --argjson stale "$stale" --argjson want "$want" --argjson apps "$apps" \
     '{version: 1, stamp: $stamp, checked_at: $at, url: $url, latest: $latest, stale: $stale,
       want: $want, app_want: ($apps.gotg // null), ui_want: ($apps.ui // null)}' \
-    >"$cache.tmp" && mv -f "$cache.tmp" "$cache"
-  updates_restamp "$library"
+    >"$cache.tmp"; then
+    mv -f "$cache.tmp" "$cache"
+    updates_restamp "$library" "$stamp"
+  else
+    rm -f "$cache.tmp"
+  fi
   exec 9>&-
 }
 
-# One installed game's catalog row, by platform/id.
-_updates_game() {
-  local key="$1"
-  jq -c --arg p "${key%%/*}" --arg i "${key#*/}" \
-    'if .version != 2 then empty else (.games[] | select(.platform == $p and .id == $i)) end' \
-    "$GOTG_CACHE_FILE" 2>/dev/null | head -1 || true
+# The catalog rows that carry extras, each on a line: the only games whose
+# install can lack a release. Four of ~5,000 rows do, and reading the whole
+# catalog once for them is 75 ms; asking it once per installed game, as this
+# first did, was 2.6 seconds with 41 games installed -- the picker's whole
+# timeout, spent before a single badge.
+_updates_games_with_extras() {
+  [[ -s "$GOTG_CACHE_FILE" ]] || return 0
+  jq -c --arg plat_re "$GOTG_PLATFORM_RE" --arg id_re "$GOTG_ID_RE" '
+    if .version != 2 then empty else
+      .games[]
+      | select((.platform | type) == "string" and (.id | type) == "string")
+      | select((.platform | test($plat_re)) and (.id | test($id_re)))
+      | select(any(.files[]?; (.name | type) == "string" and (.name | startswith("extras/"))))
+    end' "$GOTG_CACHE_FILE" 2>/dev/null || true
 }
 
 # The answer, from the cache and the filesystem only -- never the network,
@@ -178,7 +220,7 @@ _updates_game() {
 updates_json() {
   local library cache stamp writable=false pending=true stale=false
   local url="" latest="" locked="" behind=false unbuilt=false
-  local app_want="" ui_want="" picker="" app_real="" ui_real=""
+  local app_want="" ui_want="" app_real="" ui_real="" cstamp="" at=0
   library="$(gotg_library)"
   cache="$(updates_cache_file)"
   if [[ -n "$library" ]]; then
@@ -187,20 +229,31 @@ updates_json() {
     [[ -d "$library" && -w "$library" && "$library" != /nix/store/* ]] && writable=true
   fi
   if [[ -n "$library" && -s "$cache" ]]; then
-    [[ "$(jq -r '.stamp // ""' "$cache" 2>/dev/null)" == "$stamp" ]] && pending=false
-    url="$(jq -r '.url // ""' "$cache" 2>/dev/null)"
-    latest="$(jq -r '.latest // ""' "$cache" 2>/dev/null)"
-    stale="$(jq -r '.stale // false' "$cache" 2>/dev/null)"
-    app_want="$(jq -r '.app_want // ""' "$cache" 2>/dev/null)"
-    ui_want="$(jq -r '.ui_want // ""' "$cache" 2>/dev/null)"
+    # One read of the cache for every scalar it holds; see _updates_fresh
+    # for the separator.
+    IFS=$'\x1f' read -r cstamp url latest stale app_want ui_want at < <(
+      jq -r '[.stamp // "", .url // "", .latest // "", (.stale // false | tostring),
+              .app_want // "", .ui_want // "", (.checked_at // 0 | tostring)] | map(tostring) | join("\u001f")' \
+        "$cache" 2>/dev/null
+    ) || true
+    [[ "$cstamp" == "$stamp" ]] && pending=false
+    [[ "$stale" == true ]] || stale=false
+    [[ "$at" =~ ^[0-9]+$ ]] || at=0
   fi
   [[ -n "$latest" && -n "$locked" && "$latest" != "$locked" ]] && behind=true
   [[ -e "$GOTG_APP_ROOT" ]] && app_real="$(readlink -f "$GOTG_APP_ROOT")"
   [[ -e "$GOTG_UI_ROOT" ]] && ui_real="$(readlink -f "$GOTG_UI_ROOT")"
-  picker="$ui_real"
+  # A root that exists and is not what the lock wants. A root that was
+  # never made -- a machine that has not set Steam up -- is not out of
+  # date; it is absent, and `gotg steam` is the step it is missing.
+  local picker_current=false
   if [[ "$pending" == false ]]; then
-    [[ -n "$app_want" && "$app_real" != "$app_want" ]] && unbuilt=true
-    [[ -n "$ui_want" && "$ui_real" != "$ui_want" ]] && unbuilt=true
+    [[ -n "$app_want" && -n "$app_real" && "$app_real" != "$app_want" ]] && unbuilt=true
+    [[ -n "$ui_want" && -n "$ui_real" && "$ui_real" != "$ui_want" ]] && unbuilt=true
+    # The root is what the lock wants: a picker running from anywhere else
+    # has only to restart into it -- and not otherwise, since a newer picker
+    # run from a checkout would be offered a restart into an older root.
+    [[ -n "$ui_want" && "$ui_real" == "$ui_want" ]] && picker_current=true
   fi
 
   # Games: a root that is not what the lock would build, and an install
@@ -211,6 +264,7 @@ updates_json() {
   if [[ "$pending" == false ]]; then
     while IFS=$'\t' read -r attr want; do
       [[ -n "$attr" && -n "$want" && "$want" != null ]] || continue
+      [[ "$attr" =~ $GOTG_ROOT_ATTR_RE ]] || continue
       root="$(library_games_dir)/$attr"
       [[ -e "$root" ]] || continue
       [[ "$(readlink -f "$root")" != "$want" ]] || continue
@@ -219,31 +273,34 @@ updates_json() {
       [[ " ${reasons[$key]:-} " == *" build "* ]] || reasons["$key"]+="${reasons[$key]:+ }build"
     done < <(jq -r '.want // {} | to_entries[] | "\(.key)\t\(.value // "null")"' "$cache" 2>/dev/null)
   fi
+  # Only the games that carry extras can lack one; the rest are not asked.
   local game install
-  while IFS= read -r key; do
-    [[ -n "$key" ]] || continue
-    game="$(_updates_game "$key")"
+  while IFS= read -r game; do
     [[ -n "$game" ]] || continue
-    game_has_extras "$game" || continue
     install="$(game_installed_path "$game")" || continue
     [[ -d "$install" ]] || continue
     [[ -n "$(_extras_missing "$install" "$game")" ]] || continue
+    key="$(manifest_field "$game" platform)/$(manifest_field "$game" id)"
     attrs["$key"]="${attrs[$key]:-}"
     reasons["$key"]+="${reasons[$key]:+ }extras"
-  done < <(manifest_installed_keys)
+  done < <(_updates_games_with_extras)
 
-  local games='[]' entry
-  for key in "${!reasons[@]}"; do
-    entry="$(jq -nc --arg k "$key" --arg a "${attrs[$key]:-}" --arg r "${reasons[$key]}" \
-      '{key: $k, attrs: ($a | split(" ") | map(select(length > 0))), reasons: ($r | split(" "))}')"
-    games="$(jq -c --argjson e "$entry" '. + [$e]' <<<"$games")"
-  done
+  # The games as one jq over one line each, not a jq per game: on the day
+  # the pin moves every installed game is on this list.
+  local games
+  games="$(
+    for key in "${!reasons[@]}"; do
+      printf '%s\t%s\t%s\n' "$key" "${attrs[$key]:-}" "${reasons[$key]}"
+    done | jq -Rsc '[split("\n")[] | select(length > 0) | split("\t")
+                     | {key: .[0], attrs: (.[1] | split(" ") | map(select(length > 0))), reasons: (.[2] | split(" "))}]'
+  )"
   jq -n --argjson pending "$pending" --argjson stale "$stale" --arg library "$library" \
     --argjson writable "$writable" --arg url "$url" --arg locked "$locked" --arg latest "$latest" \
-    --argjson behind "$behind" --argjson unbuilt "$unbuilt" --arg picker "$picker" --argjson games "$games" \
-    --argjson at "$(jq -r '.checked_at // 0' "$cache" 2>/dev/null || echo 0)" \
+    --argjson behind "$behind" --argjson unbuilt "$unbuilt" --arg picker "$ui_real" --argjson games "$games" \
+    --argjson at "$at" --argjson picker_current "$picker_current" \
     '{version: 1, checked_at: $at, stale: $stale, pending: $pending, library: $library, writable: $writable,
       gotg: {url: $url, locked: $locked, latest: $latest, behind: $behind, unbuilt: $unbuilt,
-             available: ($behind or $unbuilt), picker: (if $picker == "" then null else $picker end)},
+             available: ($behind or $unbuilt), picker: (if $picker == "" then null else $picker end),
+             picker_current: $picker_current},
       games: ($games | sort_by(.key))}'
 }
