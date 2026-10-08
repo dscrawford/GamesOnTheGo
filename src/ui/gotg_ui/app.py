@@ -83,12 +83,20 @@ def _intent(event) -> Intent:
     and the screens that asked both wrote it down twice. A pad danstick has not
     published gives None for both and so means nothing (`pads.py`).
     """
+    return _heard(event)[0]
+
+
+def _heard(event) -> tuple[Intent, str | None]:
+    """`_intent`, and the pad button it was read from, for the screens that
+    also act on a button the intent has no word for (storage's X and Y, the
+    panel's Start) -- read once here, since `pads.button` traces each read
+    and a press was landing in the trace twice."""
     if event.type == pygame.KEYDOWN:
-        return intents.intent(key=event.key)
+        return intents.intent(key=event.key), None
     if event.type == pygame.JOYHATMOTION:
-        return intents.intent(step=pads.direction(event))
+        return intents.intent(step=pads.direction(event)), None
     button = pads.button(event)
-    return intents.intent(button=button, step=step_for(button))
+    return intents.intent(button=button, step=step_for(button)), button
 
 
 def _steered(steer: Nav, event, now: float) -> Nav:
@@ -481,7 +489,7 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
             elif outcome == EDITED:
                 storage_typing = text
             return
-        said = _intent(event)
+        said, pressed = _heard(event)
         if said == BACK:
             storage = None
         elif said.dy:
@@ -494,7 +502,6 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
             elif event.key in (pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_EQUALS, pygame.K_y):
                 storage_typing = ""
         else:
-            pressed = pads.button(event)
             if pressed == pads.X:
                 storage.remove()
             elif pressed == pads.Y:
@@ -545,7 +552,7 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
         # the panel underneath owns them when there is none. One step back per
         # press of B: the list first, then the panel.
         nonlocal panel, typing, typing_from
-        said = _intent(event)
+        said, pressed = _heard(event)
         if said == BACK:
             if panel.open:
                 panel.close()
@@ -564,7 +571,7 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
                 panel.choose(browser)
             elif panel.press(browser) == filters.TYPING:
                 typing = typing_from = browser.search
-        elif pads.button(event) == pads.START:
+        elif pressed == pads.START:
             # Start closes it the way Start opened it.
             panel = None
 

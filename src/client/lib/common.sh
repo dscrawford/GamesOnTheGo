@@ -145,11 +145,12 @@ zenity_supervise() {
   # Ignored for the supervisor's lifetime, the write fails with EPIPE instead,
   # which `|| true` can absorb. The work inherits the disposition; curl writes
   # to a file and nix to a socket it owns, neither minds.
+  # Restored on the way out by a RETURN trap rather than `|| rc=$?`: the
+  # latter would have run the body with errexit off, and a mkfifo that
+  # failed used to end the client rather than carry on without a dialog.
   trap '' PIPE
-  local rc=0
-  _zenity_supervise "$@" || rc=$?
-  trap - PIPE
-  return "$rc"
+  trap 'trap - PIPE; trap - RETURN' RETURN
+  _zenity_supervise "$@"
 }
 
 # One line to the dialog's fifo. Its reader may be gone (see above), so the
