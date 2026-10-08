@@ -32,11 +32,12 @@ from .hush import Hush
 from .installed import installed_games
 from .installs import Installs
 from .keys import KeyHold
-from .layout import grid, shelf, shelf_at, tile_at
+from .layout import corner, grid, shelf, shelf_at, tile_at
 from .menu import Menu
 from .nav import Nav
 from .prepare import Preparer, is_ready
 from .recent import Recent
+from .restart import Restart
 from .saves_choice import HERE, REMOTE, Choice
 from .saves_choice import check as check_saves
 from .saves_choice import when as saves_when
@@ -108,6 +109,21 @@ def draw_alert_badge(screen, tile) -> None:
     stroke = max(2, r // 4)
     pygame.draw.line(screen, BACKGROUND, (cx, cy - r // 2), (cx, cy + r // 6), stroke)
     pygame.draw.aacircle(screen, BACKGROUND, (cx, cy + r // 2), max(1, stroke // 2 + 1))
+
+
+def draw_chip(screen, font_at, text: str | None):
+    """The words at the top right -- "Update available", and what follows a
+    press -- on a rounded chip in the attention colour, or nothing. Returns
+    the rect drawn, for a click to be matched against; None when nothing."""
+    if not text:
+        return None
+    width, height = screen.get_size()
+    label = font_at(18).render(text, True, BACKGROUND)
+    chip = corner(width, height, label.get_width(), label.get_height())
+    pygame.draw.rect(screen, ATTENTION, chip.rect, border_radius=chip.height // 2)
+    at = (chip.x + (chip.width - label.get_width()) // 2, chip.y + (chip.height - label.get_height()) // 2)
+    screen.blit(label, at)
+    return chip
 
 
 def draw_ring(screen, centre, radius: int, fraction: float | None, failed: bool) -> None:
@@ -289,7 +305,8 @@ def draw_shelf(
     installed: set[tuple[str, str]] | None = None,
     rings: dict[tuple[str, str], tuple[float | None, bool]] | None = None,
     outdated: frozenset[tuple[str, str]] | None = None,
-) -> None:
+    chip: str | None = None,
+):
     """The list on the left, and the art of the one under the cursor on the
     right — the other way to look at the same library."""
     width, height = screen.get_size()
@@ -338,6 +355,7 @@ def draw_shelf(
     if status:
         shown = font_at(22).render(status, True, TEXT_DIM)
         screen.blit(shown, (rows[0].x, height - shown.get_height() - 10))
+    return draw_chip(screen, font_at, chip)
 
 
 def draw(
@@ -351,7 +369,8 @@ def draw(
     installed: set[tuple[str, str]] | None = None,
     rings: dict[tuple[str, str], tuple[float | None, bool]] | None = None,
     outdated: frozenset[tuple[str, str]] | None = None,
-) -> None:
+    chip: str | None = None,
+):
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
     page = state.page
@@ -422,9 +441,12 @@ def draw(
     # Tiles shrink long titles toward unreadable and art hides them entirely;
     # the selection is the one game whose whole name is worth a line, and
     # hover moves the selection, so pointer and stick share it.
+    # The chip shares that strip; the title fits in what the chip leaves.
+    chip_rect = draw_chip(screen, font_at, chip)
     if state.game is not None:
         text = state.game.title[:200]
-        label = _fit(font_at, text, width - 48, 26).render(text, True, TEXT)
+        room = width - 48 - (2 * (chip_rect.width + 24) if chip_rect is not None else 0)
+        label = _fit(font_at, text, max(120, room), 26).render(text, True, TEXT)
         screen.blit(label, ((width - label.get_width()) // 2, (tiles[0].y - label.get_height()) // 2))
 
     if not status:
@@ -439,7 +461,7 @@ def draw(
         status = f"search: {typing}_"
     label = font_at(18).render(status, True, TEXT if typing is not None else TEXT_DIM)
     screen.blit(label, (label.get_height(), height - label.get_height() * 2))
-
+    return chip_rect
 
 def menu_rects(menu: Menu, tiles, font_at, bounds=None) -> list[tuple[int, int, int, int]]:
     """One rect per action row, beside the tile on the side with room.
@@ -704,7 +726,7 @@ def _draw_progress_bar(screen, font_at, y: int, margin: int, fraction: float | N
 def draw_prepare(
     screen,
     font_at,
-    game: Game,
+    game: Game | None,
     lines: list[str],
     failed: bool,
     progress: prepare.Progress | None = None,
@@ -722,7 +744,18 @@ def draw_prepare(
     screen.fill(BACKGROUND)
     margin = height // 16
 
-    if failed:
+    if game is None:
+        # `gotg update self`: GOTG itself, the roots Steam starts, and then a
+        # restart into the new picker. Nothing is changed until it is done.
+        if failed:
+            heading = "could not update GOTG — nothing was changed"
+            hint = "B / Escape — back to the grid   ·   full log: gotg update self"
+            colour = (224, 96, 96)
+        else:
+            heading = "updating GOTG — the picker restarts when it is done"
+            hint = "B / Escape — cancel; the library stays as it was"
+            colour = TEXT
+    elif failed:
         heading = f"could not prepare {game.title[:80]}"
         hint = "B / Escape — back to the grid   ·   full log: gotg install " + f"{game.platform}/{game.id}"
         colour = (224, 96, 96)
@@ -777,10 +810,12 @@ def _steered(steer: Nav, event, now: float) -> Nav:
     return steer
 
 
-def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | None:
+def run(library: Library, installed_only: bool = False) -> tuple | Restart | None:
     """Draw until somebody chooses an action or quits, and say which.
 
-    Returns (game, verb) — play or configure — both of which the caller execs.
+    Returns (game, verb) — play or configure — both of which the caller execs;
+    or a Restart, after `gotg update self`, which the caller execs too: this
+    pid into the new picker (restart.py).
 
     The game is *returned* rather than launched here: exec has to happen after
     pygame has given the display back, or the emulator inherits a window and a
@@ -829,10 +864,62 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     report = updates.ask()
     browser.set_outdated(updates.outdated(report, browser.installed))
     update_check: updates.Check | None = updates.Check() if report is not None else None
+    # The chip: what the report says, or the loop's own word for a while
+    # after a press (updates.chip). `chip_rect` is where it was drawn, for a
+    # click; `chip_until` when a transient word gives way to the report's.
+    chip_phase: str | None = None
+    chip_until = 0.0
+    chip_rect = None
+    restart: Restart | None = None
 
     def refresh_badges() -> None:
+        nonlocal report
         browser.set_installed(installed_games())
-        browser.set_outdated(updates.outdated(updates.ask(), browser.installed))
+        report = updates.ask()
+        browser.set_outdated(updates.outdated(report, browser.installed))
+
+    def say_chip(phase: str | None, seconds: float = 6.0) -> None:
+        nonlocal chip_phase, chip_until
+        chip_phase = phase
+        chip_until = time.monotonic() + seconds
+
+    def self_update() -> None:
+        """The chip pressed: `gotg update self` through the loader, unless
+        something else is running -- two writers of the library's lock would
+        queue, and a person would see neither."""
+        nonlocal preparer, after_prepare, prepare_failed
+        words = updates.chip(report, updates.self_root(), chip_phase if time.monotonic() < chip_until else None)
+        if words is None:
+            return
+        if words == updates.RESTART_TO_UPDATE and report is not None and report.picker:
+            # The root already holds a newer picker: nothing to build.
+            finish_restart(report.picker)
+            return
+        if words != updates.UPDATE_AVAILABLE:
+            return
+        if installs.keys or preparer is not None:
+            say_chip("busy")
+            return
+        trace.say("self-update")
+        preparer = Preparer(None, ["update", "self"])
+        after_prepare = "self-update"
+        prepare_failed = False
+        say_chip("updating", 3600.0)
+
+    def finish_restart(root: str) -> None:
+        """The new picker is at `root`: become it, keeping the pid the daemon
+        follows. In the dev shell (no GOTG_UI_SELF) the running picker is the
+        checkout, so nothing to restart into: Steam's copy is current, and the
+        chip says so for a while."""
+        nonlocal restart, running
+        mine = updates.self_root()
+        if mine is None or root == mine:
+            say_chip("updated", 10.0)
+            refresh_badges()
+            return
+        trace.say("restart", root=root)
+        restart = Restart(root)
+        running = False
     if installed_only:
         browser.toggle_installed()
     store = ArtStore()
@@ -1381,7 +1468,10 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                             trace.say("hover", tile=over, was=state.selected, pos=list(event.pos))
                         state.select(over)
                 elif event.type == pygame.MOUSEBUTTONDOWN:
-                    if event.button == 1:
+                    on_chip = chip_rect is not None and pygame.Rect(chip_rect.rect).collidepoint(event.pos)
+                    if event.button == 1 and on_chip:
+                        self_update()
+                    elif event.button == 1:
                         over = hovering(browser, event.pos, screen.get_size())
                         # Only ever the tile actually under the pointer: hover has
                         # already put the cursor there, so this cannot launch
@@ -1428,6 +1518,10 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         # library. Start is the button somebody presses looking
                         # for options, so that is what it opens.
                         panel = Filters()
+                    elif pressed == pads.BACK:
+                        # Select: the chip at the top right, when it says
+                        # something. The grid left Select unbound.
+                        self_update()
 
             # Installs running behind the grid: one landing is a badge, and
             # the versions the client listed were about a game not yet there.
@@ -1468,6 +1562,21 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 if preparer.ok:
                     if after_prepare is None:
                         preparer = None  # steam add done — back to the grid
+                    elif after_prepare == "self-update":
+                        # The client's last line names the picker now at the
+                        # root Steam starts; an older client that said nothing
+                        # is read as "the root, as it is".
+                        said = [line for line in reversed(preparer.tail(40)) if line.startswith("picker\t")]
+                        root = said[0].split("\t", 1)[1].strip() if said else ""
+                        if not root and report is not None and report.picker:
+                            root = report.picker
+                        preparer = None
+                        after_prepare = None
+                        if root:
+                            finish_restart(root)
+                        else:
+                            say_chip("updated", 10.0)
+                            refresh_badges()
                     elif after_prepare in ("install", "uninstall"):
                         refresh_badges()
                         # What the client said about versions was about a game
@@ -1489,6 +1598,8 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         preparer = None
                 else:
                     prepare_failed = True
+                    if after_prepare == "self-update":
+                        say_chip("failed", 10.0)
             # Reconnected here rather than on a timer: connect() on an absent
             # socket fails at once with ENOENT, and a daemon started while the
             # picker is open should be picked up without restarting it.
@@ -1517,6 +1628,9 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     trace.say("danstick", **{k: v for k, v in said.items() if k not in ("lines", "build")})
 
             painting = time.perf_counter()
+            chip_words = updates.chip(
+                report, updates.self_root(), chip_phase if time.monotonic() < chip_until else None
+            )
             if preparer is not None:
                 draw_prepare(
                     screen, font_at, preparer.game, preparer.tail(28), prepare_failed,
@@ -1534,7 +1648,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 # The grid behind it, so changing a filter is visibly changing
                 # the thing underneath rather than a number on a form.
                 if browser.view == SHELF:
-                    draw_shelf(
+                    chip_rect = draw_shelf(
                         screen,
                         state,
                         font_at,
@@ -1543,9 +1657,10 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         browser.installed,
                         installs.rings(),
                         browser.outdated,
+                        chip_words,
                     )
                 else:
-                    draw(
+                    chip_rect = draw(
                         screen,
                         state,
                         font_at,
@@ -1556,6 +1671,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         browser.installed,
                         installs.rings(),
                         browser.outdated,
+                        chip_words,
                     )
                 draw_filters(screen, font_at, browser, panel, typing)
             else:
@@ -1572,7 +1688,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     # The menu is drawn over the list rather than swapping the
                     # screen back to the grid underneath it, which is what
                     # happened before and moved every game on screen.
-                    draw_shelf(
+                    chip_rect = draw_shelf(
                         screen,
                         state,
                         font_at,
@@ -1581,12 +1697,13 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         browser.installed,
                         installs.rings(),
                         browser.outdated,
+                        chip_words,
                     )
                 else:
                     # Typing still belongs to the grid: the search box is drawn
                     # there, and a shelf with its own copy would be two to keep
                     # in step.
-                    draw(
+                    chip_rect = draw(
                         screen,
                         state,
                         font_at,
@@ -1597,6 +1714,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                         browser.installed,
                         installs.rings(),
                         browser.outdated,
+                        chip_words,
                     )
                 if menu is not None:
                     draw_menu(screen, menu, view_rects(browser, screen.get_size()), font_at)
@@ -1656,4 +1774,4 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # And the bar: the game gets its own, which knows its console.
     beside.stop(overlay)
     pygame.quit()
-    return chosen
+    return restart if restart is not None else chosen

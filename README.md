@@ -239,6 +239,18 @@ env-n64-usa_legend_of_zelda_ocarina_of_time_rev2-rando
 | `switch.world.paper_mario_the_thousand_year_door` | `60fps` (text always skippable; ZR + D-pad Down fast, ZR + D-pad Up instant) |
 | `switch.world.super_mario_rpg` | `120fps` |
 
+**Updates, from the picker.** When the library is behind where it came
+from, or the picker and client Steam starts are not what the library would
+build, a chip at the top right says **Update available**; Select (or a
+click) runs `gotg update self` on the loading screen -- the pin moved, both
+built, the two roots swapped, the picker restarted into the new build with
+everybody's seats kept -- and nothing is changed if any step fails. A game
+whose build the library would now do differently, or whose install lacks a
+release the catalog attached, wears an **!** instead of the download arrow,
+and **Update** sits under Play in its menu (`gotg update <platform>/<id>`).
+Behind it: `gotg update --check` (the network and the evaluation, once per
+six hours) and `gotg complete updates` (the cached answer).
+
 On a Steam Deck the Switch variants are the same names with a Deck
 profile: handheld 720p unless a television is connected, the console's own
 4 GiB, caps no higher than 60 with UltraCam's DynamicFPS turning a miss into

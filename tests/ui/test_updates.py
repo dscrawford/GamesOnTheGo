@@ -73,6 +73,28 @@ def test_the_badge_precedence_ring_then_alert_then_arrow():
     assert badge(key, set(), set(), set()) == NONE
 
 
+def test_the_chip_truth_table():
+    from gotg_ui.updates import AFTER_INSTALLS, RESTART_TO_UPDATE, UPDATE_AVAILABLE, UPDATE_FAILED, UPDATING, chip
+
+    behind = parse(report())
+    gotg = {"available": False, "behind": False, "unbuilt": False, "picker": "/nix/store/x-gotg-ui"}
+    current = parse(report(gotg=gotg))
+    assert chip(behind, "/nix/store/x-gotg-ui") == UPDATE_AVAILABLE
+    assert chip(current, "/nix/store/x-gotg-ui") is None
+    # The root already holds a newer picker than the one running.
+    assert chip(current, "/nix/store/old-gotg-ui") == RESTART_TO_UPDATE
+    # The dev shell: no self, so never "restart", but "available" still shows.
+    assert chip(behind, None) == UPDATE_AVAILABLE
+    assert chip(current, None) is None
+    # Nothing to say, and nowhere to write a pin.
+    assert chip(None, "/nix/store/x-gotg-ui") is None
+    assert chip(parse(report(writable=False)), "/nix/store/x-gotg-ui") is None
+    # The loop's own word wins.
+    assert chip(behind, None, phase="updating") == UPDATING
+    assert chip(None, None, phase="failed") == UPDATE_FAILED
+    assert chip(behind, None, phase="busy") == AFTER_INSTALLS
+
+
 def stub(tmp_path, body: str, monkeypatch) -> None:
     path = tmp_path / "gotg"
     path.write_text(f"#!/bin/sh\n{body}\n")

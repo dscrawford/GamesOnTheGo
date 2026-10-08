@@ -14,6 +14,20 @@ DECK = (1280, 800)  # the screen this is for
 DESKTOP = (1920, 1080)
 
 
+def test_the_chip_sits_in_the_strip_above_the_tiles_inside_the_right_margin():
+    from gotg_ui.layout import corner
+
+    for size in (DECK, DESKTOP):
+        width, height = size
+        chip = corner(width, height, 150, 20)
+        first = grid(width, height)[0]
+        assert chip.x + chip.width <= width
+        assert chip.x + chip.width <= first.x + width  # inside the window
+        assert chip.y >= 0
+        assert chip.y + chip.height <= first.y, "above the first row"
+        assert chip.width == 150 + 20 and chip.height == 20 + 20
+
+
 def test_ten_tiles_five_across_and_two_down():
     assert (COLUMNS, ROWS) == (5, 2)
     tiles = grid(*DECK)

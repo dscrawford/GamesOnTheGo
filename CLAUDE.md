@@ -44,7 +44,11 @@ both made by `#update`, both left where they were by `nix flake update`. A
 Deck upgraded that way kept running the day-old picker, and a fix that had
 shipped looked like one that did not work. On a machine where a full update
 is too long for now, the two roots alone are `nix build gotg#gotg-ui -o
-~/.local/state/gotg/picker` and `#gotg -o ~/.local/state/gotg/app`.
+~/.local/state/gotg/picker` and `#gotg -o ~/.local/state/gotg/app`. The
+picker now says so itself -- "Update available" at the top right when the
+library is behind origin or those roots are not what it would build, and
+Select runs `gotg update self` and restarts into the new picker
+(`src/client/lib/updates.sh`, `gotg_ui/updates.py`, `restart.py`).
 
 ## Build / Run
 

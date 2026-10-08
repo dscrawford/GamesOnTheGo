@@ -183,11 +183,13 @@ class Preparer:
 
     def __init__(
         self,
-        game: Game,
+        game: Game | None,
         argv: list[str] | None = None,
         variant: str | None = None,
         version: str | None = None,
     ):
+        # None for a run that is not about one game -- `gotg update self`,
+        # which the loader draws with the same bar and the same way out.
         self.game = game
         self.variant = variant
         self.version = version
@@ -210,7 +212,7 @@ class Preparer:
                 [
                     gotg_bin(),
                     *self.argv,
-                    f"{game.platform}/{game.id}",
+                    *([f"{game.platform}/{game.id}"] if game is not None else []),
                     *([variant] if variant else []),
                     *(["--version", version] if version else []),
                 ],
@@ -264,6 +266,11 @@ class Preparer:
     @property
     def elapsed(self) -> float:
         return time.monotonic() - self.started
+
+    @property
+    def title(self) -> str:
+        """What the loader's heading is about: the game, or GOTG itself."""
+        return self.game.title if self.game is not None else "GOTG"
 
     @property
     def running(self) -> bool:

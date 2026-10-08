@@ -195,6 +195,75 @@ cmd_library() {
   fi
 }
 
+# GOTG itself brought up to date, from the picker's chip: the library's pin
+# moved to the head of where it came from (and its catalog with it), the
+# client and the picker built from there, and only then the two roots Steam
+# starts swapped to them -- each an atomic symlink and a GC root of its own
+# (`nix build <store path> -o`), so nothing is half-done at any moment and
+# a failure before the swap leaves the machine exactly as it was: the lock
+# is put back from its copy. Games are not rebuilt here; the picker that
+# restarts shows an exclamation mark where their roots moved, and Play or
+# Update does each one. The last line names the picker now at its root, for
+# the running picker to restart into.
+#
+# The check that follows runs as the *new* client, so a fix to the check
+# ships with the update.
+library_update_self() {
+  local library app_out ui_out
+  library="$(gotg_library)"
+  [[ -n "$library" ]] || die "no library configured: set GOTG_LIBRARY, or \`library\` in $GOTG_CONFIG_FILE"
+  [[ -d "$library" && -w "$library" && "$library" != /nix/store/* ]] ||
+    die "the library at $library is not a directory this can write; its pin cannot be moved from here"
+  mkdir -p "$GOTG_STATE_DIR/locks"
+  exec 9>"$GOTG_STATE_DIR/locks/library.lock"
+  flock 9
+  export GOTG_NO_DIALOG=1
+  cp -f "$library/flake.lock" "$library/flake.lock.before-update"
+  _library_update_restore() {
+    [[ -f "$library/flake.lock.before-update" ]] || return 0
+    mv -f "$library/flake.lock.before-update" "$library/flake.lock"
+    warn "the library's lock is back as it was; nothing was changed"
+  }
+  log "moving the library to the newest gotg"
+  "$(nix_bin)" flake update gotg catalog --flake "$library" >&2 || {
+    _library_update_restore
+    die "could not move the library's pin"
+  }
+  # Built with nothing pointed at them yet: a build that fails leaves both
+  # roots as they were. Drawn for the picker's loading screen, then asked
+  # for their paths, which is instant the second time.
+  _nix_drawn build "$library#gotg" "$library#gotg-ui" --no-link || {
+    _library_update_restore
+    die "could not build gotg from $library"
+  }
+  app_out="$("$(nix_bin)" build "$library#gotg" --no-link --print-out-paths)" || {
+    _library_update_restore
+    die "could not build gotg from $library"
+  }
+  ui_out="$("$(nix_bin)" build "$library#gotg-ui" --no-link --print-out-paths)" || {
+    _library_update_restore
+    die "could not build the picker from $library"
+  }
+  "$(nix_bin)" build "$app_out" -o "$GOTG_APP_ROOT" || {
+    _library_update_restore
+    die "could not place gotg at $GOTG_APP_ROOT"
+  }
+  "$(nix_bin)" build "$ui_out" -o "$GOTG_UI_ROOT" || {
+    _library_update_restore
+    die "could not place the picker at $GOTG_UI_ROOT"
+  }
+  rm -f "$library/flake.lock.before-update"
+  log "gotg: up to date"
+  log "gotg-ui: up to date"
+  # What is out of date now, as the new client sees it; best effort.
+  if [[ -x "$GOTG_APP_ROOT/bin/gotg" ]]; then
+    "$GOTG_APP_ROOT/bin/gotg" update --check --force >/dev/null 2>&1 || true
+  fi
+  foreign_gl_sync
+  exec 9>&-
+  printf 'picker\t%s\n' "$(readlink -f "$GOTG_UI_ROOT")"
+}
+
 # One game brought up to date: every root it has here -- the plain game and
 # its variants, each an output of its own -- rebuilt from the library as it
 # is, and then whatever its install lacks fetched (an update, DLC, a pack:
@@ -261,8 +330,12 @@ cmd_update() {
       library_update_game "$1"
       return 0
       ;;
+    self)
+      library_update_self
+      return 0
+      ;;
     "") ;;
-    *) die "usage: gotg update [--check [--force] | <platform>/<id>]" ;;
+    *) die "usage: gotg update [--check [--force] | self | <platform>/<id>]" ;;
   esac
   library="$(gotg_library)"
   [[ -n "$library" ]] || die "no library configured: set GOTG_LIBRARY, or \`library\` in $GOTG_CONFIG_FILE"

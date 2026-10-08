@@ -100,7 +100,25 @@ def main(argv: list[str] | None = None) -> int:
     chosen = run(library, installed_only=args.installed)
     if chosen is None:
         return 0
+    from .restart import Restart
+
+    if isinstance(chosen, Restart):
+        return _restart(chosen)
     return _play(*chosen)
+
+
+def _restart(restart) -> int:
+    """Become the newer picker `gotg update self` left at the root Steam
+    starts; only come back if that cannot happen."""
+    from .launch import LaunchError
+    from .restart import exec_restart
+
+    try:
+        exec_restart(restart)
+    except LaunchError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    return 0  # unreachable: exec_restart() replaced this process
 
 
 def _play(game, verb: str = "play", variant: str | None = None, version: str | None = None) -> int:

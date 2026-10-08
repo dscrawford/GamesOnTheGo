@@ -243,6 +243,70 @@ real_root() { printf '%s/store/%s' "$TEST_TMP" "$1"; }
   [[ "$stderr" == *"no build here yet"* ]]
 }
 
+# For `update self`: the shim answers `build ... --no-link --print-out-paths`
+# with a store path per installable, and `build <store path> -o <root>` with
+# a root that is that path's directory.
+self_update_nix() {
+  updates_nix
+  python3 - "$GOTG_NIX" <<'EOF'
+import sys
+path = sys.argv[1]
+text = open(path).read()
+marker = 'out="" prev="" installable=""\n'
+extra = r'''
+if [[ "$*" == *"--print-out-paths"* ]]; then
+  for arg in "$@"; do
+    case "$arg" in *"#"*) echo "$TEST_TMP/store/$(printf '%s' "${arg#*#}")-out" ;; esac
+  done
+  exit 0
+fi
+if [[ "$1" == build && "$2" == "$TEST_TMP/store/"* ]]; then
+  out="" prev=""
+  for arg in "$@"; do [[ "$prev" == "-o" ]] && out="$arg"; prev="$arg"; done
+  mkdir -p "$2/bin"; rm -rf "$out"; ln -sfn "$2" "$out"; exit 0
+fi
+if [[ -n "${BUILD_FAILS:-}" && "$1" == build ]]; then echo "error: build failed" >&2; exit 1; fi
+'''
+open(path, "w").write(text.replace(marker, extra + marker, 1))
+EOF
+}
+
+@test "update self moves the pin, builds both with nothing pointed at them, then swaps the roots" {
+  self_update_nix
+  run gotg update self
+  [ "$status" -eq 0 ]
+  grep -q "^flake update gotg catalog --flake $GOTG_LIBRARY\$" "$NIX_LOG"
+  grep -q "^build $GOTG_LIBRARY#gotg $GOTG_LIBRARY#gotg-ui --no-link" "$NIX_LOG"
+  grep -q "^build $TEST_TMP/store/gotg-out -o $GOTG_APP_ROOT\$" "$NIX_LOG"
+  grep -q "^build $TEST_TMP/store/gotg-ui-out -o $GOTG_UI_ROOT\$" "$NIX_LOG"
+  [ "$(readlink -f "$GOTG_UI_ROOT")" = "$TEST_TMP/store/gotg-ui-out" ]
+  [ ! -e "$GOTG_LIBRARY/flake.lock.before-update" ]
+  # The last line, for the picker: where the new picker is.
+  [ "$(tail -n1 <<<"$output")" = "$(printf 'picker\t%s' "$TEST_TMP/store/gotg-ui-out")" ]
+}
+
+@test "update self that cannot build puts the lock back and leaves the roots alone" {
+  self_update_nix
+  mkdir -p "$TEST_TMP/store/was-ui"
+  ln -sfn "$TEST_TMP/store/was-ui" "$GOTG_UI_ROOT"
+  cp "$GOTG_LIBRARY/flake.lock" "$TEST_TMP/lock-before"
+  export BUILD_FAILS=1
+  run gotg update self
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"nothing was changed"* ]]
+  cmp -s "$GOTG_LIBRARY/flake.lock" "$TEST_TMP/lock-before"
+  [ ! -e "$GOTG_LIBRARY/flake.lock.before-update" ]
+  [ "$(readlink -f "$GOTG_UI_ROOT")" = "$TEST_TMP/store/was-ui" ]
+}
+
+@test "update self refuses a library it cannot write" {
+  export GOTG_LIBRARY="/nix/store/zzzz-library"
+  run gotg update self
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"cannot be moved from here"* ]]
+  [ ! -e "$NIX_LOG" ]
+}
+
 @test "update with an argument it does not know says its usage" {
   run gotg update --frobnicate
   [ "$status" -ne 0 ]

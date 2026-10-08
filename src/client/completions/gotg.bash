@@ -59,7 +59,7 @@ _gotg() {
             fi
             ;;
         update)
-            mapfile -t COMPREPLY < <(compgen -W "--check --force" -- "$cur")
+            mapfile -t COMPREPLY < <(compgen -W "--check --force self" -- "$cur")
             mapfile -t -O "${#COMPREPLY[@]}" COMPREPLY < <(_gotg_ids "$cur")
             ;;
         saves)

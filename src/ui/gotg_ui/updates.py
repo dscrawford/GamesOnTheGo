@@ -117,6 +117,48 @@ def badge(
     return NONE
 
 
+# What the chip at the top right says, if anything.
+UPDATE_AVAILABLE = "Update available"
+RESTART_TO_UPDATE = "Restart to update"
+UPDATING = "Updating…"
+UPDATE_FAILED = "Update failed"
+UPDATED = "Updated — this picker runs the checkout"
+AFTER_INSTALLS = "Update after installs finish"
+
+
+def chip(report: Report | None, self_root: str | None, phase: str | None = None) -> str | None:
+    """The words at the top right, or None for none.
+
+    `self_root` is the store path this picker runs from (GOTG_UI_SELF, set by
+    the packaged wrapper and not by the dev shell). A root Steam starts that
+    already holds a newer picker than this one needs only a restart. A
+    library that cannot be written -- a store copy, from `nix run <lib>#ui`
+    with nothing configured -- can be behind all it likes: no chip, since
+    nothing here could move its pin. `phase` is the loop's word while an
+    update runs or has just ended, and wins.
+    """
+    if phase == "updating":
+        return UPDATING
+    if phase == "failed":
+        return UPDATE_FAILED
+    if phase == "updated":
+        return UPDATED
+    if phase == "busy":
+        return AFTER_INSTALLS
+    if report is None or not report.writable:
+        return None
+    if self_root and report.picker and report.picker != self_root:
+        return RESTART_TO_UPDATE
+    if report.available:
+        return UPDATE_AVAILABLE
+    return None
+
+
+def self_root() -> str | None:
+    """The root this picker runs from, when it is a packaged one."""
+    return os.environ.get("GOTG_UI_SELF") or None
+
+
 class Check:
     """`gotg update --check`, running: the network and the evaluation behind
     the cached answer, in its own process group at a lower priority, so the

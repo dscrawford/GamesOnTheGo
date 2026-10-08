@@ -72,6 +72,7 @@ stdenvNoCC.mkDerivation {
       --set PYTHONPATH "$out/share/gotg-ui:${gotg}/share/gotg/steam" \
       --set GOTG_UI_ENV "${gotg}/share/gotg/env" \
       --set GOTG_CONFIG "$out/share/gotg-ui/config" \
+      --set GOTG_UI_SELF "$out" \
       --prefix PATH : ${lib.makeBinPath [
         gotg
         danstick

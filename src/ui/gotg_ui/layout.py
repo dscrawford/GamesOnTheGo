@@ -92,6 +92,19 @@ def grid(width: int, height: int, reserved: int = 0) -> list[Tile]:
     ]
 
 
+def corner(width: int, height: int, text_width: int, text_height: int, pad: int = 10) -> Tile:
+    """The chip at the top right: inside the margin, centred on the strip
+    above the first row of tiles, with `pad` around the text. The same strip
+    the hovered title is centred in, so the two share a line and the title's
+    fit width is what is left."""
+    tiles = grid(width, height)
+    margin = int(width * MARGIN_FRACTION)
+    w, h = text_width + 2 * pad, text_height + 2 * pad
+    x = width - margin - w
+    y = max(0, (tiles[0].y - h) // 2)
+    return Tile(x, y, w, h)
+
+
 def tile_at(x: int, y: int, width: int, height: int, reserved: int = 0) -> int | None:
     """Which tile a point is on, or None for the gaps and the margins.
 
