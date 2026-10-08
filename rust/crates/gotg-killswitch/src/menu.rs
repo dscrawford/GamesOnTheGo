@@ -1,6 +1,6 @@
 //! The overlay's menu: the seated controllers, a rebind, the order, a held exit.
 //!
-//! Brought down by L + R + A held for half a second on one pad, and driven by that
+//! Brought down by L + R + Select held for half a second on one pad, and driven by that
 //! pad alone -- the player who asked. Two people fighting over one cursor is a
 //! problem for later; for now anybody else's presses are not read at all.
 //!

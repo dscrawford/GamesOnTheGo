@@ -150,7 +150,7 @@ mod tests {
     const MENU: Input = Input {
         left: true,
         right: true,
-        a: true,
+        back: true,
         ..NONE
     };
 

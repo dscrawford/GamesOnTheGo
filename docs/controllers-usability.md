@@ -83,7 +83,7 @@ seats, the assignment and controller screens, and the door with its ready-up
 hold that `gotg-seat` put in front of every game. The overlay does all of it,
 over whatever is on screen. It keeps danstick's `seating` open (so a pad joins
 by being held, mid-level included), draws the join, walks a pad danstick has no
-buttons for, rebinds one pad from its menu (L+R+A held) with the console's controller drawn
+buttons for, rebinds one pad from its menu (L+R+Select held) with the console's controller drawn
 and each press lit, and says "No controllers connected" over a game nobody has
 joined. What stayed in the picker is the rule, not a screen: only a pad danstick
 published moves the cursor, the keyboard only once seated, and a controller's

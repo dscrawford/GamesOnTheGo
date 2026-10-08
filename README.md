@@ -167,7 +167,7 @@ fills in your colour: you are player one, the next to hold is player two, and
 that is the numbering every game is bound against. A controller danstick has
 no buttons for gets them walked right there, over the game.
 
-**L + R + A** held half a second brings a menu down for that player alone:
+**L + R + Select** held half a second brings a menu down for that player alone:
 the seats as a row of controller icons; the game's controller under them,
 every press lighting the presser's icon beside the button it hit; A rebinds
 yours, A held then left/right moves your seat, X takes a controller out of

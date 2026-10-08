@@ -27,23 +27,22 @@ pub struct Input {
 pub enum Chord {
     /// Both shoulders and Start: the game stops.
     Exit,
-    /// Both shoulders and A: the overlay's menu comes down, for this pad's
-    /// player -- the controllers, a rebind, the order, a held exit.
+    /// Both shoulders and Select: the overlay's menu comes down, for this
+    /// pad's player -- the controllers, a rebind, the order, a held exit.
     Menu,
 }
 
 impl Input {
     /// Both shoulders and the chord's own button, and not the other one's.
-    /// Two shoulders is a grip somebody could stumble into; two shoulders
-    /// and Start, held past three seconds, is not -- which is the entire
-    /// brief for a control that must never fire by accident and must exist
-    /// on every pad. Start with A still down is the exit, not the menu --
-    /// L+R+A+Start is what somebody reaching for "quit" actually held -- and
+    /// Two shoulders is a grip somebody could stumble into; with Start held
+    /// past three seconds it is the exit, with Select held half a second the
+    /// menu. It was A for the menu once, and A is the button every game
+    /// presses most: a grip plus a jump brought the menu down mid-play.
     /// Start with Select is neither.
     fn chord(self, chord: Chord) -> bool {
         let (want, other) = match chord {
             Chord::Exit => (self.start, self.back),
-            Chord::Menu => (self.a, self.start || self.back),
+            Chord::Menu => (self.back, self.start),
         };
         self.left && self.right && want && !other
     }
@@ -140,8 +139,8 @@ mod tests {
         left: true,
         right: true,
         start: false,
-        back: false,
-        a: true,
+        back: true,
+        a: false,
     };
 
     /// Holding from t=0, sampled every `step` ms like the real loop: when it
@@ -270,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn a_in_place_of_start_is_the_menu_not_the_exit() {
+    fn select_in_place_of_start_is_the_menu_not_the_exit() {
         let mut exit = Pad::new(3000);
         let mut menu = Pad::timing(Chord::Menu, 1000);
         let exited = (0..=6000).step_by(50).any(|now| exit.step(MENU, now));
@@ -278,26 +277,31 @@ mod tests {
             .step_by(50)
             .filter(|&now| menu.step(MENU, now))
             .collect();
-        assert!(!exited, "A is not Start: the game keeps running");
+        assert!(!exited, "Select is not Start: the game keeps running");
         assert_eq!(opened, [1000], "the menu opens once, at a second");
         let mut menu = Pad::timing(Chord::Menu, 1000);
         assert!(
             !(0..=6000).step_by(50).any(|now| menu.step(CHORD, now)),
-            "and Start is not A"
+            "and Start is not Select"
         );
     }
 
     #[test]
-    fn start_with_a_still_down_is_the_exit_and_not_the_menu() {
+    fn start_with_select_still_down_is_neither_and_a_changes_nothing() {
         let everything = Input { start: true, ..MENU };
         for chord in [Chord::Exit, Chord::Menu] {
             let mut pad = Pad::timing(chord, 1000);
-            let fired = (0..=6000).step_by(50).any(|now| pad.step(everything, now));
-            assert_eq!(fired, chord == Chord::Exit, "{chord:?}");
+            assert!(
+                !(0..=6000).step_by(50).any(|now| pad.step(everything, now)),
+                "{chord:?}"
+            );
         }
-        let with_select = Input { back: true, ..MENU };
+        let with_a = Input { a: true, ..MENU };
         let mut menu = Pad::timing(Chord::Menu, 1000);
-        assert!(!(0..=6000).step_by(50).any(|now| menu.step(with_select, now)));
+        assert!(
+            (0..=6000).step_by(50).any(|now| menu.step(with_a, now)),
+            "A is the game's, not the chord's"
+        );
     }
 
     #[test]

@@ -131,7 +131,7 @@ wait_for_watcher() { wait_for 5 test -s "$WATCHER_LOG"; }
 @test "the launch says how to use it" {
   fake_watcher
   gotg play usa.zelda
-  [[ "$stderr" == *"L + R and A for a second for the menu"* ]]
+  [[ "$stderr" == *"L + R and Select for half a second for the menu"* ]]
   [[ "$stderr" == *"L + R and Start for 3s stops the game"* ]]
 }
 

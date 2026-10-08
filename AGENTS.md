@@ -199,7 +199,7 @@ from Steam or from a terminal -- and it keeps danstick's `seating` open
 (`seating.rs`: on each connection, and again when a `state` says danstick
 stopped listening with a seat free and no session open). A hold on any pad
 takes a seat and the bar draws it filling; a seat danstick has no buttons for
-is walked over the game (`rebind.rs` `due`); L+R+A held half a second brings the
+is walked over the game (`rebind.rs` `due`); L+R+Select held half a second brings the
 menu down for that player alone (`menu.rs`): the seats as one line of
 controller icons, whose order is the player number; the game's controller
 under them with its buttons named, where each press puts the presser's own
@@ -335,7 +335,7 @@ name-CRC, because SDL renames clones) and `keys.py`.
   (launched beside every game) watches the exit chord and danstick's socket;
   a bar comes down for a pad joining and for the exit hold, and further --
   the game's controller drawn, the asked-for button ringed -- for a rebind
-  from the menu (L + R + A held 0.5 s), which has danstick walk that pad's
+  from the menu (L + R + Select held 0.5 s), which has danstick walk that pad's
   buttons again (`map`, no session: only that pad is grabbed, its clone held
   back from the game). Drawing is a
   separate process -- `gotg-killswitch --paint`, fed ~100-byte frames over a

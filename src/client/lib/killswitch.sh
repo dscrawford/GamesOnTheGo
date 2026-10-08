@@ -87,5 +87,5 @@ killswitch_start() {
 
   "$bin" --pid "$pid" --hold-ms "$hold" ${console[@]+"${console[@]}"} ${picture[@]+"${picture[@]}"} \
     ${saves[@]+"${saves[@]}"} &
-  log "${C_DIM}hold L + R and A for a second for the menu; L + R and Start for $((hold / 1000))s stops the game${C_RESET}"
+  log "${C_DIM}hold L + R and Select for half a second for the menu; L + R and Start for $((hold / 1000))s stops the game${C_RESET}"
 }

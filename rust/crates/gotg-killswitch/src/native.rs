@@ -2,7 +2,7 @@
 //!
 //! Two layers of controls, and they must not be one. The game's are a walk
 //! somebody chose (an N64 walk puts L and R on the triggers) and change with
-//! every rebind. The overlay's -- L + R + A held for the menu, L + R + Start
+//! every rebind. The overlay's -- L + R + Select held for the menu, L + R + Start
 //! held to stop the game -- are the pad's own and never move: L and R are the
 //! bumpers, A the bottom face button, whatever the game has been told.
 //!

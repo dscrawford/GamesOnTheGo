@@ -83,7 +83,7 @@ triggers) and Start are held together for the hold time, the process
 is asked to stop, and killed if it will not. Exits on its own when
 that process is gone.
 
-Both shoulders and A, held half a second, bring the menu down for that
+Both shoulders and Select, held half a second, bring the menu down for that
 controller's player: the seated controllers (A rebinds one, A held
 moves it to another seat), the game's controller for everybody to try
 their buttons on (A starts the owner's own test, Select held half a
@@ -678,7 +678,9 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                     listeners.focused.clear();
                     send_focus(&mut link, &listeners.focused, owner, true);
                     if !options.quiet {
-                        eprintln!("gotg-killswitch: menu down for player {owner}");
+                        eprintln!(
+                            "gotg-killswitch: menu down for player {owner}: both shoulders and Select held"
+                        );
                     }
                 }
                 Opening::Unseated if !options.quiet => {
