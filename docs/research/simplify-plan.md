@@ -60,3 +60,35 @@ and the paragraph copied into six game files.*
 - Per-platform Nix files as a data table: the discovery contract depends on one file per platform, and they are 3–12 lines each.
 - `slugify.py` / `plan.py`: ported verbatim, kept diffable with upstream.
 - The why-comments. Several surveys wanted to trim narratives (four-swords-split's 54 lines on the Gamescope WSI layer); those get tightened, not removed.
+
+## Outcome (2026-10-08)
+
+Sixteen commits on `chore/simplify`, every check green at each, the
+controller e2e green on the cluster at the end (52 passed, 1 skipped).
+
+What is gone: 20 uncalled functions, the paragraph copied into nine
+variant files, the jq-and-mv shell copied eight times, the dialog
+supervisor written twice, the server spin written forty-six times in
+the service tests, the frame layout counted by hand twice, `run()`
+answering "who owns the input" twice, `flake.nix`'s second half, two
+copies of the package set. What was found on the way and fixed: a
+download cancelled from its dialog ended the client silently (errexit
+on `wait`, SIGPIPE on the full bar); the client's "slow curl" test shim
+never reached the client; three service routes dropped the connection
+on an unbalanced `[`; a PUT to a save's meta stored a save; the
+`inheritsPlatform` check had never evaluated since it was written.
+
+What it cost in lines, source only (`src`, `rust`, `nix`, `flake.nix`;
+tests under `tests/` excluded): 47,408 -> 49,928. Of the 2,520 added,
+~665 are Rust tests inside their modules, 291 the new `prelaunchProbe`
+check, ~460 comment lines (every new module carries the why-paragraph
+the house style asks for), and the rest is the structure that a split
+costs -- imports, signatures, dataclasses -- against the duplication it
+removed. Tests under `tests/`: +2,016 lines; 575 -> 667 picker, 724 ->
+872 service, 251 -> 279 Rust, +55 bats.
+
+Not done: the `run()` handlers are still closures over the loop's
+state (a state object is the next seam, and wants pygame tests);
+`steam_write_picker_launcher`, `admin_scan`, `updates_json` and
+`play_prepare` stay whole; `machine.sh` and `foreign-gl.nix` stay in
+the scanned directory, four importers outside it name them by path.
