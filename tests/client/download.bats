@@ -533,7 +533,7 @@ publish_bundle_game_plus_update() {
   [ "$(cat "$install/handler")" = single_file ]
 }
 
-@test "an environment built before it knew the extras handler says to rebuild it, and leaves the game alone" {
+@test "an environment built before it knew the extras handler says to rebuild it, and the game still launches" {
   publish_bundle_game
   stub_bundle_recipe_env
   gotg refresh
@@ -545,7 +545,9 @@ publish_bundle_game_plus_update() {
   publish_bundle_game_plus_update
   gotg refresh
   gotg download world.zelda
-  [ "$status" -ne 0 ]
+  # A warning, not a failure: an update is never worth a launch that does
+  # not start, and `gotg play` runs this same top-up on the way to the game.
+  [ "$status" -eq 0 ]
   [[ "$stderr" == *"gotg update"* ]]
   [ ! -e "$GOTG_GAMES_DIR/switch/world.zelda/extras/update_1.4.2-u2.rar" ]
   [ -d "$GOTG_GAMES_DIR/switch/world.zelda" ]

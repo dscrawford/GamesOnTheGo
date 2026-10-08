@@ -535,6 +535,18 @@ _top_up_extras() {
 
   missing="$(_extras_missing "$install" "$game")"
   [[ -n "$missing" ]] || return 0
+
+  # An extra is never worth a launch that does not start. An environment
+  # built before its recipe knew extras -- or before recipes existed -- is a
+  # rebuild away (`gotg update`); until then the game runs as it is, and the
+  # catalog's new release waits.
+  local attr
+  attr="${GOTG_PINNED_ATTR:-$(env_attr "$game")}"
+  env_build_wait
+  if [[ ! -x "$(env_root "$attr")/bin/gotg-recipe" ]] || ! _recipe_declares "$attr" extras; then
+    warn "$title has extras this build of $attr cannot install -- rebuild it: gotg update"
+    return 0
+  fi
   log "fetching what $title is missing: $(tr '\n' ' ' <<<"$missing")"
 
   mkdir -p "$GOTG_PARTIAL_DIR" "$GOTG_STATE_DIR/locks"

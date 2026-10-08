@@ -482,6 +482,36 @@ def test_a_link_entry_with_extra_members_is_flagged(stub):
     assert diff_catalog(manifest, CatalogAPI(base, "t")) == ["link entry with 2 members: n64/usa.zelda"]
 
 
+def test_a_link_entrys_extras_are_not_counted_as_members(stub):
+    # A texture pack attached to an N64 game, or an update to a Switch one, is
+    # a release riding on the entry, not a second game file.
+    from gotg.indexer.manifest import Entry
+    from gotg.indexer.publish import diff_catalog
+
+    base, handler = stub
+    handler.games = [
+        {
+            "platform": "n64",
+            "id": "usa.zelda",
+            "handler": "single_file",
+            "files": [
+                {"name": "usa.zelda.z64", "size_bytes": 4, "sha256": "a" * 64, "path": "/t/z.z64", "mtime": 1},
+                {
+                    "name": "extras/textures_3.7.0/pack.o2r",
+                    "size_bytes": 9,
+                    "sha256": "b" * 64,
+                    "path": "/t/pack.o2r",
+                    "mtime": 1,
+                },
+            ],
+        },
+    ]
+    manifest = {
+        "/Games/n64/usa.zelda.z64": Entry("n64", "/Games/n64/usa.zelda.z64", "file", 4, "a" * 64, "Zelda"),
+    }
+    assert diff_catalog(manifest, CatalogAPI(base, "t")) == []
+
+
 def test_the_games_root_pass_covers_what_no_longer_seeds(stub, tmp_path):
     from gotg.indexer.config import load as load_config
     from gotg.indexer.manifest import Entry
@@ -510,6 +540,9 @@ def test_the_games_root_pass_covers_what_no_longer_seeds(stub, tmp_path):
     assert payload["handler"] == "single_file"
     assert payload["files"][0]["sha256"] == "a" * 64
     assert payload["files"][0]["path"].endswith("Games/n64/usa.pruned.z64")
+    # And the rest of the run knows the row: a pack attached later in the same
+    # run finds its base here on a fresh catalog.
+    assert publisher.rows[("n64", "usa.pruned")]["files"][0]["sha256"] == "a" * 64
 
 
 def test_a_games_root_entry_missing_on_disk_is_an_error_not_a_crash(stub, tmp_path):

@@ -117,13 +117,16 @@ in
     fi
 
     if [ ! -e "$SHIP_HOME/${archive}" ]; then
-      echo "first run: extracting game assets from $install -- half a minute, once" >&2
+      # $target, not $install: with extras attached (a texture pack) the game
+      # installs as a directory and $install is that directory, while $target
+      # is the zip inside it -- and the zip itself when there are none.
+      echo "first run: extracting game assets from $target -- half a minute, once" >&2
       paperboat_work="$state/.extract"
       rm -rf "$paperboat_work"
       mkdir -p "$paperboat_work/rom" "$paperboat_work/out"
-      unzip -q -o "$install" -d "$paperboat_work/rom"
+      unzip -q -o "$target" -d "$paperboat_work/rom"
       paperboat_rom="$(find "$paperboat_work/rom" -name '*.z64' | head -1)"
-      [ -n "$paperboat_rom" ] || { echo "no .z64 inside $install" >&2; exit 1; }
+      [ -n "$paperboat_rom" ] || { echo "no .z64 inside $target" >&2; exit 1; }
       # -s is where config.yml and the asset yamls are: PaperBoat's own, so
       # the recipe is the one this port reads. -u writes portVersion, as
       # PaperBoat's extractor does. Into a scratch directory and then moved,
@@ -132,7 +135,7 @@ in
         -s "${port}/share/paperboat" -d "$paperboat_work/out" \
         -u "${lib.getVersion port}" "$paperboat_rom" >"$paperboat_work/torch.log" 2>&1) || {
         tail -20 "$paperboat_work/torch.log" >&2
-        echo "could not extract PaperBoat's assets from $install" >&2
+        echo "could not extract PaperBoat's assets from $target" >&2
         exit 1
       }
       mv -f "$paperboat_work/out/${archive}" "$SHIP_HOME/${archive}"

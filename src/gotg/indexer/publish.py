@@ -363,7 +363,10 @@ def diff_catalog(manifest_entries: dict, api: CatalogAPI) -> list[str]:
             continue
         if game["handler"] not in LINK_HANDLERS:
             continue  # derived: the recipe replaces the byte comparison
-        members = game.get("files", [])
+        # A link entry is one member -- plus whatever extras ride on it, which
+        # are attached releases, not the game: a Switch cartridge with its
+        # update, an N64 game with a texture pack.
+        members = [m for m in game.get("files", []) if not is_extra(m.get("name", ""))]
         if len(members) != 1:
             problems.append(f"link entry with {len(members)} members: {entry.platform}/{entry.game_id}")
             continue
@@ -415,7 +418,12 @@ def publish_games_root(publisher: Publisher, entries: dict, cfg) -> tuple[int, i
                 # nobody has touched since the day they were made.
                 publisher.unchanged.add(key)
                 continue
-            publisher.api.put(entry.platform, entry.game_id, {"handler": handler, "title": title, "files": files})
+            payload = {"handler": handler, "title": title, "files": files}
+            publisher.api.put(entry.platform, entry.game_id, payload)
+            # Known to the rest of this run: an attach that follows -- a pack
+            # for a game this pass just created on a fresh catalog -- finds
+            # its base here rather than failing for want of it.
+            publisher.rows[key] = {"platform": entry.platform, "id": entry.game_id, **payload}
             published += 1
         except (OSError, PublishError) as error:
             log.error("games-root publish %s: %s", entry.game_id, error)

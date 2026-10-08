@@ -132,9 +132,11 @@ in
       chmod -R u+w "$gotg_port" 2>/dev/null || true
       rm -rf "$gotg_port" "$state/.build"
       mkdir -p "$state/.build"
-      unzip -o "$install" -d "$state/.build" >/dev/null
+      # $target, not $install: a game with extras attached installs as a
+      # directory, and $target is the zip inside it either way.
+      unzip -o "$target" -d "$state/.build" >/dev/null
       gotg_rom="$(find "$state/.build" -name '*.z64' | head -1)"
-      [ -n "$gotg_rom" ] || { echo "no .z64 inside $install" >&2; exit 1; }
+      [ -n "$gotg_rom" ] || { echo "no .z64 inside $target" >&2; exit 1; }
       gotg-build-sm64coopdx "$gotg_rom" "$gotg_port"
       rm -rf "$state/.build"
       # The trees of other keys are of no use to anything now: every variant
