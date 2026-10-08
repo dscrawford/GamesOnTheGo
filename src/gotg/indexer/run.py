@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..contract import utc_now
 from . import classify as cl
 from . import manifest as mf
 from . import plan as pl
@@ -172,7 +173,7 @@ def run_scan(
     answer to "index the update I just dropped in" where the whole library
     is twenty minutes.
     """
-    since = pub.utc_now()
+    since = utc_now()
     started = time.monotonic()
     scanned, ignored = discover(root, rules)
     log.info(

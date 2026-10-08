@@ -13,11 +13,13 @@ import socket
 import threading
 import urllib.error
 import urllib.request
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler
 
 import pytest
+from harness import send, serve, serve_stub
 
-from gotg.service.app import Config, make_server
+from gotg.service.app import Config
 
 # --- a stub for whatever sits upstream --------------------------------------
 
@@ -79,26 +81,13 @@ class Upstream(BaseHTTPRequestHandler):
         self._reply(200, {"ok": True, "saw": self.path})
 
 
-def free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def serve(handler) -> tuple[HTTPServer, str]:
-    server = HTTPServer(("127.0.0.1", free_port()), handler)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    return server, f"http://127.0.0.1:{server.server_port}"
-
-
 @pytest.fixture
 def upstream():
     Upstream.seen = []
     Upstream.token_calls = 0
     Upstream.token_ttl = 5184000
-    server, url = serve(Upstream)
-    yield url
-    server.shutdown()
+    with serve_stub(Upstream) as stub:
+        yield stub.url
 
 
 @pytest.fixture
@@ -112,21 +101,13 @@ def proxy(upstream):
         igdb_url=upstream,
         igdb_token_url=f"{upstream}/oauth2/token",
     )
-    server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_port}"
-    server.shutdown()
+    with serve(config) as server:
+        yield server.url
 
 
 def call(url: str, token: str | None = "client-token", data: bytes | None = None):
-    request = urllib.request.Request(url, data=data)
-    if token:
-        request.add_header("Authorization", f"Bearer {token}")
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return response.status, response.read()
-    except urllib.error.HTTPError as error:
-        return error.code, error.read()
+    status, _, body = send(url, token=token, body=data)
+    return status, body
 
 
 # --- who is allowed in ------------------------------------------------------
@@ -228,6 +209,17 @@ def test_an_upstream_error_is_relayed_not_swallowed(proxy):
     assert b"no such thing" in body
 
 
+def test_an_upstream_answer_keeps_its_status_body_and_content_type(proxy):
+    status, headers, body = send(f"{proxy}/steamgriddb/missing", token="client-token")
+    assert status == 404
+    assert headers["Content-Type"] == "application/json"
+    assert json.loads(body) == {"error": "no such thing"}
+    status, headers, body = send(f"{proxy}/steamgriddb/fine", token="client-token")
+    assert status == 200
+    assert headers["Content-Type"] == "application/json"
+    assert json.loads(body)["saw"].endswith("/fine")
+
+
 def test_an_unknown_route_is_a_404(proxy):
     status, _ = call(f"{proxy}/nothing/here")
     assert status == 404
@@ -235,14 +227,10 @@ def test_an_unknown_route_is_a_404(proxy):
 
 def test_an_unconfigured_upstream_says_so(upstream):
     config = Config(token="client-token", steamgriddb_url=upstream)  # no key
-    server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    try:
-        status, body = call(f"http://127.0.0.1:{server.server_port}/steamgriddb/x")
+    with serve(config) as server:
+        status, body = call(f"{server.url}/steamgriddb/x")
         assert status == 503
         assert b"steamgriddb" in body.lower()
-    finally:
-        server.shutdown()
 
 
 def test_an_upstream_that_is_down_is_a_gateway_error(upstream):
@@ -251,26 +239,34 @@ def test_an_upstream_that_is_down_is_a_gateway_error(upstream):
         steamgriddb_key="k",
         steamgriddb_url="http://127.0.0.1:1",
     )
-    server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    try:
-        status, _ = call(f"http://127.0.0.1:{server.server_port}/steamgriddb/x")
+    with serve(config) as server:
+        status, headers, body = send(f"{server.url}/steamgriddb/x")
         assert status == 502
-    finally:
-        server.shutdown()
+        assert headers["Content-Type"] == "application/json"
+        assert json.loads(body)["error"].startswith("upstream unreachable")
+
+
+def test_a_cached_proxy_whose_upstream_is_down_says_so_the_same_way(tmp_path):
+    config = Config(
+        token="client-token",
+        steamgriddb_key="k",
+        steamgriddb_url="http://127.0.0.1:1",
+        upstream_cache_dir=str(tmp_path / "artcache"),
+    )
+    with serve(config) as server:
+        status, _, body = send(f"{server.url}/steamgriddb/grids/game/1")
+        assert status == 502
+        assert json.loads(body)["error"].startswith("upstream unreachable")
+        assert not (tmp_path / "artcache").exists() or not list((tmp_path / "artcache").iterdir())
 
 
 def test_a_token_is_required_even_when_nothing_is_configured():
     # Refusing before looking at what is configured: an unauthenticated caller
     # must not be able to tell which upstreams this proxy holds keys for.
     config = Config(token="client-token")
-    server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    try:
-        status, _ = call(f"http://127.0.0.1:{server.server_port}/igdb/games", token=None)
+    with serve(config) as server:
+        status, _ = call(f"{server.url}/igdb/games", token=None)
         assert status == 401
-    finally:
-        server.shutdown()
 
 
 def test_it_refuses_to_start_with_no_token():
@@ -368,17 +364,12 @@ def test_a_redirect_is_relayed_to_the_client_not_followed(upstream):
             self.send_header("Content-Length", "0")
             self.end_headers()
 
-    server, url = serve(Redirecting)
-    config = Config(token="client-token", steamgriddb_key="k", steamgriddb_url=url)
-    proxy_server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=lambda: proxy_server.serve_forever(poll_interval=0.05), daemon=True).start()
-    try:
-        status, _ = call(f"http://127.0.0.1:{proxy_server.server_port}/steamgriddb/x")
-        assert status == 302
-        assert len(Upstream.seen) == 1  # exactly one upstream request, no follow
-    finally:
-        proxy_server.shutdown()
-        server.shutdown()
+    with serve_stub(Redirecting) as stub:
+        config = Config(token="client-token", steamgriddb_key="k", steamgriddb_url=stub.url)
+        with serve(config) as proxy_server:
+            status, _ = call(f"{proxy_server.url}/steamgriddb/x")
+            assert status == 302
+            assert len(Upstream.seen) == 1  # exactly one upstream request, no follow
 
 
 def test_a_body_far_larger_than_a_query_is_refused(proxy):
@@ -421,7 +412,6 @@ def test_a_hostile_content_type_cannot_split_our_response():
     # headers. A folded value arrives with a raw CRLF still in it, and writing
     # that back out is response splitting — harmless with the client here,
     # which re-folds it, but parsers differ and this one is free to close.
-    import socket
 
     def hostile(sock):
         conn, _ = sock.accept()
@@ -440,16 +430,12 @@ def test_a_hostile_content_type_cannot_split_our_response():
         steamgriddb_key="k",
         steamgriddb_url=f"http://127.0.0.1:{listener.getsockname()[1]}",
     )
-    server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     try:
-        request = urllib.request.Request(f"http://127.0.0.1:{server.server_port}/steamgriddb/x")
-        request.add_header("Authorization", "Bearer client-token")
-        with urllib.request.urlopen(request, timeout=10) as response:
-            seen = response.headers.get("Content-Type", "")
+        with serve(config) as server:
+            _, headers, _ = send(f"{server.url}/steamgriddb/x")
+        seen = headers.get("Content-Type", "")
         assert "\r" not in seen and "\n" not in seen
     finally:
-        server.shutdown()
         listener.close()
 
 
@@ -461,14 +447,8 @@ def test_a_hostile_content_type_cannot_split_our_response():
 
 
 def call_with_headers(url: str, token: str | None = "client-token"):
-    request = urllib.request.Request(url)
-    if token:
-        request.add_header("Authorization", f"Bearer {token}")
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return response.status, json.loads(response.read() or b"{}"), dict(response.headers)
-    except urllib.error.HTTPError as error:
-        return error.code, json.loads(error.read() or b"{}"), dict(error.headers)
+    status, headers, body = send(url, token=token)
+    return status, json.loads(body or b"{}"), headers
 
 
 @pytest.fixture
@@ -479,10 +459,8 @@ def cached_proxy(upstream, tmp_path):
         steamgriddb_url=upstream,
         upstream_cache_dir=str(tmp_path / "artcache"),
     )
-    server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_port}", tmp_path / "artcache"
-    server.shutdown()
+    with serve(config) as server:
+        yield server.url, tmp_path / "artcache"
 
 
 def test_a_repeated_question_reaches_upstream_once(cached_proxy):
@@ -496,6 +474,23 @@ def test_a_repeated_question_reaches_upstream_once(cached_proxy):
     assert headers.get("X-Gotg-Cache") == "hit"
     assert second == first, "the cached answer is the answer"
     assert len(Upstream.seen) == 1, "one question upstream, however many clients ask"
+
+
+def test_a_cached_proxy_relays_an_upstream_error_with_its_body(cached_proxy):
+    proxy, _ = cached_proxy
+    status, headers, body = send(f"{proxy}/steamgriddb/grids/game/missing", token="client-token")
+    assert status == 404
+    assert headers["Content-Type"] == "application/json"
+    assert json.loads(body) == {"error": "no such thing"}
+    assert "X-Gotg-Cache" not in headers
+
+
+def test_a_cached_miss_is_marked_and_keeps_the_content_type(cached_proxy):
+    proxy, _ = cached_proxy
+    _, miss, _ = call_with_headers(f"{proxy}/steamgriddb/grids/game/3")
+    status, headers, _ = send(f"{proxy}/steamgriddb/grids/game/3", token="client-token")
+    assert (status, headers["X-Gotg-Cache"], headers["Content-Type"]) == (200, "hit", "application/json")
+    assert miss["ok"] is True
 
 
 def test_a_different_query_is_a_different_answer(cached_proxy):
@@ -521,15 +516,10 @@ def test_the_cache_survives_a_service_restart(upstream, tmp_path):
         steamgriddb_url=upstream,
         upstream_cache_dir=str(tmp_path / "artcache"),
     )
-    server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    call_with_headers(f"http://127.0.0.1:{server.server_port}/steamgriddb/grids/game/7")
-    server.shutdown()
-
-    reborn = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=lambda: reborn.serve_forever(poll_interval=0.05), daemon=True).start()
-    status, _, headers = call_with_headers(f"http://127.0.0.1:{reborn.server_port}/steamgriddb/grids/game/7")
-    reborn.shutdown()
+    with serve(config) as server:
+        call_with_headers(f"{server.url}/steamgriddb/grids/game/7")
+    with serve(config) as reborn:
+        status, _, headers = call_with_headers(f"{reborn.url}/steamgriddb/grids/game/7")
     assert status == 200
     assert headers.get("X-Gotg-Cache") == "hit"
     assert len(Upstream.seen) == 1
@@ -545,13 +535,11 @@ def test_an_unwritable_cache_is_a_working_proxy(upstream, tmp_path):
         steamgriddb_url=upstream,
         upstream_cache_dir=str(blocked / "artcache"),
     )
-    server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     try:
-        status, _, _ = call_with_headers(f"http://127.0.0.1:{server.server_port}/steamgriddb/grids/game/9")
+        with serve(config) as server:
+            status, _, _ = call_with_headers(f"{server.url}/steamgriddb/grids/game/9")
         assert status == 200, "best-effort: a full or broken disk must not take artwork down"
     finally:
-        server.shutdown()
         blocked.chmod(0o700)
 
 
@@ -569,7 +557,8 @@ def test_without_a_cache_dir_nothing_changes(proxy):
 # ceiling here, the proxy is a loaded gun pointed at somebody else's quota.
 
 
-def paced(upstream, tmp_path, **overrides):
+@contextmanager
+def paced(upstream, **overrides):
     config = Config(
         token="client-token",
         steamgriddb_key="sg-key",
@@ -579,47 +568,32 @@ def paced(upstream, tmp_path, **overrides):
         upstream_wait=0.0,
         **overrides,
     )
-    server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    return server, f"http://127.0.0.1:{server.server_port}"
+    with serve(config) as server:
+        yield server.url
 
 
-def test_past_the_pace_a_caller_is_told_to_come_back(upstream, tmp_path):
-    server, proxy = paced(upstream, tmp_path)
-    try:
+def test_past_the_pace_a_caller_is_told_to_come_back(upstream):
+    with paced(upstream) as proxy:
         assert call(f"{proxy}/steamgriddb/search/autocomplete/zelda")[0] == 200
         status, body = call(f"{proxy}/steamgriddb/search/autocomplete/mario")
-    finally:
-        server.shutdown()
     assert status == 429
     assert len(Upstream.seen) == 1, "the refused question never left the cluster"
 
 
-def test_a_throttled_answer_says_how_long_to_wait(upstream, tmp_path):
-    server, proxy = paced(upstream, tmp_path)
-    try:
+def test_a_throttled_answer_says_how_long_to_wait(upstream):
+    with paced(upstream) as proxy:
         call(f"{proxy}/steamgriddb/search/autocomplete/zelda")
-        request = urllib.request.Request(f"{proxy}/steamgriddb/search/autocomplete/mario")
-        request.add_header("Authorization", "Bearer client-token")
-        try:
-            urllib.request.urlopen(request, timeout=10)
-            raise AssertionError("expected a 429")
-        except urllib.error.HTTPError as error:
-            assert int(error.headers["Retry-After"]) >= 1
-            error.close()
-    finally:
-        server.shutdown()
+        status, headers, _ = send(f"{proxy}/steamgriddb/search/autocomplete/mario")
+        assert status == 429
+        assert int(headers["Retry-After"]) >= 1
 
 
 def test_a_cached_answer_is_never_throttled(upstream, tmp_path):
     # It costs the upstream nothing, and throttling it would make the cache
     # useless exactly when the fleet needs it most.
-    server, proxy = paced(upstream, tmp_path, upstream_cache_dir=str(tmp_path / "artcache"))
-    try:
+    with paced(upstream, upstream_cache_dir=str(tmp_path / "artcache")) as proxy:
         assert call(f"{proxy}/steamgriddb/grids/game/42")[0] == 200
         for _ in range(5):
             status, _ = call(f"{proxy}/steamgriddb/grids/game/42")
             assert status == 200
-    finally:
-        server.shutdown()
     assert len(Upstream.seen) == 1

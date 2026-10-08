@@ -9,14 +9,12 @@ stub, because the cache and its failure modes are the feature.
 import json
 import socket
 import time
-import urllib.error
-import urllib.request
 
 import pytest
-from test_proxy import free_port
+from harness import send, serve
 
 from gotg.saves import SavesStore
-from gotg.service.app import Config, make_server
+from gotg.service.app import Config
 from gotg.tokens import TokenStore
 
 LEGACY = "legacy-token"
@@ -31,25 +29,16 @@ def token_store(tmp_path):
 
 @pytest.fixture
 def service(tmp_path, token_store):
-    import threading
 
     config = Config(token=LEGACY, admin_token=ADMIN, index_token=INDEX)
     store = SavesStore(root=tmp_path / "saves", keep=3, max_bytes=100_000)
-    server = make_server("127.0.0.1", free_port(), config, store, token_store=token_store)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_port}"
-    server.shutdown()
+    with serve(config, store, token_store=token_store) as server:
+        yield server.url
 
 
 def call(url, method="GET", token=None, body=None):
-    request = urllib.request.Request(url, method=method, data=body)
-    if token:
-        request.add_header("Authorization", f"Bearer {token}")
-    try:
-        with urllib.request.urlopen(request) as response:
-            return response.status, response.read()
-    except urllib.error.HTTPError as error:
-        return error.code, error.read()
+    status, _, answer = send(url, method=method, token=token, body=body)
+    return status, answer
 
 
 def claim(url, code):
@@ -165,17 +154,12 @@ def test_claim_never_reads_the_body_it_is_promised(service, token_store):
 
 
 def test_a_deployment_without_a_token_store_says_so(tmp_path):
-    import threading
 
     config = Config(token=LEGACY)
-    server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    url = f"http://127.0.0.1:{server.server_port}"
-    try:
+    with serve(config) as server:
+        url = server.url
         status, _ = claim(url, "gotgi_whatever")
         assert status == 503
-    finally:
-        server.shutdown()
 
 
 # --- whoami ------------------------------------------------------------------
@@ -261,17 +245,12 @@ def test_admin_routes_refuse_the_client_token(service):
 
 
 def test_admin_is_503_when_no_admin_token_is_configured(tmp_path, token_store):
-    import threading
 
     config = Config(token=LEGACY)
-    server = make_server("127.0.0.1", free_port(), config, token_store=token_store)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    url = f"http://127.0.0.1:{server.server_port}"
-    try:
+    with serve(config, token_store=token_store) as server:
+        url = server.url
         status, _ = call(f"{url}/admin/tokens", token=LEGACY)
         assert status == 503
-    finally:
-        server.shutdown()
 
 
 def test_the_admin_token_is_no_good_outside_admin(service):
@@ -350,27 +329,11 @@ def test_validate_refuses_an_admin_token_that_matches(token_store):
 
 @pytest.fixture
 def two_pods(tmp_path, token_store):
-    import threading
-
     api_config = Config(token=LEGACY, admin_token=ADMIN)
-    api = make_server("127.0.0.1", free_port(), api_config, token_store=token_store)
-    threading.Thread(target=lambda: api.serve_forever(poll_interval=0.05), daemon=True).start()
-    api_url = f"http://127.0.0.1:{api.server_port}"
-
-    library_config = Config(token=LEGACY, auth_url=api_url)
-    library = make_server(
-        "127.0.0.1",
-        free_port(),
-        library_config,
-        auth_cache_ttl=0.4,
-        auth_neg_ttl=0.2,
-    )
-    threading.Thread(target=lambda: library.serve_forever(poll_interval=0.05), daemon=True).start()
-    library_url = f"http://127.0.0.1:{library.server_port}"
-
-    yield api, api_url, library_url
-    library.shutdown()
-    api.shutdown()
+    with serve(api_config, token_store=token_store) as api:
+        library_config = Config(token=LEGACY, auth_url=api.url)
+        with serve(library_config, auth_cache_ttl=0.4, auth_neg_ttl=0.2) as library:
+            yield api.server, api.url, library.url
 
 
 def test_a_personal_token_authenticates_on_the_library_pod(two_pods, token_store):
@@ -434,26 +397,20 @@ def test_a_non_ascii_bearer_earns_401_through_introspection_not_a_crash(two_pods
 
 
 def test_the_auth_cache_clears_at_its_bound_instead_of_growing(tmp_path, token_store):
-    import threading
-
-    api = make_server("127.0.0.1", free_port(), Config(token=LEGACY), token_store=token_store)
-    threading.Thread(target=lambda: api.serve_forever(poll_interval=0.05), daemon=True).start()
-    api_url = f"http://127.0.0.1:{api.server_port}"
-    library = make_server("127.0.0.1", free_port(), Config(token=LEGACY, auth_url=api_url))
-    threading.Thread(target=lambda: library.serve_forever(poll_interval=0.05), daemon=True).start()
-    try:
+    with (
+        serve(Config(token=LEGACY), token_store=token_store) as api,
+        serve(Config(token=LEGACY, auth_url=api.url)) as library,
+    ):
+        api_url = api.url
         # Keys are attacker-supplied hashes; the bound is the whole defence
         # against a memory-growth denial on the internet-facing pod.
-        handler = library.RequestHandlerClass
+        handler = library.server.RequestHandlerClass
         for i in range(1025):
             handler.auth_cache[f"stale-{i}"] = (None, 0.0)
 
         code = token_store.mint_invite("nina")
         _, body = claim(api_url, code)
         token = json.loads(body)["token"]
-        status, _ = call(f"http://127.0.0.1:{library.server_port}/auth/whoami", token=token)
+        status, _ = call(f"{library.url}/auth/whoami", token=token)
         assert status == 200
         assert len(handler.auth_cache) == 1
-    finally:
-        library.shutdown()
-        api.shutdown()

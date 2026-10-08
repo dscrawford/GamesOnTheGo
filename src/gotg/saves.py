@@ -36,9 +36,10 @@ import hashlib
 import json
 import re
 import threading
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from .contract import utc_now
 
 # The same shapes the client validates. An attr becomes a directory name and a
 # bundle name becomes a file name, so nothing that does not match is touched.
@@ -53,10 +54,6 @@ GEN_RE = re.compile(r"^\d{6}-[0-9a-f]{12}\.tar\.zst$")
 # to; bundles are kilobytes to a few megabytes.
 DEFAULT_KEEP = 10
 DEFAULT_MAX_BYTES = 64 * 1024 * 1024
-
-
-def _utc_now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 @dataclass
@@ -153,7 +150,7 @@ class SavesStore:
             "hash": hashlib.sha256(bundle.read_bytes()).hexdigest(),
             "size": stat.st_size,
             "device": "",
-            "written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(stat.st_mtime)),
+            "written_at": utc_now(stat.st_mtime),
         }
 
     # --- writing -------------------------------------------------------------
@@ -198,7 +195,7 @@ class SavesStore:
                 "bundle": f"gen/{name}",
                 "size": len(body),
                 "device": device,
-                "written_at": _utc_now(),
+                "written_at": utc_now(),
             }
             history_dir = self._attr_dir(user, attr) / "history"
             history_dir.mkdir(exist_ok=True)

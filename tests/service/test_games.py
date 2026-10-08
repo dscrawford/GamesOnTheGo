@@ -13,17 +13,16 @@ import http.client
 import json
 import os
 import socket
-import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
 import pytest
-from test_proxy import free_port
+from harness import send, serve
 
 from gotg.catalog import CatalogStore
-from gotg.service.app import Config, make_server
+from gotg.service.app import Config
 
 CLIENT = "client-token"
 INDEX = "index-token"
@@ -73,23 +72,13 @@ def catalog(tmp_path, library):
 @pytest.fixture
 def service(catalog, files_dir):
     config = Config(token=CLIENT, index_token=INDEX)
-    server = make_server("127.0.0.1", free_port(), config, None, catalog, files_dir=files_dir, stream_slots=2)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_port}", server
-    server.shutdown()
+    with serve(config, None, catalog, files_dir=files_dir, stream_slots=2) as server:
+        yield server.url, server.server
 
 
 def fetch(base, path, *, method="GET", token: str | None = CLIENT, headers=None):
-    request = urllib.request.Request(f"{base}{path}", method=method)
-    if token:
-        request.add_header("Authorization", f"Bearer {token}")
-    for name, value in (headers or {}).items():
-        request.add_header(name, value)
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return response.status, response.read(), dict(response.headers)
-    except urllib.error.HTTPError as error:
-        return error.code, error.read(), dict(error.headers or {})
+    status, response_headers, body = send(f"{base}{path}", method=method, token=token, headers=headers)
+    return status, body, response_headers
 
 
 def add_member(catalog, library, game_id, name, data, sha=None):
@@ -284,15 +273,11 @@ def test_files_never_follows_a_symlink(service, files_dir, tmp_path):
 
 def test_a_service_without_a_files_dir_says_so(catalog):
     config = Config(token=CLIENT)
-    server = make_server("127.0.0.1", free_port(), config, None, catalog)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    base = f"http://127.0.0.1:{server.server_port}"
-    try:
+    with serve(config, None, catalog) as server:
+        base = server.url
         status, body, _ = fetch(base, "/files/switch/prod.keys")
         assert status == 503
         assert json.loads(body)["error"] == "this service holds no files directory"
-    finally:
-        server.shutdown()
 
 
 def test_a_large_file_streams_intact_with_a_mid_file_resume(service, library, catalog):

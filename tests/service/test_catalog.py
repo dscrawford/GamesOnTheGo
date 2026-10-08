@@ -16,11 +16,11 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-from test_proxy import free_port
+from harness import send, serve
 
 import gotg.catalog as catalog_module
 from gotg.catalog import CatalogStore, Conflict, SweepRefused
-from gotg.service.app import Config, make_server
+from gotg.service.app import Config
 
 CLIENT = "client-token"
 INDEX = "index-token"
@@ -41,22 +41,14 @@ def catalog(tmp_path, library):
 @pytest.fixture
 def service(catalog):
     config = Config(token=CLIENT, index_token=INDEX)
-    server = make_server("127.0.0.1", free_port(), config, None, catalog)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_port}"
-    server.shutdown()
+    with serve(config, None, catalog) as server:
+        yield server.url
 
 
 def call(url, *, method="GET", token: str | None = CLIENT, body=None):
     data = json.dumps(body).encode() if isinstance(body, dict) else body
-    request = urllib.request.Request(url, data=data, method=method)
-    if token:
-        request.add_header("Authorization", f"Bearer {token}")
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return response.status, json.loads(response.read() or b"{}")
-    except urllib.error.HTTPError as error:
-        return error.code, json.loads(error.read() or b"{}")
+    status, _, answer = send(url, method=method, token=token, body=data)
+    return status, json.loads(answer or b"{}")
 
 
 def entry(library, name="usa.zelda.z64", **overrides):
@@ -401,13 +393,9 @@ def test_a_malformed_basic_header_is_a_401_not_an_error(service):
 
 def test_a_service_without_a_catalog_says_so():
     config = Config(token=CLIENT, index_token=INDEX)
-    server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    try:
-        status, _ = call(f"http://127.0.0.1:{server.server_port}/catalog")
+    with serve(config) as server:
+        status, _ = call(f"{server.url}/catalog")
         assert status == 503
-    finally:
-        server.shutdown()
 
 
 def test_matching_tokens_refuse_to_start():
@@ -419,14 +407,10 @@ def test_the_catalog_names_the_byte_host_when_one_is_configured(catalog):
     # files_url is how a deployment keeps /games off a proxied control plane;
     # clients read it from the catalog rather than being configured.
     config = Config(token=CLIENT, index_token=INDEX, files_url="https://files.example")
-    server = make_server("127.0.0.1", free_port(), config, None, catalog)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    try:
-        status, view = call(f"http://127.0.0.1:{server.server_port}/catalog")
+    with serve(config, None, catalog) as server:
+        status, view = call(f"{server.url}/catalog")
         assert status == 200
         assert view["files_url"] == "https://files.example"
-    finally:
-        server.shutdown()
 
 
 def test_no_files_url_configured_means_none_in_the_catalog(service):
@@ -438,12 +422,6 @@ def test_no_files_url_configured_means_none_in_the_catalog(service):
 def test_a_files_url_that_is_not_a_url_refuses_to_start():
     with pytest.raises(ValueError, match="GOTG_FILES_URL"):
         Config(token=CLIENT, files_url="files.example").validate()
-
-
-def _serve(config, catalog):
-    server = make_server("127.0.0.1", free_port(), config, None, catalog)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    return server
 
 
 @pytest.mark.parametrize(
@@ -466,41 +444,31 @@ def test_a_port_file_rides_the_files_url_and_a_bad_one_withholds_it(catalog, tmp
     if content is not None:
         port_file.write_text(content)
     config = Config(token=CLIENT, files_url="https://files.example", files_port_file=str(port_file))
-    server = _serve(config, catalog)
-    try:
-        status, view = call(f"http://127.0.0.1:{server.server_port}/catalog")
+    with serve(config, None, catalog) as server:
+        status, view = call(f"{server.url}/catalog")
         assert status == 200
         assert view.get("files_url") == expect
-    finally:
-        server.shutdown()
 
 
 def test_the_port_is_read_per_request_so_a_reconnect_is_picked_up(catalog, tmp_path):
     port_file = tmp_path / "forwarded_port"
     port_file.write_text("41234")
     config = Config(token=CLIENT, files_url="https://files.example", files_port_file=str(port_file))
-    server = _serve(config, catalog)
-    try:
-        base = f"http://127.0.0.1:{server.server_port}"
+    with serve(config, None, catalog) as server:
+        base = server.url
         assert call(f"{base}/catalog")[1]["files_url"] == "https://files.example:41234"
         port_file.write_text("50001")
         assert call(f"{base}/catalog")[1]["files_url"] == "https://files.example:50001"
-    finally:
-        server.shutdown()
 
 
 def test_an_unset_index_token_makes_the_catalog_read_only(catalog, library):
     config = Config(token=CLIENT)
-    server = make_server("127.0.0.1", free_port(), config, None, catalog)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    base = f"http://127.0.0.1:{server.server_port}"
-    try:
+    with serve(config, None, catalog) as server:
+        base = server.url
         status, _ = call(f"{base}/catalog/n64/usa.zelda", method="PUT", token=CLIENT, body=entry(library))
         assert status == 503, "writes must never fall back to the client token"
         status, _ = call(f"{base}/catalog")
         assert status == 200
-    finally:
-        server.shutdown()
 
 
 # --- atomicity and consistency ------------------------------------------------
@@ -990,10 +958,8 @@ ADMIN = "admin-token"
 @pytest.fixture
 def admin_service(catalog):
     config = Config(token=CLIENT, index_token=INDEX, admin_token=ADMIN)
-    server = make_server("127.0.0.1", free_port(), config, None, catalog)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_port}"
-    server.shutdown()
+    with serve(config, None, catalog) as server:
+        yield server.url
 
 
 def test_the_scan_is_the_admin_token_and_nobody_else(admin_service, catalog, library, monkeypatch):
@@ -1041,17 +1007,13 @@ def test_a_scan_is_a_get(admin_service):
 
 def test_the_scan_needs_no_token_store_but_does_need_a_catalog():
     config = Config(token=CLIENT, admin_token=ADMIN)
-    server = make_server("127.0.0.1", free_port(), config, None, None)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    url = f"http://127.0.0.1:{server.server_port}"
-    try:
+    with serve(config, None, None) as server:
+        url = server.url
         status, _ = call(f"{url}/admin/scan", token=ADMIN)
         assert status == 503
         # …and the token routes still say what they are missing.
         status, _ = call(f"{url}/admin/tokens", token=ADMIN)
         assert status == 503
-    finally:
-        server.shutdown()
 
 
 # --- what the review pass found -----------------------------------------------
@@ -1203,10 +1165,8 @@ def admin_tokens_service(catalog, tmp_path):
 
     config = Config(token=CLIENT, index_token=INDEX, admin_token=ADMIN)
     store = TokenStore(tmp_path / "state" / "tokens.db")
-    server = make_server("127.0.0.1", free_port(), config, None, catalog, token_store=store)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_port}"
-    server.shutdown()
+    with serve(config, None, catalog, token_store=store) as server:
+        yield server.url
 
 
 @pytest.mark.parametrize(
@@ -1251,17 +1211,13 @@ def test_the_admin_gate_checks_the_bearer_and_not_the_principal_name(catalog, mo
     import gotg.service.app as app_module
 
     config = Config(token=CLIENT, admin_token=ADMIN)
-    server = make_server("127.0.0.1", free_port(), config, None, catalog)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    url = f"http://127.0.0.1:{server.server_port}"
-    # A peer that vouches for any bearer as "admin".
-    monkeypatch.setattr(app_module.Handler, "_principal", lambda self: "admin")
-    try:
+    with serve(config, None, catalog) as server:
+        url = server.url
+        # A peer that vouches for any bearer as "admin".
+        monkeypatch.setattr(app_module.Handler, "_principal", lambda self: "admin")
         status, _ = call(f"{url}/admin/scan", token="not-the-admin-token")
         assert status == 403, "the name says admin; the bearer does not"
         assert call(f"{url}/admin/scan", token=ADMIN)[0] == 200
-    finally:
-        server.shutdown()
 
 
 def test_a_scan_that_cannot_read_the_catalog_is_a_500_that_names_no_path(admin_service, catalog, monkeypatch):
@@ -1366,10 +1322,8 @@ LIBRARY = "library-token"
 @pytest.fixture
 def library_service(catalog):
     config = Config(token=CLIENT, index_token=INDEX, library_token=LIBRARY)
-    server = make_server("127.0.0.1", free_port(), config, None, catalog)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_port}"
-    server.shutdown()
+    with serve(config, None, catalog) as server:
+        yield server.url
 
 
 def _seed(catalog, library):
@@ -1428,27 +1382,19 @@ def test_a_preferred_byte_host_is_listed_first_and_files_url_stays_universal(cat
         files_url="https://files.example",
         files_preferred_url="http://100.64.0.1:30780",
     )
-    server = make_server("127.0.0.1", free_port(), config, None, catalog)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    try:
-        status, view = call(f"http://127.0.0.1:{server.server_port}/catalog")
+    with serve(config, None, catalog) as server:
+        status, view = call(f"{server.url}/catalog")
         assert status == 200
         assert view["files_url"] == "https://files.example"
         assert view["files_urls"] == ["http://100.64.0.1:30780", "https://files.example"]
-    finally:
-        server.shutdown()
 
 
 def test_a_preferred_host_alone_is_listed_without_a_files_url(catalog):
     config = Config(token=CLIENT, index_token=INDEX, files_preferred_url="http://100.64.0.1:30780")
-    server = make_server("127.0.0.1", free_port(), config, None, catalog)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    try:
-        status, view = call(f"http://127.0.0.1:{server.server_port}/catalog")
+    with serve(config, None, catalog) as server:
+        status, view = call(f"{server.url}/catalog")
         assert "files_url" not in view
         assert view["files_urls"] == ["http://100.64.0.1:30780"]
-    finally:
-        server.shutdown()
 
 
 def test_a_preferred_host_that_is_not_a_url_refuses_to_start():

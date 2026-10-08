@@ -48,10 +48,12 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from .._http import NO_REDIRECT_OPENER
 from ..catalog import CatalogStore, Conflict, SweepRefused
 from ..contract import ENTRY_ID_RE, PLATFORM_RE
 from ..saves import SavesStore
@@ -127,23 +129,6 @@ REFRESH_MARGIN = 24 * 60 * 60
 STEAMGRIDDB_URL = "https://www.steamgriddb.com"
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """Relay a 3xx instead of following it.
-
-    urllib's default redirect handler copies every header except Content-* onto
-    the new request — Authorization included, even when the Location crosses
-    hosts. Behind a credential-injecting proxy that is the whole failure: one
-    open redirect on the upstream and the key walks off to any host on the
-    internet. The client can follow the redirect itself, without our header.
-    """
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ARG002
-        return None
-
-
-_OPENER = urllib.request.build_opener(_NoRedirect())
-
-
 def safe_content_type(value: str) -> str:
     """An upstream's Content-Type, made safe to write into our own headers.
 
@@ -208,11 +193,14 @@ class RateLimiter:
     request costs the proxy one idle thread, never the bucket.
     """
 
-    def __init__(self, rate: float, burst: float):
+    def __init__(self, rate: float, burst: float, now: Callable[[], float] = time.monotonic):
+        # `now` is a test seam: the refill arithmetic is asserted against a
+        # clock the test advances, instead of a sleep and a tolerance.
         self.rate = max(rate, 0.0)
         self.burst = max(burst, 1.0)
+        self._now = now
         self.tokens = self.burst
-        self.updated = time.monotonic()
+        self.updated = now()
         self.lock = threading.Lock()
 
     def reserve(self, wait: float) -> tuple[bool, float]:
@@ -221,7 +209,7 @@ class RateLimiter:
         rather than hold a thread open for a minute."""
         if not self.rate:
             return True, 0.0
-        now = time.monotonic()
+        now = self._now()
         with self.lock:
             self.tokens = min(self.burst, self.tokens + (now - self.updated) * self.rate)
             self.updated = now
@@ -366,7 +354,7 @@ class TokenCache:
                 data=body,
                 headers={"User-Agent": USER_AGENT},
             )
-            with _OPENER.open(request, timeout=TIMEOUT) as response:  # noqa: S310
+            with NO_REDIRECT_OPENER.open(request, timeout=TIMEOUT) as response:  # noqa: S310
                 payload = json.loads(response.read())
 
             self.value = payload["access_token"]
@@ -439,13 +427,25 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
+    def _json(self, code: int, obj: object, extra: dict[str, str] | None = None) -> None:
+        """Reply with `obj` as JSON.
+
+        Replaces twenty-four hand-written `self._send(code, json.dumps(obj)
+        .encode(), "application/json")` calls, each of which had to remember
+        the encode and the content type; one place now decides how this
+        service spells a JSON answer. `extra` is for the few that add a header
+        (Retry-After, X-Gotg-Art). The few literal `b'{"ok":true}'` replies are
+        left as they are: their compact spelling is what clients and probes see.
+        """
+        self._send(code, json.dumps(obj).encode(), "application/json", extra)
+
     def _problem(self, code: int, message: str, *, close: bool = False) -> None:
         # close: for rejections raised before the request body is read. On a
         # kept-alive HTTP/1.1 connection the unread body would otherwise frame
         # the next request, so the client sees a reset instead of this reply.
         if close:
             self.close_connection = True
-        self._send(code, json.dumps({"error": message}).encode(), "application/json")
+        self._json(code, {"error": message})
 
     # --- who is asking ------------------------------------------------------
 
@@ -547,25 +547,45 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- forwarding ---------------------------------------------------------
 
-    def _forward(self, url: str, headers: dict[str, str], body: bytes | None) -> None:
+    def _fetch(self, url: str, headers: dict[str, str], body: bytes | None) -> tuple[int, bytes, str] | None:
+        """Ask the upstream and return `(status, payload, content_type)`, or None once a 502 has been sent.
+
+        `_forward` and the cached SteamGridDB branch each carried their own
+        copy of this request, error relay and 502; they differed only in what
+        they did with the answer, which is the part that stays with them. Every
+        deliberate property lives here once: our User-Agent, the caller's
+        headers (the credential), the no-redirect opener, the one timeout, and
+        an upstream Content-Type made safe before it is echoed.
+
+        An upstream error status is an answer, not a failure: a 404 from
+        SteamGridDB means the game is not there, which the client needs to
+        hear as a 404 -- so it comes back here with its own body, and only an
+        upstream that could not be reached is turned into our 502. A 3xx is
+        also an error status here (see `gotg._http`).
+        """
         request = urllib.request.Request(url, data=body, method=self.command)
         request.add_header("User-Agent", USER_AGENT)
         for name, value in headers.items():
             request.add_header(name, value)
 
         try:
-            with _OPENER.open(request, timeout=TIMEOUT) as response:  # noqa: S310
-                payload = response.read()
-                kind = safe_content_type(response.headers.get("Content-Type", ""))
-                self._send(response.status, payload, kind)
+            with NO_REDIRECT_OPENER.open(request, timeout=TIMEOUT) as response:  # noqa: S310
+                return (
+                    response.status,
+                    response.read(),
+                    safe_content_type(response.headers.get("Content-Type", "")),
+                )
         except urllib.error.HTTPError as error:
-            # Relayed rather than swallowed: a 404 from SteamGridDB means the
-            # game is not there, which the client needs to hear as a 404.
-            payload = error.read()
             kind = safe_content_type(error.headers.get("Content-Type", "")) if error.headers else "application/json"
-            self._send(error.code, payload, kind)
+            return error.code, error.read(), kind
         except (urllib.error.URLError, OSError, ValueError) as error:
             self._problem(502, f"upstream unreachable: {error}")
+            return None
+
+    def _forward(self, url: str, headers: dict[str, str], body: bytes | None) -> None:
+        answer = self._fetch(url, headers, body)
+        if answer is not None:
+            self._send(*answer)
 
     def _paced(self, upstream: str) -> bool:
         """Wait for this upstream's turn, or answer 429 and say so.
@@ -579,10 +599,9 @@ class Handler(BaseHTTPRequestHandler):
             return True
         allowed, delay = limiter.reserve(self.config.upstream_wait)
         if not allowed:
-            self._send(
+            self._json(
                 429,
-                json.dumps({"error": f"{upstream} is being asked too fast; retry shortly"}).encode(),
-                "application/json",
+                {"error": f"{upstream} is being asked too fast; retry shortly"},
                 {"Retry-After": str(max(1, int(delay + 0.999)))},
             )
             return False
@@ -617,21 +636,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if not self._paced("steamgriddb"):
             return
-        request = urllib.request.Request(url)
-        request.add_header("User-Agent", USER_AGENT)
-        for name, value in headers.items():
-            request.add_header(name, value)
-        try:
-            with _OPENER.open(request, timeout=TIMEOUT) as response:  # noqa: S310
-                payload = response.read()
-                kind = safe_content_type(response.headers.get("Content-Type", ""))
-        except urllib.error.HTTPError as error:
-            payload = error.read()
-            kind = safe_content_type(error.headers.get("Content-Type", "")) if error.headers else "application/json"
-            self._send(error.code, payload, kind)
+        answer = self._fetch(url, headers, None)
+        if answer is None:
             return
-        except (urllib.error.URLError, OSError, ValueError) as error:
-            self._problem(502, f"upstream unreachable: {error}")
+        status, payload, kind = answer
+        if status >= 300:
+            # urllib raised for these: an error (or an unfollowed redirect)
+            # is relayed and never remembered.
+            self._send(status, payload, kind)
             return
         _cache_put(self.config.upstream_cache_dir, key, payload, kind)
         self._send(200, payload, kind, {"X-Gotg-Cache": "miss"})
@@ -680,7 +692,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.command not in ("GET", "HEAD"):
                 self._problem(405, "the art index is a GET")
                 return
-            self._send(200, json.dumps(self.art.index()).encode(), "application/json")
+            self._json(200, self.art.index())
             return
         if len(segments) != 2:
             self._problem(404, "a picture lives at /art/<platform>/<id>")
@@ -716,10 +728,9 @@ class Handler(BaseHTTPRequestHandler):
             # client that hears it stops asking. "absent" only means nobody
             # has warmed this one yet.
             miss = self.art.is_miss(platform, game_id)
-            self._send(
+            self._json(
                 404,
-                json.dumps({"error": f"no art for {platform}/{game_id}", "miss": miss}).encode(),
-                "application/json",
+                {"error": f"no art for {platform}/{game_id}", "miss": miss},
                 {"X-Gotg-Art": "miss" if miss else "absent"},
             )
             return
@@ -747,7 +758,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if miss:
             self.art.put_miss(platform, game_id)
-            self._send(200, json.dumps({"stored": f"{platform}/{game_id}", "miss": True}).encode(), "application/json")
+            self._json(200, {"stored": f"{platform}/{game_id}", "miss": True})
             return
         if not body:
             self._problem(400, "a picture, or ?miss=1 to record that there is none")
@@ -758,18 +769,14 @@ class Handler(BaseHTTPRequestHandler):
             self._problem(415, "that is not a png, jpeg or webp")
             return
         path = self.art.put(platform, game_id, body)
-        self._send(
-            200,
-            json.dumps({"stored": f"{platform}/{game_id}", "ext": path.suffix, "bytes": len(body)}).encode(),
-            "application/json",
-        )
+        self._json(200, {"stored": f"{platform}/{game_id}", "ext": path.suffix, "bytes": len(body)})
 
     def _art_delete(self, platform: str, game_id: str) -> None:
         if not self._is_index():
             self._problem(403, "forgetting art needs the index token")
             return
         dropped = self.art.forget(platform, game_id)
-        self._send(200, json.dumps({"forgot": f"{platform}/{game_id}", "had": dropped}).encode(), "application/json")
+        self._json(200, {"forgot": f"{platform}/{game_id}", "had": dropped})
 
     # --- the saves store ----------------------------------------------------
 
@@ -823,41 +830,27 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if want_history:
                 history = self.store.history(user, attr)
-                self._send(200, json.dumps({"generations": history}).encode(), "application/json")
+                self._json(200, {"generations": history})
             elif want_gen:
                 found = self.store.generation_path(user, attr, int(segments[2]))
                 if found is None:
                     self._problem(404, f"generation {segments[2]} of {attr} is not kept")
                     return
                 path, record = found
-                payload = path.read_bytes()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/zstd")
-                self.send_header("Content-Length", str(len(payload)))
-                self.send_header("X-Gotg-Generation", str(record["generation"]))
-                self.send_header("X-Gotg-Hash", record["hash"])
-                self.end_headers()
-                self.wfile.write(payload)
+                self._send_bundle(path, record)
             elif self.command == "GET" and want_meta:
                 meta = self.store.meta(user, attr)
                 if meta is None:
                     self._problem(404, f"nothing has been pushed for {attr}")
                     return
-                self._send(200, json.dumps(meta).encode(), "application/json")
+                self._json(200, meta)
             elif self.command == "GET":
                 meta = self.store.meta(user, attr)
                 path = self.store.bundle_path(user, attr)
                 if meta is None or path is None:
                     self._problem(404, f"nothing has been pushed for {attr}")
                     return
-                payload = path.read_bytes()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/zstd")
-                self.send_header("Content-Length", str(len(payload)))
-                self.send_header("X-Gotg-Generation", str(meta["generation"]))
-                self.send_header("X-Gotg-Hash", meta["hash"])
-                self.end_headers()
-                self.wfile.write(payload)
+                self._send_bundle(path, meta)
             elif self.command == "PUT":
                 if not body:
                     self._problem(400, "a save must arrive with its bundle as the body")
@@ -872,13 +865,26 @@ class Handler(BaseHTTPRequestHandler):
                     device="".join(c for c in self.headers.get("X-Gotg-Device", "") if c.isprintable())[:32],
                     force="force=1" in parts.query.split("&"),
                 )
-                self._send(published.status, json.dumps(published.meta).encode(), "application/json")
+                self._json(published.status, published.meta)
             else:
                 self._problem(405, f"{self.command} is not something the saves store answers")
         except ValueError as error:
             self._problem(400, str(error))
         except OSError as error:
             self._problem(500, str(error))
+
+    def _send_bundle(self, path: Path, record: dict) -> None:
+        """A saved bundle's bytes, labelled with the generation and hash they are.
+
+        The head (`GET /saves/<attr>`) and a kept generation (`/gen/<n>`) each
+        wrote these five headers by hand; the two replies are now one shape.
+        """
+        self._send(
+            200,
+            path.read_bytes(),
+            "application/zstd",
+            {"X-Gotg-Generation": str(record["generation"]), "X-Gotg-Hash": record["hash"]},
+        )
 
     def _files_url(self) -> str:
         """The byte host as it stands right now, or "" for none.
@@ -958,7 +964,7 @@ class Handler(BaseHTTPRequestHandler):
                 hosts = [h for h in (self.config.files_preferred_url, files_url) if h]
                 if hosts:
                     view["files_urls"] = list(dict.fromkeys(hosts))
-                self._send(200, json.dumps(view).encode(), "application/json")
+                self._json(200, view)
             elif self.command == "PUT" and len(segments) == 2:
                 if not needs_index():
                     return
@@ -971,7 +977,7 @@ class Handler(BaseHTTPRequestHandler):
                     json.loads(body),
                     force="force=1" in query,
                 )
-                self._send(200, json.dumps(entry).encode(), "application/json")
+                self._json(200, entry)
             elif self.command == "POST" and segments == ["seen"]:
                 if not needs_index():
                     return
@@ -993,7 +999,7 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     keys.append((platform, game_id))
                 seen = self.catalog.touch(keys)
-                self._send(200, json.dumps({"seen": seen, "asked": len(keys)}).encode(), "application/json")
+                self._json(200, {"seen": seen, "asked": len(keys)})
             elif self.command == "POST" and segments == ["sweep"]:
                 if not needs_index():
                     return
@@ -1005,7 +1011,7 @@ class Handler(BaseHTTPRequestHandler):
                     str(payload.get("since", "")),
                     confirm="confirm=1" in query,
                 )
-                self._send(200, json.dumps(report).encode(), "application/json")
+                self._json(200, report)
             elif self.command == "DELETE" and len(segments) == 2:
                 if not needs_index():
                     return
@@ -1016,11 +1022,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._problem(404, f"nothing lives at /catalog/{parts.path.strip('/')}")
         except Conflict as conflict:
-            self._send(
-                409,
-                json.dumps({"error": str(conflict), "stored": conflict.stored}).encode(),
-                "application/json",
-            )
+            self._json(409, {"error": str(conflict), "stored": conflict.stored})
         except SweepRefused as refused:
             self._problem(409, str(refused))
         # JSONDecodeError is a ValueError; RecursionError is what a deeply
@@ -1364,7 +1366,7 @@ class Handler(BaseHTTPRequestHandler):
             self._problem(410, "this claim code was already used or has expired")
             return
         name, token = outcome
-        self._send(200, json.dumps({"name": name, "token": token}).encode(), "application/json")
+        self._json(200, {"name": name, "token": token})
 
     def _auth(self, rest: str, principal: str) -> None:
         if rest.split("?")[0] != "whoami":
@@ -1378,7 +1380,7 @@ class Handler(BaseHTTPRequestHandler):
             user = self.token_store.user_for(principal)
             if user:
                 reply["user"] = user
-        self._send(200, json.dumps(reply).encode(), "application/json")
+        self._json(200, reply)
 
     def _needs_admin(self, principal: str) -> bool:
         if not self.config.admin_token:
@@ -1433,7 +1435,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         finally:
             self.scans.release()
-        self._send(200, json.dumps(report).encode(), "application/json")
+        self._json(200, report)
 
     def _admin(self, rest: str, body: bytes | None, principal: str) -> None:
         if self._needs_admin(principal):
@@ -1456,11 +1458,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if segments == ["info"]:
-            self._send(200, json.dumps({"public_url": self.config.public_url}).encode(), "application/json")
+            self._json(200, {"public_url": self.config.public_url})
             return
 
         if segments == ["invites"] and self.command in ("GET", "HEAD"):
-            self._send(200, json.dumps({"invites": self.token_store.invites()}).encode(), "application/json")
+            self._json(200, {"invites": self.token_store.invites()})
             return
 
         if segments == ["invites"]:
@@ -1485,14 +1487,14 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, TypeError, OverflowError) as error:
                 self._problem(400, str(error))
                 return
-            self._send(200, json.dumps({"name": name, "code": code}).encode(), "application/json")
+            self._json(200, {"name": name, "code": code})
             return
 
         if segments == ["tokens"]:
             if self.command not in ("GET", "HEAD"):
                 self._problem(405, "the token list is a GET")
                 return
-            self._send(200, json.dumps({"tokens": self.token_store.tokens()}).encode(), "application/json")
+            self._json(200, {"tokens": self.token_store.tokens()})
             return
 
         if len(segments) == 2 and segments[0] == "tokens":
@@ -1500,7 +1502,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._problem(405, "revoking is a DELETE")
                 return
             if self.token_store.revoke(segments[1]):
-                self._send(200, json.dumps({"revoked": segments[1]}).encode(), "application/json")
+                self._json(200, {"revoked": segments[1]})
             else:
                 self._problem(404, f"nothing live to revoke for {segments[1]!r}")
             return

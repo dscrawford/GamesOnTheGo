@@ -26,10 +26,10 @@ import re
 import sqlite3
 import stat
 import threading
-import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from ._db import connect
 from .contract import ENTRY_ID_RE as ID_RE
 from .contract import (
     HANDLERS,
@@ -38,6 +38,7 @@ from .contract import (
     is_extra,
     valid_filename,
 )
+from .contract import utc_now as _now  # the tests pin the catalog's clock by patching this name
 
 # How much of the catalog a sweep may report vanished without an explicit
 # confirm. The failure this guards is a half-run indexer reporting the whole
@@ -97,10 +98,6 @@ class SweepRefused(Exception):
         )
 
 
-def _now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-
 class CatalogStore:
     def __init__(self, db: Path, roots: list[Path]):
         if not roots:
@@ -125,13 +122,7 @@ class CatalogStore:
             self._write.executescript(_SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA busy_timeout=5000")
-        conn.execute("PRAGMA foreign_keys=ON")
-        return conn
+        return connect(self.db)
 
     # Opened per operation and closed deterministically, not cached per
     # thread: the server runs a thread per TCP connection, and a connection

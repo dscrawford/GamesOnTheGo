@@ -21,6 +21,8 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from ._db import connect
+
 TOKEN_PREFIX = "gotg_"
 INVITE_PREFIX = "gotgi_"
 TOKEN_RE = re.compile(r"^gotg_[A-Za-z0-9_-]{40,50}$")
@@ -161,13 +163,7 @@ class TokenStore:
                     )
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA busy_timeout=5000")
-        conn.execute("PRAGMA foreign_keys=ON")
-        return conn
+        return connect(self.db)
 
     @contextmanager
     def _read(self):

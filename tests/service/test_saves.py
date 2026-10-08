@@ -12,15 +12,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import threading
-import urllib.error
-import urllib.request
 
 import pytest
-from test_proxy import free_port
+from harness import send, serve
 
 from gotg.saves import SavesStore
-from gotg.service.app import Config, make_server
+from gotg.service.app import Config
 from gotg.tokens import TokenStore
 
 
@@ -32,10 +29,8 @@ def store(tmp_path):
 @pytest.fixture
 def service(store):
     config = Config(token="client-token")
-    server = make_server("127.0.0.1", free_port(), config, store)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_port}"
-    server.shutdown()
+    with serve(config, store) as server:
+        yield server.url
 
 
 def call(
@@ -46,16 +41,8 @@ def call(
     body: bytes | None = None,
     headers: dict[str, str] | None = None,
 ):
-    request = urllib.request.Request(url, data=body, method=method)
-    if token:
-        request.add_header("Authorization", f"Bearer {token}")
-    for name, value in (headers or {}).items():
-        request.add_header(name, value)
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return response.status, response.read(), dict(response.headers)
-    except urllib.error.HTTPError as error:
-        return error.code, error.read(), dict(error.headers or {})
+    status, response_headers, response_body = send(url, method=method, token=token, body=body, headers=headers)
+    return status, response_body, response_headers
 
 
 def push(service, body: bytes, parent: str = "", force: bool = False, attr: str = "env-n64"):
@@ -79,14 +66,10 @@ def test_the_store_requires_the_same_token_as_everything_else(service):
 
 
 def test_a_service_with_no_store_says_so():
-    server = make_server("127.0.0.1", free_port(), Config(token="client-token"), None)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    try:
-        status, body, _ = call(f"http://127.0.0.1:{server.server_port}/saves/env-n64")
+    with serve(Config(token="client-token"), None) as server:
+        status, body, _ = call(f"{server.url}/saves/env-n64")
         assert status == 503
         assert b"no saves store" in body
-    finally:
-        server.shutdown()
 
 
 # --- the two verbs ----------------------------------------------------------
@@ -106,6 +89,33 @@ def test_what_is_saved_is_what_is_retrieved(service):
     assert body == bundle
     assert headers["X-Gotg-Generation"] == "1"
     assert headers["X-Gotg-Hash"] == published["hash"]
+
+
+def test_every_way_to_read_a_bundle_says_what_it_is_and_how_long(service):
+    # The head and a kept generation are two routes to the same reply shape:
+    # zstd bytes, their exact length, and the generation and hash they are.
+    metas = push_chain(service, 2)
+    for path, meta in ((f"{service}/saves/env-n64", metas[1]), (f"{service}/saves/env-n64/gen/1", metas[0])):
+        status, body, headers = call(path)
+        assert status == 200
+        assert headers["Content-Type"] == "application/zstd"
+        assert headers["Content-Length"] == str(len(body))
+        assert headers["X-Gotg-Generation"] == str(meta["generation"])
+        assert headers["X-Gotg-Hash"] == meta["hash"]
+
+
+def test_the_json_routes_say_so_and_the_404s_carry_an_error(service):
+    push_chain(service, 1)
+    for suffix in ("/meta", "/history"):
+        status, body, headers = call(f"{service}/saves/env-n64{suffix}")
+        assert status == 200
+        assert headers["Content-Type"] == "application/json"
+        assert headers["Content-Length"] == str(len(body))
+        json.loads(body)
+    status, body, headers = call(f"{service}/saves/env-none")
+    assert status == 404
+    assert headers["Content-Type"] == "application/json"
+    assert "env-none" in json.loads(body)["error"]
 
 
 def test_retrieving_before_any_push_is_a_404_not_an_error(service):
@@ -266,15 +276,11 @@ def test_history_is_namespaced_by_user(tmp_path, store):
     tokens = TokenStore(db=tmp_path / "tokens.db")
     daniel = tokens.claim(tokens.mint_invite("daniel-desktop"))[1]
     john = tokens.claim(tokens.mint_invite("john-deck"))[1]
-    server = make_server("127.0.0.1", free_port(), Config(token="client-token"), store, token_store=tokens)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    try:
-        base = f"http://127.0.0.1:{server.server_port}"
+    with serve(Config(token="client-token"), store, token_store=tokens) as server:
+        base = server.url
         call(f"{base}/saves/env-n64", method="PUT", body=b"d", token=daniel, headers={"X-Gotg-Parent": ""})
         assert json.loads(call(f"{base}/saves/env-n64/history", token=john)[1])["generations"] == []
         assert call(f"{base}/saves/env-n64/gen/1", token=john)[0] == 404
-    finally:
-        server.shutdown()
 
 
 def test_ten_generations_are_kept_by_default(tmp_path):
@@ -340,10 +346,8 @@ def test_saves_are_namespaced_by_user_not_shared(tmp_path, store):
     daniel = tokens.claim(tokens.mint_invite("daniel-desktop"))[1]
     john = tokens.claim(tokens.mint_invite("john-deck"))[1]
     config = Config(token="client-token")
-    server = make_server("127.0.0.1", free_port(), config, store, token_store=tokens)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    try:
-        base = f"http://127.0.0.1:{server.server_port}"
+    with serve(config, store, token_store=tokens) as server:
+        base = server.url
         headers = {"X-Gotg-Parent": ""}
         assert (
             call(f"{base}/saves/env-n64", method="PUT", body=b"daniel bytes", token=daniel, headers=headers)[0] == 200
@@ -354,8 +358,6 @@ def test_saves_are_namespaced_by_user_not_shared(tmp_path, store):
         assert call(f"{base}/saves/env-n64", token=john)[1] == b"john bytes"
         assert (store.root / "daniel" / "env-n64" / "current.json").exists()
         assert (store.root / "john" / "env-n64" / "current.json").exists()
-    finally:
-        server.shutdown()
 
 
 def test_two_devices_of_one_user_share_their_saves(tmp_path, store):
@@ -363,10 +365,8 @@ def test_two_devices_of_one_user_share_their_saves(tmp_path, store):
     desktop = tokens.claim(tokens.mint_invite("daniel-desktop"))[1]
     deck = tokens.claim(tokens.mint_invite("daniel-deck"))[1]
     config = Config(token="client-token")
-    server = make_server("127.0.0.1", free_port(), config, store, token_store=tokens)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    try:
-        base = f"http://127.0.0.1:{server.server_port}"
+    with serve(config, store, token_store=tokens) as server:
+        base = server.url
         assert (
             call(
                 f"{base}/saves/env-n64",
@@ -378,8 +378,6 @@ def test_two_devices_of_one_user_share_their_saves(tmp_path, store):
             == 200
         )
         assert call(f"{base}/saves/env-n64", token=deck)[1] == b"from the desktop"
-    finally:
-        server.shutdown()
 
 
 def test_the_legacy_token_lands_in_the_configured_user(tmp_path):
@@ -387,11 +385,7 @@ def test_the_legacy_token_lands_in_the_configured_user(tmp_path):
     # were daniel's all along, instead of a parallel "legacy" copy.
     store = SavesStore(root=tmp_path / "saves", keep=3, max_bytes=100_000)
     config = Config(token="client-token", legacy_user="daniel")
-    server = make_server("127.0.0.1", free_port(), config, store)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    try:
-        base = f"http://127.0.0.1:{server.server_port}"
+    with serve(config, store) as server:
+        base = server.url
         assert call(f"{base}/saves/env-n64", method="PUT", body=b"b", headers={"X-Gotg-Parent": ""})[0] == 200
         assert (store.root / "daniel" / "env-n64" / "current.json").exists()
-    finally:
-        server.shutdown()

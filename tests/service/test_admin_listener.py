@@ -12,15 +12,12 @@ from __future__ import annotations
 
 import json
 import re
-import threading
-import urllib.error
-import urllib.request
 
 import pytest
-from test_proxy import free_port
+from harness import send, serve
 
 from gotg.service import admin_page
-from gotg.service.app import Config, make_server
+from gotg.service.app import Config
 from gotg.tokens import TokenStore
 
 LEGACY = "legacy-token"
@@ -35,31 +32,19 @@ def token_store(tmp_path):
     return TokenStore(tmp_path / "tokens.db")
 
 
-def _serve(config, token_store, listener):
-    server = make_server("127.0.0.1", free_port(), config, token_store=token_store, listener=listener)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    return server, f"http://127.0.0.1:{server.server_address[1]}"
-
-
 @pytest.fixture
 def pair(token_store):
     config = Config(token=LEGACY, admin_token=ADMIN, index_token=INDEX, admin_url=ADMIN_URL, public_url=PUBLIC_URL)
-    public, public_url = _serve(config, token_store, "public")
-    admin, admin_url = _serve(config, token_store, "admin")
-    yield public_url, admin_url
-    public.shutdown()
-    admin.shutdown()
+    with (
+        serve(config, token_store=token_store, listener="public") as public,
+        serve(config, token_store=token_store, listener="admin") as admin,
+    ):
+        yield public.url, admin.url
 
 
 def call(url, method="GET", token=None, body=None):
-    request = urllib.request.Request(url, data=body, method=method)
-    if token:
-        request.add_header("Authorization", f"Bearer {token}")
-    try:
-        with urllib.request.urlopen(request, timeout=5) as response:
-            return response.status, response.read(), response.headers
-    except urllib.error.HTTPError as error:
-        return error.code, error.read(), error.headers
+    status, headers, answer = send(url, method=method, token=token, body=body)
+    return status, answer, headers
 
 
 # --- the public listener -------------------------------------------------------
@@ -194,13 +179,11 @@ def test_the_page_uses_no_inline_script_or_style():
 
 def test_a_server_with_no_listener_named_serves_both_as_before(token_store):
     config = Config(token=LEGACY, admin_token=ADMIN, index_token=INDEX)
-    server, url = _serve(config, token_store, "both")
-    try:
+    with serve(config, token_store=token_store, listener="both") as server:
+        url = server.url
         assert call(f"{url}/admin/tokens", token=ADMIN)[0] == 200
         assert call(f"{url}/auth/whoami", token=LEGACY)[0] == 200
         assert call(f"{url}/admin/")[0] == 200
-    finally:
-        server.shutdown()
 
 
 # --- the environment -------------------------------------------------------------
@@ -240,9 +223,6 @@ def test_the_listing_of_invites_is_only_the_open_ones(token_store, monkeypatch):
 
 def test_a_deployment_with_no_admin_token_serves_no_page(token_store):
     config = Config(token=LEGACY, index_token=INDEX)
-    server, url = _serve(config, token_store, "both")
-    try:
-        assert call(f"{url}/admin/")[0] == 401
-        assert call(f"{url}/admin/app.js")[0] == 401
-    finally:
-        server.shutdown()
+    with serve(config, token_store=token_store, listener="both") as server:
+        assert call(f"{server.url}/admin/")[0] == 401
+        assert call(f"{server.url}/admin/app.js")[0] == 401

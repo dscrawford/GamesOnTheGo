@@ -10,24 +10,15 @@ gap.
 from __future__ import annotations
 
 import json
-import socket
-import threading
-import urllib.error
-import urllib.request
 
 import pytest
+from harness import send, serve
 
-from gotg.service.app import Config, RateLimiter, make_server
+from gotg.service.app import Config, RateLimiter
 from gotg.service.artcache import ArtCache
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 JPEG = b"\xff\xd8\xff" + b"\x00" * 32
-
-
-def free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 @pytest.fixture
@@ -38,23 +29,13 @@ def cache(tmp_path):
 @pytest.fixture
 def service(cache):
     config = Config(token="client-token", index_token="index-token", art_dir=str(cache.root))
-    server = make_server("127.0.0.1", free_port(), config, art=cache)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_port}"
-    server.shutdown()
+    with serve(config, art=cache) as server:
+        yield server.url
 
 
 def call(url, token="client-token", data=None, method=None, headers=None):
-    request = urllib.request.Request(url, data=data, method=method)
-    if token:
-        request.add_header("Authorization", f"Bearer {token}")
-    for name, value in (headers or {}).items():
-        request.add_header(name, value)
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return response.status, response.read(), dict(response.headers)
-    except urllib.error.HTTPError as error:
-        return error.code, error.read(), dict(error.headers)
+    status, response_headers, body = send(url, method=method, token=token, body=data, headers=headers)
+    return status, body, response_headers
 
 
 # --- the cache on its own ---------------------------------------------------
@@ -143,6 +124,37 @@ def test_a_second_ask_can_be_answered_with_a_304(service, cache):
     assert (status, body) == (304, b"")
 
 
+def test_a_picture_carries_a_stable_etag_and_a_long_lifetime(service, cache):
+    cache.put("n64", "usa.zelda", PNG)
+    _, _, first = call(f"{service}/art/n64/usa.zelda")
+    _, _, second = call(f"{service}/art/n64/usa.zelda")
+    assert first["ETag"] == second["ETag"]
+    assert first["ETag"].startswith('"') and first["ETag"].endswith('"')
+    assert first["Cache-Control"] == "public, max-age=604800"
+    assert first["X-Gotg-Art"] == "hit"
+
+
+def test_a_304_keeps_the_validators_and_a_stale_etag_gets_the_picture(service, cache):
+    cache.put("n64", "usa.zelda", PNG)
+    _, _, headers = call(f"{service}/art/n64/usa.zelda")
+    status, body, not_modified = call(f"{service}/art/n64/usa.zelda", headers={"If-None-Match": headers["ETag"]})
+    assert (status, body) == (304, b"")
+    assert not_modified["ETag"] == headers["ETag"]
+    assert not_modified["Content-Type"] == "image/png"
+
+    status, body, _ = call(f"{service}/art/n64/usa.zelda", headers={"If-None-Match": '"not-this-one"'})
+    assert (status, body) == (200, PNG)
+
+
+def test_a_404_says_which_kind_of_nothing_in_its_body_too(service, cache):
+    cache.put_miss("switch", "usa.some_game")
+    status, body, headers = call(f"{service}/art/switch/usa.some_game")
+    assert status == 404
+    assert headers["Content-Type"] == "application/json"
+    assert json.loads(body)["miss"] is True
+    assert json.loads(call(f"{service}/art/switch/usa.other_game")[1])["miss"] is False
+
+
 def test_a_miss_is_told_apart_from_never_looked(service, cache):
     cache.put_miss("switch", "usa.some_game")
     _, _, miss = call(f"{service}/art/switch/usa.some_game")
@@ -189,13 +201,9 @@ def test_deleting_lets_the_next_warm_look_again(service, cache):
 
 def test_a_deployment_without_a_cache_says_so(cache):
     config = Config(token="client-token")
-    server = make_server("127.0.0.1", free_port(), config)
-    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
-    try:
-        status, _, _ = call(f"http://127.0.0.1:{server.server_port}/art")
+    with serve(config) as server:
+        status, _, _ = call(f"{server.url}/art")
         assert status == 503
-    finally:
-        server.shutdown()
 
 
 # --- the pace ---------------------------------------------------------------

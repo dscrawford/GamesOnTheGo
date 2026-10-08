@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from .._http import NO_REDIRECT_OPENER
 from ..contract import EXTRAS_PREFIX, LINK_HANDLERS, SHA256_RE, is_extra, valid_filename
 from . import execute as ex
 from . import plan as pl
@@ -32,19 +32,6 @@ log = logging.getLogger("gotg.publish")
 TIMEOUT = 30
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """Refuse redirects: urllib's default copies the Authorization header onto
-    the redirected request even cross-origin, which would hand the index token
-    to whatever a Location header names — the same leak afd63b3 fixed in the
-    proxy."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ARG002
-        return None
-
-
-_OPENER = urllib.request.build_opener(_NoRedirect())
-
-
 class PublishError(Exception):
     """One entry could not be published — per-entry, never fatal to a run."""
 
@@ -52,10 +39,6 @@ class PublishError(Exception):
 class Collision(PublishError):
     """The service holds this id for different bytes — the same error the
     hardlink no-clobber used to surface, answered as a 409."""
-
-
-def utc_now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 class CatalogAPI:
@@ -71,7 +54,7 @@ class CatalogAPI:
         )
         request.add_header("Authorization", f"Bearer {self.token}")
         try:
-            with _OPENER.open(request, timeout=TIMEOUT) as response:  # noqa: S310
+            with NO_REDIRECT_OPENER.open(request, timeout=TIMEOUT) as response:  # noqa: S310
                 return response.status, json.loads(response.read() or b"{}")
         except urllib.error.HTTPError as error:
             try:

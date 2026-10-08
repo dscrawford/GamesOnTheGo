@@ -116,3 +116,30 @@ def test_bash_and_python_agree_on_platforms(sample, valid):
     pattern = _shell_var("GOTG_PLATFORM_RE")
     assert bool(contract.PLATFORM_RE.match(sample)) is valid
     assert _bash_matches(sample, pattern) is valid
+
+
+# --- the one timestamp spelling ------------------------------------------------
+#
+# catalog.py, saves.py and publish.py each spelled "now" as the same strftime
+# call. The catalog's since/seen_at comparisons are lexicographic, so the spelling
+# is part of the wire contract: second resolution, UTC, a literal Z.
+
+
+def test_utc_now_is_the_fixed_width_stamp_the_catalog_sorts_on():
+    assert re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", contract.utc_now())
+
+
+@pytest.mark.parametrize(
+    ("epoch", "expected"),
+    [(0, "1970-01-01T00:00:00Z"), (1700000000, "2023-11-14T22:13:20Z"), (1700000000.9, "2023-11-14T22:13:20Z")],
+)
+def test_utc_now_of_a_given_instant_is_that_instant_in_utc(epoch, expected):
+    assert contract.utc_now(epoch) == expected
+
+
+def test_utc_now_follows_the_clock():
+    import time
+
+    before = time.time()
+    stamp = contract.utc_now()
+    assert contract.utc_now(before) <= stamp <= contract.utc_now(time.time() + 1)
