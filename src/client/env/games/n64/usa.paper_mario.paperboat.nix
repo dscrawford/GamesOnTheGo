@@ -9,6 +9,7 @@
   ...
 }:
 let
+  inherit (import ../../emulators/jq-edit.nix { inherit pkgs; }) gotgJqEdit;
   port = gotgPkgs.paperboat;
   torch = gotgPkgs.paperboat-torch;
   # The name the port's config.yml gives the US cartridge's archive.
@@ -37,8 +38,12 @@ in
     # one name the port loads. A regular file left by the old fetch stays; a
     # link whose bundle is gone is removed before the port trips on it.
     paperboat_hd="$(gotg_extra '*.o2r')"
+    paperboat_hd_new=""
     if [ -n "$paperboat_hd" ]; then
-      ln -sfn "$paperboat_hd" "$SHIP_HOME/paperboat-hd.o2r"
+      if [ "$(readlink "$SHIP_HOME/paperboat-hd.o2r" 2>/dev/null)" != "$paperboat_hd" ]; then
+        ln -sfn "$paperboat_hd" "$SHIP_HOME/paperboat-hd.o2r"
+        paperboat_hd_new=1
+      fi
     elif [ -L "$SHIP_HOME/paperboat-hd.o2r" ] && [ ! -e "$SHIP_HOME/paperboat-hd.o2r" ]; then
       rm -f "$SHIP_HOME/paperboat-hd.o2r"
     fi
@@ -54,8 +59,22 @@ in
         "gSettings.SdlWindowedFullscreen" = 1;
         "gSettings.MatchRefreshRate" = 1;
         "gSettings.MSAAValue" = 4;
+        # The pack's textures are the archive's alt/ set, drawn only with this on.
+        "gEnhancements.Mods.AlternateAssets" = 1;
       };
     }}
+    # A pack that just arrived (or changed) turns alt assets on even where a
+    # player had switched them off; the in-game toggle still holds per session.
+    if [ -n "$paperboat_hd_new" ]; then
+      ${gotgJqEdit {
+        file = "$lus_cfg";
+        filter = ".CVars.gEnhancements.Mods.AlternateAssets = 1";
+        jq = "jq";
+        force = true;
+        suffix = ".gotg-tmp";
+        indent = "      ";
+      }}
+    fi
 
     # An archive from another port version stops on a modal no pad reaches.
     paperboat_stamp="$SHIP_HOME/.gotg-archive-version"

@@ -332,6 +332,16 @@ pkgs.runCommand "check-prelaunch-probe"
       fail "paperboat: the pack is not linked to the bundle's"
     launch "$d" ${scripts.paperboat} install="$d/install"
     [ "$(cat "$hd")" = hd ] || fail "paperboat: the link did not survive a second launch"
+    alt() { jq -r '.CVars.gEnhancements.Mods.AlternateAssets' "$1/state/boat/paperboat.cfg.json"; }
+    [ "$(alt "$d")" = 1 ] || fail "paperboat: a pack's alt assets are not on"
+    # Switched off by the player: the same pack leaves it; a new pack turns it on.
+    jq '.CVars.gEnhancements.Mods.AlternateAssets = 0' "$d/state/boat/paperboat.cfg.json" >"$d/off" && mv "$d/off" "$d/state/boat/paperboat.cfg.json"
+    launch "$d" ${scripts.paperboat} install="$d/install"
+    [ "$(alt "$d")" = 0 ] || fail "paperboat: the same pack overrode a player's alt assets"
+    rm "$d/install/extras/mod_refolded-paperboat-hd.o2r"
+    echo hd2 >"$d/install/extras/mod_refolded-4k-paperboat-hd.o2r"
+    launch "$d" ${scripts.paperboat} install="$d/install"
+    [ "$(cat "$hd")" = hd2 ] && [ "$(alt "$d")" = 1 ] || fail "paperboat: a new pack did not turn alt assets on"
     # No pack: a link whose bundle is gone goes, a plain install changes nothing.
     d=$(boat boat-dangling)
     ln -s "$d/install/extras/gone.o2r" "$d/state/boat/paperboat-hd.o2r"
