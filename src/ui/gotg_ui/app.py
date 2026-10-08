@@ -1,10 +1,12 @@
 """The picker: the one loop that draws the library and reads the controllers.
 
 Kept thin on purpose. Which games exist, where the tiles go, what a menu
-offers and what a press means are all answerable without a display, and live
-in the modules imported below as pure models; what is left here is drawing
-them (`draw*`, SDL and pygame only) and `run()`, which rebuilds each screen's
-state from every event.
+offers, what a press means, which screen owns the input (screens.py) and what
+a pick, the chip, a restart or a finished loader should do (plans.py) are all
+answerable without a display, and live in the modules imported below as pure
+models. Drawing is draw_grid.py, draw_screens.py and saves_draw.py; what is
+left here is `run()`: read the events, hand each to the handler of the screen
+that owns input, apply what the models decided, paint that screen, present.
 
 The screens, all drawn over one scaled window (display.py): the grid and the
 shelf (browser.py) with cover art decoded off the loop; the per-game menu;
@@ -20,7 +22,6 @@ the display is given back.
 from __future__ import annotations
 
 import gc
-import math
 import os
 import sys
 import time
@@ -28,718 +29,48 @@ from concurrent.futures import Future, ThreadPoolExecutor
 
 import pygame
 
-from . import beside, config, display, filters, intents, keys, meter, pads, prepare, trace, updates
+from . import beside, config, display, filters, intents, keys, meter, pads, plans, trace, updates
 from .art import ArtStore
+from .badges import Asker, Badges, land
 from .browser import SHELF, Browser
 from .buttons import step_for
 from .catalog import Game, Library
+from .chip import ChipState
 from .danstick import DaemonWatch, Danstick, ensure_daemon
 from .decode import PENDING, Decoder
+from .draw_grid import draw, draw_menu, draw_shelf, hovering, menu_rects, view_rects
+from .draw_screens import draw_filters, draw_prepare, draw_saves_choice, draw_storage
 from .fetch import Loader
 from .filters import Filters
-from .gridview import GridView, row_under_text, status_line
+from .gridview import GridView
 from .hush import Hush
 from .installed import installed_games
 from .installs import Installs
 from .intents import BACK, Intent, keyboard_heard
 from .keys import KeyHold
-from .layout import corner, grid, shelf, shelf_at, tile_at
 from .menu import Menu
 from .nav import Nav
 from .prepare import Preparer, is_ready
-from .recent import Recent
-from .restart import Restart, said_root, usable
-from .saves_choice import HERE, REMOTE, Choice
+from .restart import Restart, usable
+from .saves_choice import Choice
 from .saves_choice import check as check_saves
-from .saves_choice import when as saves_when
 from .saves_draw import draw_saves
 from .saves_list import Saves, has_own_saves
 from .saves_list import fetch as fetch_saves
-from .storage import Storage, human
+from .screens import Screen, grid_press, screen_of
+from .storage import Storage
+from .texting import CANCEL, COMMIT, EDITED, edit
+from .theme import WINDOW
 from .variants import variants_for
 from .versions import forget as forget_versions
 from .versions import names as version_names
 from .versions import versions_for
 
-BACKGROUND = config.colour("theme.colours.background", (18, 18, 20))
-TILE = config.colour("theme.colours.tile", (38, 38, 44))
-TILE_SELECTED = config.colour("theme.colours.tile_selected", (58, 104, 148))
-TEXT = config.colour("theme.colours.text", (232, 232, 236))
-TEXT_DIM = config.colour("theme.colours.text_dim", (150, 150, 158))
-ATTENTION = config.colour("theme.colours.attention", (232, 176, 64))
-# The menu's list, a shade off the background.
-PANEL = config.colour("theme.colours.panel", (26, 26, 30))
-
-# The Deck's own panel, so a window on a desktop is the shape it will be there.
-WINDOW = tuple(config.get("theme.window", [1280, 800]))
-
-
-def _fit(font_at, text: str, width: int, size: int):
-    """The largest of a font that renders `text` inside `width`, down to tiny.
-
-    Titles are free text from the catalog — "The Legend of Zelda: Ocarina of
-    Time" next to "Tetris" — so a fixed size either wraps the long ones or
-    wastes the short ones.
-    """
-    while size > 8:
-        font = font_at(size)
-        if font.size(text)[0] <= width:
-            return font
-        size -= 1
-    return font_at(8)
-
-
-def draw_badge(screen, tile) -> None:
-    """Download-arrow badge, top-left: drawn rather than a loaded asset, so it
-    scales with the tile and reads over art of any colour."""
-    r = max(10, tile.width // 14)
-    cx, cy = tile.x + r + 6, tile.y + r + 6
-    pygame.draw.aacircle(screen, BACKGROUND, (cx, cy), r + 2)
-    pygame.draw.aacircle(screen, TILE_SELECTED, (cx, cy), r)
-    shaft = r // 2
-    head = r // 2
-    stroke = max(2, r // 5)
-    pygame.draw.line(screen, TEXT, (cx, cy - shaft), (cx, cy + shaft // 2), stroke)
-    # The arrow head: filled, then an aa outline over it, because pygame has
-    # no anti-aliased fill for a polygon and the diagonal edges are what show.
-    pygame.draw.polygon(screen, TEXT, [(cx - head, cy), (cx + head, cy), (cx, cy + head)])
-    pygame.draw.aalines(screen, TEXT, True, [(cx - head, cy), (cx + head, cy), (cx, cy + head)])
-    pygame.draw.line(screen, TEXT, (cx - head, cy + head + 2), (cx + head, cy + head + 2), stroke)
-
-
-def draw_alert_badge(screen, tile) -> None:
-    """An exclamation mark where the download arrow would be: this game is
-    here, and the library would build it differently now, or has attached a
-    release the install lacks (updates.py)."""
-    r = max(10, tile.width // 14)
-    cx, cy = tile.x + r + 6, tile.y + r + 6
-    pygame.draw.aacircle(screen, BACKGROUND, (cx, cy), r + 2)
-    pygame.draw.aacircle(screen, ATTENTION, (cx, cy), r)
-    stroke = max(2, r // 4)
-    pygame.draw.line(screen, BACKGROUND, (cx, cy - r // 2), (cx, cy + r // 6), stroke)
-    pygame.draw.aacircle(screen, BACKGROUND, (cx, cy + r // 2), max(1, stroke // 2 + 1))
-
-
-_chip_labels: dict[str, object] = {}
-
-
-def draw_chip(screen, font_at, text: str | None):
-    """The words at the top right -- "Update available", and what follows a
-    press -- on a rounded chip in the attention colour, or nothing. Returns
-    the chip's Tile, for a click to be matched against; None when nothing.
-    The label is rendered once per wording: it is on every frame for as
-    long as it shows."""
-    if not text:
-        return None
-    width, height = screen.get_size()
-    label = _chip_labels.get(text)
-    if label is None:
-        label = _chip_labels[text] = font_at(18).render(text, True, BACKGROUND)
-    chip = corner(width, height, label.get_width(), label.get_height())
-    pygame.draw.rect(screen, ATTENTION, chip.rect, border_radius=chip.height // 2)
-    at = (chip.x + (chip.width - label.get_width()) // 2, chip.y + (chip.height - label.get_height()) // 2)
-    screen.blit(label, at)
-    return chip
-
-
-def draw_ring(screen, centre, radius: int, fraction: float | None, failed: bool) -> None:
-    """An install on its way: a ring filling clockwise from the top, or a
-    short arc going round when there are no figures yet (a build). Red and
-    whole when it failed."""
-    stroke = max(3, radius // 5)
-    box = pygame.Rect(centre[0] - radius, centre[1] - radius, 2 * radius, 2 * radius)
-    pygame.draw.aacircle(screen, BACKGROUND, centre, radius + stroke)
-    pygame.draw.circle(screen, TILE, centre, radius, stroke)
-    colour = (224, 96, 96) if failed else TILE_SELECTED
-    if fraction is None:
-        start = -(pygame.time.get_ticks() / 400.0) % (2 * math.pi)
-        pygame.draw.arc(screen, colour, box, start, start + math.pi / 2, stroke)
-    elif fraction > 0:
-        # pygame's arcs run anticlockwise from the +x axis; this one runs
-        # clockwise from twelve, which is how a clock and a person read it.
-        top = math.pi / 2
-        pygame.draw.arc(screen, colour, box, top - 2 * math.pi * fraction, top, stroke)
-
-
-# Every cover that has been scaled to fit a tile, by game and size.
-#
-# The picker was rescaling all of them on every frame: 7.4 ms of a 16.7 ms
-# frame on a Steam Deck for the grid's ten, 9.0 ms for the shelf's twenty-four.
-# Art does not change between frames and neither does a tile, so the second
-# scale of the same pair is work nobody asked for.
-#
-# Module level rather than passed around: two views and a hero all want the
-# same surfaces, and threading a cache through every drawing function is how
-# one of them ends up with its own.
-_scaled = Recent(96)
-
-
-def fitted(picture, key, width: int, height: int):
-    """`picture` scaled to fit a `width` x `height` box, kept for next frame.
-
-    Fitted, never stretched: a tile is 2:3 and a cartridge box is landscape, so
-    most of this library's art arrives the wrong shape for its slot and scaling
-    to fill would squash every one.
-    """
-    pw, ph = picture.get_size()
-    scale = min(width / pw, height / ph)
-    size = (max(1, int(pw * scale)), max(1, int(ph * scale)))
-    remembered = _scaled.get((key, size))
-    if remembered is not None:
-        return remembered
-    return _scaled.put((key, size), pygame.transform.smoothscale(picture, size))
-
-
-def filling(picture, key, width: int, height: int):
-    """`picture` scaled so it *covers* a box, for cropping to a square icon.
-
-    The other half of `fitted`: that one leaves bars, which is right for a
-    cover in a tile and wrong for a 40-pixel icon in a list row.
-    """
-    pw, ph = picture.get_size()
-    scale = max(width / pw, height / ph)
-    size = (max(1, int(pw * scale)), max(1, int(ph * scale)))
-    remembered = _scaled.get((key, "fill", size))
-    if remembered is not None:
-        return remembered
-    return _scaled.put((key, "fill", size), pygame.transform.smoothscale(picture, size))
-
-
-def view_rects(browser, size) -> list:
-    """The rectangles the view on screen draws its games in.
-
-    Asked of the view rather than assumed to be the grid's. The menu anchors
-    to one of these, and the shelf's twelve rows are not the grid's ten tiles:
-    opening a menu on the eleventh row indexed past the end of a list that was
-    not the one on screen, and the picker died with an IndexError.
-    """
-    if browser.view == SHELF:
-        _hero, rows = shelf(*size)
-        return rows
-    return grid(*size)
-
-
-def hovering(browser, pos, size) -> int | None:
-    """Which cover the pointer is on, in whichever view is drawn.
-
-    Asked of the view rather than assumed, because the two have different
-    rectangles and a pointer answered by the wrong one selects a game three
-    along from the one it is over.
-    """
-    finder = shelf_at if browser.view == SHELF else tile_at
-    return finder(*pos, *size)
-
-
-def draw_row(
-    screen,
-    font_at,
-    row,
-    game,
-    picture,
-    selected: bool,
-    under: str,
-    ring: tuple[float | None, bool] | None = None,
-) -> None:
-    """One line of the list: an icon, a title, and `under` it (the platform and
-    what is going on, from `gridview.row_under_text`).
-
-    The icon is the game's own art cropped to a square rather than fitted into
-    one. A row is wide and short, and art letterboxed into that leaves a
-    postage stamp with bars either side; a square crop of a cover is what
-    Steam's list shows and what reads at this size.
-    """
-    if selected:
-        pygame.draw.rect(screen, TILE_SELECTED, row.rect, border_radius=8)
-
-    side = max(8, row.height - 8)
-    icon = pygame.Rect(row.x + 6, row.y + 4, side, side)
-    if picture is not None:
-        art_surface = filling(picture, game.key, side, side)
-        screen.blit(art_surface, icon.topleft, pygame.Rect(0, 0, side, side))
-    else:
-        pygame.draw.rect(screen, TILE, icon, border_radius=4)
-
-    left = icon.right + 12
-    room = max(24, row.x + row.width - left - 12)
-    text = game.title[:120]
-    size = max(14, min(24, row.height // 2))
-    title = font_at(size).render(text, True, TEXT)
-    if title.get_width() > room:
-        title = _fit(font_at, text, room, size).render(text, True, TEXT)
-    screen.blit(title, (left, row.y + 4))
-
-    if ring is not None:
-        fraction, failed = ring
-        r = max(6, side // 3)
-        draw_ring(screen, (row.x + row.width - r - 12, row.y + row.height // 2), r, fraction, failed)
-    small = font_at(max(11, size - 8)).render(under, True, TEXT_DIM)
-    screen.blit(small, (left, row.y + 6 + title.get_height()))
-
-
-def draw_shelf(screen, font_at, view: GridView):
-    """The list on the left, and the art of the one under the cursor on the
-    right — the other way to look at the same library."""
-    state, art, installed, rings, outdated = view.state, view.art, view.installed, view.rings, view.outdated
-    width, height = screen.get_size()
-    screen.fill(BACKGROUND)
-    page = state.page
-    hero, rows = shelf(width, height)
-
-    chosen = page[state.selected] if 0 <= state.selected < len(page) else None
-    if chosen is not None:
-        picture = art.get(chosen.key) if art else None
-        if picture is not None:
-            art_surface = fitted(picture, chosen.key, hero.width, hero.height)
-            size = art_surface.get_size()
-            screen.blit(
-                art_surface,
-                (hero.x + (hero.width - size[0]) // 2, hero.y + (hero.height - size[1]) // 2),
-            )
-        else:
-            # No art anywhere: the title, large, in the space the art would
-            # have had. Better than an empty half of the screen.
-            pygame.draw.rect(screen, TILE, hero.rect, border_radius=12)
-            text = chosen.title[:120]
-            shown = _fit(font_at, text, hero.width - 32, 44).render(text, True, TEXT)
-            screen.blit(
-                shown,
-                (hero.x + (hero.width - shown.get_width()) // 2,
-                 hero.y + hero.height // 2 - shown.get_height() // 2),
-            )
-
-    for index, row in enumerate(rows):
-        if index >= len(page):
-            break
-        game = page[index]
-        ring = rings.get(game.key) if rings else None
-        under = row_under_text(
-            game, ring, bool(installed and game.key in installed), bool(outdated and game.key in outdated)
-        )
-        draw_row(screen, font_at, row, game, art.get(game.key) if art else None, index == state.selected, under, ring)
-
-    if view.status:
-        shown = font_at(22).render(view.status, True, TEXT_DIM)
-        screen.blit(shown, (rows[0].x, height - shown.get_height() - 10))
-    return draw_chip(screen, font_at, view.chip)
-
-
-def draw(screen, font_at, view: GridView, typing: str | None = None, menu=None):
-    state, art, installed, rings, outdated = view.state, view.art, view.installed, view.rings, view.outdated
-    width, height = screen.get_size()
-    screen.fill(BACKGROUND)
-    page = state.page
-    tiles = grid(width, height)
-    # One translucent wash per tile size, cached: while the menu is open every
-    # other tile drops to ~90% so the chosen one reads as chosen.
-    dim = None
-    if menu is not None:
-        # Cached, which the comment here used to claim and the code did not do:
-        # it built one of these every frame the menu was open.
-        dim = _scaled.get(("dim", tiles[0].width, tiles[0].height))
-        if dim is None:
-            dim = pygame.Surface((tiles[0].width, tiles[0].height), pygame.SRCALPHA)
-            dim.fill((*BACKGROUND, 26))
-            _scaled.put(("dim", tiles[0].width, tiles[0].height), dim)
-
-    for index, tile in enumerate(tiles):
-        if index >= len(page):
-            break
-        game = page[index]
-        selected = index == state.selected
-        picture = art.get(game.key) if art else None
-
-        if picture is not None:
-            art_surface = fitted(picture, game.key, tile.width, tile.height)
-            size = art_surface.get_size()
-            pygame.draw.rect(screen, TILE, tile.rect, border_radius=8)
-            screen.blit(
-                art_surface,
-                (tile.x + (tile.width - size[0]) // 2, tile.y + (tile.height - size[1]) // 2),
-            )
-        else:
-            pygame.draw.rect(screen, TILE_SELECTED if selected else TILE, tile.rect, border_radius=8)
-            # No picture — the title *is* the tile, which is also what a game
-            # with no art anywhere falls back to for good.
-            inner = tile.width - 16
-            # Bounded: titles have no server-side length cap, and font.render
-            # on a pathological one allocates a surface megapixels wide.
-            text = game.title[:120]
-            title = font_at(20).render(text, True, TEXT)
-            if title.get_width() > inner:
-                title = _fit(font_at, text, inner, 20).render(text, True, TEXT)
-            screen.blit(title, (tile.x + 8, tile.y + tile.height // 2 - title.get_height() // 2))
-            platform = font_at(14).render(game.platform, True, TEXT_DIM)
-            screen.blit(platform, (tile.x + 8, tile.y + tile.height - platform.get_height() - 8))
-
-        if installed and game.key in installed:
-            if outdated and game.key in outdated:
-                draw_alert_badge(screen, tile)
-            else:
-                draw_badge(screen, tile)
-        if rings and game.key in rings:
-            fraction, failed = rings[game.key]
-            radius = max(14, tile.width // 5)
-            draw_ring(screen, (tile.x + tile.width // 2, tile.y + tile.height // 2), radius, fraction, failed)
-            if fraction is not None and not failed:
-                pct = font_at(max(14, radius // 2)).render(f"{int(fraction * 100)}%", True, TEXT)
-                screen.blit(
-                    pct,
-                    (tile.x + (tile.width - pct.get_width()) // 2, tile.y + (tile.height - pct.get_height()) // 2),
-                )
-        if selected:
-            pygame.draw.rect(screen, TEXT, tile.rect, width=3, border_radius=8)
-        if dim is not None and index != menu.tile_index:
-            screen.blit(dim, (tile.x, tile.y))
-
-    # The hovered game's full title, in the top strip the grid never uses.
-    # Tiles shrink long titles toward unreadable and art hides them entirely;
-    # the selection is the one game whose whole name is worth a line, and
-    # hover moves the selection, so pointer and stick share it.
-    # The chip shares that strip; the title fits in what the chip leaves.
-    chip_rect = draw_chip(screen, font_at, view.chip)
-    if state.game is not None:
-        text = state.game.title[:200]
-        room = width - 48 - (2 * (chip_rect.width + 24) if chip_rect is not None else 0)
-        label = _fit(font_at, text, max(120, room), 26).render(text, True, TEXT)
-        screen.blit(label, ((width - label.get_width()) // 2, (tiles[0].y - label.get_height()) // 2))
-
-    # While typing, the search box replaces the status: see status_line.
-    status, bright = status_line(state, view.status, typing)
-    label = font_at(18).render(status, True, TEXT if bright else TEXT_DIM)
-    screen.blit(label, (label.get_height(), height - label.get_height() * 2))
-    return chip_rect
-
-def menu_rects(menu: Menu, tiles, font_at, bounds=None) -> list[tuple[int, int, int, int]]:
-    """One rect per action row, beside the tile on the side with room.
-
-    Computed here and only here, so the drawing and the pointer hit-testing
-    cannot disagree about where a row is.
-
-    `bounds` is the window, and the panel is kept inside it. In a grid of two
-    rows a panel centred on a tile always fitted; against the twelfth row of a
-    list it hangs off the bottom of the screen, and the verbs at the end of it
-    -- uninstall among them -- cannot be reached or read.
-    """
-    # Clamped rather than indexed blind. The caller passes the view's own
-    # rectangles, so this should always be in range -- and if a view ever grows
-    # a shape nobody updated, a menu in the wrong place beats a traceback on a
-    # television.
-    tile = tiles[min(menu.tile_index, len(tiles) - 1)]
-    row_h = font_at(22).get_height() + 14
-    width = max(font_at(22).size(label)[0] for label, _ in menu.actions) + 32
-    height = row_h * len(menu.actions) + 8
-    gap = 10
-    x = tile.x + tile.width + gap if menu.side == "right" else tile.x - gap - width
-    y = tile.y + (tile.height - height) // 2
-    if bounds is not None:
-        screen_width, screen_height = bounds
-        y = max(4, min(y, screen_height - height - 4))
-        x = max(4, min(x, screen_width - width - 4))
-    return [(x, y + 4 + i * row_h, width, row_h) for i in range(len(menu.actions))]
-
-
-def draw_menu(screen, menu: Menu, tiles, font_at) -> None:
-    rows = menu_rects(menu, tiles, font_at, screen.get_size())
-    x, y = rows[0][0], rows[0][1] - 4
-    height = rows[-1][1] + rows[-1][3] - y + 8
-    pygame.draw.rect(screen, TILE, (x, y, rows[0][2], height), border_radius=8)
-    pygame.draw.rect(screen, TEXT_DIM, (x, y, rows[0][2], height), width=1, border_radius=8)
-    for index, (label, _) in enumerate(menu.actions):
-        rx, ry, rw, rh = rows[index]
-        if index == menu.selected:
-            pygame.draw.rect(screen, TILE_SELECTED, (rx + 4, ry, rw - 8, rh - 4), border_radius=6)
-        text = font_at(22).render(label, True, TEXT if index == menu.selected else TEXT_DIM)
-        screen.blit(text, (rx + 16, ry + (rh - text.get_height()) // 2 - 2))
-
-
-def filter_rects(panel, font_at, size) -> list[tuple[int, int, int, int]]:
-    """One rect per filter row, centred. Computed here and only here, so the
-    drawing and the pointer cannot disagree about where a row is."""
-    width, height = size
-    row_h = font_at(26).get_height() + 16
-    panel_w = min(int(width * 0.6), 560)
-    total = row_h * len(panel.rows)
-    left = (width - panel_w) // 2
-    top = (height - total) // 2
-    return [(left, top + i * row_h, panel_w, row_h) for i in range(len(panel.rows))]
-
-
-def draw_filters(screen, font_at, browser, panel, typing: str | None = None) -> None:
-    """The filter panel: a row per thing to narrow by, and its value.
-
-    A list rather than more buttons. Everything on it was already possible and
-    half of it only from a keyboard -- regions had no binding a pad could
-    reach at all.
-    """
-    width, height = screen.get_size()
-    overlay = _scaled.get(("panel", width, height))
-    if overlay is None:
-        overlay = pygame.Surface((width, height), pygame.SRCALPHA)
-        overlay.fill((*BACKGROUND, 232))
-        _scaled.put(("panel", width, height), overlay)
-    screen.blit(overlay, (0, 0))
-
-    title = font_at(40).render("Menu", True, TEXT)
-    rows = filter_rects(panel, font_at, (width, height))
-    screen.blit(title, ((width - title.get_width()) // 2, rows[0][1] - title.get_height() - 24))
-
-    for (label, value, selected), (rx, ry, rw, rh) in zip(filters.rows_for(browser, panel, typing), rows, strict=True):
-        if selected:
-            pygame.draw.rect(screen, TILE_SELECTED, (rx, ry, rw, rh - 6), border_radius=8)
-        name = font_at(26).render(label, True, TEXT if selected else TEXT_DIM)
-        screen.blit(name, (rx + 20, ry + (rh - 6 - name.get_height()) // 2))
-        if value:
-            shown = font_at(26).render(value, True, TEXT if selected else TEXT_DIM)
-            screen.blit(shown, (rx + rw - shown.get_width() - 20, ry + (rh - 6 - shown.get_height()) // 2))
-
-    bottom = rows[-1][1] + rows[-1][3]
-    if panel.choice is not None:
-        # The list can reach below the rows, and the keys have to clear it --
-        # a footer drawn under an open list reads as part of the options.
-        bottom = max(bottom, draw_choice(screen, font_at, panel, rows))
-
-    keys = (
-        "up/down choose   A pick   B back"
-        if panel.choice is not None
-        else "A open the list   left/right nudge   B or Esc back"
-    )
-    footer = font_at(22).render(keys, True, TEXT_DIM)
-    screen.blit(footer, ((width - footer.get_width()) // 2, bottom + 20))
-
-
-# How many options are on screen at once. A dozen platforms would run off the
-# bottom of a Deck, so the list scrolls around the cursor instead.
-CHOICE_WINDOW = 7
-
-
-def draw_choice(screen, font_at, panel, rows) -> int:
-    """The open dropdown, over the row it belongs to. Returns its bottom."""
-    choice = panel.choice
-    rx, ry, rw, rh = rows[panel.index]
-    row_h = font_at(24).get_height() + 10
-
-    # Scrolled so the cursor is in the middle, except at the ends, where
-    # sliding past the last entry would show empty space instead of options.
-    total = len(choice.options)
-    shown = min(CHOICE_WINDOW, total)
-    first = max(0, min(choice.index - shown // 2, total - shown))
-
-    counter = font_at(18)
-    # Room for "7 of 12" under the last option rather than across it.
-    footer_h = counter.get_height() + 6 if total > shown else 0
-    list_w = max(220, rw // 2)
-    list_x = rx + rw - list_w
-    list_y = ry + rh - 6
-    list_h = row_h * shown + 8 + footer_h
-    # Upwards when there is no room screen, which there is not for the last row.
-    if list_y + list_h > screen.get_height():
-        list_y = ry - list_h + 6
-
-    pygame.draw.rect(screen, PANEL, (list_x, list_y, list_w, list_h), border_radius=8)
-    pygame.draw.rect(screen, TEXT_DIM, (list_x, list_y, list_w, list_h), width=1, border_radius=8)
-
-    for offset in range(shown):
-        index = first + offset
-        y = list_y + 4 + offset * row_h
-        if index == choice.index:
-            pygame.draw.rect(screen, TILE_SELECTED, (list_x + 4, y, list_w - 8, row_h - 2), border_radius=6)
-        colour = TEXT if index == choice.index else TEXT_DIM
-        text = font_at(24).render(choice.options[index], True, colour)
-        screen.blit(text, (list_x + 16, y + (row_h - 2 - text.get_height()) // 2))
-
-    # Said, rather than left to be guessed at from a list that stops.
-    if footer_h:
-        more = counter.render(f"{choice.index + 1} of {total}", True, TEXT_DIM)
-        screen.blit(more, (list_x + list_w - more.get_width() - 12, list_y + list_h - more.get_height() - 4))
-    return list_y + list_h
-
-
-def draw_storage(screen, font_at, storage: Storage, typing: str | None) -> None:
-    """The storage screen: every games directory, the device's room, the way out."""
-    width, height = screen.get_size()
-    screen.fill(BACKGROUND)
-    margin = height // 16
-    screen.blit(font_at(30).render("Storage — where games are kept", True, TEXT), (margin, margin))
-
-    y = margin + font_at(30).get_height() + margin // 2
-    row_h = font_at(22).get_height() + 16
-    if not storage.rows:
-        empty = font_at(22).render("no games directory known — could not ask the client", True, TEXT_DIM)
-        screen.blit(empty, (margin, y))
-    for index, row in enumerate(storage.rows):
-        selected = index == storage.selected
-        if selected:
-            band = (margin - 8, y - 4, width - 2 * margin + 16, row_h)
-            pygame.draw.rect(screen, TILE_SELECTED, band, border_radius=6)
-        mark = "downloads land here" if row.get("default") else ""
-        if not row.get("exists", True):
-            room = "missing"
-        else:
-            room = f"{human(int(row.get('free_bytes', 0)))} free of {human(int(row.get('total_bytes', 0)))}"
-        path = font_at(22).render(str(row["path"])[:90], True, TEXT if selected else TEXT_DIM)
-        screen.blit(path, (margin, y + 4))
-        note = font_at(18).render(f"{room}    {mark}", True, TEXT if selected else TEXT_DIM)
-        screen.blit(note, (width - margin - note.get_width(), y + 8))
-        y += row_h
-
-    if typing is not None:
-        prompt = font_at(22).render(f"add a directory: {typing}_", True, TEXT)
-        screen.blit(prompt, (margin, y + row_h))
-    if storage.message:
-        note = font_at(18).render(storage.message[:160], True, TEXT)
-        screen.blit(note, (margin, height - margin * 2 - note.get_height()))
-    hint = (
-        "A / Enter — downloads go here   ·   Y / + — add a directory   ·   X / Delete — forget   ·   B / Escape — back"
-    )
-    label = font_at(18).render(hint, True, TEXT_DIM)
-    screen.blit(label, (margin, height - margin - label.get_height()))
-
-
-def draw_saves_choice(screen, font_at, choice: Choice | None, title: str) -> None:
-    """Two saves side by side: which machine each is on, and when it changed.
-
-    None is the moment before there is anything to choose -- the client is
-    still bundling and asking -- and says so rather than showing the grid.
-    """
-    width, height = screen.get_size()
-    screen.fill(BACKGROUND)
-    margin = height // 16
-    if choice is None:
-        said = font_at(30).render(f"Checking the saves for {title[:60]}…", True, TEXT)
-        screen.blit(said, ((width - said.get_width()) // 2, height // 2 - said.get_height()))
-        hint = font_at(18).render("B / Escape — back", True, TEXT_DIM)
-        screen.blit(hint, (margin, height - margin - hint.get_height()))
-        return
-    heading = font_at(34).render(f"Two different saves for {choice.game.title[:50]}", True, TEXT)
-    screen.blit(heading, ((width - heading.get_width()) // 2, margin))
-    lede = font_at(20).render(
-        "Both were played since they last matched. Keep one — the other is kept aside, not deleted.", True, TEXT_DIM
-    )
-    screen.blit(lede, ((width - lede.get_width()) // 2, margin + heading.get_height() + 12))
-
-    remote = choice.check.remote
-    cards = (
-        (HERE, "This machine", choice.check.here.device, choice.check.here.updated),
-        (REMOTE, "Saved on the service", remote.device if remote else "", remote.updated if remote else ""),
-    )
-    gap = width // 24
-    card_w = (width - 2 * margin - gap) // 2
-    card_h = height // 3
-    top = height // 2 - card_h // 2
-    for index, (side, label, device, updated) in enumerate(cards):
-        lit = choice.selected == side
-        left = margin + index * (card_w + gap)
-        box = pygame.Rect(left, top, card_w, card_h)
-        pygame.draw.rect(screen, TILE_SELECTED if lit else TILE, box, border_radius=12)
-        y = top + card_h // 8
-        for text, size, colour in (
-            (label, 22, TEXT_DIM if not lit else TEXT),
-            (device or "an unnamed machine", 36, TEXT),
-            (f"updated {saves_when(updated)}", 24, TEXT if lit else TEXT_DIM),
-        ):
-            line = font_at(size).render(text[:48], True, colour)
-            screen.blit(line, (left + (card_w - line.get_width()) // 2, y))
-            y += line.get_height() + card_h // 10
-    keys = "Left / Right — choose   ·   A / Enter — keep this one   ·   B / Escape — back"
-    hint = font_at(18).render(keys, True, TEXT_DIM)
-    screen.blit(hint, (margin, height - margin - hint.get_height()))
-
-
-def _draw_progress_bar(screen, font_at, y: int, margin: int, fraction: float | None, figures: str, what: str) -> int:
-    """One bar with its figures under it; returns where the next thing goes."""
-    width, height = screen.get_size()
-    bar_h = max(10, height // 45)
-    bar = pygame.Rect(margin, y, width - 2 * margin, bar_h)
-    pygame.draw.rect(screen, TILE, bar, border_radius=bar_h // 2)
-    if fraction is None:
-        # Size unknown: a short segment sweeping back and forth, so the
-        # bar still says "moving" rather than "stuck at zero".
-        sweep = (pygame.time.get_ticks() // 8) % (2 * (bar.width - bar.width // 5))
-        if sweep > bar.width - bar.width // 5:
-            sweep = 2 * (bar.width - bar.width // 5) - sweep
-        fill = pygame.Rect(bar.x + sweep, bar.y, bar.width // 5, bar_h)
-    else:
-        fill = pygame.Rect(bar.x, bar.y, max(bar_h, int(bar.width * fraction)), bar_h)
-    pygame.draw.rect(screen, TILE_SELECTED, fill, border_radius=bar_h // 2)
-    y += bar_h + 8
-    text = font_at(20).render(figures, True, TEXT)
-    screen.blit(text, (margin, y))
-    detail = font_at(16).render(what[:120], True, TEXT_DIM)
-    screen.blit(detail, (width - margin - detail.get_width(), y + 2))
-    return y + text.get_height() + margin // 2
-
-
-def draw_prepare(
-    screen,
-    font_at,
-    game: Game | None,
-    lines: list[str],
-    failed: bool,
-    progress: prepare.Progress | None = None,
-    elapsed: float = 0.0,
-    stage: prepare.Stage | None = None,
-) -> None:
-    """The loader screen: heading, a bar while a download runs, `gotg install`'s
-    output verbatim, the way out.
-
-    Verbatim so a build failure reads on the TV, not only in a log file. The
-    bar and the running clock are there because a 30 GB download and a
-    first emulator build are minutes of a screen that otherwise looks frozen.
-    """
-    width, height = screen.get_size()
-    screen.fill(BACKGROUND)
-    margin = height // 16
-
-    if game is None:
-        # `gotg update self`: GOTG itself, the roots Steam starts, and then a
-        # restart into the new picker; the client's lines say what became
-        # of the library when it fails.
-        if failed:
-            heading = "could not update GOTG"
-            hint = "B / Escape — back to the grid   ·   full log: gotg update self"
-            colour = (224, 96, 96)
-        else:
-            heading = "updating GOTG — the picker restarts when it is done"
-            hint = "B / Escape — cancel; the library stays as it was"
-            colour = TEXT
-    elif failed:
-        heading = f"could not prepare {game.title[:80]}"
-        hint = "B / Escape — back to the grid   ·   full log: gotg install " + f"{game.platform}/{game.id}"
-        colour = (224, 96, 96)
-    else:
-        heading = f"preparing {game.title[:80]} — a first launch builds its emulator"
-        hint = "B / Escape — cancel and go back"
-        colour = TEXT
-
-    screen.blit(font_at(30).render(heading, True, colour), (margin, margin))
-    if not failed:
-        # The clock, at the right of the heading: the one thing that moves
-        # through a build that prints nothing for a minute.
-        clock = font_at(20).render(prepare.elapsed_text(elapsed), True, TEXT_DIM)
-        screen.blit(clock, (width - margin - clock.get_width(), margin + 6))
-
-    y = margin + font_at(30).get_height() + margin // 2
-    # The download and the emulator's build run at once, so each has a bar:
-    # what nix is doing first, since it is the one that used to say nothing.
-    for shown in (stage, progress):
-        if shown is not None and not failed:
-            y = _draw_progress_bar(screen, font_at, y, margin, shown.fraction, shown.describe(), shown.what)
-    line_font = font_at(16)
-    for line in lines:
-        if y > height - margin * 2:
-            break
-        screen.blit(line_font.render(line[:180], True, TEXT_DIM), (margin, y))
-        y += line_font.get_height() + 2
-
-    label = font_at(18).render(hint, True, TEXT_DIM)
-    screen.blit(label, (margin, height - margin - label.get_height()))
-
-
 # intents.py writes SDL's keycodes down so that it needs no pygame; this is
 # where the two are made to agree, as pads.py does for the button numbering.
 assert intents.Key.ESCAPE == pygame.K_ESCAPE and intents.Key.B == pygame.K_b
 assert intents.Key.RETURN == pygame.K_RETURN and intents.Key.KP_ENTER == pygame.K_KP_ENTER
-assert intents.Key.SPACE == pygame.K_SPACE
+assert intents.Key.SPACE == pygame.K_SPACE and intents.Key.BACKSPACE == pygame.K_BACKSPACE
 assert intents.Key.UP == pygame.K_UP and intents.Key.DOWN == pygame.K_DOWN
 assert intents.Key.LEFT == pygame.K_LEFT and intents.Key.RIGHT == pygame.K_RIGHT
 
@@ -830,98 +161,75 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
     # Asked once, up front, and again only after an uninstall: the answer is
     # a walk of the whole catalog against the disk, not a per-frame question.
     browser = Browser(library, installed=installed_games())
+
     # What is out of date, from the client's cache -- asked on a worker, as
     # every later refresh is: the answer is two subprocesses, a quarter of a
     # second on a desk and more on a Deck, which is frames the grid would
     # otherwise drop (CLAUDE.md's budget is 16.7 ms). The first answer lands
     # a moment after the first frame; and once the client has answered (so
     # it knows the question), the check that refreshes its cache runs
-    # behind the grid.
-    report: updates.Report | None = None
-    badge_asker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="badges")
-    badges: Future | None = badge_asker.submit(lambda: (installed_games(), updates.ask()))
+    # behind the grid. See badges.py.
+    learned = Badges()
+    asker = Asker()
+    asker.refresh()
     update_check: updates.Check | None = None
-    check_started = False
     # The chip: what the report says, or the loop's own word for a while
-    # after a press (updates.chip). `chip_rect` is where it was drawn, for a
-    # click; `chip_until` when a transient word gives way to the report's.
-    chip_phase: str | None = None
-    chip_until = 0.0
-    chip_rect = None
+    # after a press (chip.py). It also remembers where it was drawn, for a click.
+    chip = ChipState()
     restart: Restart | None = None
 
-    def refresh_badges() -> None:
-        """Ask again what is here and what is out of date, off the loop; the
-        answer is applied when it lands (below)."""
-        nonlocal badges
-        badges = badge_asker.submit(lambda: (installed_games(), updates.ask()))
-
     def apply_badges() -> None:
-        nonlocal badges, report, update_check, check_started
-        if badges is None or not badges.done():
+        nonlocal learned, update_check
+        answer = asker.poll()
+        if answer is None:
             return
-        try:
-            here, said = badges.result()
-        except Exception as error:  # noqa: BLE001 - a badge must never stop the grid
-            trace.say("badges-failed", why=str(error))
-            badges = None
-            return
-        badges = None
-        report = said
-        browser.set_installed(here)
-        browser.set_outdated(updates.outdated(report, browser.installed))
-        if not check_started and report is not None:
-            check_started = True
-            update_check = updates.Check.start_after(report)
+        landed = land(learned, *answer)
+        learned = landed.badges
+        browser.set_installed(landed.installed)
+        browser.set_outdated(landed.outdated)
+        if landed.start_check:
+            update_check = updates.Check.start_after(learned.report)
 
-    def say_chip(phase: str | None, seconds: float = 6.0) -> None:
-        nonlocal chip_phase, chip_until
-        chip_phase = phase
-        chip_until = time.monotonic() + seconds
+    def say_chip(phase: str | None) -> None:
+        nonlocal chip
+        chip = chip.say(phase, time.monotonic())
 
     def self_update() -> None:
-        """The chip pressed: restart into a newer picker already at the root,
-        or `gotg update self` through the loader -- unless something else is
-        running, since two writers of the library's lock would queue and a
-        person would see neither."""
+        """The chip pressed (plans.plan_self_update says what that means)."""
         nonlocal preparer, after_prepare, prepare_failed
-        if chip_phase == "updating" and time.monotonic() < chip_until:
-            return
-        # The report's word, not the transient one: "failed" ten seconds ago
-        # is no reason to refuse the second press.
-        words = updates.chip(report, updates.self_root())
-        if words not in (updates.RESTART_TO_UPDATE, updates.UPDATE_AVAILABLE):
-            return
-        if installs.keys or preparer is not None:
-            say_chip("busy")
-            return
-        if words == updates.RESTART_TO_UPDATE and report is not None and report.picker:
-            finish_restart(report.picker)
-            return
-        trace.say("self-update")
-        preparer = Preparer(None, ["update", "self"])
-        after_prepare = "self-update"
-        prepare_failed = False
-        say_chip("updating", 3600.0)
+        plan = plans.plan_self_update(
+            learned.report,
+            updates.self_root(),
+            chip=chip,
+            now=time.monotonic(),
+            busy=bool(installs.keys) or preparer is not None,
+        )
+        if plan.action == plans.SAY:
+            say_chip(plan.chip)
+        elif plan.action == plans.RESTART:
+            finish_restart(plan.root)
+        elif plan.action == plans.UPDATING:
+            trace.say("self-update")
+            preparer = Preparer(None, ["update", "self"])
+            after_prepare = "self-update"
+            prepare_failed = False
+            say_chip(plan.chip)
 
     def finish_restart(root: str) -> None:
-        """The new picker is at `root`: become it, keeping the pid the daemon
-        follows. Nothing to restart into when this picker already is that
-        root, or when it is the dev shell's checkout (no GOTG_UI_SELF): then
-        Steam's copy is current and the chip says which for a while."""
+        """The new picker is at `root`: become it (plans.plan_restart)."""
         nonlocal restart, running
-        mine = updates.self_root()
-        if mine is None or os.path.normpath(root) == os.path.normpath(mine):
-            say_chip("up-to-date" if mine is not None else "updated-here", 10.0)
-            refresh_badges()
-            return
-        if not usable(root):
+        plan = plans.plan_restart(root, updates.self_root(), usable)
+        if plan.action == plans.NOOP:
+            say_chip(plan.chip)
+            asker.refresh()
+        elif plan.action == plans.REFUSE:
             trace.say("restart-refused", root=root)
-            say_chip("failed", 10.0)
-            return
-        trace.say("restart", root=root)
-        restart = Restart(root)
-        running = False
+            say_chip(plan.chip)
+        else:
+            trace.say("restart", root=root)
+            restart = Restart(root)
+            running = False
+
     if installed_only:
         browser.toggle_installed()
     store = ArtStore()
@@ -1058,58 +366,432 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
         )
 
     def pick(game: Game | None, verb: str = "play", variant: str | None = None, version: str | None = None) -> None:
-        nonlocal chosen, running, preparer, after_prepare, storage, saves, listing
-        if game is None:
-            return
-        if verb == "saves":
+        """A verb chosen in a game's menu: plans.plan_pick says what it means,
+        this carries it out."""
+        nonlocal preparer, after_prepare, storage, saves, listing
+        plan = plans.plan_pick(
+            game,
+            verb,
+            variant,
+            version,
+            installing=game is not None and installs.running(game.key),
+            ready=lambda: is_ready(game, variant),
+        )
+        if plan.sets_after:
+            after_prepare = plan.after
+        if plan.action == plans.OPEN_SAVES:
             saves = Saves.open(game, variant, version)
             listing = saves_asker.submit(fetch_saves, game, variant)
-            return
-        if verb == "storage":
+        elif plan.action == plans.OPEN_STORAGE:
             storage = Storage()
             storage.refresh()
-            return
-        if verb == "steam-add":
-            # Not an exec: the shortcut is written, the grid comes back. A mod
-            # gets its own Steam entry, which is what the client does with a
-            # variant anyway — its own launcher, its own artwork.
-            preparer = Preparer(game, ["steam", "add"], variant, version)
-            after_prepare = None
-            return
-        if verb == "install":
-            # Behind the grid, as a ring on the tile: the badge fills in when
-            # it lands, and the grid stays usable meanwhile. Per variant,
-            # like play -- a mod is its own environment, and installing it
-            # here is what makes its Play instant later.
-            installs.start(game, variant, version)
-            return
-        if verb == "cancel-install":
-            installs.cancel(game.key)
-            return
-        if verb == "update":
+        elif plan.action == plans.PREPARE:
+            args = list(plan.args) if plan.args is not None else None
+            preparer = Preparer(game, args, plan.variant, plan.version)
+        elif plan.action == plans.INSTALL:
+            installs.start(game, plan.variant, plan.version)
+        elif plan.action == plans.UPDATE:
             installs.start(game, verb="update")
-            return
-        if verb == "uninstall":
-            # Through the loader like steam-add, so what was removed is read
-            # rather than guessed; then the badges are asked for again.
-            # No variant: `gotg uninstall` takes the game's bytes and every
-            # launcher with them, mods included. Passing one would read as
-            # "remove just this mod", which is not what would happen.
-            preparer = Preparer(game, ["uninstall"])
-            after_prepare = "uninstall"
-            return
-        after_prepare = verb
-        # A game already on its way: the loader adopts that install rather
-        # than starting a second one to queue behind the client's lock.
-        if verb == "play" and installs.running(game.key):
+        elif plan.action == plans.CANCEL_INSTALL:
+            installs.cancel(game.key)
+        elif plan.action == plans.ADOPT:
             preparer = installs.take(game.key)
-            return
-        # Readiness is per variant: a mod is its own environment, and the one
-        # built for the plain game says nothing about whether this one is.
-        if is_ready(game, variant):
+        elif plan.action == plans.START:
             start(game, verb, variant, version)
+
+    # -- the screens that own input, one handler each ---------------------------------------------
+    #
+    # `screen_of` says which owns it (screens.py); the handlers below are the
+    # branches the event loop used to carry inline, in the same order.
+
+    def current_screen() -> Screen:
+        return screen_of(
+            preparing=preparer is not None,
+            saves_check=checking is not None or choice is not None,
+            saves=saves is not None,
+            storage=storage is not None,
+            menu=menu is not None,
+            panel=panel is not None,
+            typing=typing is not None,
+        )
+
+    def on_prepare(event) -> None:
+        # On the loader, the only input is the way out. Everything else
+        # would be the grid moving invisibly behind the build.
+        nonlocal preparer, prepare_failed
+        if _intent(event) == BACK:
+            if not prepare_failed:
+                preparer.cancel()
+            preparer = None
+            prepare_failed = False
+
+    def on_saves_check(event) -> None:
+        # Checking the saves, or choosing between two: A, B and a direction,
+        # nothing else.
+        nonlocal checking, choice, starting, preparer, after_prepare
+        said = _intent(event)
+        if said == BACK:
+            checking, choice, starting = None, None, None
+            return
+        if choice is None:
+            return
+        if said.dx:
+            choice = choice.move(said.dx)
+        elif said.confirms():
+            # Through the loader, which shows what the client says as it
+            # pulls or pushes; the game starts when it is done.
+            preparer = Preparer(choice.game, ["saves", "keep", choice.selected], choice.variant)
+            after_prepare = "kept"
+            choice = None
+
+    def on_saves(event) -> None:
+        # The Saves screen: up and down, A twice to load, B to step back.
+        nonlocal saves, listing, restoring, preparer, after_prepare
+        said = _intent(event)
+        if said == BACK:
+            saves = saves.press_b()
+            if saves is None:
+                listing = None
+            return
+        if said.dy:
+            saves = saves.move(said.dy)
+        elif said.confirms():
+            saves, entry = saves.press_a()
+            if entry is not None:
+                # Through the loader, which shows the client archiving and
+                # restoring; the game starts after. No version: `restore`
+                # takes none, and the play that follows gets it from
+                # `restoring`.
+                restoring = (saves.game, saves.variant, saves.version)
+                preparer = Preparer(saves.game, ["saves", "restore", entry.id], saves.variant)
+                after_prepare = "restored"
+                saves, listing = None, None
+
+    def on_storage(event) -> None:
+        # The storage screen owns its input: a list to walk, three verbs, and
+        # a path typed to add -- every key is text then.
+        nonlocal storage, storage_typing
+        if storage_typing is not None:
+            if event.type != pygame.KEYDOWN:
+                return
+            text, outcome = edit(storage_typing, event.key, event.unicode)
+            if outcome == CANCEL:
+                storage_typing = None
+            elif outcome == COMMIT:
+                storage.add(text)
+                storage_typing = None
+            elif outcome == EDITED:
+                storage_typing = text
+            return
+        said = _intent(event)
+        if said == BACK:
+            storage = None
+        elif said.dy:
+            storage.move(said.dy)
+        elif said.confirms():
+            storage.make_default()
+        elif event.type == pygame.KEYDOWN:
+            if event.key in (pygame.K_DELETE, pygame.K_x):
+                storage.remove()
+            elif event.key in (pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_EQUALS, pygame.K_y):
+                storage_typing = ""
         else:
-            preparer = Preparer(game, None, variant, version)
+            pressed = pads.button(event)
+            if pressed == pads.X:
+                storage.remove()
+            elif pressed == pads.Y:
+                # A Deck raises the Steam keyboard over this.
+                storage_typing = ""
+
+    def confirm_menu() -> None:
+        nonlocal menu
+        verb = menu.confirm()
+        if verb is not None:
+            picked, menu = menu, None
+            pick(picked.game, verb, picked.variant, picked.version)
+
+    def menu_rows_at(pos) -> list[int]:
+        rows = menu_rects(menu, view_rects(browser, screen.get_size()), font_at, screen.get_size())
+        return [i for i, (rx, ry, rw, rh) in enumerate(rows) if rx <= pos[0] < rx + rw and ry <= pos[1] < ry + rh]
+
+    def on_menu(event) -> None:
+        # While the menu is open it owns the input: the grid must not move
+        # invisibly underneath the panel.
+        nonlocal menu
+        said = _intent(event)
+        if said == BACK:
+            # Out of the variants first, then out of the menu: one button, one
+            # step at a time.
+            if menu.expanded:
+                menu.close_list()
+            else:
+                menu = None
+        elif said.dy:
+            menu.move(said.dy)
+        elif said.confirms(space=True):
+            confirm_menu()
+        elif event.type == pygame.MOUSEMOTION:
+            for i in menu_rows_at(event.pos):
+                menu.select(i)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            hits = menu_rows_at(event.pos)
+            if not hits:
+                menu = None  # a click that misses the panel closes it
+            elif menu.select(hits[-1]):
+                confirm_menu()
+
+    def on_panel(event) -> None:
+        # The filter panel, while it is up. Before the typing screen so that
+        # opening the keyboard from it still works, and before the grid so the
+        # cursor does not move behind it. An open list owns up, down, A and B;
+        # the panel underneath owns them when there is none. One step back per
+        # press of B: the list first, then the panel.
+        nonlocal panel, typing, typing_from
+        said = _intent(event)
+        if said == BACK:
+            if panel.open:
+                panel.close()
+            else:
+                panel = None
+        elif said.kind == "move":
+            if said.dy:
+                if panel.open:
+                    panel.choice.move(said.dy)
+                else:
+                    panel.move(said.dy)
+            if said.dx and not panel.open:
+                panel.adjust(browser, said.dx)
+        elif said.confirms(space=True):
+            if panel.open:
+                panel.choose(browser)
+            elif panel.press(browser) == filters.TYPING:
+                typing = typing_from = browser.search
+        elif pads.button(event) == pads.START:
+            # Start closes it the way Start opened it.
+            panel = None
+
+    def on_typing(event) -> None:
+        # While typing, every key is text. Nothing else runs, or the letters
+        # of a search would also be moving the cursor.
+        nonlocal typing
+        if event.type != pygame.KEYDOWN:
+            return
+        text, outcome = edit(typing, event.key, event.unicode)
+        if outcome == CANCEL:
+            # Cancelled: the grid goes back to the search it had.
+            browser.set_search(typing_from)
+            typing = None
+        elif outcome == COMMIT:
+            browser.set_search(typing)
+            typing = None
+        elif outcome == EDITED:
+            typing = text
+            # Applied as it is typed: the grid narrowing under the letters is
+            # the feedback that the letters went in.
+            browser.set_search(text)
+
+    def on_grid_key(event) -> None:
+        nonlocal running, typing, typing_from, panel, storage, menu
+        if event.key in (pygame.K_ESCAPE, pygame.K_q):
+            running = False
+        elif event.key in (pygame.K_SLASH, pygame.K_f):
+            typing = typing_from = browser.search
+        elif event.key == pygame.K_TAB:
+            # The panel, which is every filter in one place and both
+            # directions on each. It used to cycle platforms forwards and,
+            # with shift, regions -- a controller could reach the first and not
+            # the second.
+            panel = Filters()
+        elif event.key == pygame.K_LEFT:
+            state.move(-1, 0)
+        elif event.key == pygame.K_RIGHT:
+            state.move(1, 0)
+        elif event.key == pygame.K_UP:
+            state.move(0, -1)
+        elif event.key == pygame.K_DOWN:
+            state.move(0, 1)
+        elif event.key == pygame.K_PAGEDOWN:
+            state.turn(1)
+        elif event.key == pygame.K_PAGEUP:
+            state.turn(-1)
+        elif event.key == pygame.K_SPACE:
+            space.down(time.monotonic())
+        elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            if state.game is not None:
+                menu = menu_for(state.game)
+        elif event.key == pygame.K_i:
+            browser.toggle_installed()
+        elif event.key == pygame.K_s:
+            storage = Storage()
+            storage.refresh()
+
+    def on_grid_press(pressed: str) -> None:
+        # By name, not by index (screens.grid_press).
+        nonlocal running, typing, typing_from, panel, menu
+        action = grid_press(pressed)
+        if action == "menu":
+            if state.game is not None:
+                menu = menu_for(state.game)
+        elif action == "quit":
+            running = False
+        elif action == "page-back":
+            state.turn(-1)
+        elif action == "page-forward":
+            state.turn(1)
+        elif action == "platform":
+            browser.cycle_platform(1)
+        elif action == "search":
+            typing = typing_from = browser.search
+        elif action == "panel":
+            panel = Filters()
+        elif action == "update":
+            self_update()
+
+    def on_grid(event) -> None:
+        nonlocal menu
+        if event.type == pygame.KEYDOWN:
+            on_grid_key(event)
+        elif event.type == pygame.MOUSEMOTION:
+            # Hover moves the cursor, so the pointer and the stick drive one
+            # selection rather than two competing highlights. A gap leaves it
+            # where it was.
+            over = hovering(browser, event.pos, screen.get_size())
+            if over is not None:
+                if over != state.selected:
+                    trace.say("hover", tile=over, was=state.selected, pos=list(event.pos))
+                state.select(over)
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1 and chip.hit(event.pos):
+                self_update()
+            elif event.button == 1:
+                over = hovering(browser, event.pos, screen.get_size())
+                # Only ever the tile actually under the pointer: hover has
+                # already put the cursor there, so this cannot launch
+                # something the click was not on.
+                if over is not None and state.select(over):
+                    menu = menu_for(state.game)
+            # No button 4/5 here: SDL2 reports a wheel as MOUSEWHEEL *and* as
+            # those two for compatibility, so handling both turns the page
+            # twice for one scroll.
+        elif event.type == pygame.KEYUP and event.key == pygame.K_SPACE:
+            # A tap is the menu, as space always was; a hold that finished has
+            # already seated the keyboard and this is just the key coming back
+            # up.
+            if space.up(time.monotonic()) and state.game is not None:
+                menu = menu_for(state.game)
+        elif event.type == pygame.MOUSEWHEEL:
+            browser.grid.turn(-1 if event.y > 0 else 1)
+        else:
+            step = pads.direction(event)
+            if step is not None:
+                state.move(*step)
+            else:
+                pressed = pads.button(event)
+                if pressed is not None:
+                    on_grid_press(pressed)
+
+    handlers = {
+        Screen.PREPARE: on_prepare,
+        Screen.SAVES_CHECK: on_saves_check,
+        Screen.SAVES: on_saves,
+        Screen.STORAGE: on_storage,
+        Screen.MENU: on_menu,
+        Screen.PANEL: on_panel,
+        Screen.PANEL_TYPING: on_typing,
+        Screen.TYPING: on_typing,
+        Screen.GRID: on_grid,
+    }
+
+    # -- and one painter each, chosen by the same answer ------------------------------------------
+
+    def grid_view() -> GridView:
+        words = chip.words(learned.report, updates.self_root(), time.monotonic())
+        return GridView(state, art, browser.status, browser.installed, installs.rings(), browser.outdated, words)
+
+    def paint_prepare() -> None:
+        draw_prepare(
+            screen, font_at, preparer.game, preparer.tail(28), prepare_failed,
+            progress=preparer.progress if preparer.running else None,
+            stage=preparer.stage if preparer.running else None,
+            elapsed=preparer.elapsed,
+        )
+
+    def paint_saves_check() -> None:
+        draw_saves_choice(screen, font_at, choice, starting[0].title if starting else "")
+
+    def paint_saves() -> None:
+        draw_saves(screen, font_at, saves)
+
+    def paint_storage() -> None:
+        draw_storage(screen, font_at, storage, storage_typing)
+
+    def paint_panel() -> None:
+        # The grid behind it, so changing a filter is visibly changing the
+        # thing underneath rather than a number on a form.
+        nonlocal chip
+        view = grid_view()
+        chip = chip.drawn(draw_shelf(screen, font_at, view) if browser.view == SHELF else draw(screen, font_at, view))
+        draw_filters(screen, font_at, browser, panel, typing)
+
+    def paint_grid() -> None:
+        nonlocal chip
+        # Whatever the workers finished since the last frame stops being a
+        # placeholder now. Only the page on screen is ever asked for.
+        for game in loader.done():
+            art.pop(game.key, None)
+            shown.pace.busy(time.monotonic())
+        if decoder.arrived():
+            shown.pace.busy(time.monotonic())
+        for game in state.page:
+            surface_for(game)
+        view = grid_view()
+        if browser.view == SHELF and typing is None:
+            # The menu is drawn over the list rather than swapping the screen
+            # back to the grid underneath it, which is what happened before and
+            # moved every game on screen.
+            chip = chip.drawn(draw_shelf(screen, font_at, view))
+        else:
+            # Typing still belongs to the grid: the search box is drawn there,
+            # and a shelf with its own copy would be two to keep in step.
+            chip = chip.drawn(draw(screen, font_at, view, typing, menu))
+        if menu is not None:
+            draw_menu(screen, menu, view_rects(browser, screen.get_size()), font_at)
+
+    painters = {
+        Screen.PREPARE: paint_prepare,
+        Screen.SAVES_CHECK: paint_saves_check,
+        Screen.SAVES: paint_saves,
+        Screen.STORAGE: paint_storage,
+        Screen.PANEL: paint_panel,
+        Screen.PANEL_TYPING: paint_panel,
+        Screen.MENU: paint_grid,
+        Screen.TYPING: paint_grid,
+        Screen.GRID: paint_grid,
+    }
+
+    def apply_prepare_done(done: plans.PrepareDone) -> None:
+        """Carry out what a finished loader leaves to do (plans.on_prepare_done)."""
+        nonlocal preparer, prepare_failed, after_prepare, restoring, chosen, running
+        if done.failed:
+            prepare_failed = True
+        if done.clear:
+            preparer = None
+        if done.clear_after:
+            after_prepare = None
+        if done.clear_restoring:
+            restoring = None
+        if done.refresh:
+            asker.refresh()
+        if done.forget_versions:
+            forget_versions()
+        if done.restart_root:
+            finish_restart(done.restart_root)
+        if done.chip:
+            say_chip(done.chip)
+        if done.begin is not None:
+            start(*done.begin)
+        if done.launch is not None:
+            chosen, running = done.launch, False
 
     # Everything built so far -- the library of nine thousand games, the
     # config, the caches -- lives until the picker exits, and the collector
@@ -1179,291 +861,16 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
                         trace.say("key-refused", key=getattr(event, "key", None))
                         continue
 
-                # On the loader, the only input is the way out. Everything else
-                # would be the grid moving invisibly behind the build.
-                if preparer is not None:
-                    if _intent(event) == BACK:
-                        if not prepare_failed:
-                            preparer.cancel()
-                        preparer = None
-                        prepare_failed = False
-                    continue
-
-                # Checking the saves, or choosing between two: A, B and a
-                # direction, nothing else.
-                if checking is not None or choice is not None:
-                    heard = _intent(event)
-                    if heard == BACK:
-                        checking, choice, starting = None, None, None
-                        continue
-                    if choice is None:
-                        continue
-                    if heard.dx:
-                        choice = choice.move(heard.dx)
-                    elif heard.confirms():
-                        # Through the loader, which shows what the client says
-                        # as it pulls or pushes; the game starts when it is done.
-                        preparer = Preparer(choice.game, ["saves", "keep", choice.selected], choice.variant)
-                        after_prepare = "kept"
-                        choice = None
-                    continue
-
-                # The Saves screen: up and down, A twice to load, B to step back.
-                if saves is not None:
-                    heard = _intent(event)
-                    if heard == BACK:
-                        saves = saves.press_b()
-                        if saves is None:
-                            listing = None
-                        continue
-                    if heard.dy:
-                        saves = saves.move(heard.dy)
-                    elif heard.confirms():
-                        saves, entry = saves.press_a()
-                        if entry is not None:
-                            # Through the loader, which shows the client
-                            # archiving and restoring; the game starts after.
-                            # No version: `restore` takes none, and the play
-                            # that follows gets it from `restoring`.
-                            restoring = (saves.game, saves.variant, saves.version)
-                            preparer = Preparer(saves.game, ["saves", "restore", entry.id], saves.variant)
-                            after_prepare = "restored"
-                            saves, listing = None, None
-                    continue
-
-                # The storage screen owns its input: a list to walk, three
-                # verbs, and a path typed to add — every key is text then.
-                if storage is not None:
-                    if storage_typing is not None:
-                        if event.type != pygame.KEYDOWN:
-                            continue
-                        if event.key == pygame.K_ESCAPE:
-                            storage_typing = None
-                        elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-                            storage.add(storage_typing)
-                            storage_typing = None
-                        elif event.key == pygame.K_BACKSPACE:
-                            storage_typing = storage_typing[:-1]
-                        elif event.unicode and event.unicode.isprintable():
-                            storage_typing += event.unicode
-                        continue
-                    heard = _intent(event)
-                    if heard == BACK:
-                        storage = None
-                    elif heard.dy:
-                        storage.move(heard.dy)
-                    elif heard.confirms():
-                        storage.make_default()
-                    elif event.type == pygame.KEYDOWN:
-                        if event.key in (pygame.K_DELETE, pygame.K_x):
-                            storage.remove()
-                        elif event.key in (pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_EQUALS, pygame.K_y):
-                            storage_typing = ""
-                    else:
-                        pressed = pads.button(event)
-                        if pressed == pads.X:
-                            storage.remove()
-                        elif pressed == pads.Y:
-                            # A Deck raises the Steam keyboard over this.
-                            storage_typing = ""
-                    continue
-
-                # While the menu is open it owns the input: the grid must
-                # not move invisibly underneath the panel.
-                if menu is not None:
-                    heard = _intent(event)
-                    if heard == BACK:
-                        # Out of the variants first, then out of the menu: one
-                        # button, one step at a time.
-                        if menu.expanded:
-                            menu.close_list()
-                        else:
-                            menu = None
-                    elif heard.dy:
-                        menu.move(heard.dy)
-                    elif heard.confirms(space=True):
-                        verb = menu.confirm()
-                        if verb is not None:
-                            picked, menu = menu, None
-                            pick(picked.game, verb, picked.variant, picked.version)
-                    elif event.type == pygame.MOUSEMOTION:
-                        rows = menu_rects(
-                            menu, view_rects(browser, screen.get_size()), font_at, screen.get_size()
-                        )
-                        for i, (rx, ry, rw, rh) in enumerate(rows):
-                            if rx <= event.pos[0] < rx + rw and ry <= event.pos[1] < ry + rh:
-                                menu.select(i)
-                    elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                        rows = menu_rects(
-                            menu, view_rects(browser, screen.get_size()), font_at, screen.get_size()
-                        )
-                        hit = None
-                        for i, (rx, ry, rw, rh) in enumerate(rows):
-                            if rx <= event.pos[0] < rx + rw and ry <= event.pos[1] < ry + rh:
-                                hit = i
-                        if hit is None:
-                            menu = None  # a click that misses the panel closes it
-                        elif menu.select(hit):
-                            verb = menu.confirm()
-                            if verb is not None:
-                                picked, menu = menu, None
-                                pick(picked.game, verb, picked.variant, picked.version)
-                    continue
-
-                # The filter panel, while it is up. Before the typing branch
-                # so that opening the keyboard from it still works, and before
-                # the grid so the cursor does not move behind it.
-                if panel is not None and typing is None:
-                    # An open list owns up, down, A and B; the panel underneath
-                    # owns them when there is none. One step back per press of
-                    # B: the list first, then the panel.
-                    heard = _intent(event)
-                    if heard == BACK:
-                        if panel.open:
-                            panel.close()
-                        else:
-                            panel = None
-                    elif heard.kind == "move":
-                        if heard.dy:
-                            panel.choice.move(heard.dy) if panel.open else panel.move(heard.dy)
-                        if heard.dx and not panel.open:
-                            panel.adjust(browser, heard.dx)
-                    elif heard.confirms(space=True):
-                        if panel.open:
-                            panel.choose(browser)
-                        elif panel.press(browser) == filters.TYPING:
-                            typing = typing_from = browser.search
-                    elif pads.button(event) == pads.START:
-                        # Start closes it the way Start opened it.
-                        panel = None
-                    continue
-
-                # While typing, every key is text. Nothing below runs, or the
-                # letters of a search would also be moving the cursor.
-                if typing is not None:
-                    if event.type != pygame.KEYDOWN:
-                        continue
-                    if event.key == pygame.K_ESCAPE:
-                        # Cancelled: the grid goes back to the search it had.
-                        browser.set_search(typing_from)
-                        typing = None
-                    elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-                        browser.set_search(typing)
-                        typing = None
-                    elif event.key == pygame.K_BACKSPACE:
-                        typing = typing[:-1]
-                        browser.set_search(typing)
-                    elif event.unicode and event.unicode.isprintable():
-                        typing += event.unicode
-                        # Applied as it is typed: the grid narrowing under the
-                        # letters is the feedback that the letters went in.
-                        browser.set_search(typing)
-                    continue
-
-                if event.type == pygame.KEYDOWN:
-                    if event.key in (pygame.K_ESCAPE, pygame.K_q):
-                        running = False
-                    elif event.key in (pygame.K_SLASH, pygame.K_f):
-                        typing = typing_from = browser.search
-                    elif event.key == pygame.K_TAB:
-                        # The panel, which is every filter in one place and
-                        # both directions on each. It used to cycle platforms
-                        # forwards and, with shift, regions — a controller
-                        # could reach the first and not the second.
-                        panel = Filters()
-                    elif event.key == pygame.K_LEFT:
-                        state.move(-1, 0)
-                    elif event.key == pygame.K_RIGHT:
-                        state.move(1, 0)
-                    elif event.key == pygame.K_UP:
-                        state.move(0, -1)
-                    elif event.key == pygame.K_DOWN:
-                        state.move(0, 1)
-                    elif event.key == pygame.K_PAGEDOWN:
-                        state.turn(1)
-                    elif event.key == pygame.K_PAGEUP:
-                        state.turn(-1)
-                    elif event.key == pygame.K_SPACE:
-                        space.down(time.monotonic())
-                    elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-                        if state.game is not None:
-                            menu = menu_for(state.game)
-                    elif event.key == pygame.K_i:
-                        browser.toggle_installed()
-                    elif event.key == pygame.K_s:
-                        storage = Storage()
-                        storage.refresh()
-                elif event.type == pygame.MOUSEMOTION:
-                    # Hover moves the cursor, so the pointer and the stick drive
-                    # one selection rather than two competing highlights. A gap
-                    # leaves it where it was.
-                    over = hovering(browser, event.pos, screen.get_size())
-                    if over is not None:
-                        if over != state.selected:
-                            trace.say("hover", tile=over, was=state.selected, pos=list(event.pos))
-                        state.select(over)
-                elif event.type == pygame.MOUSEBUTTONDOWN:
-                    on_chip = chip_rect is not None and pygame.Rect(chip_rect.rect).collidepoint(event.pos)
-                    if event.button == 1 and on_chip:
-                        self_update()
-                    elif event.button == 1:
-                        over = hovering(browser, event.pos, screen.get_size())
-                        # Only ever the tile actually under the pointer: hover has
-                        # already put the cursor there, so this cannot launch
-                        # something the click was not on.
-                        if over is not None and state.select(over):
-                            menu = menu_for(state.game)
-                    # No button 4/5 here: SDL2 reports a wheel as MOUSEWHEEL *and*
-                    # as those two for compatibility, so handling both turns the
-                    # page twice for one scroll.
-                elif event.type == pygame.KEYUP and event.key == pygame.K_SPACE:
-                    # A tap is the menu, as space always was; a hold that
-                    # finished has already seated the keyboard and this is
-                    # just the key coming back up.
-                    if space.up(time.monotonic()) and state.game is not None:
-                        menu = menu_for(state.game)
-                elif event.type == pygame.MOUSEWHEEL:
-                    browser.grid.turn(-1 if event.y > 0 else 1)
-                elif pads.direction(event) is not None:
-                    state.move(*pads.direction(event))
-                elif pads.button(event) is not None:
-                    # By name, not by index: the shoulders are 4 and 5 on an
-                    # Xbox pad and 9 and 10 on a Steam Controller, and this used
-                    # to compare against the first pair on both.
-                    pressed = pads.button(event)
-                    if pressed == pads.A:
-                        if state.game is not None:
-                            menu = menu_for(state.game)
-                    elif pressed == pads.B:
-                        running = False
-                    elif pressed == pads.LB:
-                        state.turn(-1)
-                    elif pressed == pads.RB:
-                        state.turn(1)
-                    elif pressed == pads.Y:
-                        # The next platform: quicker than the panel when it is
-                        # the next one that is wanted.
-                        browser.cycle_platform(1)
-                    elif pressed == pads.X:
-                        # Search. A Deck raises the Steam keyboard over this.
-                        typing = typing_from = browser.search
-                    elif pressed == pads.START:
-                        # Start: the filter panel, which is where installed-only
-                        # now lives along with everything else that narrows the
-                        # library. Start is the button somebody presses looking
-                        # for options, so that is what it opens.
-                        panel = Filters()
-                    elif pressed == pads.BACK:
-                        self_update()
+                handlers[current_screen()](event)
 
             # Installs running behind the grid: one landing is a badge, and
             # the versions the client listed were about a game not yet there.
             if installs.poll():
-                refresh_badges()
+                asker.refresh()
                 forget_versions()
             if update_check is not None and update_check.done():
                 update_check = None
-                refresh_badges()
+                asker.refresh()
             apply_badges()
             # The saves answer: a conflict is a choice, anything else starts
             # the game. No answer at all (no client, no service, too slow)
@@ -1475,12 +882,12 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
                     trace.say("saves-check-failed", why=str(error))
                     found = None
                 checking = None
-                if starting is not None:
-                    game, verb, variant, version = starting
-                    if found is not None and found.conflict:
-                        choice = Choice.open(game, variant, version, found)
-                    else:
-                        chosen, running = starting, False
+                verdict = plans.plan_saves_answer(found, starting is not None)
+                if verdict == plans.CHOOSE:
+                    _, _, variant, version = starting
+                    choice = Choice.open(starting[0], variant, version, found)
+                elif verdict == plans.LAUNCH:
+                    chosen, running = starting, False
             if listing is not None and listing.done():
                 try:
                     found_saves = listing.result()
@@ -1493,42 +900,19 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
             # Completion first, drawing second: a finished steam-add clears
             # the preparer, and this same frame must already be the grid's.
             if preparer is not None and not prepare_failed and not preparer.running:
-                if preparer.ok:
-                    if after_prepare is None:
-                        preparer = None  # steam add done — back to the grid
-                    elif after_prepare == "self-update":
-                        # An older client says nothing: the root, as it is.
-                        root = said_root(preparer.tail(40)) or (report.picker if report is not None else None)
-                        preparer = None
-                        after_prepare = None
-                        if root:
-                            finish_restart(root)
-                        else:
-                            say_chip("up-to-date", 10.0)
-                            refresh_badges()
-                    elif after_prepare in ("install", "uninstall"):
-                        refresh_badges()
-                        # What the client said about versions was about a game
-                        # that is no longer there -- or not there yet.
-                        forget_versions()
-                        preparer = None
-                    elif after_prepare == "restored" and restoring is not None:
-                        # The save is back: play it, asking about saves as any
-                        # play does -- this machine is now simply ahead.
-                        game, variant, version = restoring
-                        restoring, preparer = None, None
-                        start(game, "play", variant, version)
-                    elif after_prepare == "kept" and starting is not None:
-                        # A save kept: the game starts with it, and no second
-                        # question -- the two sides now agree.
-                        chosen, running, preparer = starting, False, None
-                    else:
-                        start(preparer.game, after_prepare, preparer.variant, preparer.version)
-                        preparer = None
-                else:
-                    prepare_failed = True
-                    if after_prepare == "self-update":
-                        say_chip("failed", 10.0)
+                apply_prepare_done(
+                    plans.on_prepare_done(
+                        after_prepare,
+                        preparer.ok,
+                        preparer.tail(40),
+                        picker=learned.report.picker if learned.report is not None else None,
+                        restoring=restoring,
+                        starting=starting,
+                        game=preparer.game,
+                        variant=preparer.variant,
+                        version=preparer.version,
+                    )
+                )
             # Reconnected here rather than on a timer: connect() on an absent
             # socket fails at once with ENOENT, and a daemon started while the
             # picker is open should be picked up without restarting it.
@@ -1556,59 +940,9 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
                 if trace.on() and said.get("event") != "progress":
                     trace.say("danstick", **{k: v for k, v in said.items() if k not in ("lines", "build")})
 
+
             painting = time.perf_counter()
-            chip_words = updates.chip(
-                report, updates.self_root(), chip_phase if time.monotonic() < chip_until else None
-            )
-            if preparer is not None:
-                draw_prepare(
-                    screen, font_at, preparer.game, preparer.tail(28), prepare_failed,
-                    progress=preparer.progress if preparer.running else None,
-                    stage=preparer.stage if preparer.running else None,
-                    elapsed=preparer.elapsed,
-                )
-            elif checking is not None or choice is not None:
-                draw_saves_choice(screen, font_at, choice, starting[0].title if starting else "")
-            elif saves is not None:
-                draw_saves(screen, font_at, saves)
-            elif storage is not None:
-                draw_storage(screen, font_at, storage, storage_typing)
-            elif panel is not None:
-                # The grid behind it, so changing a filter is visibly changing
-                # the thing underneath rather than a number on a form.
-                view = GridView(
-                    state, art, browser.status, browser.installed, installs.rings(), browser.outdated, chip_words
-                )
-                if browser.view == SHELF:
-                    chip_rect = draw_shelf(screen, font_at, view)
-                else:
-                    chip_rect = draw(screen, font_at, view)
-                draw_filters(screen, font_at, browser, panel, typing)
-            else:
-                # Whatever the workers finished since the last frame stops being a
-                # placeholder now. Only the page on screen is ever asked for.
-                for game in loader.done():
-                    art.pop(game.key, None)
-                    shown.pace.busy(time.monotonic())
-                if decoder.arrived():
-                    shown.pace.busy(time.monotonic())
-                for game in state.page:
-                    surface_for(game)
-                view = GridView(
-                    state, art, browser.status, browser.installed, installs.rings(), browser.outdated, chip_words
-                )
-                if browser.view == SHELF and typing is None:
-                    # The menu is drawn over the list rather than swapping the
-                    # screen back to the grid underneath it, which is what
-                    # happened before and moved every game on screen.
-                    chip_rect = draw_shelf(screen, font_at, view)
-                else:
-                    # Typing still belongs to the grid: the search box is drawn
-                    # there, and a shelf with its own copy would be two to keep
-                    # in step.
-                    chip_rect = draw(screen, font_at, view, typing, menu)
-                if menu is not None:
-                    draw_menu(screen, menu, view_rects(browser, screen.get_size()), font_at)
+            painters[current_screen()]()
 
             drawn = time.perf_counter()
             now = time.monotonic()
@@ -1649,7 +983,7 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
             preparer.cancel()
         if update_check is not None:
             update_check.stop()
-        badge_asker.shutdown(wait=False, cancel_futures=True)
+        asker.shutdown()
         # danstick goes on listening for a hold. It used to be told to stop
         # here, on the theory that a game has its own idea of what a button
         # does -- but the daemon seats only pads that hold no seat, so a
@@ -1665,3 +999,5 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
     beside.stop(overlay)
     pygame.quit()
     return restart if restart is not None else chosen
+
+

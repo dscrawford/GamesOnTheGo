@@ -31,6 +31,7 @@ from .buttons import A, B
 class Key(IntEnum):
     """The SDL keycodes the screens read."""
 
+    BACKSPACE = 8
     ESCAPE = 27
     B = 98
     RETURN = 13

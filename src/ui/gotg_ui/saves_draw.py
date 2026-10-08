@@ -1,23 +1,15 @@
 """Drawing the Saves screen (saves_list.py is what it shows).
 
-Apart from app.py, which draws every other screen, only because app.py is
-three times the length a module here should be; the colours are the theme's,
-read the same way.
+The other screens are drawn in draw_grid.py and draw_screens.py; the colours
+are the theme's (theme.py) in all of them.
 """
 
 from __future__ import annotations
 
 import pygame
 
-from . import config
 from .saves_list import Saves
-
-BACKGROUND = config.colour("theme.colours.background", (18, 18, 20))
-TILE = config.colour("theme.colours.tile", (38, 38, 44))
-TILE_SELECTED = config.colour("theme.colours.tile_selected", (58, 104, 148))
-TEXT = config.colour("theme.colours.text", (232, 232, 236))
-TEXT_DIM = config.colour("theme.colours.text_dim", (150, 150, 158))
-PANEL = config.colour("theme.colours.panel", (26, 26, 30))
+from .theme import BACKGROUND, PANEL, TEXT, TEXT_DIM, TILE, TILE_SELECTED
 
 # Rows on screen at once; the list scrolls to keep the lit one among them.
 VISIBLE = 6
