@@ -27,6 +27,60 @@ let
     name = "paper-mario-ttyd-mods";
   };
   mod = "${mods}/[60FPS v1.0.1]";
+
+  # NatalieWhatever's "Text Always Skippable" (gamebanana.com/mods/516121):
+  # the remake lets a box be mashed through only on a second reading, and
+  # this cheat makes the game believe every box has been read. A cheat and
+  # nothing else, one file per game version, each named for its build id.
+  # Not Fl4sh9174's pack and a different patch from the "skip text" line in
+  # his Faster Text Speed (that one is at another address and the two work
+  # together; he credits her for it). Shipped as made (CC BY-NC-ND), fetched
+  # from GameBanana's own download, which is a redirect to their file cache.
+  skippable = pkgs.fetchurl {
+    url = "https://gamebanana.com/dl/1235739";
+    name = "paper_mario_ttyd_switch_text_always_skippable.zip";
+    hash = "sha256-23RaypBbBrHvQ17xo1kjT4A89j6r31vhuzNzYQrblqQ=";
+  };
+
+  # Which cheats start switched on, in the one format Ryujinx reads them in:
+  # "<build id>-<<cheat name> Cheat>", one per line, where the build id is the
+  # cheat file's name and the cheat name is a bracketed section heading inside
+  # it. A heading with no instructions under it is not a cheat — that is how
+  # Ryujinx parses the file, and "[made by Fl4sh]" at the foot of each one is
+  # exactly that case.
+  #
+  # Read back out of the files rather than written down here, so that a later
+  # revision that renames a cheat cannot leave this list quietly pointing at a
+  # name that no longer exists.
+  cheatsIn =
+    name: dir:
+    pkgs.runCommand "paper-mario-ttyd-${name}-enabled-cheats" { } ''
+      for cheats in ${lib.escapeShellArg dir}/cheats/*.txt; do
+        id="$(basename "$cheats" .txt | tr '[:lower:]' '[:upper:]')"
+        ${pkgs.gawk}/bin/awk -v id="$id" '
+          # The archives keep DOS line endings, and Ryujinx reads the file a
+          # line at a time — so the carriage return is not part of any name.
+          { sub(/\r$/, "") }
+          /^\[/ {
+            if (name != "" && lines > 0) print id "-<" name " Cheat>"
+            name = substr($0, 2, length($0) - 2)
+            lines = 0
+            next
+          }
+          NF { lines++ }
+          END { if (name != "" && lines > 0) print id "-<" name " Cheat>" }
+        ' "$cheats"
+      done >$out
+
+      # Every line a build id and a cheat name, and no bracket left in the
+      # name: the section headings are bracketed and the files have DOS line
+      # endings, so getting one character out here is how a name that Ryujinx
+      # will never match gets written silently.
+      test -s $out
+      test "$(${pkgs.gnugrep}/bin/grep -cE '^[0-9A-F]{16}-<[^][]+ Cheat>$' $out)" \
+        = "$(wc -l <$out)"
+    '';
+  slug = folder: lib.replaceStrings [ " " "." ] [ "-" "-" ] folder;
 in
 rec {
   # Copied out to a name of our own: the archive's directory is
@@ -54,53 +108,26 @@ rec {
         test -d $out/exefs
       '';
 
-  # Which cheats start switched on, in the one format Ryujinx reads them in:
-  # "<build id>-<<cheat name> Cheat>", one per line, where the build id is the
-  # cheat file's name and the cheat name is a bracketed section heading inside
-  # it. A heading with no instructions under it is not a cheat — that is how
-  # Ryujinx parses the file, and "[made by Fl4sh]" at the foot of each one is
-  # exactly that case.
-  #
-  # Read back out of the archive rather than written down here, so that a later
-  # revision that renames a cheat cannot leave this list quietly pointing at a
-  # name that no longer exists.
-  #
-  # For any folder of the pack with cheats in it. The 60 FPS one, and the
-  # text-speed one: the remake's text crawls, and the 60 FPS patch slows it
-  # further (its delta time). "Faster Text Speed" is the same author's answer --
-  # a patch that quickens it a little and lets a press skip it, and a cheat
-  # whose hotkeys pick the speed, ZR + D-pad Down fast and ZR + D-pad Up
-  # instant. Shipped as the author made it (CC BY-NC-ND), so the hotkeys are
-  # the way to instant, not a setting.
-  paperMarioTtydCheats =
-    folder:
-    pkgs.runCommand "paper-mario-ttyd-${lib.replaceStrings [ " " "." ] [ "-" "-" ] folder}-enabled-cheats"
-      { }
-      ''
-        for cheats in ${lib.escapeShellArg "${mods}/[${folder}]"}/cheats/*.txt; do
-          id="$(basename "$cheats" .txt | tr '[:lower:]' '[:upper:]')"
-          ${pkgs.gawk}/bin/awk -v id="$id" '
-            # The archive keeps DOS line endings, and Ryujinx reads the file a
-            # line at a time — so the carriage return is not part of any name.
-            { sub(/\r$/, "") }
-            /^\[/ {
-              if (name != "" && lines > 0) print id "-<" name " Cheat>"
-              name = substr($0, 2, length($0) - 2)
-              lines = 0
-              next
-            }
-            NF { lines++ }
-            END { if (name != "" && lines > 0) print id "-<" name " Cheat>" }
-          ' "$cheats"
-        done >$out
-
-        # Every line a build id and a cheat name, and no bracket left in the
-        # name: the section headings are bracketed and the file has DOS line
-        # endings, so getting one character out here is how a name that Ryujinx
-        # will never match gets written silently.
-        test -s $out
-        test "$(${pkgs.gnugrep}/bin/grep -cE '^[0-9A-F]{16}-<[^][]+ Cheat>$' $out)" \
-          = "$(wc -l <$out)"
-      '';
+  # The cheat list for any folder of Fl4sh9174's pack with cheats in it. The
+  # 60 FPS one, and the text-speed one: the remake's text crawls, and the 60
+  # FPS patch slows it further (its delta time). "Faster Text Speed" is the
+  # same author's answer -- a patch that quickens it a little and lets a press
+  # skip it, and a cheat whose hotkeys pick the speed, ZR + D-pad Down fast
+  # and ZR + D-pad Up instant. Shipped as the author made it (CC BY-NC-ND), so
+  # the hotkeys are the way to instant, not a setting.
+  paperMarioTtydCheats = folder: cheatsIn (slug folder) "${mods}/[${folder}]";
   paperMarioTtyd60Cheats = paperMarioTtydCheats "60FPS v1.0.1";
+
+  # Natalie's cheat as a mod directory Ryujinx reads (cheats/<build id>.txt,
+  # both versions), and the list that switches it on.
+  paperMarioTtydSkippableTextMod = pkgs.runCommand "paper-mario-ttyd-skippable-text" { } ''
+    mkdir -p $out/cheats
+    ${pkgs.unzip}/bin/unzip -q ${skippable} -d unpacked
+    for version in unpacked/*/; do
+      cp --no-preserve=mode "$version"*.txt $out/cheats/
+    done
+    test -f $out/cheats/0EFFE4AF1DEC3A79.txt
+    test -f $out/cheats/78F37BB55D015BE3.txt
+  '';
+  paperMarioTtydSkippableTextCheats = cheatsIn "skippable-text" paperMarioTtydSkippableTextMod;
 }

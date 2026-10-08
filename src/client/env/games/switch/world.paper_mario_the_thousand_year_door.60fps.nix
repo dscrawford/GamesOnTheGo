@@ -83,5 +83,13 @@ base
       name = "faster-text";
       dir = helpers.paperMarioTtydMod "Faster Text Speed v1.0.1";
       enabledCheats = helpers.paperMarioTtydCheats "Faster Text Speed v1.0.1";
+    }).preLaunch
+    # And every box mashable on a first reading, as the GameCube game allowed:
+    # NatalieWhatever's cheat. See paper-mario-ttyd.nix.
+    + (helpers.ryujinxModOnly {
+      titleId = "0100ecd018ebe000";
+      name = "skippable-text";
+      dir = helpers.paperMarioTtydSkippableTextMod;
+      enabledCheats = helpers.paperMarioTtydSkippableTextCheats;
     }).preLaunch;
 }

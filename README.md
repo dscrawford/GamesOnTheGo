@@ -233,7 +233,7 @@ env-n64-usa_legend_of_zelda_ocarina_of_time_rev2-rando
 | `switch.world.legend_of_zelda_skyward_sword_hd` | `120fps` (needs 1.0.1) |
 | `switch.world.luigis_mansion_2_hd` | `60fps`, `120fps` |
 | `switch.world.kirby_and_the_forgotten_land` | `60fps` |
-| `switch.world.paper_mario_the_thousand_year_door` | `60fps` (text: ZR + D-pad Down fast, ZR + D-pad Up instant) |
+| `switch.world.paper_mario_the_thousand_year_door` | `60fps` (text always skippable; ZR + D-pad Down fast, ZR + D-pad Up instant) |
 | `switch.world.super_mario_rpg` | `120fps` |
 
 On a Steam Deck the Switch variants are the same names with a Deck
