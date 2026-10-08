@@ -22,21 +22,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gotg_killswitch::bar::Bar;
+use gotg_killswitch::chords::{Holds, NativeHolds, Round};
 use gotg_killswitch::clones;
 use gotg_killswitch::consoles::{self, CONSOLES};
-use gotg_killswitch::departures::Departures;
-use gotg_killswitch::frame::{self, EMPTY_SEAT, Frame, MenuFrame, ROWS_MAX, Rebinding, Saying};
-use gotg_killswitch::killswitch::{Chord, Input, Pad};
+use gotg_killswitch::driver::{MenuDriver, Opening, Step};
+use gotg_killswitch::frame::{Frame, ROWS_MAX, Saying};
+use gotg_killswitch::killswitch::Input;
+use gotg_killswitch::listeners::Listeners;
 use gotg_killswitch::loading;
-use gotg_killswitch::menu::{self, Focused, Menu, Row};
-use gotg_killswitch::native::Native;
+use gotg_killswitch::menu::Focused;
 use gotg_killswitch::padlink::Link;
 use gotg_killswitch::painter::{self, Painter};
-use gotg_killswitch::pairing::Pairing;
 use gotg_killswitch::pressing::Held;
 use gotg_killswitch::procstat;
-use gotg_killswitch::rebind::{Rebind, View};
-use gotg_killswitch::seating::Seating;
+use gotg_killswitch::rebind::Rebind;
+use gotg_killswitch::views;
 use sdl3_sys::everything::*;
 
 const DEFAULT_HOLD_MS: u64 = 3000;
@@ -61,15 +61,10 @@ const FRAME_MS: u64 = 16;
 /// Past halfway is "pulled". A trigger's rest is not always a clean zero, and
 /// nobody holds a trigger at 40% for three seconds by accident.
 const TRIGGER_ON: i16 = 16384;
-/// L + R + A held this long brings the menu down.
-const MENU_HOLD_MS: u64 = 500;
 /// Closing the menu, the bar goes up over this long.
 const MENU_CLOSE_SECONDS: f64 = 1.0;
 /// The longest the saves are waited on after the menu's Exit.
 const SAVE_SECONDS: f64 = 60.0;
-/// The longest the bar says a save is loading: the wrapper pushes, restores
-/// and starts the game again, and a game slow to start is not waited on.
-const RELOAD_SECONDS: f64 = 120.0;
 
 static STOP: AtomicBool = AtomicBool::new(false);
 
@@ -309,13 +304,10 @@ impl Game {
 struct Watched {
     id: SDL_JoystickID,
     pad: *mut SDL_Gamepad,
-    state: Pad,
-    /// The menu chord's hold, beside the exit's.
-    menu: Pad,
+    /// The exit's hold and the menu's, timed on this pad.
+    holds: Holds,
     /// The seat this pad is danstick's clone for; None for a raw pad.
     player: Option<i32>,
-    /// Whether this hold has been mentioned in the log.
-    announced: bool,
 }
 
 #[derive(Default)]
@@ -349,10 +341,8 @@ impl Pads {
         self.0.push(Watched {
             id,
             pad,
-            state: Pad::new(hold_ms),
-            menu: Pad::timing(Chord::Menu, MENU_HOLD_MS),
+            holds: Holds::new(hold_ms),
             player: clones::player_of_guid(&guid.data),
-            announced: false,
         });
     }
 
@@ -570,27 +560,17 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
     // Who is joining, from danstick's own socket: one more client beside the
     // picker. What it asks is that danstick go on listening for a hold
     // (`seating`), and a rebind when somebody wants one.
-    let mut pairing = Pairing::new(pair_hold_seconds());
+    let mut listeners = Listeners::new(pair_hold_seconds());
     let mut link = Link::new(std::env::var("GOTG_OVERLAY_DANSTICK_SOCKET").ok().as_deref());
     let mut bar = Bar::new(SLIDE_SECONDS);
     let mut painter = Painter::default();
-    let mut rebind = Rebind::default();
-    let mut seating = Seating::new(pair_hold_seconds());
-    let mut focused = Focused::default();
     // The overlay's own controls, per seated player, and each player's two
     // holds timed on them -- the exit's and the menu's.
-    let mut native = Native::default();
-    let mut departures = Departures::default();
-    let mut native_holds: std::collections::HashMap<i32, (Pad, Pad, bool)> = std::collections::HashMap::new();
-    let mut menu: Option<Menu> = None;
-    let mut exiting = false;
+    let mut native_holds = NativeHolds::default();
     // Loading a save from the menu: this play's session, the client listing
     // the saves into it, and -- once one is picked -- the game being started
     // again on it, the bar saying so until the wrapper has. See loading.rs.
-    let session = loading::Session::from_env();
-    let mut listing: Option<loading::Listing> = None;
-    let mut save_lines: Vec<loading::SaveLine> = Vec::new();
-    let mut reloading: Option<(f64, i32)> = None;
+    let mut menu = MenuDriver::new(loading::Session::from_env());
     let mut seat_icons: std::collections::HashMap<String, u8> = std::collections::HashMap::new();
     let console_index = consoles::for_platform(&options.platform);
     let console = &CONSOLES[console_index];
@@ -625,33 +605,21 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         // leased to this connection too.
         if link.fd().is_some()
             && !options.overlay_only
-            && let Some(line) = native.wanted()
+            && let Some(line) = listeners.native.wanted()
         {
             link.send(&line);
         }
-        link.pump(
-            &mut pairing,
-            &mut rebind,
-            &mut [&mut seating, &mut focused, &mut native, &mut departures],
-            clock,
-        );
-        if link.fd().is_none() {
-            pairing.room(None);
-            seating.lost();
-            native.lost();
-        } else if let Some(line) = seating.wanted()
-            && !link.send(&line)
-        {
-            seating.lost();
-        }
+        listeners.pump(&mut link, clock);
+        listeners.settle(link.fd().is_some(), |line| link.send(line));
         // A pad that went away takes its seat with it, in the picker too.
-        while let Some(line) = departures.wanted() {
+        while let Some(line) = listeners.departures.wanted() {
             if !options.quiet {
                 eprintln!("gotg-killswitch: a controller went away; {line}");
             }
             link.send(&line);
         }
-        if let Some(player) = rebind
+        if let Some(player) = listeners
+            .rebind
             .due(clock)
             .filter(|_| options.draw && !options.overlay_only)
         {
@@ -661,19 +629,13 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
             ask_for_rebind(
                 Some(player),
                 console,
-                &mut rebind,
+                &mut listeners.rebind,
                 &mut link,
                 clock,
                 options.quiet,
             );
         }
-        // The furthest along any one pad is, since the picture is of a hold
-        // rather than of a controller.
-        let mut progress = 0.0f64;
-        let mut fire = false;
-        // Who asked for the menu this frame, and what they had down (the
-        // chord's own buttons, which the menu ignores until let go).
-        let mut asked: Option<(Option<i32>, std::collections::BTreeSet<String>)> = None;
+        let mut round = Round::default();
         for watched in &mut pads.0 {
             // SAFETY: every watched pad is open.
             let input = unsafe { read_pad(watched.pad) };
@@ -683,200 +645,125 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
             // A seated pad's chords are its own controls, which danstick says
             // (`native`); its clone carries the game's walk and is not read
             // for them. A pad nobody seated is not held, and SDL reads it.
-            if native.active() && watched.player.is_some() {
+            if listeners.native.active() && watched.player.is_some() {
                 continue;
             }
-            let (fired, held, menu_fired) = chords(
-                input,
-                &mut watched.state,
-                &mut watched.menu,
-                &mut watched.announced,
-                now,
-                options,
-            );
-            fire |= fired;
-            progress = progress.max(held);
-            if menu_fired {
-                // SAFETY: every watched pad is open.
-                asked = Some((watched.player, unsafe { read_held(watched.pad) }.controls));
-            }
+            let sample = watched.holds.sample(input, now);
+            announce(&sample, options);
+            let (pad, player) = (watched.pad, watched.player);
+            // SAFETY: every watched pad is open.
+            round.add(sample, || (player, unsafe { read_held(pad) }.controls));
         }
-        if native.active() && !options.overlay_only {
-            let seated: Vec<i32> = rebind.seated().iter().map(|seat| seat.player).collect();
-            native_holds.retain(|player, _| seated.contains(player));
+        if listeners.native.active() && !options.overlay_only {
+            let seated: Vec<i32> = listeners.rebind.seated().iter().map(|seat| seat.player).collect();
+            native_holds.retain_seated(&seated);
             for player in seated {
-                let (exit, menu_hold, announced) = native_holds.entry(player).or_insert_with(|| {
-                    (
-                        Pad::new(options.hold_ms),
-                        Pad::timing(Chord::Menu, MENU_HOLD_MS),
-                        false,
-                    )
-                });
-                let (fired, held, menu_fired) =
-                    chords(native.input(player), exit, menu_hold, announced, now, options);
-                fire |= fired;
-                progress = progress.max(held);
-                if menu_fired {
-                    asked = Some((Some(player), native.held(player)));
-                }
+                let sample = native_holds
+                    .of(player, options.hold_ms)
+                    .sample(listeners.native.input(player), now);
+                announce(&sample, options);
+                round.add(sample, || (Some(player), listeners.native.held(player)));
             }
         }
-        if let Some((who, down)) = asked
+        let fire = round.fire();
+        let exit_progress = round.exit_progress();
+        if let Some((who, down)) = round.take_asked()
             && options.draw
-            && menu.is_none()
-            && rebind.view(clock).is_none()
+            && !menu.is_open()
+            && listeners.rebind.view(clock).is_none()
         {
-            match who {
-                Some(owner) => {
-                    let rows = seat_rows(&rebind, &seating, &mut seat_icons);
-                    let opened = Menu::open(owner, rows, &down);
-                    // Only where the game can be started again: a session, a
-                    // wrapper that said which process is the game, a game of
-                    // its own saves, and a client to ask.
-                    let can_load = !options.client.is_empty()
-                        && loading::dedicated(&options.saves)
-                        && session.as_ref().and_then(loading::Session::game_pid).is_some();
-                    menu = Some(if can_load { opened.with_saves() } else { opened });
-                    focused.clear();
-                    send_focus(&mut link, &focused, owner, true);
+            let rows = || views::seat_rows(&listeners.rebind, &listeners.seating, &mut seat_icons);
+            match menu.open(who, &down, rows, &options.client, &options.saves) {
+                Opening::Opened(owner) => {
+                    listeners.focused.clear();
+                    send_focus(&mut link, &listeners.focused, owner, true);
                     if !options.quiet {
                         eprintln!("gotg-killswitch: menu down for player {owner}");
                     }
                 }
-                None if !options.quiet => {
+                Opening::Unseated if !options.quiet => {
                     eprintln!("gotg-killswitch: menu held on a pad danstick has not seated; nothing to show");
                 }
-                None => {}
+                Opening::Unseated => {}
             }
         }
-        let exit_progress = if fire { 1.0 } else { progress };
-
-        // The menu, driven by its owner alone: danstick's word for what that
-        // player has down while it holds them (`focus`), and the clone's
-        // through SDL besides -- which is all there is from a danstick that
-        // cannot hold them, and nothing once one does.
-        if let Some(open) = menu.as_mut() {
-            open.seats(seat_rows(&rebind, &seating, &mut seat_icons));
-            let owner = open.owner;
-            if departures.gone(owner) {
-                open.pad_gone(owner);
+        let step = menu.drive(
+            || views::seat_rows(&listeners.rebind, &listeners.seating, &mut seat_icons),
+            |owner| listeners.departures.gone(owner),
+            |owner| {
+                let mut down = listeners.focused.of(owner);
+                if let Some(watched) = pads.0.iter().find(|w| w.player == Some(owner)) {
+                    // SAFETY: every watched pad is open.
+                    down.extend(unsafe { read_held(watched.pad) }.controls);
+                }
+                down
+            },
+            &options.client,
+            &options.saves,
+            clock,
+        );
+        match step {
+            Some(Step::Close { owner }) => {
+                send_focus(&mut link, &listeners.focused, owner, false);
+                bar.want_over(false, clock, MENU_CLOSE_SECONDS);
             }
-            let mut down = focused.of(owner);
-            if let Some(watched) = pads.0.iter().find(|w| w.player == Some(owner)) {
-                // SAFETY: every watched pad is open.
-                down.extend(unsafe { read_held(watched.pad) }.controls);
+            Some(Step::Exit { owner }) => send_focus(&mut link, &listeners.focused, owner, false),
+            Some(Step::Rebind { owner, player }) => {
+                send_focus(&mut link, &listeners.focused, owner, false);
+                ask_for_rebind(
+                    Some(player),
+                    console,
+                    &mut listeners.rebind,
+                    &mut link,
+                    clock,
+                    options.quiet,
+                );
             }
-            match open.tick(&down, clock) {
-                Some(menu::Action::Close) => {
-                    send_focus(&mut link, &focused, owner, false);
-                    menu = None;
+            Some(Step::Send(line)) => {
+                link.send(&line);
+            }
+            Some(Step::Load { owner, line }) => {
+                send_focus(&mut link, &listeners.focused, owner, false);
+                let started = load_save(options, menu.session(), line.as_ref(), clock);
+                if !menu.reload_started(started) {
                     bar.want_over(false, clock, MENU_CLOSE_SECONDS);
                 }
-                Some(menu::Action::Exit) => {
-                    send_focus(&mut link, &focused, owner, false);
-                    menu = None;
-                    exiting = true;
-                }
-                Some(menu::Action::Rebind(player)) => {
-                    send_focus(&mut link, &focused, owner, false);
-                    menu = None;
-                    ask_for_rebind(
-                        Some(player),
-                        console,
-                        &mut rebind,
-                        &mut link,
-                        clock,
-                        options.quiet,
-                    );
-                }
-                Some(menu::Action::Remove(player)) => {
-                    link.send(&serde_json::json!({"cmd": "unseat", "player": player}).to_string());
-                }
-                Some(menu::Action::Move { player, to }) => {
-                    link.send(&serde_json::json!({"cmd": "move", "player": player, "to": to}).to_string());
-                }
-                // Leased to this connection: whatever it switched off comes
-                // back on if the overlay goes.
-                Some(menu::Action::Port { player, open }) => {
-                    link.send(
-                        &serde_json::json!({"cmd": "port", "player": player, "open": open}).to_string(),
-                    );
-                }
-                Some(menu::Action::ListSaves) => {
-                    if let Some(session) = &session {
-                        listing = Some(loading::Listing::start(
-                            &options.client,
-                            &options.saves,
-                            session,
-                            clock,
-                        ));
-                    }
-                }
-                Some(menu::Action::Load(at)) => {
-                    send_focus(&mut link, &focused, owner, false);
-                    menu = None;
-                    listing = None;
-                    reloading = load_save(options, session.as_ref(), save_lines.get(at), clock);
-                    if reloading.is_none() {
-                        bar.want_over(false, clock, MENU_CLOSE_SECONDS);
-                    }
-                }
-                None => {}
             }
+            None => {}
         }
-        if let (Some(running), Some(session)) = (listing.as_mut(), session.as_ref())
-            && let Some(listed) = running.poll(session, clock)
-        {
-            listing = None;
-            save_lines = session.lines();
-            if let Some(open) = menu.as_mut() {
-                open.saves_listed(listed.map(|_| save_lines.len()));
-            }
-        }
-        // Started again once the wrapper says a different process is the game.
-        if let Some((since, was)) = reloading
-            && (clock - since > RELOAD_SECONDS
-                || session
-                    .as_ref()
-                    .and_then(loading::Session::game_pid)
-                    .is_some_and(|pid| pid != was && procstat::alive(pid)))
-        {
-            reloading = None;
-        }
+        menu.poll_listing(clock);
+        menu.poll_reload(clock, procstat::alive);
 
         // Down while there is something to show, up when not. The painter
         // exists only while the bar is anywhere on screen, so a session
         // nobody joins or leaves never has one -- and a machine with no
         // display is one whose painter exits at once and is asked again less
         // and less often.
-        let rebinding = rebind.view(clock);
+        let rebinding = listeners.rebind.view(clock);
         bar.want(
             options.draw
                 && (exit_progress > 0.0
-                    || pairing.busy(clock)
-                    || pairing.nobody(clock)
+                    || listeners.pairing.busy(clock)
+                    || listeners.pairing.nobody(clock)
                     || rebinding.is_some()
-                    || menu.is_some()
-                    || reloading.is_some()
-                    || exiting),
+                    || menu.wants_bar()),
             clock,
         );
         let showing = !bar.gone(clock);
         let mut moving = false;
         if showing {
-            let holds = pairing.now(clock);
-            let joined = pairing.line(clock);
+            let holds = listeners.pairing.now(clock);
+            let joined = listeners.pairing.line(clock);
             // A rebind panel shows what is pressed, so it is redrawn at the
             // frame rate for as long as it is down.
             moving = bar.moving(clock)
                 || !holds.is_empty()
                 || exit_progress > 0.0
                 || rebinding.is_some()
-                || menu.is_some();
+                || menu.is_open();
             let frame = Frame::pack(bar.position(clock), exit_progress, &holds, &joined)
-                .with_nobody(pairing.nobody(clock))
-                .with_menu(menu.as_ref().map(|open| {
-                    let view = open.view(clock);
+                .with_nobody(listeners.pairing.nobody(clock))
+                .with_menu(menu.view(clock).map(|view| {
                     // Everybody can try their buttons on the game's controller,
                     // from the moment it comes down: each seat's clone as the
                     // game reads it, and the owner -- held back from the game
@@ -886,7 +773,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                     let held: [Held; ROWS_MAX] = std::array::from_fn(|at| {
                         let player = at as i32 + 1;
                         if player == view.owner {
-                            focused.held(player)
+                            listeners.focused.held(player)
                         } else {
                             pads.0
                                 .iter()
@@ -896,15 +783,9 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                                 .unwrap_or_default()
                         }
                     });
-                    menu_frame(&view, console_index, console, &held)
+                    views::menu_frame(&view, console_index, console, &held)
                 }))
-                .with_saying(if exiting {
-                    Saying::Saving
-                } else if reloading.is_some() {
-                    Saying::Loading
-                } else {
-                    Saying::Nothing
-                })
+                .with_saying(menu.saying())
                 .with_rebind(rebinding.map(|view| {
                     // danstick's word while it walks; the seat's clone after.
                     let held = view.held.clone().unwrap_or_else(|| {
@@ -915,7 +796,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                             .map(|watched| unsafe { read_held(watched.pad) })
                             .unwrap_or_default()
                     });
-                    drawn(&view, &held, console, console_index)
+                    views::rebinding(&view, &held, console, console_index)
                 }));
             painter.ensure(clock);
             painter.send(&frame, clock);
@@ -933,7 +814,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
             game.stop(options.grace_ms, options.poll_ms);
             break;
         }
-        if exiting {
+        if menu.exiting() {
             // The menu's Exit: the game asked to go (its own saves written in
             // the grace it gets), then this machine's saves sent up, with the
             // bar saying so until they are.
@@ -967,36 +848,12 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
     painter.close();
 }
 
-/// One pad's two holds for one sample: whether the exit fired, how far through
-/// it is (0..1), and whether the menu's fired. The same for a pad read through
-/// SDL and a seated player read through danstick's `native`.
-fn chords(
-    input: Input,
-    exit: &mut Pad,
-    menu_hold: &mut Pad,
-    announced: &mut bool,
-    now: u64,
-    options: &Options,
-) -> (bool, f64, bool) {
-    let fired = exit.step(input, now);
-    let menu_fired = menu_hold.step(input, now);
-    // One line when a hold starts, so the log of a session that ended this
-    // way says why.
-    if !options.quiet && exit.holding() && !*announced {
-        *announced = true;
+/// One line when an exit hold starts, so the log of a session that ended
+/// this way says why.
+fn announce(sample: &gotg_killswitch::chords::Sample, options: &Options) {
+    if !options.quiet && sample.started {
         eprintln!("gotg-killswitch: kill switch held; {}ms to go", options.hold_ms);
     }
-    if !exit.holding() {
-        *announced = false;
-    }
-    let held = if options.hold_ms > 0 {
-        exit.held_ms(now) as f64 / options.hold_ms as f64
-    } else if exit.holding() {
-        1.0
-    } else {
-        0.0
-    };
-    (fired, held, menu_fired)
 }
 
 /// `focus`, unless danstick has said it does not know it.
@@ -1010,70 +867,6 @@ fn send_focus(link: &mut Link, focused: &Focused, player: i32, open: bool) {
 /// has it, and report its controls -- or let go of it.
 fn focus_line(player: i32, open: bool) -> String {
     serde_json::json!({"cmd": "focus", "player": player, "open": open}).to_string()
-}
-
-/// The seats as the menu lists them: every slot danstick has, each with the
-/// drawing of the pad in it, looked up once per node.
-fn seat_rows(
-    rebind: &Rebind,
-    seating: &Seating,
-    icons: &mut std::collections::HashMap<String, u8>,
-) -> Vec<Row> {
-    let seated = rebind.seated();
-    let slots = seated
-        .iter()
-        .map(|seat| seat.player)
-        .max()
-        .unwrap_or(0)
-        .max(seating.slots())
-        .clamp(1, menu::SEATS_MAX as i32);
-    (1..=slots)
-        .map(|player| Row {
-            icon: seated.iter().find(|seat| seat.player == player).map(|seat| {
-                let key = format!("{}|{}", seat.node, seat.name);
-                *icons
-                    .entry(key)
-                    .or_insert_with(|| gotg_killswitch::icons::resolve(&seat.node, &seat.name))
-            }),
-            off: rebind.ports_off().contains(&player),
-        })
-        .collect()
-}
-
-/// The menu as a frame carries it.
-fn menu_frame(
-    view: &menu::View,
-    console_index: usize,
-    console: &consoles::Console,
-    held: &[Held; ROWS_MAX],
-) -> MenuFrame {
-    let mut icons = [EMPTY_SEAT; ROWS_MAX];
-    let mut off = 0u32;
-    for (at, row) in view.rows.iter().take(ROWS_MAX).enumerate() {
-        // A drawing numbered like the empty marker would read as empty.
-        icons[at] = row.icon.map_or(EMPTY_SEAT, |icon| icon.min(EMPTY_SEAT - 1));
-        if row.off {
-            off |= 1 << at;
-        }
-    }
-    MenuFrame {
-        owner: view.owner,
-        rows: view.rows.len().min(ROWS_MAX) as u32,
-        icons,
-        focus: view.focus as u32,
-        carried: view.carried.unwrap_or(0),
-        a_fill: view.a_fill,
-        b_fill: view.b_fill,
-        off,
-        console: console_index as u32,
-        pressed: std::array::from_fn(|at| held[at].bits(console.controls.iter().map(|control| control.id))),
-        sticks: std::array::from_fn(|at| held[at].sticks),
-        testing: view.testing,
-        saves: frame::Saves {
-            row: view.saves_row,
-            browse: view.saves,
-        },
-    }
 }
 
 /// A save picked from the menu: named in the session, and the game -- the
@@ -1179,28 +972,6 @@ fn ask_for_rebind(
     } else {
         eprintln!("gotg-killswitch: danstick is not listening; cannot rebind player {player}");
         rebind.unsent(clock);
-    }
-}
-
-/// A rebind as the painter draws it.
-fn drawn(view: &View, held: &Held, console: &consoles::Console, console_index: usize) -> Rebinding {
-    Rebinding {
-        player: view.player,
-        console: console_index as u32,
-        control: console
-            .control(&view.control)
-            .and_then(|at| i32::try_from(at).ok())
-            .unwrap_or(-1),
-        index: view.index,
-        total: view.total,
-        finish: view.finish as f32,
-        ended: match view.stored {
-            None => 0,
-            Some(true) => 1,
-            Some(false) => 2,
-        },
-        pressed: held.bits(console.controls.iter().map(|control| control.id)),
-        sticks: held.sticks,
     }
 }
 

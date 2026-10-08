@@ -5,14 +5,17 @@
 //! the binary's loop.
 
 pub mod bar;
+pub mod chords;
 pub mod clones;
 pub mod consoles;
 pub mod departures;
+pub mod driver;
 pub mod events;
 pub mod frame;
 pub mod icons;
 pub mod killswitch;
 pub mod leaders;
+pub mod listeners;
 pub mod loading;
 pub mod menu;
 pub mod native;
@@ -28,6 +31,7 @@ pub mod scene;
 pub mod seating;
 pub mod shapes;
 pub mod text;
+pub mod views;
 
 /// config/theme.yaml's colours, generated at build time.
 pub mod theme {

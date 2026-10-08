@@ -75,7 +75,15 @@ pub struct Saves {
 }
 
 impl Saves {
-    fn encode(self) -> [u32; SAVES_WORDS] {
+    fn put(self, out: &mut Writer) {
+        self.words().into_iter().for_each(|word| out.put_u32(word));
+    }
+
+    fn get(from: &mut Reader) -> Self {
+        Self::from_words([from.get_u32(), from.get_u32(), from.get_u32()])
+    }
+
+    fn words(self) -> [u32; SAVES_WORDS] {
         let (state, count, selected, confirming) = match self.browse {
             None => (0, 0, 0, false),
             Some(b) => match b.listed {
@@ -93,7 +101,7 @@ impl Saves {
 
     /// Whatever arrived, a list that can be drawn: the cursor on a save that
     /// is there, and no list at all for a state there is none of.
-    fn decode(words: [u32; SAVES_WORDS]) -> Self {
+    fn from_words(words: [u32; SAVES_WORDS]) -> Self {
         let [flags, count, selected] = words;
         let listed = match (flags >> 8) & 0xff {
             1 => Some(Listed::Loading),
@@ -123,6 +131,117 @@ fn pack_sticks(sticks: [f32; 4]) -> u32 {
 
 fn unpack_sticks(word: u32) -> [f32; 4] {
     std::array::from_fn(|at| f32::from((word >> (8 * at)) as u8 as i8) / 127.0)
+}
+
+/// Where the layout is written down once per direction: a cursor over the
+/// frame's bytes that moves a word at a time, so a field named in `put` and
+/// the same field named in `get` are in the same place by construction and
+/// no offset is counted by hand. Every wire value is one 32-bit word (a
+/// `u64` is two, low first; an icon is a `u8` widened).
+struct Writer {
+    bytes: [u8; SIZE],
+    at: usize,
+}
+
+impl Writer {
+    fn new() -> Self {
+        Self {
+            bytes: [0; SIZE],
+            at: 0,
+        }
+    }
+
+    fn put(&mut self, word: [u8; 4]) {
+        if let Some(slot) = self.bytes.get_mut(self.at..self.at + 4) {
+            slot.copy_from_slice(&word);
+        }
+        self.at += 4;
+    }
+
+    fn put_u32(&mut self, value: u32) {
+        self.put(value.to_ne_bytes());
+    }
+
+    fn put_i32(&mut self, value: i32) {
+        self.put(value.to_ne_bytes());
+    }
+
+    fn put_f32(&mut self, value: f32) {
+        self.put(value.to_ne_bytes());
+    }
+
+    fn put_u8(&mut self, value: u8) {
+        self.put_u32(u32::from(value));
+    }
+
+    fn put_u64(&mut self, value: u64) {
+        self.put_u32(value as u32);
+        self.put_u32((value >> 32) as u32);
+    }
+
+    /// The bytes, once every word the layout names has been written.
+    fn finish(self) -> [u8; SIZE] {
+        debug_assert_eq!(self.at, SIZE, "the layout writes exactly SIZE bytes");
+        self.bytes
+    }
+}
+
+struct Reader<'a> {
+    bytes: &'a [u8; SIZE],
+    at: usize,
+}
+
+impl<'a> Reader<'a> {
+    fn new(bytes: &'a [u8; SIZE]) -> Self {
+        Self { bytes, at: 0 }
+    }
+
+    fn get(&mut self) -> [u8; 4] {
+        let word = self
+            .bytes
+            .get(self.at..self.at + 4)
+            .and_then(|slot| <[u8; 4]>::try_from(slot).ok())
+            .unwrap_or_default();
+        self.at += 4;
+        word
+    }
+
+    fn get_u32(&mut self) -> u32 {
+        u32::from_ne_bytes(self.get())
+    }
+
+    fn get_i32(&mut self) -> i32 {
+        i32::from_ne_bytes(self.get())
+    }
+
+    fn get_f32(&mut self) -> f32 {
+        f32::from_ne_bytes(self.get())
+    }
+
+    /// A drawing past the table is drawn as the fallback, by `icons`.
+    fn get_u8(&mut self) -> u8 {
+        u8::try_from(self.get_u32()).unwrap_or(u8::MAX)
+    }
+
+    fn get_u64(&mut self) -> u64 {
+        let low = u64::from(self.get_u32());
+        low | u64::from(self.get_u32()) << 32
+    }
+
+    /// A number that came through a pipe: not a number is the middle, and
+    /// one off its travel is at its edge.
+    fn get_f32_within(&mut self, low: f32, high: f32) -> f32 {
+        let value = self.get_f32();
+        if value.is_finite() {
+            value.clamp(low, high)
+        } else {
+            0.0_f32.clamp(low, high)
+        }
+    }
+
+    fn finish(&self) {
+        debug_assert_eq!(self.at, SIZE, "the layout reads exactly SIZE bytes");
+    }
 }
 
 /// What the bar says in words when it says something on its own.
@@ -156,6 +275,106 @@ pub struct Rebinding {
     pub pressed: u64,
     /// Left stick x, y, right stick x, y: -1..1, y down.
     pub sticks: [f32; 4],
+}
+
+impl Rebinding {
+    /// What the wire says when there is no rebind: player 0.
+    const NONE: Self = Self {
+        player: 0,
+        console: 0,
+        control: -1,
+        index: 0,
+        total: 0,
+        finish: 0.0,
+        ended: 0,
+        pressed: 0,
+        sticks: [0.0; 4],
+    };
+
+    fn put(&self, out: &mut Writer) {
+        out.put_i32(self.player);
+        out.put_u32(self.console);
+        out.put_i32(self.control);
+        out.put_i32(self.index);
+        out.put_i32(self.total);
+        out.put_f32(self.finish);
+        out.put_u32(self.ended);
+        out.put_u64(self.pressed);
+        self.sticks.iter().for_each(|&axis| out.put_f32(axis));
+    }
+
+    fn get(from: &mut Reader) -> Self {
+        Self {
+            player: from.get_i32(),
+            console: from.get_u32(),
+            control: from.get_i32(),
+            index: from.get_i32(),
+            total: from.get_i32(),
+            finish: from.get_f32(),
+            ended: from.get_u32(),
+            pressed: from.get_u64(),
+            sticks: std::array::from_fn(|_| from.get_f32_within(-1.0, 1.0)),
+        }
+    }
+}
+
+impl MenuFrame {
+    /// What the wire says when there is no menu: owner 0.
+    const NONE: Self = Self {
+        owner: 0,
+        rows: 0,
+        icons: [EMPTY_SEAT; ROWS_MAX],
+        focus: 0,
+        carried: 0,
+        a_fill: 0.0,
+        b_fill: 0.0,
+        off: 0,
+        console: 0,
+        pressed: [0; ROWS_MAX],
+        sticks: [[0.0; 4]; ROWS_MAX],
+        testing: false,
+        saves: Saves {
+            row: false,
+            browse: None,
+        },
+    };
+
+    fn put(&self, out: &mut Writer) {
+        out.put_i32(self.owner);
+        out.put_u32(self.rows);
+        out.put_u32(self.focus);
+        out.put_i32(self.carried);
+        out.put_f32(self.a_fill);
+        out.put_f32(self.b_fill);
+        self.icons.iter().for_each(|&icon| out.put_u8(icon));
+        out.put_u32(self.off);
+        out.put_u32(self.console);
+        self.pressed.iter().for_each(|&down| out.put_u64(down));
+        self.sticks
+            .iter()
+            .for_each(|&axes| out.put_u32(pack_sticks(axes)));
+        out.put_u32(u32::from(self.testing));
+        self.saves.put(out);
+    }
+
+    fn get(from: &mut Reader) -> Self {
+        Self {
+            owner: from.get_i32(),
+            rows: from.get_u32().min(ROWS_MAX as u32),
+            // A seat, the tester, the saves row, or Exit.
+            focus: from.get_u32().min(ROWS_MAX as u32 + 2),
+            carried: from.get_i32(),
+            a_fill: from.get_f32_within(0.0, 1.0),
+            b_fill: from.get_f32_within(0.0, 1.0),
+            icons: std::array::from_fn(|_| from.get_u8()),
+            off: from.get_u32(),
+            console: from.get_u32(),
+            pressed: std::array::from_fn(|_| from.get_u64()),
+            sticks: std::array::from_fn(|_| unpack_sticks(from.get_u32())),
+            testing: from.get_u32() != 0,
+            saves: Saves::get(from),
+        }
+    }
 }
 
 /// One frame, in fixed arrays as it crosses the pipe: nothing to allocate
@@ -252,187 +471,71 @@ impl Frame {
     }
 
     pub fn encode(&self) -> [u8; SIZE] {
-        let mut out = [0u8; SIZE];
-        let mut words = out.as_chunks_mut::<4>().0.iter_mut();
-        let mut put = |bytes: [u8; 4]| {
-            if let Some(word) = words.next() {
-                *word = bytes;
-            }
-        };
-        put(MAGIC.to_ne_bytes());
-        put(self.position.to_ne_bytes());
-        put(self.exit_progress.to_ne_bytes());
-        put((self.hold_count as u32).to_ne_bytes());
-        put((self.joined_count as u32).to_ne_bytes());
-        put(u32::from(self.nobody).to_ne_bytes());
-        put(self.joined_fresh.to_ne_bytes());
-        self.hold_fraction
-            .iter()
-            .for_each(|value| put(value.to_ne_bytes()));
-        self.hold_player.iter().for_each(|value| put(value.to_ne_bytes()));
-        self.hold_icon
-            .iter()
-            .for_each(|&value| put(u32::from(value).to_ne_bytes()));
-        self.joined.iter().for_each(|value| put(value.to_ne_bytes()));
-        self.joined_icon
-            .iter()
-            .for_each(|&value| put(u32::from(value).to_ne_bytes()));
-        let rebind = self.rebind.unwrap_or(Rebinding {
-            player: 0,
-            console: 0,
-            control: -1,
-            index: 0,
-            total: 0,
-            finish: 0.0,
-            ended: 0,
-            pressed: 0,
-            sticks: [0.0; 4],
-        });
-        put(rebind.player.to_ne_bytes());
-        put(rebind.console.to_ne_bytes());
-        put(rebind.control.to_ne_bytes());
-        put(rebind.index.to_ne_bytes());
-        put(rebind.total.to_ne_bytes());
-        put(rebind.finish.to_ne_bytes());
-        put(rebind.ended.to_ne_bytes());
-        put((rebind.pressed as u32).to_ne_bytes());
-        put(((rebind.pressed >> 32) as u32).to_ne_bytes());
-        rebind.sticks.iter().for_each(|value| put(value.to_ne_bytes()));
-        let menu = self.menu.unwrap_or(MenuFrame {
-            owner: 0,
-            rows: 0,
-            icons: [EMPTY_SEAT; ROWS_MAX],
-            focus: 0,
-            carried: 0,
-            a_fill: 0.0,
-            b_fill: 0.0,
-            off: 0,
-            console: 0,
-            pressed: [0; ROWS_MAX],
-            sticks: [[0.0; 4]; ROWS_MAX],
-            testing: false,
-            saves: Saves::default(),
-        });
-        put(menu.owner.to_ne_bytes());
-        put(menu.rows.to_ne_bytes());
-        put(menu.focus.to_ne_bytes());
-        put(menu.carried.to_ne_bytes());
-        put(menu.a_fill.to_ne_bytes());
-        put(menu.b_fill.to_ne_bytes());
-        menu.icons
-            .iter()
-            .for_each(|&icon| put(u32::from(icon).to_ne_bytes()));
-        put(menu.off.to_ne_bytes());
-        put(menu.console.to_ne_bytes());
-        for pressed in menu.pressed {
-            put((pressed as u32).to_ne_bytes());
-            put(((pressed >> 32) as u32).to_ne_bytes());
-        }
-        for sticks in menu.sticks {
-            put(pack_sticks(sticks).to_ne_bytes());
-        }
-        put(u32::from(menu.testing).to_ne_bytes());
-        menu.saves
-            .encode()
-            .iter()
-            .for_each(|word| put(word.to_ne_bytes()));
-        put(match self.saying {
-            Saying::Nothing => 0u32,
+        let mut out = Writer::new();
+        out.put_u32(MAGIC);
+        out.put_f32(self.position);
+        out.put_f32(self.exit_progress);
+        out.put_u32(self.hold_count as u32);
+        out.put_u32(self.joined_count as u32);
+        out.put_u32(u32::from(self.nobody));
+        out.put_u32(self.joined_fresh);
+        self.hold_fraction.iter().for_each(|&value| out.put_f32(value));
+        self.hold_player.iter().for_each(|&value| out.put_i32(value));
+        self.hold_icon.iter().for_each(|&value| out.put_u8(value));
+        self.joined.iter().for_each(|&value| out.put_i32(value));
+        self.joined_icon.iter().for_each(|&value| out.put_u8(value));
+        self.rebind.unwrap_or(Rebinding::NONE).put(&mut out);
+        self.menu.unwrap_or(MenuFrame::NONE).put(&mut out);
+        out.put_u32(match self.saying {
+            Saying::Nothing => 0,
             Saying::Saving => 1,
             Saying::Loading => 2,
-        }
-        .to_ne_bytes());
-        out
+        });
+        out.finish()
     }
 
     /// The frame in these bytes, if they are one this painter can draw: the
     /// right magic, and counts no larger than the arrays, whatever arrived.
     /// A drawing past the table is drawn as the fallback, by `icons`.
     pub fn decode(bytes: &[u8; SIZE]) -> Option<Self> {
-        let word =
-            |i: usize| -> [u8; 4] { [bytes[i * 4], bytes[i * 4 + 1], bytes[i * 4 + 2], bytes[i * 4 + 3]] };
-        let count = |i: usize| u32::from_ne_bytes(word(i)) as usize;
-        let icon = |i: usize| u8::try_from(u32::from_ne_bytes(word(i))).unwrap_or(u8::MAX);
-        let (hold_count, joined_count) = (count(3), count(4));
-        if u32::from_ne_bytes(word(0)) != MAGIC || hold_count > HOLDS_MAX || joined_count > JOINED_MAX {
+        let mut from = Reader::new(bytes);
+        let magic = from.get_u32();
+        let position = from.get_f32();
+        let exit_progress = from.get_f32();
+        let (hold_count, joined_count) = (from.get_u32() as usize, from.get_u32() as usize);
+        if magic != MAGIC || hold_count > HOLDS_MAX || joined_count > JOINED_MAX {
             return None;
         }
-        let holds = 7;
-        let joined = holds + 3 * HOLDS_MAX;
-        let rebind = joined + 2 * JOINED_MAX;
-        let player = i32::from_ne_bytes(word(rebind));
-        let menu = rebind + REBIND_WORDS;
-        let owner = i32::from_ne_bytes(word(menu));
-        let fill = |i: usize| {
-            let value = f32::from_ne_bytes(word(i));
-            if value.is_finite() {
-                value.clamp(0.0, 1.0)
-            } else {
-                0.0
-            }
+        let nobody = from.get_u32() != 0;
+        let joined_fresh = from.get_u32() & ((1u32 << joined_count) - 1);
+        let hold_fraction = std::array::from_fn(|_| from.get_f32());
+        let hold_player = std::array::from_fn(|_| from.get_i32());
+        let hold_icon = std::array::from_fn(|_| from.get_u8());
+        let joined = std::array::from_fn(|_| from.get_i32());
+        let joined_icon = std::array::from_fn(|_| from.get_u8());
+        let rebind = Rebinding::get(&mut from);
+        let menu = MenuFrame::get(&mut from);
+        let saying = match from.get_u32() {
+            1 => Saying::Saving,
+            2 => Saying::Loading,
+            _ => Saying::Nothing,
         };
+        from.finish();
         Some(Self {
-            menu: (owner > 0).then(|| MenuFrame {
-                owner,
-                rows: u32::from_ne_bytes(word(menu + 1)).min(ROWS_MAX as u32),
-                // A seat, the tester, the saves row, or Exit.
-                focus: u32::from_ne_bytes(word(menu + 2)).min(ROWS_MAX as u32 + 2),
-                carried: i32::from_ne_bytes(word(menu + 3)),
-                a_fill: fill(menu + 4),
-                b_fill: fill(menu + 5),
-                icons: std::array::from_fn(|i| icon(menu + 6 + i)),
-                off: u32::from_ne_bytes(word(menu + 6 + ROWS_MAX)),
-                console: u32::from_ne_bytes(word(menu + 7 + ROWS_MAX)),
-                pressed: std::array::from_fn(|i| {
-                    let at = menu + 8 + ROWS_MAX + 2 * i;
-                    u64::from(u32::from_ne_bytes(word(at)))
-                        | u64::from(u32::from_ne_bytes(word(at + 1))) << 32
-                }),
-                sticks: std::array::from_fn(|i| {
-                    unpack_sticks(u32::from_ne_bytes(word(menu + 8 + 3 * ROWS_MAX + i)))
-                }),
-                testing: u32::from_ne_bytes(word(menu + 8 + 4 * ROWS_MAX)) != 0,
-                saves: Saves::decode(std::array::from_fn(|i| {
-                    u32::from_ne_bytes(word(menu + 9 + 4 * ROWS_MAX + i))
-                })),
-            }),
-            saying: match u32::from_ne_bytes(word(menu + MENU_WORDS)) {
-                1 => Saying::Saving,
-                2 => Saying::Loading,
-                _ => Saying::Nothing,
-            },
-            rebind: (player > 0).then(|| Rebinding {
-                player,
-                console: u32::from_ne_bytes(word(rebind + 1)),
-                control: i32::from_ne_bytes(word(rebind + 2)),
-                index: i32::from_ne_bytes(word(rebind + 3)),
-                total: i32::from_ne_bytes(word(rebind + 4)),
-                finish: f32::from_ne_bytes(word(rebind + 5)),
-                ended: u32::from_ne_bytes(word(rebind + 6)),
-                pressed: u64::from(u32::from_ne_bytes(word(rebind + 7)))
-                    | u64::from(u32::from_ne_bytes(word(rebind + 8))) << 32,
-                // A stick off its travel is at its edge, and not a number
-                // is the middle: this came through a pipe.
-                sticks: std::array::from_fn(|i| {
-                    let value = f32::from_ne_bytes(word(rebind + 9 + i));
-                    if value.is_finite() {
-                        value.clamp(-1.0, 1.0)
-                    } else {
-                        0.0
-                    }
-                }),
-            }),
-            nobody: u32::from_ne_bytes(word(5)) != 0,
-            position: f32::from_ne_bytes(word(1)),
-            exit_progress: f32::from_ne_bytes(word(2)),
-            hold_fraction: std::array::from_fn(|i| f32::from_ne_bytes(word(holds + i))),
-            hold_player: std::array::from_fn(|i| i32::from_ne_bytes(word(holds + HOLDS_MAX + i))),
-            hold_icon: std::array::from_fn(|i| icon(holds + 2 * HOLDS_MAX + i)),
+            position,
+            exit_progress,
+            hold_fraction,
+            hold_player,
+            hold_icon,
             hold_count,
-            joined: std::array::from_fn(|i| i32::from_ne_bytes(word(joined + i))),
-            joined_icon: std::array::from_fn(|i| icon(joined + JOINED_MAX + i)),
+            joined,
+            joined_icon,
             joined_count,
-            joined_fresh: u32::from_ne_bytes(word(6)) & ((1u32 << joined_count) - 1),
+            joined_fresh,
+            rebind: (rebind.player > 0).then_some(rebind),
+            menu: (menu.owner > 0).then_some(menu),
+            saying,
+            nobody,
         })
     }
 }
@@ -536,6 +639,91 @@ mod tests {
             Some(ROWS_MAX as u32 + 2),
             "a cursor past Exit is drawn on Exit"
         );
+    }
+
+    /// A frame with something in every field, distinct values throughout.
+    fn golden_frame() -> Frame {
+        let holds = [hold(0.25, 2, 5), hold(0.5, 3, 9)];
+        let joined = [shown(1, 4, false), shown(2, 6, true), shown(3, 7, true)];
+        Frame {
+            rebind: Some(Rebinding {
+                player: 2,
+                console: 5,
+                control: 3,
+                index: 4,
+                total: 14,
+                finish: 0.25,
+                ended: 1,
+                pressed: 1 << 40 | 0b101,
+                sticks: [-1.0, 0.5, 0.0, 0.25],
+            }),
+            ..Frame::pack(0.75, 0.5, &holds, &joined)
+        }
+        .with_menu(Some(MenuFrame {
+            owner: 2,
+            rows: 3,
+            icons: std::array::from_fn(|i| if i < 3 { i as u8 + 10 } else { EMPTY_SEAT }),
+            focus: 4,
+            carried: -1,
+            a_fill: 0.5,
+            b_fill: 0.25,
+            off: 0b10,
+            console: 6,
+            pressed: std::array::from_fn(|i| (1 << (33 + i)) | i as u64),
+            sticks: std::array::from_fn(|i| [i as f32 / 8.0, -1.0, 0.5, 1.0]),
+            testing: true,
+            saves: Saves {
+                row: true,
+                browse: Some(Browse {
+                    listed: Listed::Ready(7),
+                    selected: 3,
+                    confirming: true,
+                }),
+            },
+        }))
+        .with_saying(Saying::Saving)
+        .with_nobody(true)
+    }
+
+    /// The wire format, word by word, as it was before encode and decode
+    /// shared one cursor. The painter is a separate process and a frame from
+    /// an older killswitch must still read: if this fails, the layout moved.
+    const GOLDEN: [u32; SIZE / 4] = [
+        0x56534f47, 0x3f400000, 0x3f000000, 0x00000002, 0x00000003, 0x00000001, 0x00000006, 0x3e800000,
+        0x3f000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000002,
+        0x00000003, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000005,
+        0x00000009, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000001,
+        0x00000002, 0x00000003, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000004,
+        0x00000006, 0x00000007, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000002,
+        0x00000005, 0x00000003, 0x00000004, 0x0000000e, 0x3e800000, 0x00000001, 0x00000005, 0x00000100,
+        0xbf800000, 0x3f000000, 0x00000000, 0x3e800000, 0x00000002, 0x00000003, 0x00000004, 0xffffffff,
+        0x3f000000, 0x3e800000, 0x0000000a, 0x0000000b, 0x0000000c, 0x000000ff, 0x000000ff, 0x000000ff,
+        0x000000ff, 0x000000ff, 0x00000002, 0x00000006, 0x00000000, 0x00000002, 0x00000001, 0x00000004,
+        0x00000002, 0x00000008, 0x00000003, 0x00000010, 0x00000004, 0x00000020, 0x00000005, 0x00000040,
+        0x00000006, 0x00000080, 0x00000007, 0x00000100, 0x7f408100, 0x7f408110, 0x7f408120, 0x7f408130,
+        0x7f408140, 0x7f40814f, 0x7f40815f, 0x7f40816f, 0x00000001, 0x00000303, 0x00000007, 0x00000003,
+        0x00000001,
+    ];
+
+    #[test]
+    fn the_wire_format_is_the_one_the_painter_reads() {
+        let bytes = golden_frame().encode();
+        let words: Vec<u32> = bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| u32::from_ne_bytes(*c))
+            .collect();
+        assert_eq!(words, GOLDEN, "encoded bytes");
+        let mut golden = [0u8; SIZE];
+        for (chunk, word) in golden.as_chunks_mut::<4>().0.iter_mut().zip(GOLDEN) {
+            *chunk = word.to_ne_bytes();
+        }
+        // Sticks are quantised to a byte an axis, so compare the bytes again.
+        let decoded = Frame::decode(&golden).expect("the old frame still reads");
+        assert_eq!(decoded.encode(), golden, "decoded and encoded again");
+        assert_eq!(decoded.menu.map(|m| (m.owner, m.focus)), Some((2, 4)));
+        assert_eq!(decoded.rebind.map(|r| r.pressed), Some(1 << 40 | 0b101));
     }
 
     #[test]
