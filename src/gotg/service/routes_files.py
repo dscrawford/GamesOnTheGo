@@ -1,12 +1,9 @@
 """`/games` and `/files`: streaming a member file or a hand-placed key.
 
-These are the routes that move gigabytes, and they are their own file because
-the byte-range arithmetic had been buried inside the same method that sends
-the headers: `_stream_fd` decided a window, refused a stream slot and wrote
-seven headers in fifty lines. `range_window` is now the whole range decision
-as a pure function (a 416, an ignored header, a 206 and a stale If-Range are
-each one assertion), and `open_contained` -- the check that a served file is
-really under its root -- sits beside the only two routes that use it.
+These are the routes that move gigabytes. `range_window` is the whole range
+decision as a pure function (a 416, an ignored header, a 206 and a stale
+If-Range are each one assertion); `open_contained` checks that a served file is
+under its root.
 """
 
 from __future__ import annotations

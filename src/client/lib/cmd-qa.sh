@@ -370,7 +370,7 @@ qa_where() {
 # QA_PAD_PID, QA_SINK_MODULE and QA_ROUTER_PID are the ones qa_cleanup reads
 # from the EXIT trap; they are globals for that reason and no other.
 
-# Step 1, the arguments. Sets the QA_* request globals above; a typo is
+# The arguments. Sets the QA_* request globals above; a typo is
 # refused here, before anything is built. Separate from _qa_check_args because
 # --rerun re-enters the loop with a recorded argument list.
 _qa_parse_args() {
@@ -445,7 +445,7 @@ EOF
   done
 }
 
-# Step 2, whether what was asked makes sense: an id, whole seconds, an overlay
+# Whether what was asked makes sense: an id, whole seconds, an overlay
 # that fits in the run, a machine that has a profile. All of it before
 # anything is built or downloaded: a typo here is the cheapest thing to be
 # wrong about after the id.
@@ -461,7 +461,7 @@ _qa_check_args() {
   qa_machine_env "$QA_MACHINE" >/dev/null
 }
 
-# Step 3, where the run happens. Prints the host of the real machine when the
+# Where the run happens. Prints the host of the real machine when the
 # profile names one and it answers; prints nothing when the stand-in here is
 # to do it (the machine is the desktop, no host is configured, or it did not
 # answer -- which is said, because the run is then not what was asked for).
@@ -487,7 +487,7 @@ _qa_remote_args() {
   printf '%s\n' "${there[@]}"
 }
 
-# Step 3b, the run goes to the real machine at $1; its status is ours.
+# The run goes to the real machine at $1; its status is ours.
 _qa_run_there() {
   local host="$1" arg
   local -a there=()
@@ -496,7 +496,7 @@ _qa_run_there() {
   "$(qa_ssh_bin)" -o BatchMode=yes "$host" gotg qa "${there[@]}"
 }
 
-# Step 4, the game, in the catalog. An id that is not there is the cheapest
+# The game, in the catalog. An id that is not there is the cheapest
 # thing to be wrong about. A game imported since the cache was written is the
 # usual thing a QA run is for, so one refresh before giving up on it.
 # Sets QA_GAME.
@@ -508,7 +508,7 @@ _qa_resolve_game() {
   fi
 }
 
-# Step 5, what the machine must have, said before anything is built: the
+# What the machine must have, said before anything is built: the
 # overlay's binary if it was asked for and nothing to draw it (not found
 # later as a failed axis), the uinput node, the QA tools. Sets QA_KILLSWITCH.
 _qa_preflight() {
@@ -523,7 +523,7 @@ _qa_preflight() {
   qa_tools_ensure
 }
 
-# Step 6, the virtual pad, started and waited for. The pad first:
+# The virtual pad, started and waited for. The pad first:
 # pads_configure inside play_prepare must see it, and the emulator must find
 # it already present when SDL first scans /dev/input. Sets QA_PAD_PID.
 # $1 the run directory.
@@ -553,7 +553,7 @@ _qa_pad_key() {
   jq -r '[.[] | select(.identity | test("^0300....5e0400008e02"))][-1] | "\(.identity)/\(.slot)"'
 }
 
-# Step 7, seat the virtual pad as player 1 for this run only; the machine's
+# Seat the virtual pad as player 1 for this run only; the machine's
 # own controllers.json, likely pinned to a real pad, stays untouched.
 # $1 the run directory.
 _qa_seat_pad() {
@@ -567,7 +567,7 @@ _qa_seat_pad() {
   fi
 }
 
-# Step 8, an id is its game as the library builds it, graded as that -- built
+# An id is its game as the library builds it, graded as that -- built
 # fresh rather than whatever root is here: a stale root was the first bug a
 # real run ever caught. A spec (--spec) already is one. Sets QA_WANT to the
 # built spec's.
@@ -583,7 +583,7 @@ _qa_build_game() {
   QA_WANT="$LAUNCH_WANT"
 }
 
-# Step 9, the game prepared as a launch would prepare it, into the run's
+# The game prepared as a launch would prepare it, into the run's
 # scratch state. A machine without GL of its own -- a Deck -- has the game
 # load nixpkgs' mesa (GOTG_FOREIGN_GL in its profile, applied inside the
 # session), so the mesa it names is fetched here as a real Deck's launch
@@ -602,7 +602,7 @@ _qa_prepare_game() {
   qa_require_bootstrap "$PLAY_ATTR" "$rundir/env-state"
 }
 
-# Step 10, the null sink, the recorder on its monitor, and the router that
+# The null sink, the recorder on its monitor, and the router that
 # moves the emulator onto it. Sets QA_SINK_MODULE, QA_AUDIO_PID and
 # QA_ROUTER_PID. $1 the run directory.
 _qa_start_audio() {
@@ -622,7 +622,7 @@ _qa_start_audio() {
   QA_ROUTER_PID=$!
 }
 
-# Step 11, the machine this run pretends to be. Applied by the session, to
+# The machine this run pretends to be. Applied by the session, to
 # the game alone: the recorder, the pad and cage itself stay what they are
 # here -- except for GL, which the tools need too and a Deck does not have.
 # $1 the run directory.
@@ -636,7 +636,7 @@ _qa_apply_machine() {
   printf '%s\n' "$QA_MACHINE" >"$rundir/machine"
 }
 
-# Step 12, the recording itself: the game inside a headless cage, driven by
+# The recording itself: the game inside a headless cage, driven by
 # qa/session.sh. Sets QA_CAGE_STATUS. $1 the run directory.
 _qa_run_session() {
   local rundir="$1"
@@ -687,7 +687,7 @@ _qa_golden_matches() {
   [[ "$blessed" == "$wanted" ]]
 }
 
-# Step 13, the golden frame, if this game has one, or this run's frame
+# The golden frame, if this game has one, or this run's frame
 # becoming it. Taken near the end of the run — the most-progressed,
 # most-settled screen. A golden is put in the run directory only when its
 # timings match; otherwise it is said not to be graded. $1 the run directory.
@@ -718,7 +718,7 @@ _qa_verdict_lines() {
     (if .value.pass == true then "pass" elif .value.pass == false then "FAIL" else "skip" end)'
 }
 
-# Step 14, grade the recording and say how it went; the exit status is the
+# Grade the recording and say how it went; the exit status is the
 # verdict's. $1 the run directory.
 _qa_report() {
   local rundir="$1" verdict_status=0

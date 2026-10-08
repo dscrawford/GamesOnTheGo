@@ -1,9 +1,6 @@
 """The "Update available" chip's state, as a value.
 
-Pulled out of `run()`, which kept three locals for it -- the loop's own word
-(`chip_phase`), when that word gives way (`chip_until`), and where the chip was
-last drawn (`chip_rect`) -- and spelled the timing at every call of `say_chip`.
-The seam is that the chip is the report's words except for a while after a
+The chip is the report's words except for a while after a
 press: `words()` is that rule, `say()` starts a while, and the rect is kept
 here only because a click is matched against it. No pygame (the rect is the
 layout Tile `draw_chip` returns); frozen, so every press is a new value.

@@ -17,9 +17,6 @@ def never_asked():
     raise AssertionError("readiness was asked when the verb did not need it")
 
 
-# plan_pick ---------------------------------------------------------------------------------
-
-
 def pick(verb="play", variant=None, version=None, installing=False, ready=lambda: True, game=GAME):
     return plans.plan_pick(game, verb, variant, version, installing=installing, ready=ready)
 
@@ -67,9 +64,6 @@ def test_a_ready_game_starts_and_an_unready_one_is_prepared_per_variant():
 
 def test_installing_only_adopts_for_a_play():
     assert pick("configure", installing=True, ready=lambda: True).action == plans.START
-
-
-# plan_self_update --------------------------------------------------------------------------
 
 
 def report(**kw) -> Report:
@@ -122,9 +116,6 @@ def test_the_chip_words_are_the_reports_not_the_transient_ones():
     assert updates.chip(report(), None) == updates.UPDATE_AVAILABLE
 
 
-# plan_restart ------------------------------------------------------------------------------
-
-
 def test_restarting_into_the_root_already_running_is_up_to_date():
     p = plans.plan_restart("/nix/store/a/", "/nix/store/a", lambda r: True)
     assert (p.action, p.chip, p.refresh) == (plans.NOOP, "up-to-date", True)
@@ -148,9 +139,6 @@ def test_a_usable_new_root_is_gone_to_and_usability_is_not_asked_when_it_need_no
         raise AssertionError("asked")
 
     assert plans.plan_restart("/nix/store/a", "/nix/store/a", asked).action == plans.NOOP
-
-
-# on_prepare_done ---------------------------------------------------------------------------
 
 
 def done(after, ok=True, lines=(), picker=None, restoring=None, starting=None, game=GAME, variant=None, version=None):
@@ -214,9 +202,6 @@ def test_restored_or_kept_with_nothing_remembered_falls_through_to_the_verb():
 def test_any_other_verb_starts_what_the_loader_prepared():
     p = done("play", variant="mod", version="v1")
     assert p.begin == (GAME, "play", "mod", "v1") and p.clear and not p.clear_restoring
-
-
-# plan_saves_answer -------------------------------------------------------------------------
 
 
 def test_a_conflict_is_a_choice_and_anything_else_launches():

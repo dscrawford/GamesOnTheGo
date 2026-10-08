@@ -2,8 +2,7 @@
 //! joining (`pairing`), the rebind walk and the seat list (`rebind`), the
 //! standing request for seating (`seating`), the menu owner's controls
 //! (`focused`), every seated pad's own controls (`native`), and the pads that
-//! went away (`departures`). `watch()` in main.rs used to hold six locals and
-//! name all six at each use; the bundle is the seam between "the socket
+//! went away (`departures`). The bundle is the seam between "the socket
 //! said" and "the loop decides". What to do when the connection comes and
 //! goes is here, taking the link as a closure so it is tested with none.
 

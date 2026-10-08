@@ -20,9 +20,6 @@ def state(count):
     return Grid(Library([Game(id=f"usa.g{i:03}", platform="snes", title=f"G{i}", handler="x") for i in range(count)]))
 
 
-# --- the line under a row's title ---------------------------------------------
-
-
 def test_a_game_that_is_neither_installed_nor_installing_is_its_platform():
     assert row_under_text(game("n64"), None, False, False) == "n64"
 
@@ -48,9 +45,6 @@ def test_a_failed_install_says_so():
     assert row_under_text(game(), (None, True), False, False) == "snes   ·   install failed"
 
 
-# --- the status corner ---------------------------------------------------------
-
-
 def test_the_status_the_browser_gave_is_shown_dim():
     assert status_line(state(25), "3 installed", None) == ("3 installed", False)
 
@@ -66,9 +60,6 @@ def test_an_empty_catalog_says_so():
 def test_typing_replaces_the_status_and_is_bright():
     assert status_line(state(25), "3 installed", "mar") == ("search: mar_", True)
     assert status_line(state(25), "", "") == ("search: _", True)
-
-
-# --- the bundle ----------------------------------------------------------------
 
 
 def test_a_view_is_what_a_frame_draws_and_cannot_be_changed():

@@ -1,9 +1,8 @@
 # The programs this project packages itself because nixpkgs does not carry
 # them (or carries them without a patch the ports need), and the SDL cut they
-# share. Its own file because two things need exactly this set: the flake's
-# `packages` (nix/packages.nix) and the environments in src/client/env, whose
-# game files name them as `gotgPkgs`. Each used to build the set for itself --
-# the same twelve callPackage lines, written twice, and a bare
+# share. Two things need exactly this set: the flake's `packages`
+# (nix/packages.nix) and the environments in src/client/env, whose game files
+# name them as `gotgPkgs`; built apart, a bare
 # `import src/client/env { inherit pkgs; }` quietly got a second copy.
 #
 # Only what a derivation of ours is made of: danstick and the gotg-pads

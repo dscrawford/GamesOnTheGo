@@ -1,12 +1,7 @@
 """One way to start the service on a free port and one way to talk to it.
 
-Every service test file used to carry its own `free_port()`, its own `call()`
-(seven of them, each returning a slightly different tuple) and a hand-rolled
-`make_server` + `serve_forever` thread + `shutdown()` -- forty-six times, with
-the shutdown living in a `finally` that a new test could forget. Here the
-start and the stop are one context manager, and the transport is one function
-that always answers `(status, headers, body)`; a test file that wants its body
-as JSON, or without the headers, adapts that in one line beside its fixtures.
+One context manager starts and stops the service on a free port; `call()`
+always answers `(status, headers, body)`.
 
 It is a module and not `conftest.py` because test files import from it by
 name (as they do `test_proxy`), and `tests/conftest.py` already owns that name

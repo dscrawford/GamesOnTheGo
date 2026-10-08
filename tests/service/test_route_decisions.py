@@ -144,8 +144,6 @@ def test_a_saves_path_urlsplit_refuses_is_a_400_not_a_dropped_connection(tmp_pat
 
 
 def test_putting_to_meta_does_not_store_a_save(tmp_path):
-    # /saves/<attr>/meta is read-only: a PUT there used to fall through to
-    # the head's PUT and store the body as a generation.
     store = SavesStore(root=tmp_path / "saves", keep=3, max_bytes=100_000)
     with serve(Config(token=CLIENT_TOKEN), store) as server:
         assert server.call("PUT", "/saves/env-n64/meta", body=b"bundle")[0] == 405

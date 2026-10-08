@@ -1,7 +1,6 @@
 """The picker's colours and window size, from config/theme.yaml with defaults.
 
-One table for every drawing module (it was written out in app.py and again in
-saves_draw.py). The window is the Deck's own panel, so a window on a desktop is
+One table for every drawing module. The window is the Deck's own panel, so a window on a desktop is
 the shape it will be there.
 """
 

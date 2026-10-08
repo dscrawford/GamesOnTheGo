@@ -399,10 +399,8 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
         elif plan.action == plans.START:
             start(game, verb, variant, version)
 
-    # -- the screens that own input, one handler each ---------------------------------------------
-    #
-    # `screen_of` says which owns it (screens.py); the handlers below are the
-    # branches the event loop used to carry inline, in the same order.
+    # `screen_of` says which owns the input (screens.py); each handler below is
+    # that screen's.
 
     def current_screen() -> Screen:
         return screen_of(
@@ -597,10 +595,8 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
         elif event.key in (pygame.K_SLASH, pygame.K_f):
             typing = typing_from = browser.search
         elif event.key == pygame.K_TAB:
-            # The panel, which is every filter in one place and both
-            # directions on each. It used to cycle platforms forwards and,
-            # with shift, regions -- a controller could reach the first and not
-            # the second.
+            # The panel: every filter in one place, both directions on each,
+            # so a controller reaches all of them.
             panel = Filters()
         elif event.key == pygame.K_LEFT:
             state.move(-1, 0)
@@ -701,8 +697,6 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
         Screen.TYPING: on_typing,
         Screen.GRID: on_grid,
     }
-
-    # -- and one painter each, chosen by the same answer ------------------------------------------
 
     def grid_view() -> GridView:
         words = chip.words(learned.report, updates.self_root(), time.monotonic())

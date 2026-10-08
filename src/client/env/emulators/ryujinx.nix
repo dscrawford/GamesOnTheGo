@@ -76,15 +76,9 @@ let
     );
 in
 {
-  # A game's variant file, with a mod's preLaunch added after the platform's
-  # and the game-version window the mod states carried along. Five files
-  # (the TOTK and BotW UltraCam variants) each wrote `preLaunch = (base.preLaunch
-  # or "") + (mod).preLaunch` and, beside it, the same two `gameVersion*`
-  # lines for their mod -- the window belongs to the mod's executable patch,
-  # so it travels in the mod's `window` and is stated once where the reason
-  # for it is (totk-ultracam.nix, botw-ultracam.nix). `base // patch`
-  # *replaces* preLaunch, which is why this appends rather than assigns
-  # (checks.inheritsPlatform).
+  # A game's variant file. Appends the mod's preLaunch (`base // patch` would
+  # replace it, see checks.inheritsPlatform) and carries the game-version window
+  # the mod states.
   withMod =
     base: mod:
     base
@@ -195,9 +189,9 @@ in
   # mod, so the lines are merged in: a cheat a variant ships on is on -- the 60
   # FPS one is the way out of a minigame, the text-speed one a hotkey that does
   # nothing until pressed -- and every other line, a second mod's or the
-  # player's own in Ryujinx's cheat manager, is left as it was. (It used to be
-  # written only when the file was missing, which left a cheat added later off
-  # on every machine that had launched the game before.)
+  # player's own in Ryujinx's cheat manager, is left as it was. Merged on every
+  # launch, so a cheat added in a later release is not left off on a machine
+  # that launched the game before.
   ryujinxModDir =
     {
       titleId,

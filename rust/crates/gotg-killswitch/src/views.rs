@@ -1,6 +1,5 @@
 //! What to draw, worked out from what the kill switch knows: the seats as the
-//! menu lists them, the menu and the rebind as a frame carries them. Out of
-//! main.rs, where they were plain functions beside the loop, because each is
+//! menu lists them, the menu and the rebind as a frame carries them. Each is
 //! a pure map from state to a value and the corners (more seats than a frame
 //! holds, a drawing numbered like the empty marker, a control the console
 //! does not have) are worth a test. Reading a pad is not here; the loop does
@@ -56,7 +55,6 @@ pub fn rows_for(
         .collect()
 }
 
-/// The menu as a frame carries it.
 pub fn menu_frame(
     view: &menu::View,
     console_index: usize,
@@ -92,7 +90,6 @@ pub fn menu_frame(
     }
 }
 
-/// A rebind as the painter draws it.
 pub fn rebinding(view: &View, held: &Held, console: &Console, console_index: usize) -> Rebinding {
     Rebinding {
         player: view.player,

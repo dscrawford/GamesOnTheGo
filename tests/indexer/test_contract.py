@@ -118,7 +118,6 @@ def test_bash_and_python_agree_on_platforms(sample, valid):
     assert _bash_matches(sample, pattern) is valid
 
 
-# --- the one timestamp spelling ------------------------------------------------
 #
 # catalog.py, saves.py and publish.py each spelled "now" as the same strftime
 # call. The catalog's since/seen_at comparisons are lexicographic, so the spelling

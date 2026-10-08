@@ -1,8 +1,6 @@
-# A dev-shell command that runs the working tree, not the store. Its own file
-# because the shell has two of them (`gotg`, the picker) and each was the same
-# lookup of the checkout, the same refusal when it is not one, and the same
-# advice about the two ways out -- and the third would have been a copy of
-# those eight lines again.
+# A dev-shell command that runs the working tree, not the store. The shell has
+# two of them (`gotg`, the picker), each the same lookup of the checkout, the
+# same refusal when it is not one, and the same advice about the two ways out.
 { pkgs }:
 {
   # The command's name (also what its refusal says).

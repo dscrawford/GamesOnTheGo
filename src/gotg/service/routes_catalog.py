@@ -1,12 +1,8 @@
 """`/catalog`: the handler's catalog routes, one function per route.
 
-A mixin of `Handler`, in its own file because `_catalog` was a hundred and
-thirty-seven lines: path parsing, the index-token gate, five routes and the
-seven exceptions they can raise, in one `try`. The routes are now methods
-(`_catalog_list`, `_catalog_put`, `_catalog_seen`, `_catalog_sweep`,
-`_catalog_delete`), the two decisions that are not I/O are pure functions
-(`touch_keys`, `advertised_hosts`), and `_catalog` is left holding what really
-is shared: the path, the gate and the exception-to-status table.
+A mixin of `Handler`. `_catalog` holds what is shared (path, index-token gate,
+exception-to-status table); the routes are `_catalog_*` methods and the non-I/O
+decisions are `touch_keys` and `advertised_hosts`.
 """
 
 from __future__ import annotations
@@ -68,9 +64,8 @@ class CatalogRoutes:
         """`/catalog` reads for everyone; writes for the index principal only.
 
         PUT upserts one entry, and answers 409 when the stored entry points at
-        different bytes — two torrents producing the same id is a real error
-        the old hardlink collision used to surface, and an upsert must not
-        swallow it. The sweep reports what a completed scan did not confirm;
+        different bytes — two torrents producing the same id is a real error,
+        and an upsert must not swallow it. The sweep reports what a completed scan did not confirm;
         it deletes nothing.
         """
         if self.catalog is None:

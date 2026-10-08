@@ -1,11 +1,7 @@
 """Which screen owns the input, and what a press on the grid means.
 
-Pulled out of `run()`, which answered "who has the input?" twice: a chain of
-eight `if`s in the event loop and another of seven in the drawing, each with
-its own order. They agreed only by being written next to each other. The seam
-is the question itself -- it depends on nothing but which pieces of state are
-open -- so `screen_of` answers it once and `run()` dispatches on the answer for
-both reading and drawing.
+`screen_of` answers "who has the input?" once, for both reading and drawing; it
+depends on nothing but which pieces of state are open.
 
 The order is the input chain's: the loader, the saves check and choice, the
 saves list, storage, the menu, the filter panel, typing, the grid. The panel

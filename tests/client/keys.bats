@@ -73,7 +73,7 @@ keys_dir() { printf '%s/env-switch/config/Ryujinx/system' "$GOTG_STATE_DIR/env";
   [ "$status" -eq 0 ]
   [ -s "$(keys_dir)/prod.keys" ]
   [[ "$output" == *"no title.keys"* ]]
-  [[ "$output" == *"IMPORTER_SPEC"* ]]
+  [[ "$output" == *"needs its keys in /Games/"* ]]
 }
 
 @test "an interrupted fetch leaves no half a key behind" {

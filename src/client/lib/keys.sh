@@ -102,6 +102,6 @@ keys_ensure() {
   done
 
   if ((missing > 0)); then
-    warn "$platform needs its keys in /Games/$platform — see IMPORTER_SPEC.md"
+    warn "$platform needs its keys in /Games/$platform"
   fi
 }

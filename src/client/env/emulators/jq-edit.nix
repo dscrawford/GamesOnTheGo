@@ -1,15 +1,8 @@
 # Edit a JSON file in place with jq, and never leave it half written.
 #
-# This was eight hand-copied shells: Ryujinx's pinned settings, its pad
-# restore and its Deck pass (switch.nix), the generic `configEdit`
-# (ryujinx.nix), both UltraCams, the Harkinian settings (harkinian.nix) and
-# the co-op copy's Anchor block (oot-coop-split.nix). They agreed on the part
-# that matters -- jq writes a sibling, and only a jq that succeeded replaces
-# the original, so a filter that errors (or a disk that fills) cannot truncate
-# a config the emulator would then reject -- and had drifted on the rest: one
-# kept the temp file when jq failed, one used `mv -f`, three spelled the temp
-# name differently. One place says it now; what is left as a parameter is what
-# really differed.
+# jq writes a sibling and only a jq that succeeded replaces the original, so a
+# filter that errors or a full disk cannot truncate a config the emulator would
+# then reject. `file`, `filter` and the rest below are what differs per caller.
 #
 #   file      shell text for the path, written between double quotes
 #             (`$config`, `$ryujinx/Config.json`)

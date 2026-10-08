@@ -2,9 +2,7 @@
 
 A mixin of `Handler` in its own file: the cache itself is artcache.py (bytes
 on disk, no HTTP); this is the other half, the part that decides who may read
-or write, what a miss says, and when a 304 saves the body. It was already a
-route plus three small steps, which made it the cheapest feature to lift out
-of a handler module that had passed fifteen hundred lines.
+or write, what a miss says, and when a 304 saves the body.
 """
 
 from __future__ import annotations

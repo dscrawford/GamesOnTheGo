@@ -1,10 +1,6 @@
 """What one frame of the grid or the shelf shows, and the words on it.
 
-`draw`, `draw_shelf` and `draw_row` took the same nine to eleven positional
-arguments -- the cursor, the art, the status line, which games are installed,
-which are installing, which are behind, the chip -- and `run()` spelled them
-out three times in the same order, where swapping two sets of the same type
-would draw without complaint. They are one value now, built once a frame.
+One value, so two same-typed sets cannot be swapped by position.
 
 The text drawn from them is here too, because it is the part of drawing that
 can be wrong and still be tested: no pygame in this module. The draw functions

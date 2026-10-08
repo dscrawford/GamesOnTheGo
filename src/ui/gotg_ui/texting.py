@@ -1,10 +1,8 @@
 """One line of typed text: the search box and the storage path.
 
-Pulled out of `run()`, which edited a string with the same four-way chain
-twice -- Escape, Return or keypad Enter, Backspace, a printable character --
-once for the search (applied to the grid as it is typed) and once for the path
-to add to storage (applied on Return). What differs is what the caller does
-with the result, so this returns the text and which of the four happened.
+Escape, Return or keypad Enter, Backspace, a printable character: the search
+box and the storage path differ only in what the caller does with the result,
+so this returns the text and which of the four happened.
 No pygame: the keycodes are intents.Key's, asserted against pygame in app.py.
 """
 

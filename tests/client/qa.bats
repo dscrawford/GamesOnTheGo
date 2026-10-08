@@ -534,7 +534,6 @@ overlay_frames() {
   [ ! -d "$GOTG_STATE_DIR/qa/runs" ]
 }
 
-# --- the steps of a run ------------------------------------------------------
 #
 # cmd_qa is a sequence of _qa_* functions sharing QA_* globals; the ones that
 # decide something are asked directly, with no game, pad or compositor.

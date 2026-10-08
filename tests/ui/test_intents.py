@@ -83,9 +83,6 @@ def test_the_keycodes_are_the_ones_sdl_sends():
     )
 
 
-# --- the keyboard before it has a seat ------------------------------------------
-
-
 def test_before_a_seat_only_the_space_bar_is_heard():
     assert keyboard_heard(Key.SPACE, drives=False)
     for key in (Key.RETURN, Key.ESCAPE, Key.B, Key.UP, Key.DOWN, Key.KP_ENTER, ord("q"), None):

@@ -1,8 +1,8 @@
 """The IGDB access token: minted on demand, kept until nearly out.
 
-Its own file so that the one lock and the one exchange with Twitch read
-together, away from the handler's routing. (It is not tokens.py at the package
-root: that is the per-person credential store, a different thing.)
+One lock and one exchange with Twitch, read together and away from the
+handler's routing. (It is not tokens.py at the package root: that is the
+per-person credential store, a different thing.)
 """
 
 from __future__ import annotations

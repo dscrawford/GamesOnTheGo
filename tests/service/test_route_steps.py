@@ -1,11 +1,8 @@
 """The decisions the handler's routes make, each aimed at directly.
 
-Phase C split `_saves`, `_catalog`, `_stream_fd`, `_admin` and `_handle` into
-steps. The ones that are not I/O became pure functions, and they are asserted
-here without a server: a path, a header or a body goes in, a verdict comes out.
-The routes themselves are covered through the harness in the neighbouring
-files; this file is for the question "which branch is this", where a wrong
-answer used to need a socket to see.
+The decisions that are not I/O are pure functions (a path, header or body in, a
+verdict out), asserted here without a server; the routes are covered through the
+harness.
 """
 
 from __future__ import annotations
@@ -17,8 +14,6 @@ from gotg.service.routes_admin import MAX_INVITE_DAYS, parse_invite
 from gotg.service.routes_catalog import advertised_hosts, touch_keys
 from gotg.service.routes_files import range_window
 from gotg.service.routes_saves import GENERATION, HEAD, HISTORY, META, clean_device, saves_target
-
-# --- /saves paths ----------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -57,9 +52,6 @@ def test_a_device_name_is_printable_and_short():
     assert clean_device("") == ""
 
 
-# --- /catalog --------------------------------------------------------------
-
-
 def test_a_touch_names_platform_and_id_pairs():
     assert touch_keys({"games": ["n64/usa.mario", "gba/eur.zelda_minish"]}) == [
         ("n64", "usa.mario"),
@@ -87,8 +79,6 @@ def test_the_preferred_host_comes_first_and_is_not_repeated():
     assert advertised_hosts("http://tail", "") == ["http://tail"]
     assert advertised_hosts("", "") == []
 
-
-# --- byte ranges -----------------------------------------------------------
 
 ETAG = '"abc"'
 
@@ -136,9 +126,6 @@ def test_an_empty_file_has_no_satisfiable_range():
     assert range_window("bytes=0-", "", None, 0)[2] == 416
 
 
-# --- /admin invites --------------------------------------------------------
-
-
 def test_an_invite_takes_a_name_and_defaults_to_a_week():
     assert parse_invite(b'{"name": "daniel"}') == ("daniel", None, 7.0)
     assert parse_invite(b'{"name": "d", "user": "u", "ttl_days": 2}') == ("d", "u", 2.0)
@@ -158,9 +145,6 @@ def test_an_invite_ttl_outside_its_range_is_refused(ttl):
 
 def test_the_longest_invite_is_allowed():
     assert parse_invite(f'{{"ttl_days": {MAX_INVITE_DAYS}}}'.encode())[2] == MAX_INVITE_DAYS
-
-
-# --- routing ---------------------------------------------------------------
 
 
 @pytest.mark.parametrize(

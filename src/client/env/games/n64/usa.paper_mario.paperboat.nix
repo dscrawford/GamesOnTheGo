@@ -61,7 +61,7 @@ in
   # port mapping in paperboat.cfg.json, which travels with the saves, fits
   # wherever it lands -- and it puts the overlay on the generic walk, whose
   # right stick and left trigger are the C buttons and Z this port reads;
-  # the N64 walk lit neither. See docs/requests/look-like-an-xbox-pad.md.
+  # the N64 walk lit neither.
   padIdentity = "xbox360";
   # Its settings are inside the game, behind Esc; there is no launcher.
   configurable = false;

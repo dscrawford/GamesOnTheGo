@@ -86,8 +86,6 @@ def valid_filename(name: str) -> bool:
 def utc_now(epoch: float | None = None) -> str:
     """`epoch` (default: now) as `2026-01-01T00:00:00Z`.
 
-    Replaces the same strftime line in catalog.py (`_now`), saves.py
-    (`_utc_now`, and inline for a file's mtime) and the indexer's publish.py.
     The catalog compares these stamps lexicographically, so there must be one
     spelling: fixed width, second resolution, UTC, a literal Z.
     """

@@ -1,8 +1,7 @@
 """Drawing the filter panel, storage, the saves choice and the loader: SDL and
 pygame only.
 
-Pulled out of app.py with no change of behaviour (see draw_grid.py). The Saves
-list is saves_draw.py's.
+The Saves list is saves_draw.py's.
 """
 
 from __future__ import annotations
@@ -285,8 +284,7 @@ def draw_prepare(
         screen.blit(clock, (width - margin - clock.get_width(), margin + 6))
 
     y = margin + font_at(30).get_height() + margin // 2
-    # The download and the emulator's build run at once, so each has a bar:
-    # what nix is doing first, since it is the one that used to say nothing.
+    # The download and the emulator's build run at once, so each has a bar; nix's first.
     for shown in (stage, progress):
         if shown is not None and not failed:
             y = _draw_progress_bar(screen, font_at, y, margin, shown.fraction, shown.describe(), shown.what)

@@ -5,8 +5,7 @@ the service that is reachable before authentication (`_claim`, whose code *is*
 the credential), the one that decides who somebody is (`_auth`), and the one
 only the admin token opens (`_admin`). Kept apart from the proxy and the
 stores so that "what can an unauthenticated or admin caller do" is one file to
-read. `_admin` had seventy lines of five routes in one body; each is now a
-method, and `parse_invite` is the body's validation as a pure function.
+read. `parse_invite` is the body's validation as a pure function.
 """
 
 from __future__ import annotations

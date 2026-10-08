@@ -1,7 +1,6 @@
-# The shape of a flake app, and the one-script app built on it. Its own file
-# because the flake's `apps` and the library's (nix/library.nix) both write
-# `{ type = "app"; program = ...; }` around a writeShellApplication a dozen
-# times between them.
+# The shape of a flake app, and the one-script app built on it: the flake's
+# `apps` and the library's (nix/library.nix) both write
+# `{ type = "app"; program = ...; }` around a writeShellApplication.
 let
   mkApp = program: {
     type = "app";

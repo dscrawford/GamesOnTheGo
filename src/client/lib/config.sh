@@ -182,7 +182,7 @@ $NIX_CONFIG}"
 #   LOGIN_TOKEN    the bearer token                (_login_claim_exchange, _login_ask)
 #   LOGIN_NAME     whose token it is, claims only  (_login_claim_exchange)
 
-# Step 1, the arguments: `nix run <library>#login` passes --server, because
+# The arguments: `nix run <library>#login` passes --server, because
 # the library knows its server and the one question left is the token.
 _login_parse_args() {
   LOGIN_SERVER="" LOGIN_CLAIM="" LOGIN_URL="" LOGIN_CODE="" LOGIN_TOKEN="" LOGIN_NAME=""
@@ -198,7 +198,7 @@ _login_parse_args() {
   fi
 }
 
-# Step 2a, a claim link taken apart and refused unless it is one: the service
+# A claim link taken apart and refused unless it is one: the service
 # URL (which must be private or TLS, or the token crosses the network) and the
 # code. Sets LOGIN_URL and LOGIN_CODE. $1 the link.
 _login_claim_parts() {
@@ -214,7 +214,7 @@ _login_claim_parts() {
   [[ "$LOGIN_CODE" =~ ^gotgi_[A-Za-z0-9_-]{40,50}$ ]] || die "not a claim url: $claim"
 }
 
-# Step 2b, the claim spent: one POST, one token. The reply is the only time
+# The claim spent: one POST, one token. The reply is the only time
 # the plaintext exists outside the config file about to be written, so it is
 # read here and removed here. Sets LOGIN_TOKEN and LOGIN_NAME.
 _login_claim_exchange() {
@@ -238,7 +238,7 @@ _login_claim_exchange() {
   [[ -n "$LOGIN_TOKEN" ]] || die "the claim reply carried no token"
 }
 
-# Step 2c, no claim: the server (given or asked for) and a token typed in.
+# No claim: the server (given or asked for) and a token typed in.
 # Sets LOGIN_URL and LOGIN_TOKEN.
 _login_ask() {
   if [[ -n "$LOGIN_SERVER" ]]; then
@@ -254,13 +254,13 @@ _login_ask() {
   [[ -n "$LOGIN_TOKEN" ]] || die "a token is required"
 }
 
-# Step 3, the shape every bearer token has; anything else would also corrupt
+# The shape every bearer token has; anything else would also corrupt
 # the curl config the token is spliced into. $1 the token.
 _login_check_token() {
   [[ "$1" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || die "token contains characters no bearer token uses"
 }
 
-# Step 4, the service must accept the token. Via curl --config on stdin,
+# The service must accept the token. Via curl --config on stdin,
 # never argv: /proc/<pid>/cmdline is world-readable and this token does not
 # expire. whoami is served by every pod; /catalog only by the library — and a
 # claimed token deserves a check of the machinery that minted it.
@@ -273,7 +273,7 @@ _login_probe() {
     die "the service at $url did not accept that token"
 }
 
-# Step 5, api.json: the url and token, and the name when a claim gave one,
+# Api.json: the url and token, and the name when a claim gave one,
 # merged into whatever else the file holds, mode 600. $1 url, $2 token, $3 name.
 _login_save() {
   local url="$1" token="$2" name="$3" file patch
@@ -285,7 +285,7 @@ _login_save() {
   log "saved $file (mode 600)${name:+ — you are $name}"
 }
 
-# Step 6, the File Browser era left a password behind; a dead credential in a
+# The File Browser era left a password behind; a dead credential in a
 # 0600 file is still a credential.
 _login_warn_old_password() {
   if [[ -f "$GOTG_CONFIG_FILE" ]] && jq -e '.password' "$GOTG_CONFIG_FILE" >/dev/null 2>&1; then

@@ -1,10 +1,7 @@
 # Every package the flake exposes for one system -- the environments, the
-# client, the picker, the images -- as one set. Its own file because the
-# flake's `packages` output and everything that needs "the flake's packages"
-# (the library, the checks, the dev shell) used to reach it through
-# `self.packages.<system>`, and the environments were built a second time in
-# src/client/env for the same reason. The packages refer to each other here
-# by name, not through `self`.
+# client, the picker, the images -- as one set, for the flake's `packages` output
+# and everything that needs "the flake's packages" (the library, the checks, the
+# dev shell). The packages refer to each other here by name, not through `self`.
 {
   pkgs,
   # danstick's packages for this system (the flake input's).

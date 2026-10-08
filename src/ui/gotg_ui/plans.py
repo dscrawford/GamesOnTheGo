@@ -1,13 +1,10 @@
 """What the picker does next, decided from values, before it touches anything.
 
-Pulled out of `run()`, where each of these was a nested function that read and
-rebound a dozen locals (`pick`, `self_update`, `finish_restart`, and the
-completion branch after the loader) and so could only be tested by running the
-picker. The seam is that each answers "given this, what happens" with no
-effect of its own: it returns a small frozen description, and `run()` carries
-it out -- spawning the Preparer, saying the chip's word, execing. The questions
-that cost something (is the game ready, is that root usable) arrive as
-callables and are asked only on the paths that need them, as before.
+Each answers "given this, what happens" with no effect of its own: it returns a
+small frozen description, and `run()` carries it out -- spawning the Preparer,
+saying the chip's word, execing. The questions that cost something (is the game
+ready, is that root usable) arrive as callables and are asked only on the paths
+that need them.
 
 No pygame.
 """
@@ -21,8 +18,6 @@ from dataclasses import dataclass
 from . import updates
 from .chip import ChipState
 from .restart import said_root
-
-# -- a pick ------------------------------------------------------------------------------------
 
 IGNORE = "ignore"
 OPEN_SAVES = "open-saves"
@@ -102,8 +97,6 @@ def plan_pick(
     return Pick(PREPARE, None, variant, version, after=verb, sets_after=True)
 
 
-# -- the chip pressed --------------------------------------------------------------------------
-
 NOTHING = "nothing"
 SAY = "say"
 RESTART = "restart"
@@ -143,8 +136,6 @@ def plan_self_update(
     return SelfUpdate(UPDATING, chip="updating")
 
 
-# -- the restart -------------------------------------------------------------------------------
-
 NOOP = "noop"
 REFUSE = "refuse"
 GO = "go"
@@ -168,9 +159,6 @@ def plan_restart(root: str, mine: str | None, usable: Callable[[str], bool]) -> 
     if not usable(root):
         return Restarting(REFUSE, root, "failed")
     return Restarting(GO, root)
-
-
-# -- the loader finished -----------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -232,8 +220,6 @@ def on_prepare_done(
         return PrepareDone(clear=True, launch=starting)
     return PrepareDone(clear=True, begin=(game, after, variant, version))
 
-
-# -- the saves check answered ------------------------------------------------------------------
 
 CHOOSE = "choose"
 LAUNCH = "launch"

@@ -204,7 +204,7 @@ _zenity_supervise() {
       # `wait` is a command like any other to errexit: `wait; zrc=$?` left
       # the shell before zrc was read whenever the dialog's exit was not 0,
       # which for a cancel (1) is always. The build path never saw it because
-      # its caller ran it under `||`; the download path had no test until now.
+      # its caller ran it under `||`.
       wait "$zen_pid" 2>/dev/null && zrc=0 || zrc=$?
       exec {fd}>&-
       dialog_dir_remove "$pipedir"
@@ -320,8 +320,6 @@ human_size() {
   }'
 }
 
-# --------------------------------------------------------------- writing files
-
 # Replace <path> with what a command printed (or stdin did), all or nothing:
 #
 #   atomic_write <path> [mode] [-- <command...>]
@@ -331,12 +329,11 @@ human_size() {
 # pipeline cannot do (the mv has happened before the producer's status is known).
 # An empty mode means "as the umask makes any file".
 #
-# This replaced a `>"$file.tmp"` ... `mv` written out at some twenty sites, each
-# with its own answer to two questions that only matter when they go wrong: was
-# the mode set before the secret went in (a config written 0600 after the fact
-# was world-readable for as long as jq ran), and what is left behind when the
-# writer fails (a `.tmp` that the next run trips over, or -- where the failure
-# was not checked -- an empty file mv'd over a good one). The scratch file is
+# Two things only matter when they go wrong: the mode is set before the secret
+# goes in (a config written 0600 after the fact was world-readable for as long
+# as jq ran), and nothing is left behind when the writer fails (a `.tmp` that
+# the next run trips over, or -- where the failure was not checked -- an empty
+# file mv'd over a good one). The scratch file is
 # mktemp'd beside the target, so two writers do not share it, and it is removed
 # on every failure. The caller still decides what to say; this only returns 1.
 atomic_write() {
@@ -387,8 +384,6 @@ json_merge_file() {
     jq -n --argjson existing "$existing" --argjson patch "$patch" '$existing + $patch'
 }
 
-# ------------------------------------------------------------------- locking
-
 # Run a command holding an exclusive lock on <lockfile>:
 #
 #   with_lock <lockfile> <wait-seconds|""> <timeout-message> <command...>
@@ -398,13 +393,10 @@ json_merge_file() {
 # test, because a command run on the left of `||` has errexit switched off for
 # all of it, and a download or a queue write must not lose that.
 #
-# This replaced five `exec N>file; flock N` sequences, each with its release
-# (`exec N>&-`) written out by hand on every path that left the function:
-# two in the download, one in updates_check, one in library_update_self and a
-# lock/unlock pair around the Steam queue. A path that forgot kept the lock
-# for the rest of the process, and a fixed fd number could collide with the
-# progress pipe, which download.sh keeps on 9. The descriptor is allocated by
-# bash here ({fd}), above 9, and closed in the one place.
+# A release written by hand on every path that left the function was forgotten
+# on one, and kept the lock for the rest of the process; a fixed fd number could
+# collide with the progress pipe, which download.sh keeps on 9. The descriptor
+# is allocated by bash here ({fd}), above 9, and closed in the one place.
 #
 # A command that dies ends the process, which drops the lock with it. Anything
 # the command starts in the background inherits the descriptor and so keeps the

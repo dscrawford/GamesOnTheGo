@@ -115,9 +115,6 @@ def test_the_catalog_roots_are_a_colon_separated_list(tmp_path):
     assert catalog.roots == [first, second]
 
 
-# --- Config.validate: one credential rule per case ----------------------------
-
-
 @pytest.mark.parametrize(
     ("fields", "message"),
     [

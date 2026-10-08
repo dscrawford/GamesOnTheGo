@@ -1,11 +1,10 @@
 //! The menu as the loop drives it: whether one is open, whose, what its
 //! actions turn into, and the state around it that lives and dies with it --
 //! the Exit that is waiting for the saves to go up, the client listing saves
-//! into the session, the game being started again on a picked one. Out of
-//! `watch()` in main.rs, where these were seven locals and a forty-line
-//! match; what is here decides and returns a `Step` for the loop to carry
-//! out (a line on danstick's socket, the bar going up, a process started),
-//! so the decisions are tested with no socket and no SDL.
+//! into the session, the game being started again on a picked one. What is
+//! here decides and returns a `Step` for the loop to carry out (a line on
+//! danstick's socket, the bar going up, a process started), so the decisions
+//! are tested with no socket and no SDL.
 //!
 //! The menu itself (`menu::Menu`) is the model of the screen; this is the
 //! model of the loop's dealings with it.

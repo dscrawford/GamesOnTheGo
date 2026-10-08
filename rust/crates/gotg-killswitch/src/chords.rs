@@ -1,9 +1,9 @@
 //! The exit chord and the menu chord as the loop keeps them: each pad's two
 //! timed holds, what one sample of them says, and what a whole round of
-//! samples across every pad adds up to. Out of `watch()` in main.rs so the
-//! decisions -- the furthest hold wins the bar, a fired exit beats progress,
-//! the last pad to ask for the menu is the one that gets it -- are tested
-//! without SDL; reading a pad and logging stay in the loop.
+//! samples across every pad adds up to. The decisions -- the furthest hold wins
+//! the bar, a fired exit beats progress, the last pad to ask for the menu is
+//! the one that gets it -- are tested without SDL; reading a pad and logging
+//! stay in the loop.
 
 use std::collections::{BTreeSet, HashMap};
 

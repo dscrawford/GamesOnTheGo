@@ -1,12 +1,7 @@
 """Asking the client a question, the one way.
 
-Eight modules (installed, updates, prepare's readiness, versions, variants,
-the saves list and check, storage's listing) each ran `gotg ...` with their own
-copy of the same try/except, the same text decoding and the same "non-zero
-means no answer". They had begun to differ by accident -- four decoded strictly
-and a bad byte in a game's name would have been an uncaught UnicodeDecodeError
-in the one that did. Here there is one binary lookup (`launch.gotg_bin`), one
-decoding (replace, never raise), and one failure mode: None.
+One binary lookup (`launch.gotg_bin`), one decoding and one failure mode. Strict
+decoding would raise on a bad byte in a game's name, so it replaces.
 
 None means "no answer": the client is missing, hung past the timeout, or
 exited non-zero. An empty string is an answer -- an older client says exactly

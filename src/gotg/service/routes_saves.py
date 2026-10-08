@@ -2,11 +2,9 @@
 
 A mixin of `Handler` rather than a module of functions because every step
 answers through the handler's `_json`, `_problem` and `_send`, and reads its
-`store`, `config` and `headers`; and its own file because `_saves` alone was
-eighty-six lines of path parsing, method gating and five different replies in
-one `try`. Now the path is a pure function (`saves_target`), the method gate
-is one place, and each reply -- history, one generation, the head's metadata,
-the head's bytes, a PUT -- is a method a test can aim at.
+`store`, `config` and `headers`. The path is a pure function (`saves_target`),
+the method gate is one place, and each reply -- history, one generation, the
+head's metadata, the head's bytes, a PUT -- is a method a test can aim at.
 """
 
 from __future__ import annotations
@@ -92,8 +90,6 @@ class SavesRoutes:
             self._problem(405, f"{self.command} is not something saves history answers")
             return
         if what == META and self.command != "GET":
-            # Read-only: a PUT here used to fall through to the head's and
-            # store the body as a generation.
             self._problem(405, f"{self.command} is not something the save's meta answers")
             return
 

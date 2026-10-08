@@ -1,7 +1,6 @@
 """Drawing the grid, the shelf and the per-game menu: SDL and pygame only.
 
-Pulled out of app.py with no change of behaviour, so that file is the loop and
-the models it asks. Nothing here decides anything: the layout is layout.py's,
+Nothing here decides anything: the layout is layout.py's,
 the text gridview.py's, what is selected the models'.
 """
 
@@ -278,8 +277,6 @@ def draw(screen, font_at, view: GridView, typing: str | None = None, menu=None):
     # other tile drops to ~90% so the chosen one reads as chosen.
     dim = None
     if menu is not None:
-        # Cached, which the comment here used to claim and the code did not do:
-        # it built one of these every frame the menu was open.
         dim = SCALED.get(("dim", tiles[0].width, tiles[0].height))
         if dim is None:
             dim = pygame.Surface((tiles[0].width, tiles[0].height), pygame.SRCALPHA)

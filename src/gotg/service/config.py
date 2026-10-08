@@ -1,11 +1,8 @@
 """What the proxy holds, and the two constants every upstream call shares.
 
 `Config` is the whole deployment as one value: credentials, directories, the
-urls clients are told about, the pace. It is its own file because it had grown
-to a hundred lines of commented fields in the middle of the handler's module,
-and because the token cache and the handler both need `USER_AGENT` and
-`TIMEOUT` -- which, left in app.py, would have made the cache import the
-handler it serves.
+urls clients are told about, the pace. `USER_AGENT` and `TIMEOUT` live here so
+the token cache need not import the handler it serves.
 """
 
 from __future__ import annotations

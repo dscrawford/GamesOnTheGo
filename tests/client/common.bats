@@ -1,9 +1,8 @@
 #!/usr/bin/env bats
 # common.sh's file writers: atomic_write and json_merge_file.
 #
-# Every place that replaced a file wrote it beside itself and mv'd it into
-# place, each with its own idea of when the mode was set and what to do when
-# the writer failed. These pin the one version they now share.
+# atomic_write sets the mode before the secret goes in and leaves no `.tmp`
+# behind when the writer fails; these pin both.
 
 bats_require_minimum_version 1.5.0
 
@@ -83,8 +82,6 @@ peek_mode_then_write() {
   [ ! -e "$TEST_TMP/conf.json" ]
 }
 
-# ------------------------------------------------------------------ with_lock
-
 # Held by someone else for a few seconds, standing in for another gotg.
 hold_lock() {
   flock "$1" sleep "$2" &
@@ -143,8 +140,6 @@ hold_lock() {
   run -1 bash -c 'set -e; source "$GOTG_LIB/common.sh"; '"$(declare -f checked)"'; with_lock "$1" "" never checked' _ "$TEST_TMP/l"
   [ ! -e "$TEST_TMP/went-on" ]
 }
-
-# ------------------------------------------------------- the harness itself
 
 @test "HOME is inside the test's own directory, never the real one" {
   [[ "$HOME" == "$TEST_TMP"/* ]]

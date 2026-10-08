@@ -1,14 +1,13 @@
 # The settings a launch writes before the game starts, run rather than read.
 #
 # A preLaunch is shell text that edits an emulator's config for the machine it
-# finds itself on, and every part of it that does anything ran, until now, only
+# finds itself on, and every part of it that does anything runs only
 # on a real machine. The Deck profiles, the helpers that turn on `GOTG_MACHINE`,
 # the idempotent cheat merge: each can be wrong in a way that builds, passes
 # shellcheck and does nothing until somebody launches a game on that hardware
-# and sees the frame rate, the memory or the dock mode be wrong. The jq helper
-# the simplification of src/client/env pulled out of eight scripts is the case
-# that asked for this: the text it replaced was not byte-identical to the text
-# it became, and what had to hold afterwards was the file the script leaves.
+# and sees the frame rate, the memory or the dock mode be wrong. A helper that
+# replaces several hand-written scripts must leave the same file, and
+# byte-identical text is not the test.
 #
 # Each probe takes the preLaunch text a helper produces, runs it under bash
 # with the options the launcher uses (errexit, nounset, pipefail) in a scratch

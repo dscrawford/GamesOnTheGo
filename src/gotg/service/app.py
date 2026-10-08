@@ -481,8 +481,6 @@ class Handler(ArtRoutes, SavesRoutes, CatalogRoutes, FileRoutes, AdminRoutes, Ba
             body,
         )
 
-    # --- routing ------------------------------------------------------------
-
     def _handle(self) -> None:
         """Only routes: each decision below is a method or a pure function, and
         the order is the contract -- listener, then the pre-auth routes, then

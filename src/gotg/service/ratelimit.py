@@ -1,8 +1,8 @@
 """The token bucket in front of an upstream.
 
-Its own file because it is pure arithmetic over an injectable clock, tested
-without a server (tests/service/test_ratelimiter.py), and the handler only
-needs to know it as `reserve(wait)`.
+Pure arithmetic over an injectable clock, tested without a server
+(tests/service/test_ratelimiter.py); the handler only needs to know it as
+`reserve(wait)`.
 """
 
 from __future__ import annotations

@@ -1,8 +1,6 @@
 """What is installed and what is behind, asked off the loop and landed as a value.
 
-Pulled out of `run()`, which kept a Future, the last report and a "has the
-`--check` started" flag as three loose locals and mutated all of them from
-`apply_badges`. The seam is the answer's arrival: the question is two
+The seam is the answer's arrival: the question is two
 subprocesses and a walk of the disk -- a quarter of a second on a desk, more on
 a Deck, which is frames the grid would drop (CLAUDE.md's budget is 16.7 ms) --
 so it is asked on one worker (`Asker`), and what to do with the answer when it
@@ -80,7 +78,6 @@ class Asker:
         self._pending: Future | None = None
 
     def refresh(self) -> None:
-        """Ask again what is here and what is out of date, off the loop."""
         self._pending = self._pool.submit(self._ask)
 
     def poll(self):

@@ -1,8 +1,7 @@
 # mkLibrary: the outputs of a library flake -- a pin of this repository and a
-# server's catalog in, one `nix run`-able output per game out. Its own file
-# because flake.nix is the wiring of this repository's outputs and this is a
-# function other flakes call (templates/library, through `gotg.lib.mkLibrary`);
-# it was a hundred lines in the middle of the wiring. See docs/nix-games.md.
+# server's catalog in, one `nix run`-able output per game out. A function other
+# flakes call (templates/library, through `gotg.lib.mkLibrary`), so it is not
+# part of the wiring in flake.nix. See docs/nix-games.md.
 {
   lib,
   # system -> the one nixpkgs (allowUnfree) the flake uses for that system.

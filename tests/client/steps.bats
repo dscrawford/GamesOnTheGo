@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# Steps that were pulled out of long commands (uninstall, steam art): the
-# decisions in each, asked directly with stand-ins for what they would touch.
+# Decisions inside uninstall and the Steam art fetch, asked directly with
+# stand-ins for what they would touch.
 
 bats_require_minimum_version 1.5.0
 
@@ -16,8 +16,6 @@ setup() {
   override_field() { printf '%s' "$UNZIP"; }
   game_is_placed_file() { [[ "$PLACED" == true ]]; }
 }
-
-# --- uninstall: what may be rm -rf'd -------------------------------------------
 
 @test "uninstall step: a recipe's entry is the id, with or without an extension" {
   _uninstall_check_path g "$ROOT/usa.zelda" "$ROOT" usa.zelda
@@ -64,8 +62,6 @@ setup() {
   run _uninstall_launchers "$ROOT" usa.zelda
   [ "$status" -ne 0 ]
 }
-
-# --- steam art: where the pictures come from -----------------------------------
 
 @test "art step: an explicit URL beats the proxy, and no key anywhere asks to be told" {
   export GOTG_API_FILE="$TEST_TMP/api.json"

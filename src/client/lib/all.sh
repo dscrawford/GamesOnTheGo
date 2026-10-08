@@ -1,12 +1,8 @@
 # shellcheck shell=bash
 # Every library, sourced in the order bin/gotg needs them.
 #
-# This list used to be written twice: as thirty-odd `source` lines in bin/gotg
-# and again, shorter and in another order, in tests/client/helper.bash. The copy
-# had drifted -- it lacked versions, killswitch, saves-history, updates and most
-# cmd-*.sh -- so a test sourced a different program from the one that ships, and
-# a new lib had to be remembered in two places, one of which nothing checked.
-# Now bin/gotg and load_client_libs both source this file.
+# The one list of libraries; bin/gotg and the test helper's `load_client_libs`
+# both source it, so a test loads the program that ships.
 #
 # Needs GOTG_LIB set. Only defines functions; nothing here runs.
 

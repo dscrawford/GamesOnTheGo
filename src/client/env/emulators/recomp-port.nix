@@ -18,7 +18,7 @@
 #   * A wired Xbox 360 pad. It reads its own controller database
 #     (recompcontrollerdb.txt beside the binary) and a clone mirroring a Steam
 #     Controller is in no database at all; 045e:028e is the one every SDL maps
-#     by heart. See docs/requests/look-like-an-xbox-pad.md.
+#     by heart.
 #   * Settings are in-game -- the launcher's own Settings entry -- so there is
 #     no configuration screen to open, and `gotg configure` opening one would
 #     just start the game.

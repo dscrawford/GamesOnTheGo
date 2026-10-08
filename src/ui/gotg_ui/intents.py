@@ -1,13 +1,9 @@
 """What a key or a pad press means to a screen: Back, OK, a step, or the space bar.
 
-`run()` read "Escape or b, or the pad's B, is back; Return or keypad Enter, or
-the pad's A, is confirm" eight times -- the loader, the saves check, the
-choice, the Saves screen, storage, the menu, the filter panel -- each with the
-key list written out again and each ordering key and pad differently. Where
-they differ is deliberate and stays visible: Space confirms in the menu and the
-filter panel and nowhere else (so it is its own word here, and a screen opts in
-with `confirms(space=True)`); typing and the grid have keys of their own and do
-not ask this at all.
+Where screens differ is deliberate and stays visible: Space confirms in the menu
+and the filter panel and nowhere else (so it is its own word here, and a screen
+opts in with `confirms(space=True)`); typing and the grid have keys of their own
+and do not ask this at all.
 
 No pygame: the caller resolves the event to the three things this needs -- the
 key of a KEYDOWN, the name of the pad button, the pad's direction -- and the
@@ -29,8 +25,6 @@ from .buttons import A, B
 
 
 class Key(IntEnum):
-    """The SDL keycodes the screens read."""
-
     BACKSPACE = 8
     ESCAPE = 27
     B = 98
