@@ -72,6 +72,22 @@ in
     pkgs.jq
   ];
 
+  # MasterKillua's Refolded textures -- the game redrawn in 4K -- as the
+  # port's HD archive. PaperBoat loads one file by name beside its own:
+  # paperboat-hd.o2r in $SHIP_HOME (Engine.cpp, "Loading HD asset
+  # archive"), before anything in mods/. The pack is the author's, released
+  # through their Patreon and nowhere a build could fetch it from, so it
+  # travels the way console keys and firmware do: hand-placed on the
+  # library's files directory as n64/paperboat-hd.o2r, fetched into the
+  # game's state on the first launch that lacks it, never in a store path.
+  # Absent on the server it is a warning and the game runs as shipped. The
+  # archive is excluded from the saves below (boat/*.o2r), as it is made
+  # for a PaperBoat version and is better fetched than synced.
+  keys = {
+    into = "boat";
+    files = [ "paperboat-hd.o2r" ];
+  };
+
   preLaunch = ''
     export SHIP_HOME="$state/boat"
     mkdir -p "$SHIP_HOME"

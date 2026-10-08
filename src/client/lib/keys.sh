@@ -28,7 +28,10 @@ keys_fetch() {
   while :; do
     while IFS= read -r host; do
       [[ -n "$host" ]] || continue
-      if service_curl -fsS --max-time "${GOTG_API_TIMEOUT:-120}" \
+      # Fifteen minutes, as firmware gets: a key file is a few kilobytes, but
+      # PaperBoat's HD texture archive comes this way too, and that is a
+      # gigabyte over whatever the evening's connection is.
+      if service_curl -fsS --max-time "${GOTG_KEYS_FETCH_SECONDS:-900}" \
         "$host/files/$platform/$(jq -rn --arg n "$file" '$n | @uri')" \
         >"$dest" 2>/dev/null && [[ -s "$dest" ]]; then
         return 0
