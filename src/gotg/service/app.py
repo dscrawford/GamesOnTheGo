@@ -263,6 +263,20 @@ class Handler(ArtRoutes, SavesRoutes, CatalogRoutes, FileRoutes, AdminRoutes, Ba
             return self._basic_password(header[len("Basic ") :])
         return b""
 
+    def _split(self, rest: str) -> urllib.parse.SplitResult | None:
+        """The route's path and query, or None once a 400 has been sent.
+
+        urlsplit raises on an unbalanced "[" -- /catalog//[x -- and an
+        uncaught raise in a route kills its thread and drops the connection
+        with no status. The catalog and the saves each caught it; the games,
+        the files and the art did not, so this is where every route parses.
+        """
+        try:
+            return urllib.parse.urlsplit("/" + rest)
+        except ValueError:
+            self._problem(400, "malformed request path")
+            return None
+
     def _basic_allowed(self) -> bool:
         """The catalog's client read, and nothing else. A library flake pins
         the catalog as an input, and Nix authenticates a fetch only through

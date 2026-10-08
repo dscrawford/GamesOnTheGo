@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
-import urllib.parse
 from pathlib import Path
 
 from ..catalog import Conflict, SweepRefused
@@ -78,13 +77,8 @@ class CatalogRoutes:
             self._problem(503, "this service holds no catalog")
             return
 
-        try:
-            parts = urllib.parse.urlsplit("/" + rest)
-        except ValueError:
-            # urlsplit raises on an unbalanced "[" — /catalog//[x reaches this
-            # with any token, and an uncaught raise here kills the thread and
-            # drops the connection with no status.
-            self._problem(400, "malformed request path")
+        parts = self._split(rest)
+        if parts is None:
             return
         segments = [s for s in parts.path.strip("/").split("/") if s]
         query = parts.query.split("&")

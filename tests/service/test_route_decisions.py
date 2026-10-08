@@ -155,3 +155,21 @@ def test_putting_to_meta_does_not_store_a_save(tmp_path):
 def test_a_ttl_past_float_range_is_a_400_not_an_overflow(minting):
     body = b'{"name": "d", "ttl_days": 1' + b"0" * 400 + b"}"
     assert minting.call("POST", "/admin/invites", body=body, token=ADMIN)[0] == 400
+
+
+@pytest.mark.parametrize("target", ["/games//[x", "/files//[x", "/art//[x", "/catalog//[x", "/saves//[x"])
+def test_every_route_answers_a_path_urlsplit_refuses_with_a_400(tmp_path, target):
+    # urlsplit raises on an unbalanced "[". The catalog and the saves caught
+    # it; the games, the files and the art let it kill the handler thread and
+    # close the connection with no status. One helper answers for all five.
+    from gotg.catalog import CatalogStore
+    from gotg.service.artcache import ArtCache
+
+    catalog = CatalogStore(db=tmp_path / "state" / "catalog.db", roots=[tmp_path / "library"])
+    store = SavesStore(root=tmp_path / "saves", keep=3, max_bytes=100_000)
+    art = ArtCache(tmp_path / "art")
+    config = Config(token=CLIENT_TOKEN, art_dir=str(art.root))
+    with serve(config, store, catalog, files_dir=tmp_path / "library", art=art) as server:
+        status, _, body = server.call("GET", target)
+    assert status == 400
+    assert b"malformed request path" in body

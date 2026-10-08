@@ -37,7 +37,9 @@ class ArtRoutes:
         if self.art is None:
             self._problem(503, "this service holds no art cache")
             return
-        parts = urllib.parse.urlsplit("/" + rest)
+        parts = self._split(rest)
+        if parts is None:
+            return
         segments = [urllib.parse.unquote(segment) for segment in parts.path.strip("/").split("/") if segment]
 
         if not segments:

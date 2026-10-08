@@ -11,7 +11,6 @@ the head's bytes, a PUT -- is a method a test can aim at.
 
 from __future__ import annotations
 
-import urllib.parse
 from pathlib import Path
 
 from ..tokens import default_user
@@ -81,12 +80,8 @@ class SavesRoutes:
             self._problem(503, "this service holds no saves store")
             return
 
-        try:
-            parts = urllib.parse.urlsplit("/" + rest)
-        except ValueError:
-            # As in the catalog: urlsplit raises on an unbalanced "[", and an
-            # uncaught raise here dropped the connection with no status.
-            self._problem(400, "malformed request path")
+        parts = self._split(rest)
+        if parts is None:
             return
         target = saves_target(parts.path)
         if target is None:

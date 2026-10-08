@@ -89,7 +89,9 @@ class FileRoutes:
             self._problem(405, f"{self.command} is not something the library answers")
             return
 
-        parts = urllib.parse.urlsplit("/" + rest)
+        parts = self._split(rest)
+        if parts is None:
+            return
         segments = [urllib.parse.unquote(s) for s in parts.path.strip("/").split("/") if s]
         if len(segments) < 3:
             self._problem(404, "a file lives at /games/<platform>/<id>/<name>")
@@ -129,7 +131,9 @@ class FileRoutes:
             self._problem(405, f"{self.command} is not something the files answer")
             return
 
-        parts = urllib.parse.urlsplit("/" + rest)
+        parts = self._split(rest)
+        if parts is None:
+            return
         segments = [urllib.parse.unquote(s) for s in parts.path.strip("/").split("/") if s]
         if len(segments) != 2:
             self._problem(404, "a file lives at /files/<platform>/<name>")
