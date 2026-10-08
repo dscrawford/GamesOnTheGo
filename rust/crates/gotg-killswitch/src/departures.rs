@@ -27,7 +27,23 @@ pub struct Departures {
 }
 
 impl Departures {
-    pub fn apply(&mut self, event: &Event) {
+    /// The next `unseat` to send, if a pad has gone.
+    pub fn wanted(&mut self) -> Option<String> {
+        if self.due.is_empty() {
+            return None;
+        }
+        let player = self.due.remove(0);
+        Some(json!({"cmd": "unseat", "player": player}).to_string())
+    }
+
+    /// Whether seat `player`'s pad has gone.
+    pub fn gone(&self, player: i32) -> bool {
+        self.gone.contains(&player)
+    }
+}
+
+impl crate::events::Listen for Departures {
+    fn apply(&mut self, event: &Event) {
         match event {
             Event::Controller {
                 player,
@@ -55,31 +71,12 @@ impl Departures {
             _ => {}
         }
     }
-
-    /// The next `unseat` to send, if a pad has gone.
-    pub fn wanted(&mut self) -> Option<String> {
-        if self.due.is_empty() {
-            return None;
-        }
-        let player = self.due.remove(0);
-        Some(json!({"cmd": "unseat", "player": player}).to_string())
-    }
-
-    /// Whether seat `player`'s pad has gone.
-    pub fn gone(&self, player: i32) -> bool {
-        self.gone.contains(&player)
-    }
-}
-
-impl crate::events::Listen for Departures {
-    fn apply(&mut self, event: &Event) {
-        Departures::apply(self, event);
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::Listen;
     use crate::events::Seat;
 
     fn went(player: i32, unseated: bool) -> Event {

@@ -51,33 +51,6 @@ impl Native {
         self.sent && !self.refused
     }
 
-    pub fn apply(&mut self, event: &Event) {
-        match event {
-            Event::Native {
-                player,
-                control,
-                down,
-            } => {
-                let held = self.down.entry(*player).or_default();
-                if *down {
-                    held.insert(control.clone());
-                } else {
-                    held.remove(control);
-                }
-            }
-            // A seat that emptied holds nothing down.
-            Event::State { seated, .. } => {
-                self.down
-                    .retain(|player, _| seated.iter().any(|seat| seat.player == *player));
-            }
-            Event::Error { message } if message == "unknown command \"native\"" => {
-                self.refused = true;
-                self.down.clear();
-            }
-            _ => {}
-        }
-    }
-
     /// The players danstick has said anything about.
     pub fn players(&self) -> impl Iterator<Item = i32> + '_ {
         self.down.keys().copied()
@@ -105,14 +78,38 @@ impl Native {
 }
 
 impl crate::events::Listen for Native {
-    fn apply(&mut self, event: &crate::events::Event) {
-        Native::apply(self, event);
+    fn apply(&mut self, event: &Event) {
+        match event {
+            Event::Native {
+                player,
+                control,
+                down,
+            } => {
+                let held = self.down.entry(*player).or_default();
+                if *down {
+                    held.insert(control.clone());
+                } else {
+                    held.remove(control);
+                }
+            }
+            // A seat that emptied holds nothing down.
+            Event::State { seated, .. } => {
+                self.down
+                    .retain(|player, _| seated.iter().any(|seat| seat.player == *player));
+            }
+            _ if event.refuses("native") => {
+                self.refused = true;
+                self.down.clear();
+            }
+            _ => {}
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::Listen;
     use crate::events::Seat;
 
     fn press(player: i32, control: &str, down: bool) -> Event {

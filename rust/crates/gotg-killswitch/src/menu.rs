@@ -576,10 +576,36 @@ pub struct Focused {
 }
 
 impl Focused {
-    pub fn apply(&mut self, event: &crate::events::Event) {
-        if let crate::events::Event::Error { message } = event
-            && message == "unknown command \"focus\""
-        {
+    /// What `owner` has down, as danstick says; nothing for anybody else.
+    pub fn of(&self, owner: i32) -> BTreeSet<String> {
+        if self.player == owner {
+            self.down.clone()
+        } else {
+            BTreeSet::new()
+        }
+    }
+
+    /// `owner`'s pad as the controller test draws it.
+    pub fn held(&self, owner: i32) -> crate::pressing::Held {
+        crate::pressing::Held {
+            controls: self.of(owner),
+            sticks: if self.player == owner {
+                self.sticks
+            } else {
+                [0.0; 4]
+            },
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.down.clear();
+        self.sticks = [0.0; 4];
+    }
+}
+
+impl crate::events::Listen for Focused {
+    fn apply(&mut self, event: &crate::events::Event) {
+        if event.refuses("focus") {
             self.refused = true;
         }
         // A stick is said as its axes; the menu steps on its directions, as
@@ -625,43 +651,12 @@ impl Focused {
             }
         }
     }
-
-    /// What `owner` has down, as danstick says; nothing for anybody else.
-    pub fn of(&self, owner: i32) -> BTreeSet<String> {
-        if self.player == owner {
-            self.down.clone()
-        } else {
-            BTreeSet::new()
-        }
-    }
-
-    /// `owner`'s pad as the controller test draws it.
-    pub fn held(&self, owner: i32) -> crate::pressing::Held {
-        crate::pressing::Held {
-            controls: self.of(owner),
-            sticks: if self.player == owner {
-                self.sticks
-            } else {
-                [0.0; 4]
-            },
-        }
-    }
-
-    pub fn clear(&mut self) {
-        self.down.clear();
-        self.sticks = [0.0; 4];
-    }
-}
-
-impl crate::events::Listen for Focused {
-    fn apply(&mut self, event: &crate::events::Event) {
-        Focused::apply(self, event);
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::Listen;
 
     fn held(names: &[&str]) -> BTreeSet<String> {
         names.iter().map(|n| n.to_string()).collect()

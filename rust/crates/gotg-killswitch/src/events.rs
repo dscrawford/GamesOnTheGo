@@ -151,6 +151,15 @@ fn player_of(object: &Map<String, Value>) -> i32 {
     }
 }
 
+impl Event {
+    /// danstick said it does not know `cmd`: the daemon is older than the
+    /// command, and it is not asked again. Matched whole, since other errors
+    /// mention the same word.
+    pub fn refuses(&self, cmd: &str) -> bool {
+        matches!(self, Event::Error { message } if message == &format!("unknown command \"{cmd}\""))
+    }
+}
+
 /// Something that keeps its own account of danstick's events, beside the
 /// pairing picture and the rebind: seating, the menu's focus, the chords.
 pub trait Listen {
@@ -344,6 +353,16 @@ pub fn apply(event: &Event, pairing: &mut Pairing, now: f64, icon_of: &mut dyn F
 mod tests {
     use super::*;
     use crate::pairing::Pairing;
+
+    #[test]
+    fn refuses_matches_the_whole_text_of_that_command_only() {
+        let error = |text: &str| Event::Error { message: text.into() };
+        assert!(error("unknown command \"focus\"").refuses("focus"));
+        assert!(!error("unknown command \"focus\"").refuses("seating"));
+        assert!(!error("unknown command \"focus\" again").refuses("focus"));
+        assert!(!error("bad focus").refuses("focus"));
+        assert!(!Event::Other.refuses("focus"));
+    }
 
     #[test]
     fn a_controller_coming_or_going_is_read_with_why() {

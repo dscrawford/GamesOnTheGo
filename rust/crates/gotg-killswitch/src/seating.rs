@@ -53,8 +53,19 @@ impl Seating {
         self.asked = false;
     }
 
+    /// The line to send now, if danstick needs asking.
+    pub fn wanted(&mut self) -> Option<String> {
+        if self.refused || self.asked {
+            return None;
+        }
+        self.asked = true;
+        Some(json!({"cmd": "seating", "open": true, "players": self.slots, "hold": self.hold}).to_string())
+    }
+}
+
+impl crate::events::Listen for Seating {
     /// One danstick event.
-    pub fn apply(&mut self, event: &Event) {
+    fn apply(&mut self, event: &Event) {
         match event {
             Event::State {
                 seated,
@@ -75,30 +86,16 @@ impl Seating {
                 }
             }
             // Matched whole: other errors mention seating too.
-            Event::Error { message } if message == "unknown command \"seating\"" => self.refused = true,
+            _ if event.refuses("seating") => self.refused = true,
             _ => {}
         }
-    }
-
-    /// The line to send now, if danstick needs asking.
-    pub fn wanted(&mut self) -> Option<String> {
-        if self.refused || self.asked {
-            return None;
-        }
-        self.asked = true;
-        Some(json!({"cmd": "seating", "open": true, "players": self.slots, "hold": self.hold}).to_string())
-    }
-}
-
-impl crate::events::Listen for Seating {
-    fn apply(&mut self, event: &crate::events::Event) {
-        Seating::apply(self, event);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::Listen;
     use crate::events::Seat;
 
     fn state(seated: usize, listening: Option<bool>, status: &str) -> Event {

@@ -91,6 +91,37 @@ pub struct Sprite {
     pub picture: bool,
 }
 
+/// A pad's silhouette, whole, in `colour`: what every seat, presser and
+/// joined icon is. A hold on its way in overrides `revealed`.
+fn controller_sprite(icon: u8, cx: f32, cy: f32, height: f32, colour: Colour) -> Sprite {
+    Sprite {
+        icon,
+        cx,
+        cy,
+        height,
+        colour,
+        revealed: 1.0,
+        under: Colour::rgb(theme::EMPTY, 1.0),
+        picture: false,
+    }
+}
+
+/// A console's drawing in its own colours, whole: the controller a rebind
+/// or the menu's test is about. Untinted -- the vertex colour multiplies the
+/// drawing's own.
+fn lit(console: u32, cx: f32, cy: f32, height: f32) -> Sprite {
+    Sprite {
+        picture: true,
+        ..controller_sprite(
+            u8::try_from(console).unwrap_or(0),
+            cx,
+            cy,
+            height,
+            Colour::rgb([255, 255, 255], 1.0),
+        )
+    }
+}
+
 /// Where a label sits against its point: its left edge, its middle, or its
 /// right edge there; vertically it is always centred on the point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -537,22 +568,7 @@ fn build_rebind(scene: &Scene, rebind: &Rebinding, top: f32, drawing: &mut Drawi
     let dots = panel * 0.045 * total as f32;
     let card_width = layout.card_width.max(dots + panel * 0.2).min(width);
     card(&mut drawing.under, cx, top, card_width, panel);
-    drawing.sprites.push(Sprite {
-        icon: u8::try_from(rebind.console).unwrap_or(0),
-        cx,
-        cy,
-        height,
-        // Untinted: the vertex colour multiplies the drawing's own.
-        colour: Colour {
-            r: 1.0,
-            g: 1.0,
-            b: 1.0,
-            a: 1.0,
-        },
-        revealed: 1.0,
-        under: Colour::rgb(theme::EMPTY, 1.0),
-        picture: true,
-    });
+    drawing.sprites.push(lit(rebind.console, cx, cy, height));
     let console = CONSOLES.get(rebind.console as usize);
     let asked = usize::try_from(rebind.control)
         .ok()
@@ -1076,16 +1092,13 @@ fn build_line(menu: &MenuFrame, at: (f32, f32), slot: f32, drawing: &mut Drawing
             continue;
         }
         let off = menu.off & (1 << seat_at) != 0;
-        drawing.sprites.push(Sprite {
+        drawing.sprites.push(controller_sprite(
             icon,
-            cx: x,
-            cy: y,
-            height: slot * 0.64,
-            colour: player_colour(seat).with_alpha(if off { 0.35 } else { 1.0 }),
-            revealed: 1.0,
-            under: Colour::rgb(theme::EMPTY, 1.0),
-            picture: false,
-        });
+            x,
+            y,
+            slot * 0.64,
+            player_colour(seat).with_alpha(if off { 0.35 } else { 1.0 }),
+        ));
         if off {
             drawing.labels.push(Label {
                 text: "game off".to_owned(),
@@ -1130,22 +1143,9 @@ fn build_tester(
     marker: f32,
     drawing: &mut Drawing,
 ) {
-    drawing.sprites.push(Sprite {
-        icon: u8::try_from(menu.console).unwrap_or(0),
-        cx: layout.cx,
-        cy: layout.cy,
-        height: layout.height,
-        // Untinted: the vertex colour multiplies the drawing's own.
-        colour: Colour {
-            r: 1.0,
-            g: 1.0,
-            b: 1.0,
-            a: 1.0,
-        },
-        revealed: 1.0,
-        under: Colour::rgb(theme::EMPTY, 1.0),
-        picture: true,
-    });
+    drawing
+        .sprites
+        .push(lit(menu.console, layout.cx, layout.cy, layout.height));
     let seats: Vec<usize> = (0..(menu.rows as usize).min(menu.icons.len()))
         .filter(|&at| menu.icons[at] != EMPTY_SEAT)
         .collect();
@@ -1167,16 +1167,13 @@ fn build_tester(
         };
         let edge = label_x(placed) + outward * words;
         for (nth, at) in pressers(placed.anchor.id).into_iter().enumerate() {
-            drawing.sprites.push(Sprite {
-                icon: menu.icons[at],
-                cx: edge + outward * marker * (0.75 + 1.1 * nth as f32),
-                cy: placed.to.1,
-                height: marker,
-                colour: player_colour(at as i32 + 1),
-                revealed: 1.0,
-                under: Colour::rgb(theme::EMPTY, 1.0),
-                picture: false,
-            });
+            drawing.sprites.push(controller_sprite(
+                menu.icons[at],
+                edge + outward * marker * (0.75 + 1.1 * nth as f32),
+                placed.to.1,
+                marker,
+                player_colour(at as i32 + 1),
+            ));
         }
     }
     let stroke = 2.0;
@@ -1284,20 +1281,11 @@ pub fn build(scene: &Scene, drawing: &mut Drawing) {
     }
     let icon_height = bar * 0.62;
     let x = |at| item_x(scene.width, bar, at, count);
-    let empty = Colour::rgb(theme::EMPTY, 1.0);
     for (at, (&player, &icon)) in scene.joined.iter().zip(scene.joined_icons).enumerate() {
         let colour = player_colour(player);
-        let sprite = Sprite {
-            icon,
-            cx: x(at),
-            cy,
-            height: icon_height,
-            colour,
-            revealed: 1.0,
-            under: empty,
-            picture: false,
-        };
-        drawing.sprites.push(sprite);
+        drawing
+            .sprites
+            .push(controller_sprite(icon, x(at), cy, icon_height, colour));
         // The tick is for the seat just taken; the rest of the line is there
         // so its place in it can be read.
         if scene.joined_fresh >> at & 1 == 1 {
@@ -1309,14 +1297,8 @@ pub fn build(scene: &Scene, drawing: &mut Drawing) {
     let holds = scene.fractions.iter().zip(scene.players).zip(scene.hold_icons);
     for (i, ((&fraction, &player), &icon)) in holds.enumerate() {
         drawing.sprites.push(Sprite {
-            icon,
-            cx: x(offset + i),
-            cy,
-            height: icon_height,
-            colour: player_colour(player),
             revealed: fraction.clamp(0.0, 1.0),
-            under: empty,
-            picture: false,
+            ..controller_sprite(icon, x(offset + i), cy, icon_height, player_colour(player))
         });
     }
 }
@@ -1861,7 +1843,7 @@ mod tests {
 
     #[test]
     fn a_trigger_danstick_says_the_owner_pulled_is_marked_beside_its_name() {
-        use crate::events::Event;
+        use crate::events::{Event, Listen};
         let console = crate::consoles::for_platform("generic");
         let generic = &CONSOLES[console];
         let mut focused = crate::menu::Focused::default();

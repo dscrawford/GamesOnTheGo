@@ -454,6 +454,90 @@ mod tests {
         Shown { player, icon, fresh }
     }
 
+    /// Corner values through the pipe: every optional present and absent, the
+    /// counts at their maxima, the fresh bits at their edges, a menu with
+    /// every field at its limit. `decode(encode(f)) == f` for each.
+    #[test]
+    fn encode_and_decode_are_inverse_at_the_corners() {
+        let holds = vec![hold(1.0, i32::MAX, u8::MAX); HOLDS_MAX];
+        let joined: Vec<Shown> = (0..JOINED_MAX)
+            .map(|i| shown(i as i32 + 1, u8::MAX, i == 0 || i == JOINED_MAX - 1))
+            .collect();
+        let limits = MenuFrame {
+            owner: i32::MAX,
+            rows: ROWS_MAX as u32,
+            icons: [0; ROWS_MAX],
+            // Decode clamps the cursor to the last row (Exit): the largest
+            // value that survives is ROWS_MAX + 2.
+            focus: ROWS_MAX as u32 + 2,
+            carried: -1,
+            a_fill: 1.0,
+            b_fill: 1.0,
+            off: u32::MAX,
+            console: u32::MAX,
+            pressed: [u64::MAX; ROWS_MAX],
+            sticks: [[-1.0, 1.0, -1.0, 1.0]; ROWS_MAX],
+            testing: true,
+            saves: Saves {
+                row: true,
+                browse: Some(Browse {
+                    listed: Listed::Ready(usize::from(u8::MAX)),
+                    selected: usize::from(u8::MAX) - 1,
+                    confirming: true,
+                }),
+            },
+        };
+        let empty_seats = MenuFrame {
+            icons: [EMPTY_SEAT; ROWS_MAX],
+            carried: 0,
+            ..limits
+        };
+        let rebinding = Rebinding {
+            player: i32::MAX,
+            console: u32::MAX,
+            control: -1,
+            index: -1,
+            total: i32::MAX,
+            finish: 1.0,
+            ended: 2,
+            pressed: u64::MAX,
+            sticks: [-1.0, 1.0, 0.0, -1.0],
+        };
+        let bare = Frame::pack(0.0, 0.0, &[], &[]);
+        let full = Frame::pack(1.0, 1.0, &holds, &joined);
+        for frame in [
+            bare,
+            full,
+            full.with_menu(Some(limits)),
+            full.with_menu(Some(empty_seats)),
+            Frame {
+                rebind: Some(rebinding),
+                ..full
+            },
+            Frame {
+                rebind: Some(rebinding),
+                ..bare
+            }
+            .with_menu(Some(limits))
+            .with_saying(Saying::Saving)
+            .with_nobody(true),
+            bare.with_saying(Saying::Loading),
+        ] {
+            assert_eq!(Frame::decode(&frame.encode()), Some(frame));
+        }
+        let past = full.with_menu(Some(MenuFrame {
+            focus: u32::MAX,
+            ..limits
+        }));
+        assert_eq!(
+            Frame::decode(&past.encode())
+                .and_then(|f| f.menu)
+                .map(|m| m.focus),
+            Some(ROWS_MAX as u32 + 2),
+            "a cursor past Exit is drawn on Exit"
+        );
+    }
+
     #[test]
     fn a_frame_carries_what_the_bar_draws() {
         let frame = Frame::pack(
