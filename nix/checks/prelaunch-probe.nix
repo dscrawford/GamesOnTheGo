@@ -29,7 +29,7 @@
 { pkgs }:
 let
   inherit (pkgs) lib;
-  helpers = import ../../src/client/env/helpers.nix { inherit pkgs lib; };
+  helpers = import ../../src/client/env/machinery/helpers.nix { inherit pkgs lib; };
 
   # The platform's own preLaunch, with the emulator named by a string: it is
   # only ever interpolated into a command that the probe does not reach (the

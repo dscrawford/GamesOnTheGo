@@ -11,7 +11,7 @@ let
   # single_file from the games-root pass and no_intro_set from the
   # DAT torrent path.
   harkinianProbe =
-    (import ../../src/client/env/helpers.nix {
+    (import ../../src/client/env/machinery/helpers.nix {
       inherit pkgs;
       inherit (pkgs) lib;
     }).harkinianPort
@@ -39,7 +39,7 @@ let
   dk64Probe = import ../../src/client/env/games/n64/usa.donkey_kong_64.nix {
     inherit pkgs;
     inherit (pkgs) lib;
-    helpers = import ../../src/client/env/helpers.nix {
+    helpers = import ../../src/client/env/machinery/helpers.nix {
       inherit pkgs;
       inherit (pkgs) lib;
     };
@@ -63,7 +63,7 @@ let
     exit 7
   '';
   restartProbe =
-    (import ../../src/client/env/lib.nix {
+    (import ../../src/client/env/machinery/lib.nix {
       inherit pkgs;
       inherit (pkgs) lib;
     })
@@ -79,7 +79,7 @@ let
   # step library — the check that steps are usable à la carte, not
   # only through the two canned recipes.
   probe =
-    (import ../../src/client/env/lib.nix {
+    (import ../../src/client/env/machinery/lib.nix {
       inherit pkgs;
       inherit (pkgs) lib;
     })
@@ -95,7 +95,7 @@ let
         ];
         recipes =
           let
-            steps = import ../../src/client/env/steps.nix { inherit pkgs; };
+            steps = import ../../src/client/env/machinery/steps.nix { inherit pkgs; };
           in
           {
             probe_archive = [

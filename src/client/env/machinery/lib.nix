@@ -257,7 +257,7 @@ let
 
   # GL on a machine that is not NixOS: see foreign-gl.nix, which is also
   # what the picker and the QA tools use.
-  foreignGlParts = import ./foreign-gl.nix { inherit (pkgs) mesa; };
+  foreignGlParts = import ../foreign-gl.nix { inherit (pkgs) mesa; };
   foreignGl = foreignGlParts.guarded;
 
   sourceOf = v: if lib.isDerivation v || lib.isPath v then v else pkgs.writeText "gotg-config" v;
@@ -374,7 +374,7 @@ let
       # and GOTG_EXTERNAL_DISPLAY, for a preLaunch that has a machine default
       # (Ryujinx on a Deck). The function is machine.sh beside this file,
       # embedded so the launcher stays one self-contained script.
-      ${builtins.readFile ./machine.sh}
+      ${builtins.readFile ../machine.sh}
       gotg_machine_detect
 
       ${preLaunch}

@@ -9,10 +9,15 @@
 #
 # Grepped from the built launchers rather than asserted about the nix, because
 # what went missing is text in a script, and that is what can be looked for.
-{ pkgs }:
+#
+# The flake's own environments, as environments.nix has them, not a second
+# import of src/client/env: that one was given neither danstick-rs nor
+# gotg-pads, which the Four Swords split-screen launchers name, and failed on
+# null before this check reached them -- it did not evaluate.
+{ pkgs, packages }:
 let
-  envs = import ../../src/client/env { inherit pkgs; };
   lib = pkgs.lib;
+  envs = lib.filterAttrs (name: _: lib.hasPrefix "env-" name) packages;
 
   # Every environment of a platform, the platform's own first: a variant's name
   # is the platform's with more on the end.
@@ -41,15 +46,23 @@ let
     ];
   };
 
+  # A native port (Animal Crossing's decompilation, PaperBoat) is not the
+  # platform's emulator at all, so it carries none of the emulator's settings
+  # and is not what this is looking for; the launcher says so with
+  # share/gotg/native-port. The first time this check ran it named Animal
+  # Crossing, for having no Dolphin settings in a launcher that runs no Dolphin.
   checkOne =
     platform: needles:
     lib.mapAttrsToList (name: env: ''
       launcher="${env}/bin/gotg-play"
+      if [ ! -e "${env}/share/gotg/native-port" ]; then
+      : # a platform with nothing to carry (wiiu) leaves the body empty
       ${lib.concatMapStringsSep "\n" (needle: ''
         grep -qF ${lib.escapeShellArg needle} "$launcher" ||
           { echo "${name} lost ${needle} — a game file replaced the platform's preLaunch instead of adding to it" >&2
             exit 1; }
       '') needles}
+      fi
     '') (familyOf platform);
 in
 pkgs.runCommand "check-inherits-platform" { } ''

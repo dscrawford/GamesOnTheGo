@@ -290,7 +290,7 @@ name-CRC, because SDL renames clones) and `keys.py`.
   second, so the e2e measures the length through the daemon rather than
   trusting that it was sent.
 - A clone's identity is `mirror` unless an environment's `padIdentity` says
-  otherwise (`src/client/env/lib.nix` -> `pads.json` -> `danstick_identity`).
+  otherwise (`src/client/env/machinery/lib.nix` -> `pads.json` -> `danstick_identity`).
   Only the decompiled ports ask for `xbox360`, and `danstick.sh` refuses it for
   Ryujinx: every clone is one GUID under it and Ryujinx blanks the name CRC
   to make its device id. Applying it clears `DANSTICK_SKIP_DAEMON_CHECK`,

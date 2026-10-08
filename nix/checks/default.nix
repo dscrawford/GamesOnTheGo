@@ -33,7 +33,7 @@
   hmModule = import ./hm-module.nix { inherit pkgs flake; };
   fullscreen = import ./fullscreen.nix { inherit pkgs; };
   aresSystem = import ./ares-system.nix { inherit pkgs; };
-  inheritsPlatform = import ./inherits-platform.nix { inherit pkgs; };
+  inheritsPlatform = import ./inherits-platform.nix { inherit pkgs packages; };
   sm64Coop = import ./sm64-coop.nix { inherit pkgs; };
   prelaunchProbe = import ./prelaunch-probe.nix { inherit pkgs; };
   rust = import ./rust.nix { inherit pkgs; };

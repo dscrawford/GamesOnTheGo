@@ -19,38 +19,20 @@
   # will see rather than what the session can see. Optional for the same
   # reason as danstick-rs above.
   gotg-pads ? null,
+  # Tools this project packages itself, for environments that need something
+  # nixpkgs does not carry -- nix/tools.nix, which the flake's own packages are
+  # built from too, so an environment names the derivation the flake exposes.
+  # Passed alongside pkgs so an env file never has to reach back up the tree
+  # with a relative path.
+  tools ? (import ../../../nix/tools.nix { inherit pkgs; }).tools,
 }:
 
 let
-  mkEnv = import ./lib.nix { inherit pkgs lib; };
-  helpers = import ./helpers.nix { inherit pkgs lib; };
+  mkEnv = import ./machinery/lib.nix { inherit pkgs lib; };
+  helpers = import ./machinery/helpers.nix { inherit pkgs lib; };
 
-  # Tools this project packages itself, for environments that need something
-  # nixpkgs does not carry. Passed alongside pkgs so an env file never has to
-  # reach back up the tree with a relative path.
-  # The ports patched onto nixpkgs take an SDL cut to what a game uses; see
-  # pkgs/sdl3.nix for what that leaves out and what it saved.
-  sdl3s = pkgs.callPackage ../../../pkgs/sdl3.nix { };
-  gotgPkgs = {
-    dk64recomp = pkgs.callPackage ../../../pkgs/dk64recomp { SDL2 = sdl3s.sdl2; };
-    snowboardkids2recomp = pkgs.callPackage ../../../pkgs/snowboardkids2recomp { SDL2 = sdl3s.sdl2; };
-    battleship = pkgs.callPackage ../../../pkgs/battleship { SDL2 = sdl3s.sdl2; };
-    paperboat = pkgs.callPackage ../../../pkgs/paperboat { SDL2 = sdl3s.sdl2; };
-    paperboat-torch = pkgs.callPackage ../../../pkgs/paperboat-torch { };
-    open-nectar = pkgs.callPackage ../../../pkgs/open-nectar { };
-    melee-pc = pkgs.callPackage ../../../pkgs/melee-pc { };
-    # nixpkgs' Ryubing with the JIT cache size upstream Ryujinx shipped; see
-    # the package for the crash the 1.3.3 default has.
-    ryubing = pkgs.callPackage ../../../pkgs/ryubing { };
-    pyisotools = pkgs.callPackage ../../../pkgs/pyisotools { };
-    wiimms-szs-tools = pkgs.callPackage ../../../pkgs/wiimms-szs-tools { };
-    # Only the Four Swords Adventures split-screen variants name this, so only
-    # they build it — sway, gamescope and bwrap are not the client's problem.
-    splitscreen = pkgs.callPackage ../../../pkgs/splitscreen { };
+  gotgPkgs = tools // {
     inherit danstick-rs gotg-pads;
-    # The relay Ship of Harkinian's co-op talks through, run locally so four
-    # copies of Ocarina of Time on one sofa need no internet.
-    anchor-server = pkgs.callPackage ../../../pkgs/anchor-server { };
   };
 
   nixNames =
@@ -59,14 +41,14 @@ let
       lib.filterAttrs (n: t: t == "regular" && lib.hasSuffix ".nix" n) (builtins.readDir dir)
     );
 
-  # Every file here but the machinery is a platform. foreign-gl was missing
-  # from this list, so env-foreign-gl was a "platform" whose evaluation
-  # failed -- and with it `nix flake check` and checks.environments.
+  # Every file here but these two is a platform. The machinery (lib.nix,
+  # helpers.nix, steps.nix) lives in machinery/, which this scan does not
+  # enter, so a new helper cannot become a "platform" whose evaluation fails
+  # -- as foreign-gl did, taking `nix flake check` and checks.environments
+  # with it. foreign-gl.nix stays here only because the client, the picker,
+  # the overlay and the QA tools import it by this path.
   platforms = lib.subtractLists [
     "default"
-    "lib"
-    "helpers"
-    "steps"
     "foreign-gl"
   ] (nixNames ./.);
 
