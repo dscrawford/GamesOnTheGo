@@ -13,10 +13,8 @@ menu opens.
 
 from __future__ import annotations
 
-import subprocess
-
 from .catalog import Game
-from .launch import gotg_bin
+from .client import ask
 from .recent import Recent
 
 # The client walks one game's install directory; a hung client must not hold a
@@ -51,20 +49,15 @@ def versions_for(game: Game, variant: str | None = None) -> tuple[tuple[str, boo
     if remembered is not None:
         return remembered
 
-    command = [gotg_bin(), "complete", "versions", f"{game.platform}/{game.id}"]
-    if variant:
-        command.append(variant)
-    try:
-        done = subprocess.run(command, capture_output=True, timeout=VERSIONS_TIMEOUT, text=True)
-    except (OSError, subprocess.SubprocessError):
+    argv = ["complete", "versions", f"{game.platform}/{game.id}", *([variant] if variant else [])]
+    out = ask(argv, timeout=VERSIONS_TIMEOUT)
+    if out is None:
         # Not remembered: a client that was busy or missing may answer next
         # time, and caching the silence would make one bad moment permanent.
         return ()
-    if done.returncode != 0:
-        return ()
 
     found = []
-    for line in done.stdout.splitlines():
+    for line in out.splitlines():
         name = line.strip()
         if not name:
             continue

@@ -21,6 +21,7 @@ import subprocess
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
+from . import client
 from .launch import gotg_bin
 
 # The answer is a cache and a walk of the disk; a hung client must not hold
@@ -221,16 +222,5 @@ class Check:
 def ask() -> Report | None:
     """`gotg complete updates`: the cached answer, in a moment. None when the
     client is missing, hung, failed, or too old to know the question."""
-    try:
-        done = subprocess.run(  # noqa: S603 — argv is ours, shell=False
-            [gotg_bin(), "complete", "updates"],
-            capture_output=True,
-            timeout=ASK_TIMEOUT,
-            text=True,
-            errors="replace",
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if done.returncode != 0:
-        return None
-    return parse(done.stdout)
+    out = client.ask(["complete", "updates"], timeout=ASK_TIMEOUT)
+    return None if out is None else parse(out)

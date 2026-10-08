@@ -28,18 +28,20 @@ from concurrent.futures import Future, ThreadPoolExecutor
 
 import pygame
 
-from . import beside, config, display, filters, keys, meter, pads, prepare, trace, updates
+from . import beside, config, display, filters, intents, keys, meter, pads, prepare, trace, updates
 from .art import ArtStore
 from .browser import SHELF, Browser
+from .buttons import step_for
 from .catalog import Game, Library
 from .danstick import DaemonWatch, Danstick, ensure_daemon
 from .decode import PENDING, Decoder
 from .fetch import Loader
 from .filters import Filters
-from .grid import Grid
+from .gridview import GridView, row_under_text, status_line
 from .hush import Hush
 from .installed import installed_games
 from .installs import Installs
+from .intents import BACK, Intent, keyboard_heard
 from .keys import KeyHold
 from .layout import corner, grid, shelf, shelf_at, tile_at
 from .menu import Menu
@@ -230,16 +232,16 @@ def hovering(browser, pos, size) -> int | None:
 
 def draw_row(
     screen,
+    font_at,
     row,
     game,
     picture,
-    font_at,
     selected: bool,
-    installed: bool,
+    under: str,
     ring: tuple[float | None, bool] | None = None,
-    outdated: bool = False,
 ) -> None:
-    """One line of the list: an icon, a title, and the platform under it.
+    """One line of the list: an icon, a title, and `under` it (the platform and
+    what is going on, from `gridview.row_under_text`).
 
     The icon is the game's own art cropped to a square rather than fitted into
     one. A row is wide and short, and art letterboxed into that leaves a
@@ -268,30 +270,16 @@ def draw_row(
 
     if ring is not None:
         fraction, failed = ring
-        under = game.platform + ("   ·   install failed" if failed else "   ·   installing")
         r = max(6, side // 3)
         draw_ring(screen, (row.x + row.width - r - 12, row.y + row.height // 2), r, fraction, failed)
-    elif installed and outdated:
-        under = game.platform + "   ·   installed  ·  update available"
-    else:
-        under = game.platform + ("   ·   installed" if installed else "")
     small = font_at(max(11, size - 8)).render(under, True, TEXT_DIM)
     screen.blit(small, (left, row.y + 6 + title.get_height()))
 
 
-def draw_shelf(
-    screen,
-    state: Grid,
-    font_at,
-    art=None,
-    status: str = "",
-    installed: set[tuple[str, str]] | None = None,
-    rings: dict[tuple[str, str], tuple[float | None, bool]] | None = None,
-    outdated: frozenset[tuple[str, str]] | None = None,
-    chip: str | None = None,
-):
+def draw_shelf(screen, font_at, view: GridView):
     """The list on the left, and the art of the one under the cursor on the
     right — the other way to look at the same library."""
+    state, art, installed, rings, outdated = view.state, view.art, view.installed, view.rings, view.outdated
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
     page = state.page
@@ -323,37 +311,20 @@ def draw_shelf(
         if index >= len(page):
             break
         game = page[index]
-        draw_row(
-            screen,
-            row,
-            game,
-            art.get(game.key) if art else None,
-            font_at,
-            index == state.selected,
-            bool(installed and game.key in installed),
-            rings.get(game.key) if rings else None,
-            bool(outdated and game.key in outdated),
+        ring = rings.get(game.key) if rings else None
+        under = row_under_text(
+            game, ring, bool(installed and game.key in installed), bool(outdated and game.key in outdated)
         )
+        draw_row(screen, font_at, row, game, art.get(game.key) if art else None, index == state.selected, under, ring)
 
-    if status:
-        shown = font_at(22).render(status, True, TEXT_DIM)
+    if view.status:
+        shown = font_at(22).render(view.status, True, TEXT_DIM)
         screen.blit(shown, (rows[0].x, height - shown.get_height() - 10))
-    return draw_chip(screen, font_at, chip)
+    return draw_chip(screen, font_at, view.chip)
 
 
-def draw(
-    screen,
-    state: Grid,
-    font_at,
-    art=None,
-    status: str = "",
-    typing: str | None = None,
-    menu=None,
-    installed: set[tuple[str, str]] | None = None,
-    rings: dict[tuple[str, str], tuple[float | None, bool]] | None = None,
-    outdated: frozenset[tuple[str, str]] | None = None,
-    chip: str | None = None,
-):
+def draw(screen, font_at, view: GridView, typing: str | None = None, menu=None):
+    state, art, installed, rings, outdated = view.state, view.art, view.installed, view.rings, view.outdated
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
     page = state.page
@@ -425,24 +396,16 @@ def draw(
     # the selection is the one game whose whole name is worth a line, and
     # hover moves the selection, so pointer and stick share it.
     # The chip shares that strip; the title fits in what the chip leaves.
-    chip_rect = draw_chip(screen, font_at, chip)
+    chip_rect = draw_chip(screen, font_at, view.chip)
     if state.game is not None:
         text = state.game.title[:200]
         room = width - 48 - (2 * (chip_rect.width + 24) if chip_rect is not None else 0)
         label = _fit(font_at, text, max(120, room), 26).render(text, True, TEXT)
         screen.blit(label, ((width - label.get_width()) // 2, (tiles[0].y - label.get_height()) // 2))
 
-    if not status:
-        status = (
-            f"page {state.page_index + 1} of {state.library.pages}  ·  {len(state.library)} games"
-            if state.library.pages
-            else "no games in the catalog"
-        )
-    # While typing, the search box replaces the status: it is the thing being
-    # edited, and two lines competing for the same corner reads as neither.
-    if typing is not None:
-        status = f"search: {typing}_"
-    label = font_at(18).render(status, True, TEXT if typing is not None else TEXT_DIM)
+    # While typing, the search box replaces the status: see status_line.
+    status, bright = status_line(state, view.status, typing)
+    label = font_at(18).render(status, True, TEXT if bright else TEXT_DIM)
     screen.blit(label, (label.get_height(), height - label.get_height() * 2))
     return chip_rect
 
@@ -770,6 +733,31 @@ def draw_prepare(
 
     label = font_at(18).render(hint, True, TEXT_DIM)
     screen.blit(label, (margin, height - margin - label.get_height()))
+
+
+# intents.py writes SDL's keycodes down so that it needs no pygame; this is
+# where the two are made to agree, as pads.py does for the button numbering.
+assert intents.Key.ESCAPE == pygame.K_ESCAPE and intents.Key.B == pygame.K_b
+assert intents.Key.RETURN == pygame.K_RETURN and intents.Key.KP_ENTER == pygame.K_KP_ENTER
+assert intents.Key.SPACE == pygame.K_SPACE
+assert intents.Key.UP == pygame.K_UP and intents.Key.DOWN == pygame.K_DOWN
+assert intents.Key.LEFT == pygame.K_LEFT and intents.Key.RIGHT == pygame.K_RIGHT
+
+
+def _intent(event) -> Intent:
+    """What this event means to a screen that reads Back, OK and a step.
+
+    The pad's button is read once and its direction taken from it, rather than
+    asking `pads.direction` and `pads.button` in turn -- each traces the press,
+    and the screens that asked both wrote it down twice. A pad danstick has not
+    published gives None for both and so means nothing (`pads.py`).
+    """
+    if event.type == pygame.KEYDOWN:
+        return intents.intent(key=event.key)
+    if event.type == pygame.JOYHATMOTION:
+        return intents.intent(step=pads.direction(event))
+    button = pads.button(event)
+    return intents.intent(button=button, step=step_for(button))
 
 
 def _steered(steer: Nav, event, now: float) -> Nav:
@@ -1186,18 +1174,15 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
                 if event.type in (pygame.KEYDOWN, pygame.KEYUP, pygame.TEXTINPUT):
                     # The space bar is always heard: a keyboard that cannot
                     # ask for a seat cannot be given one.
-                    asking = getattr(event, "key", None) == pygame.K_SPACE
-                    if not asking and not keys.drives(danstick.players, danstick.connected):
+                    drives = keys.drives(danstick.players, danstick.connected)
+                    if not keyboard_heard(getattr(event, "key", None), drives):
                         trace.say("key-refused", key=getattr(event, "key", None))
                         continue
 
                 # On the loader, the only input is the way out. Everything else
                 # would be the grid moving invisibly behind the build.
                 if preparer is not None:
-                    back = (
-                        event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_b)
-                    ) or pads.button(event) == pads.B
-                    if back:
+                    if _intent(event) == BACK:
                         if not prepare_failed:
                             preparer.cancel()
                         preparer = None
@@ -1207,22 +1192,15 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
                 # Checking the saves, or choosing between two: A, B and a
                 # direction, nothing else.
                 if checking is not None or choice is not None:
-                    back = (
-                        event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_b)
-                    ) or pads.button(event) == pads.B
-                    if back:
+                    heard = _intent(event)
+                    if heard == BACK:
                         checking, choice, starting = None, None, None
                         continue
                     if choice is None:
                         continue
-                    step = pads.direction(event)
-                    if event.type == pygame.KEYDOWN and event.key in (pygame.K_LEFT, pygame.K_RIGHT):
-                        step = (-1 if event.key == pygame.K_LEFT else 1, 0)
-                    if step and step[0]:
-                        choice = choice.move(step[0])
-                    elif (
-                        event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER)
-                    ) or pads.button(event) == pads.A:
+                    if heard.dx:
+                        choice = choice.move(heard.dx)
+                    elif heard.confirms():
                         # Through the loader, which shows what the client says
                         # as it pulls or pushes; the game starts when it is done.
                         preparer = Preparer(choice.game, ["saves", "keep", choice.selected], choice.variant)
@@ -1232,21 +1210,15 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
 
                 # The Saves screen: up and down, A twice to load, B to step back.
                 if saves is not None:
-                    if (
-                        event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_b)
-                    ) or pads.button(event) == pads.B:
+                    heard = _intent(event)
+                    if heard == BACK:
                         saves = saves.press_b()
                         if saves is None:
                             listing = None
                         continue
-                    step = pads.direction(event)
-                    if event.type == pygame.KEYDOWN and event.key in (pygame.K_UP, pygame.K_DOWN):
-                        step = (0, -1 if event.key == pygame.K_UP else 1)
-                    if step and step[1]:
-                        saves = saves.move(step[1])
-                    elif (
-                        event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER)
-                    ) or pads.button(event) == pads.A:
+                    if heard.dy:
+                        saves = saves.move(heard.dy)
+                    elif heard.confirms():
                         saves, entry = saves.press_a()
                         if entry is not None:
                             # Through the loader, which shows the client
@@ -1275,29 +1247,21 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
                         elif event.unicode and event.unicode.isprintable():
                             storage_typing += event.unicode
                         continue
-                    if event.type == pygame.KEYDOWN:
-                        if event.key in (pygame.K_ESCAPE, pygame.K_b):
-                            storage = None
-                        elif event.key == pygame.K_UP:
-                            storage.move(-1)
-                        elif event.key == pygame.K_DOWN:
-                            storage.move(1)
-                        elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-                            storage.make_default()
-                        elif event.key in (pygame.K_DELETE, pygame.K_x):
+                    heard = _intent(event)
+                    if heard == BACK:
+                        storage = None
+                    elif heard.dy:
+                        storage.move(heard.dy)
+                    elif heard.confirms():
+                        storage.make_default()
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key in (pygame.K_DELETE, pygame.K_x):
                             storage.remove()
                         elif event.key in (pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_EQUALS, pygame.K_y):
                             storage_typing = ""
                     else:
-                        step = pads.direction(event)
                         pressed = pads.button(event)
-                        if step and step[1]:
-                            storage.move(step[1])
-                        elif pressed == pads.A:
-                            storage.make_default()
-                        elif pressed == pads.B:
-                            storage = None
-                        elif pressed == pads.X:
+                        if pressed == pads.X:
                             storage.remove()
                         elif pressed == pads.Y:
                             # A Deck raises the Steam keyboard over this.
@@ -1307,40 +1271,21 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
                 # While the menu is open it owns the input: the grid must
                 # not move invisibly underneath the panel.
                 if menu is not None:
-                    if event.type == pygame.KEYDOWN:
-                        if event.key in (pygame.K_ESCAPE, pygame.K_b):
-                            # Out of the variants first, then out of the menu.
-                            if menu.expanded:
-                                menu.close_list()
-                            else:
-                                menu = None
-                        elif event.key == pygame.K_UP:
-                            menu.move(-1)
-                        elif event.key == pygame.K_DOWN:
-                            menu.move(1)
-                        elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-                            verb = menu.confirm()
-                            if verb is not None:
-                                picked, menu = menu, None
-                                pick(picked.game, verb, picked.variant, picked.version)
-                    elif pads.direction(event) is not None:
-                        _, dy = pads.direction(event)
-                        if dy:
-                            menu.move(dy)
-                    elif pads.button(event) is not None:
-                        pressed = pads.button(event)
-                        if pressed == pads.A:
-                            verb = menu.confirm()
-                            if verb is not None:
-                                picked, menu = menu, None
-                                pick(picked.game, verb, picked.variant, picked.version)
-                        elif pressed == pads.B:
-                            # B backs out of the variants first, and only then
-                            # out of the menu: one button, one step at a time.
-                            if menu.expanded:
-                                menu.close_list()
-                            else:
-                                menu = None
+                    heard = _intent(event)
+                    if heard == BACK:
+                        # Out of the variants first, then out of the menu: one
+                        # button, one step at a time.
+                        if menu.expanded:
+                            menu.close_list()
+                        else:
+                            menu = None
+                    elif heard.dy:
+                        menu.move(heard.dy)
+                    elif heard.confirms(space=True):
+                        verb = menu.confirm()
+                        if verb is not None:
+                            picked, menu = menu, None
+                            pick(picked.game, verb, picked.variant, picked.version)
                     elif event.type == pygame.MOUSEMOTION:
                         rows = menu_rects(
                             menu, view_rects(browser, screen.get_size()), font_at, screen.get_size()
@@ -1372,47 +1317,25 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
                     # An open list owns up, down, A and B; the panel underneath
                     # owns them when there is none. One step back per press of
                     # B: the list first, then the panel.
-                    if event.type == pygame.KEYDOWN:
-                        if event.key in (pygame.K_ESCAPE, pygame.K_b):
-                            if panel.open:
-                                panel.close()
-                            else:
-                                panel = None
-                        elif event.key == pygame.K_UP:
-                            panel.choice.move(-1) if panel.open else panel.move(-1)
-                        elif event.key == pygame.K_DOWN:
-                            panel.choice.move(1) if panel.open else panel.move(1)
-                        elif event.key == pygame.K_LEFT and not panel.open:
-                            panel.adjust(browser, -1)
-                        elif event.key == pygame.K_RIGHT and not panel.open:
-                            panel.adjust(browser, 1)
-                        elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-                            if panel.open:
-                                panel.choose(browser)
-                            elif panel.press(browser) == filters.TYPING:
-                                typing = typing_from = browser.search
-                    else:
-                        step = pads.direction(event)
-                        pressed = pads.button(event)
-                        if step:
-                            dx, dy = step
-                            if dy:
-                                panel.choice.move(dy) if panel.open else panel.move(dy)
-                            if dx and not panel.open:
-                                panel.adjust(browser, dx)
-                        elif pressed == pads.A:
-                            if panel.open:
-                                panel.choose(browser)
-                            elif panel.press(browser) == filters.TYPING:
-                                typing = typing_from = browser.search
-                        elif pressed == pads.B:
-                            if panel.open:
-                                panel.close()
-                            else:
-                                panel = None
-                        elif pressed == pads.START:
-                            # Start closes it the way Start opened it.
+                    heard = _intent(event)
+                    if heard == BACK:
+                        if panel.open:
+                            panel.close()
+                        else:
                             panel = None
+                    elif heard.kind == "move":
+                        if heard.dy:
+                            panel.choice.move(heard.dy) if panel.open else panel.move(heard.dy)
+                        if heard.dx and not panel.open:
+                            panel.adjust(browser, heard.dx)
+                    elif heard.confirms(space=True):
+                        if panel.open:
+                            panel.choose(browser)
+                        elif panel.press(browser) == filters.TYPING:
+                            typing = typing_from = browser.search
+                    elif pads.button(event) == pads.START:
+                        # Start closes it the way Start opened it.
+                        panel = None
                     continue
 
                 # While typing, every key is text. Nothing below runs, or the
@@ -1653,32 +1576,13 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
             elif panel is not None:
                 # The grid behind it, so changing a filter is visibly changing
                 # the thing underneath rather than a number on a form.
+                view = GridView(
+                    state, art, browser.status, browser.installed, installs.rings(), browser.outdated, chip_words
+                )
                 if browser.view == SHELF:
-                    chip_rect = draw_shelf(
-                        screen,
-                        state,
-                        font_at,
-                        art,
-                        browser.status,
-                        browser.installed,
-                        installs.rings(),
-                        browser.outdated,
-                        chip_words,
-                    )
+                    chip_rect = draw_shelf(screen, font_at, view)
                 else:
-                    chip_rect = draw(
-                        screen,
-                        state,
-                        font_at,
-                        art,
-                        browser.status,
-                        None,
-                        None,
-                        browser.installed,
-                        installs.rings(),
-                        browser.outdated,
-                        chip_words,
-                    )
+                    chip_rect = draw(screen, font_at, view)
                 draw_filters(screen, font_at, browser, panel, typing)
             else:
                 # Whatever the workers finished since the last frame stops being a
@@ -1690,38 +1594,19 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
                     shown.pace.busy(time.monotonic())
                 for game in state.page:
                     surface_for(game)
+                view = GridView(
+                    state, art, browser.status, browser.installed, installs.rings(), browser.outdated, chip_words
+                )
                 if browser.view == SHELF and typing is None:
                     # The menu is drawn over the list rather than swapping the
                     # screen back to the grid underneath it, which is what
                     # happened before and moved every game on screen.
-                    chip_rect = draw_shelf(
-                        screen,
-                        state,
-                        font_at,
-                        art,
-                        browser.status,
-                        browser.installed,
-                        installs.rings(),
-                        browser.outdated,
-                        chip_words,
-                    )
+                    chip_rect = draw_shelf(screen, font_at, view)
                 else:
                     # Typing still belongs to the grid: the search box is drawn
                     # there, and a shelf with its own copy would be two to keep
                     # in step.
-                    chip_rect = draw(
-                        screen,
-                        state,
-                        font_at,
-                        art,
-                        browser.status,
-                        typing,
-                        menu,
-                        browser.installed,
-                        installs.rings(),
-                        browser.outdated,
-                        chip_words,
-                    )
+                    chip_rect = draw(screen, font_at, view, typing, menu)
                 if menu is not None:
                     draw_menu(screen, menu, view_rects(browser, screen.get_size()), font_at)
 

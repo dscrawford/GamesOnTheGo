@@ -23,18 +23,18 @@ ROWS = [
 ]
 
 
-def test_listing_asks_the_client_for_json(tmp_path, monkeypatch):
-    stub(tmp_path, f"echo \"$@\" > {tmp_path}/argv; printf '%s' '{json.dumps(ROWS)}'", monkeypatch)
+def test_listing_asks_the_client_for_json(fake_client):
+    fake_client.answer("configure", "storage", "list", stdout=json.dumps(ROWS))
     assert [r["path"] for r in list_dirs()] == ["/home/x/Games", "/run/media/card/Games"]
-    assert (tmp_path / "argv").read_text().split() == ["configure", "storage", "list", "--json"]
+    assert fake_client.calls == [["configure", "storage", "list", "--json"]]
 
 
-def test_a_failing_or_garbled_client_lists_nothing(tmp_path, monkeypatch):
-    stub(tmp_path, "echo boom >&2; exit 1", monkeypatch)
+def test_a_failing_or_garbled_client_lists_nothing(fake_client):
+    fake_client.answer("configure", "storage", "list", stderr="boom", code=1)
     assert list_dirs() == []
-    stub(tmp_path, "printf 'not json'", monkeypatch)
+    fake_client.answer("configure", "storage", "list", stdout="not json")
     assert list_dirs() == []
-    stub(tmp_path, 'printf \'[1, {"nope": 1}, {"path": "/a"}]\'', monkeypatch)
+    fake_client.answer("configure", "storage", "list", stdout='[1, {"nope": 1}, {"path": "/a"}]')
     assert [r["path"] for r in list_dirs()] == ["/a"]
 
 

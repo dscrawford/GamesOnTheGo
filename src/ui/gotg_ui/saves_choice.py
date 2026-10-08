@@ -23,12 +23,11 @@ saves, which is not a frame's worth of work.
 from __future__ import annotations
 
 import json
-import subprocess
 from dataclasses import dataclass, replace
 from datetime import datetime
 
 from .catalog import Game
-from .launch import gotg_bin
+from .client import ask
 
 # Bundling a big save tree and asking the service. A launch that waits longer
 # than this starts the game rather than waiting on a network.
@@ -79,12 +78,9 @@ def parse(output: str) -> Check | None:
 
 def check(game: Game, variant: str | None) -> Check | None:
     """Ask the client. None when it could not answer in time or at all."""
-    argv = [gotg_bin(), "saves", "check", f"{game.platform}/{game.id}", *([variant] if variant else []), "--json"]
-    try:
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=CHECK_TIMEOUT, check=False)  # noqa: S603
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return parse(done.stdout) if done.returncode == 0 else None
+    argv = ["saves", "check", f"{game.platform}/{game.id}", *([variant] if variant else []), "--json"]
+    out = ask(argv, timeout=CHECK_TIMEOUT)
+    return None if out is None else parse(out)
 
 
 def when(updated: str, now: datetime | None = None) -> str:

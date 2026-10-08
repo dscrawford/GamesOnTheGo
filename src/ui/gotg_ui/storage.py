@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import subprocess
 
+from .client import ask
 from .launch import gotg_bin
 
 # A df per directory; a card that has gone to sleep can take a moment.
@@ -63,16 +64,10 @@ class Storage:
 
 def list_dirs() -> list[dict]:
     """The directories as the client reports them; empty when asking failed."""
+    out = ask(["configure", "storage", "list", "--json"], timeout=STORAGE_TIMEOUT)
     try:
-        done = subprocess.run(
-            [gotg_bin(), "configure", "storage", "list", "--json"],
-            capture_output=True,
-            timeout=STORAGE_TIMEOUT,
-            text=True,
-            errors="replace",
-        )
-        rows = json.loads(done.stdout) if done.returncode == 0 else []
-    except (OSError, subprocess.SubprocessError, ValueError):
+        rows = json.loads(out) if out is not None else []
+    except ValueError:
         return []
     return [r for r in rows if isinstance(r, dict) and isinstance(r.get("path"), str)]
 

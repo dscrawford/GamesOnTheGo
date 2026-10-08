@@ -22,12 +22,11 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .catalog import Game
-from .launch import gotg_bin
+from .client import ask
 from .saves_choice import when
 from .variants import env_dir
 
@@ -87,12 +86,9 @@ def parse(output: str) -> Listing | None:
 
 def fetch(game: Game, variant: str | None) -> Listing | None:
     """Ask the client. None when it could not answer in time or at all."""
-    argv = [gotg_bin(), "saves", "list", f"{game.platform}/{game.id}", *([variant] if variant else []), "--json"]
-    try:
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=LIST_TIMEOUT, check=False)  # noqa: S603
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return parse(done.stdout) if done.returncode == 0 else None
+    argv = ["saves", "list", f"{game.platform}/{game.id}", *([variant] if variant else []), "--json"]
+    out = ask(argv, timeout=LIST_TIMEOUT)
+    return None if out is None else parse(out)
 
 
 def has_own_saves(game: Game, variant: str | None, where: Path | None = None) -> bool:

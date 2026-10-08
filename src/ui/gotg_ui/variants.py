@@ -22,11 +22,10 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 from pathlib import Path
 
 from .catalog import Game
-from .launch import gotg_bin
+from .client import ask
 
 # What the client will accept after an id — env.sh's own rule. A file with a
 # stray second dot makes a name `gotg play` rejects, and offering it here would
@@ -59,14 +58,10 @@ def disabled_for(game: Game) -> frozenset[str]:
     in words. Hiding a working mod because a subprocess failed would be the
     worse half of the trade.
     """
-    command = [gotg_bin(), "complete", "disabled", f"{game.platform}/{game.id}"]
-    try:
-        done = subprocess.run(command, capture_output=True, timeout=DISABLED_TIMEOUT, text=True)
-    except (OSError, subprocess.SubprocessError):
+    out = ask(["complete", "disabled", f"{game.platform}/{game.id}"], timeout=DISABLED_TIMEOUT)
+    if out is None:
         return frozenset()
-    if done.returncode != 0:
-        return frozenset()
-    return frozenset(line.strip() for line in done.stdout.splitlines() if line.strip())
+    return frozenset(line.strip() for line in out.splitlines() if line.strip())
 
 
 def variants_for(game: Game, where: Path | None = None) -> tuple[str, ...]:

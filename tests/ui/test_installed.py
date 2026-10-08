@@ -20,10 +20,10 @@ def stub(tmp_path, body: str, monkeypatch) -> str:
     return str(path)
 
 
-def test_it_asks_complete_installed_and_reads_platform_id_lines(tmp_path, monkeypatch):
-    stub(tmp_path, f'echo "$@" > {tmp_path}/argv; printf "snes/world.super_metroid\\nn64/usa.zelda\\n"', monkeypatch)
+def test_it_asks_complete_installed_and_reads_platform_id_lines(fake_client):
+    fake_client.answer("complete", "installed", stdout="snes/world.super_metroid\nn64/usa.zelda\n")
     assert installed_games() == {("snes", "world.super_metroid"), ("n64", "usa.zelda")}
-    assert (tmp_path / "argv").read_text().split() == ["complete", "installed"]
+    assert fake_client.calls == [["complete", "installed"]]
 
 
 def test_a_line_without_a_platform_is_not_a_key(tmp_path, monkeypatch):
@@ -44,13 +44,14 @@ def test_a_missing_client_means_no_badges(monkeypatch, tmp_path):
 def test_a_hanging_client_means_no_badges_too(monkeypatch):
     import subprocess
 
+    from gotg_ui import client
     from gotg_ui import installed as installed_module
 
     def fake_run(*args, **kwargs):
         assert kwargs.get("timeout") == installed_module.INSTALLED_TIMEOUT
         raise subprocess.TimeoutExpired(cmd=args[0], timeout=installed_module.INSTALLED_TIMEOUT)
 
-    monkeypatch.setattr(installed_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(client.subprocess, "run", fake_run)
     assert installed_games() == set()
 
 

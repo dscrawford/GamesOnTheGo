@@ -30,14 +30,10 @@ def game(id="world.totk", platform="switch"):
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(fake_client):
     """A stand-in `gotg complete versions`, recording how it was called."""
-    log = tmp_path / "argv"
-    script = tmp_path / "gotg"
-    script.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" >>" + str(log) + "\nprintf '*1.4.3\\n1.4.2\\n1.2.1\\n'\n")
-    script.chmod(0o755)
-    monkeypatch.setenv("GOTG_BIN", str(script))
-    return log
+    fake_client.answer("complete", "versions", stdout="*1.4.3\n1.4.2\n1.2.1\n")
+    return fake_client
 
 
 def test_versions_come_back_newest_first_with_the_running_one_marked(client):
@@ -48,7 +44,7 @@ def test_versions_come_back_newest_first_with_the_running_one_marked(client):
 
 def test_the_variant_is_passed_on_so_a_mod_s_ceiling_is_accounted_for(client):
     versions_for(game(), "60fps")
-    assert client.read_text().strip().endswith("complete versions switch/world.totk 60fps")
+    assert client.calls == [["complete", "versions", "switch/world.totk", "60fps"]]
 
 
 def test_a_client_that_cannot_answer_is_a_game_with_no_choice(monkeypatch, tmp_path):
@@ -56,13 +52,10 @@ def test_a_client_that_cannot_answer_is_a_game_with_no_choice(monkeypatch, tmp_p
     assert versions_for(game()) == ()
 
 
-def test_nothing_marked_means_the_client_would_refuse(monkeypatch, tmp_path):
+def test_nothing_marked_means_the_client_would_refuse(fake_client):
     # A mod with no version old enough: the client marks none of them, and the
     # picker must not invent one.
-    script = tmp_path / "gotg"
-    script.write_text("#!/bin/sh\nprintf '1.4.3\\n'\n")
-    script.chmod(0o755)
-    monkeypatch.setenv("GOTG_BIN", str(script))
+    fake_client.answer("complete", "versions", stdout="1.4.3\n")
     rows = versions_for(game())
     assert names(rows) == ("1.4.3",)
     assert running(rows) is None
@@ -151,46 +144,28 @@ def test_backing_out_of_the_version_list_keeps_what_was_chosen():
     assert m.version == "1.4.2" and m.expanded is None
 
 
-def test_the_client_is_asked_once_per_game(monkeypatch):
+def test_the_client_is_asked_once_per_game(fake_client):
     """Opening a menu spawned `gotg complete versions` every time: 31 ms on a
     Steam Deck, on the press that opens the menu, which is where a stall shows.
     The answer only changes when something is installed or removed."""
-    calls = []
-
-    def fake_run(command, **kwargs):
-        calls.append(command)
-        return type("Done", (), {"returncode": 0, "stdout": "*1.4.3\n1.2.1\n"})()
-
-    monkeypatch.setattr("gotg_ui.versions.subprocess.run", fake_run)
+    fake_client.answer("complete", "versions", stdout="*1.4.3\n1.2.1\n")
     assert versions_for(game()) == (("1.4.3", True), ("1.2.1", False))
     assert versions_for(game()) == (("1.4.3", True), ("1.2.1", False))
-    assert len(calls) == 1
+    assert len(fake_client.calls) == 1
 
 
-def test_a_variant_is_its_own_question(monkeypatch):
+def test_a_variant_is_its_own_question(fake_client):
     # A mod can take a different version from the plain game, so the two must
     # not share an answer.
-    calls = []
-
-    def fake_run(command, **kwargs):
-        calls.append(command)
-        return type("Done", (), {"returncode": 0, "stdout": "*1.4.3\n"})()
-
-    monkeypatch.setattr("gotg_ui.versions.subprocess.run", fake_run)
+    fake_client.answer("complete", "versions", stdout="*1.4.3\n")
     versions_for(game())
     versions_for(game(), "bse")
-    assert len(calls) == 2
+    assert len(fake_client.calls) == 2
 
 
-def test_a_client_that_could_not_answer_is_asked_again(monkeypatch):
+def test_a_client_that_could_not_answer_is_asked_again(fake_client):
     # Caching the silence would make one busy moment permanent.
-    calls = []
-
-    def fake_run(command, **kwargs):
-        calls.append(command)
-        raise OSError("busy")
-
-    monkeypatch.setattr("gotg_ui.versions.subprocess.run", fake_run)
+    fake_client.answer("complete", "versions", code=1)
     assert versions_for(game()) == ()
     assert versions_for(game()) == ()
-    assert len(calls) == 2
+    assert len(fake_client.calls) == 2

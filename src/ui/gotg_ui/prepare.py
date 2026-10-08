@@ -24,6 +24,7 @@ from dataclasses import dataclass
 
 from . import config
 from .catalog import Game
+from .client import ask
 from .launch import gotg_bin
 
 # Enough scrollback to show why a build failed; nix errors run long.
@@ -45,18 +46,12 @@ def is_ready(game: Game, variant: str | None = None) -> bool:
     install run with a visible screen; erring toward "ready" execs into a
     build with no screen, which is the failure this module exists to end.
     """
-    try:
-        done = subprocess.run(
-            [gotg_bin(), "complete", "ready", f"{game.platform}/{game.id}", *([variant] if variant else [])],
-            capture_output=True,
-            timeout=READY_TIMEOUT,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
+    argv = ["complete", "ready", f"{game.platform}/{game.id}", *([variant] if variant else [])]
+    out = ask(argv, timeout=READY_TIMEOUT)
     # The word as well as the code: an older client's `complete` answers any
     # unknown subcommand with exit 0 and no output, which would read as ready
     # and exec into a build with no screen.
-    return done.returncode == 0 and done.stdout.strip() == b"ready"
+    return out is not None and out.strip() == "ready"
 
 
 # What the client says while a download runs, one line per tick on stderr:

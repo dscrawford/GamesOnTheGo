@@ -5,7 +5,6 @@ lands as "nothing to say", never a crash or a stray exclamation mark."""
 from __future__ import annotations
 
 import json
-import stat
 
 from gotg_ui.updates import ALERT, INSTALLED, NONE, RING, ask, badge, outdated, parse
 
@@ -113,24 +112,16 @@ def test_the_chip_truth_table():
     assert chip(behind, None, phase="nonsense") is None
 
 
-def stub(tmp_path, body: str, monkeypatch) -> None:
-    path = tmp_path / "gotg"
-    path.write_text(f"#!/bin/sh\n{body}\n")
-    path.chmod(path.stat().st_mode | stat.S_IEXEC)
-    monkeypatch.setenv("GOTG_BIN", str(path))
-
-
-def test_ask_runs_complete_updates_and_reads_the_report(tmp_path, monkeypatch):
-    stub(tmp_path, f"echo \"$@\" > {tmp_path}/argv; cat <<'EOF'\n{report()}\nEOF", monkeypatch)
+def test_ask_runs_complete_updates_and_reads_the_report(fake_client):
+    fake_client.answer("complete", "updates", stdout=report())
     r = ask()
-    assert (tmp_path / "argv").read_text().split() == ["complete", "updates"]
+    assert fake_client.calls == [["complete", "updates"]]
     assert r is not None and r.behind
 
 
-def test_an_older_client_that_prints_nothing_and_a_failing_one_both_say_nothing(tmp_path, monkeypatch):
-    stub(tmp_path, "exit 0", monkeypatch)
-    assert ask() is None
-    stub(tmp_path, "echo boom >&2; exit 1", monkeypatch)
+def test_an_older_client_that_prints_nothing_and_a_failing_one_both_say_nothing(fake_client, tmp_path, monkeypatch):
+    assert ask() is None  # exit 0, no output: the table has no row
+    fake_client.answer("complete", "updates", stderr="boom", code=1)
     assert ask() is None
     monkeypatch.setenv("GOTG_BIN", str(tmp_path / "missing"))
     assert ask() is None
