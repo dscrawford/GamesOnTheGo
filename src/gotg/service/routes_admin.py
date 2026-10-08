@@ -35,7 +35,9 @@ def parse_invite(body: bytes | None) -> tuple[str, str | None, float]:
         name = asked.get("name", "")
         user = asked.get("user") or None
         ttl_days = float(asked.get("ttl_days", 7))
-    except (ValueError, AttributeError, TypeError):
+    except (ValueError, AttributeError, TypeError, OverflowError):
+        # OverflowError: a JSON integer past float's range, which json parses
+        # happily and float() refuses.
         raise ValueError('the body is {"name": ..., "user"?: ..., "ttl_days"?: ...}') from None
     # False for NaN, refuses Infinity: json accepts both, and either
     # overflows int() further down as an uncaught OverflowError.

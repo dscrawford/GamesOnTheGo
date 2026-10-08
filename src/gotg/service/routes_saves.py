@@ -81,7 +81,13 @@ class SavesRoutes:
             self._problem(503, "this service holds no saves store")
             return
 
-        parts = urllib.parse.urlsplit("/" + rest)
+        try:
+            parts = urllib.parse.urlsplit("/" + rest)
+        except ValueError:
+            # As in the catalog: urlsplit raises on an unbalanced "[", and an
+            # uncaught raise here dropped the connection with no status.
+            self._problem(400, "malformed request path")
+            return
         target = saves_target(parts.path)
         if target is None:
             self._problem(404, f"nothing lives at /saves/{parts.path.strip('/')}")
@@ -89,6 +95,11 @@ class SavesRoutes:
         attr, what, generation = target
         if what in (HISTORY, GENERATION) and self.command != "GET":
             self._problem(405, f"{self.command} is not something saves history answers")
+            return
+        if what == META and self.command != "GET":
+            # Read-only: a PUT here used to fall through to the head's and
+            # store the body as a generation.
+            self._problem(405, f"{self.command} is not something the save's meta answers")
             return
 
         try:

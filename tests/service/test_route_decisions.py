@@ -130,3 +130,28 @@ def test_minting_is_a_post_and_listing_is_a_get(minting):
     assert minting.call("GET", "/admin/tokens/someone", token=ADMIN)[0] == 405
     assert minting.call("DELETE", "/admin/tokens/nobody", token=ADMIN)[0] == 404
     assert minting.call("GET", "/admin/elsewhere", token=ADMIN)[0] == 404
+
+
+def test_a_saves_path_urlsplit_refuses_is_a_400_not_a_dropped_connection(tmp_path):
+    # urlsplit raises on an unbalanced "[": the catalog caught it, the saves
+    # did not, and a valid token plus /saves//[x killed the handler thread and
+    # closed the socket with no status at all.
+    store = SavesStore(root=tmp_path / "saves", keep=3, max_bytes=100_000)
+    with serve(Config(token=CLIENT_TOKEN), store) as server:
+        status, _, body = server.call("GET", "/saves//[x")
+    assert status == 400
+    assert b"malformed request path" in body
+
+
+def test_putting_to_meta_does_not_store_a_save(tmp_path):
+    # /saves/<attr>/meta is read-only: a PUT there used to fall through to
+    # the head's PUT and store the body as a generation.
+    store = SavesStore(root=tmp_path / "saves", keep=3, max_bytes=100_000)
+    with serve(Config(token=CLIENT_TOKEN), store) as server:
+        assert server.call("PUT", "/saves/env-n64/meta", body=b"bundle")[0] == 405
+        assert server.call("GET", "/saves/env-n64")[0] == 404
+
+
+def test_a_ttl_past_float_range_is_a_400_not_an_overflow(minting):
+    body = b'{"name": "d", "ttl_days": 1' + b"0" * 400 + b"}"
+    assert minting.call("POST", "/admin/invites", body=body, token=ADMIN)[0] == 400
