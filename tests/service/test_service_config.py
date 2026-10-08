@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from gotg.service import cli
-from gotg.service.app import Config
+from gotg.service.config import Config
 
 EVERYTHING = {
     "GOTG_PROXY_TOKEN": "client",

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from gotg.service.app import RateLimiter
+from gotg.service.ratelimit import RateLimiter
 
 
 class Clock:

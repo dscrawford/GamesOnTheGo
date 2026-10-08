@@ -39,33 +39,28 @@ import hashlib
 import hmac
 import json
 import os
-import re
-import sqlite3
-import stat
-import sys
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
-from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .._http import NO_REDIRECT_OPENER
-from ..catalog import CatalogStore, Conflict, SweepRefused
-from ..contract import ENTRY_ID_RE, PLATFORM_RE
+from ..catalog import CatalogStore
 from ..saves import SavesStore
-from ..tokens import TOKEN_RE, Absent, Claimed, TokenStore, default_user
+from ..tokens import TOKEN_RE, TokenStore
 from . import admin_page
-from .artcache import CONTENT_TYPES, ArtCache, extension_for
-
-USER_AGENT = "gotg-proxy/0.5.5"
-
-# Bounded, because a request that never returns holds a thread open and enough
-# of them stop the proxy answering anybody.
-TIMEOUT = 20
+from .artcache import ArtCache
+from .config import TIMEOUT, USER_AGENT, Config
+from .ratelimit import RateLimiter
+from .routes_admin import AdminRoutes
+from .routes_art import ArtRoutes
+from .routes_catalog import CatalogRoutes
+from .routes_files import FileRoutes
+from .routes_saves import SavesRoutes
+from .token_cache import TokenCache
 
 # Introspection is an in-cluster hop on every cache miss; a wedged api pod
 # must not pin library threads for the full upstream TIMEOUT.
@@ -85,48 +80,6 @@ CATALOG_MAX_BODY = 8 * 1024 * 1024
 # and the thumbnails the warmer prefers are a tenth of that; a megabyte is
 # already an upload that is not a tile.
 ART_MAX_BODY = 4 * 1024 * 1024
-
-# The one body read before anybody is authenticated: {"code": …} around a
-# 49-character code.
-CLAIM_MAX_BODY = 256
-
-# A single byte-range request: bytes=N- or bytes=N-M. Multi-range answers 200
-# with the whole file rather than a multipart body nothing here needs. The
-# digit bound matters: int() on thousands of digits raises, and an absurd
-# range should fall through to a plain 200, not a traceback.
-RANGE_RE = re.compile(r"^bytes=([0-9]{1,18})-([0-9]{0,18})$")
-
-# What may be served from the files directory: keys and firmware names.
-# No leading dot by construction (the first class excludes it), no slash by
-# split, and the directory a person curates is the real allowlist.
-FILES_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
-
-
-def open_contained(path: Path, root: Path) -> int | None:
-    """An fd for a regular file provably under root, or None.
-
-    The check that counts is on what was actually opened: O_NOFOLLOW refuses a
-    symlink as the final component, and the /proc re-check catches a
-    retargeted directory on the way there — a path checked and then opened is
-    two syscalls with a race between them.
-    """
-    try:
-        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
-    except OSError:
-        return None
-    real = Path(os.path.realpath(f"/proc/self/fd/{fd}"))
-    if not stat.S_ISREG(os.fstat(fd).st_mode) or not real.is_relative_to(Path(os.path.realpath(root))):
-        os.close(fd)
-        return None
-    return fd
-
-
-# Refresh a token with less than this left. IGDB issues them for about sixty
-# days, so a day of slack costs nothing and removes the race where a token
-# expires between the check and the upstream call.
-REFRESH_MARGIN = 24 * 60 * 60
-
-STEAMGRIDDB_URL = "https://www.steamgriddb.com"
 
 
 def safe_content_type(value: str) -> str:
@@ -180,188 +133,6 @@ def path_climbs(rest: str) -> bool:
     return any(segment == ".." for segment in decoded.split("/"))
 
 
-class RateLimiter:
-    """A token bucket in front of one upstream, shared by every thread.
-
-    The proxy holds one key for a fleet, and warming the whole library is
-    thousands of questions in a row: without a pace somewhere, one warm run
-    is a burst against a quota that is not ours to spend, and the answer to
-    that is a banned key rather than a slower client.
-
-    Slots are *reserved* rather than waited for under the lock — the caller
-    is told how long to sleep and sleeps on its own thread — so a paced
-    request costs the proxy one idle thread, never the bucket.
-    """
-
-    def __init__(self, rate: float, burst: float, now: Callable[[], float] = time.monotonic):
-        # `now` is a test seam: the refill arithmetic is asserted against a
-        # clock the test advances, instead of a sleep and a tolerance.
-        self.rate = max(rate, 0.0)
-        self.burst = max(burst, 1.0)
-        self._now = now
-        self.tokens = self.burst
-        self.updated = now()
-        self.lock = threading.Lock()
-
-    def reserve(self, wait: float) -> tuple[bool, float]:
-        """(may it go, how long first). Refused when the wait would be longer
-        than `wait`, which is a caller who should hear 429 and come back
-        rather than hold a thread open for a minute."""
-        if not self.rate:
-            return True, 0.0
-        now = self._now()
-        with self.lock:
-            self.tokens = min(self.burst, self.tokens + (now - self.updated) * self.rate)
-            self.updated = now
-            delay = 0.0 if self.tokens >= 1.0 else (1.0 - self.tokens) / self.rate
-            if delay > wait:
-                return False, delay
-            # Into the negative on purpose: the slot is taken now and paid for
-            # by the sleep, so two threads cannot reserve the same one.
-            self.tokens -= 1.0
-        return True, delay
-
-
-IGDB_URL = "https://api.igdb.com"
-IGDB_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
-
-
-@dataclass
-class Config:
-    """What this proxy holds. Everything but the client token is optional: an
-    upstream with no credentials is one this deployment does not serve."""
-
-    token: str
-    steamgriddb_key: str = ""
-    steamgriddb_url: str = STEAMGRIDDB_URL
-    igdb_client_id: str = ""
-    igdb_client_secret: str = ""
-    igdb_url: str = IGDB_URL
-    igdb_token_url: str = IGDB_TOKEN_URL
-    # The write credential for the catalog. Lives in one CronJob Secret where
-    # the client token lives on every laptop; catalog writes without it answer
-    # 503 rather than ever falling back to the client token.
-    index_token: str = ""
-    # Mints and revokes per-person tokens, valid only under /admin — an admin
-    # token that could also read saves would be one more shared secret.
-    admin_token: str = ""
-    # Reads everything a client can, and the catalog with server paths: for a
-    # pod that has the library mounted and copies members from disk instead
-    # of streaming them. Read-only, so a game running in that pod cannot use
-    # it to rewrite the catalog.
-    library_token: str = ""
-    # Where /steamgriddb answers are kept, so a fleet of clients costs one
-    # upstream question per asset against the shared key's quota. Empty means
-    # no cache, which is every deployment before the volume existed.
-    upstream_cache_dir: str = ""
-    # The library pod's pointer at the pod holding the token store: a bearer
-    # no local check recognizes is asked about at {auth_url}/auth/whoami.
-    auth_url: str = ""
-    # Which user's saves the break-glass legacy token reads and writes. On a
-    # deployment whose history predates users it is the person whose saves
-    # those already were; unset, legacy gets a namespace of its own.
-    legacy_user: str = "legacy"
-    # Where clients should fetch /games and /files from, reported in the
-    # catalog reply. Set when the control plane sits behind a proxy the byte
-    # streams must bypass; empty means bytes come from the same url.
-    files_url: str = ""
-    # A VPN-fronted byte host has no fixed port: the tunnel's NAT-PMP lease
-    # assigns one and reassigns it on reconnect. gluetun writes the current
-    # port here, and it is read per catalog GET — never cached — so a client's
-    # re-read after a failed download gets wherever the bytes live now.
-    files_port_file: str = ""
-    # A byte host only some clients can reach — the library's NodePort on a
-    # node's tailscale address — advertised ahead of files_url in files_urls.
-    # A client tries it first and falls back; one outside the tailnet never
-    # loses the universal host.
-    files_preferred_url: str = ""
-    # Where the fleet's tile pictures live — see artcache.py. Empty means this
-    # deployment serves no art, which /art says with a 503.
-    art_dir: str = ""
-    # Where administration lives when it has a listener of its own (the
-    # tailnet's): the public listener's 404 for /admin names it, so a CLI
-    # pointed at the old url is told rather than left guessing.
-    admin_url: str = ""
-    # The url people reach the service on, which a claim link is built from:
-    # the admin page is on another host and cannot know it otherwise.
-    public_url: str = ""
-    # How hard anybody may lean on an upstream through this proxy, in requests
-    # per second, with a burst for the ordinary case of one client opening a
-    # grid. Cache hits are not counted: they cost the upstream nothing.
-    upstream_rate: float = 2.0
-    upstream_burst: float = 10.0
-    # The longest a paced request will sit on a thread before being told 429
-    # instead. Long enough that a warmer simply runs slower, short enough that
-    # a burst cannot pin every thread in the pool.
-    upstream_wait: float = 5.0
-
-    def validate(self) -> Config:
-        if self.files_url and not self.files_url.startswith(("http://", "https://")):
-            raise ValueError(f"GOTG_FILES_URL is not an http(s) url: {self.files_url!r}")
-        if self.files_preferred_url and not self.files_preferred_url.startswith(("http://", "https://")):
-            raise ValueError(f"GOTG_FILES_PREFERRED_URL is not an http(s) url: {self.files_preferred_url!r}")
-        if not self.token:
-            raise ValueError(
-                "no client token set. Refusing to start: an empty token "
-                "authenticates everybody, which makes this an open relay for "
-                "somebody else's API quota."
-            )
-        if self.index_token and self.index_token == self.token:
-            raise ValueError(
-                "the index token equals the client token. Refusing to start: "
-                "that would let every client rewrite the catalog."
-            )
-        if self.admin_token and self.admin_token in (self.token, self.index_token):
-            raise ValueError(
-                "the admin token equals another credential. Refusing to start: "
-                "minting tokens must need more than holding one."
-            )
-        if self.library_token and self.library_token in (self.token, self.index_token, self.admin_token):
-            raise ValueError(
-                "the library token equals another credential. Refusing to start: "
-                "seeing server paths must not come with any other power."
-            )
-        return self
-
-
-@dataclass
-class TokenCache:
-    """The IGDB access token, minted on demand and kept until it is nearly out.
-
-    Holding this is the reason the service exists rather than each client doing
-    its own exchange — and the lock is the reason three simultaneous requests on
-    a cold start mint one token rather than three.
-    """
-
-    value: str = ""
-    expires_at: float = 0.0
-    lock: threading.Lock = field(default_factory=threading.Lock)
-
-    def get(self, config: Config) -> str:
-        with self.lock:
-            if self.value and time.time() < self.expires_at - REFRESH_MARGIN:
-                return self.value
-
-            body = urllib.parse.urlencode(
-                {
-                    "client_id": config.igdb_client_id,
-                    "client_secret": config.igdb_client_secret,
-                    "grant_type": "client_credentials",
-                }
-            ).encode()
-            request = urllib.request.Request(
-                config.igdb_token_url,
-                data=body,
-                headers={"User-Agent": USER_AGENT},
-            )
-            with NO_REDIRECT_OPENER.open(request, timeout=TIMEOUT) as response:  # noqa: S310
-                payload = json.loads(response.read())
-
-            self.value = payload["access_token"]
-            self.expires_at = time.time() + float(payload.get("expires_in", 0))
-            return self.value
-
-
 def strip_prefix(rest: str, prefix: str) -> str:
     """Allow a caller to include the upstream's own path prefix, or not.
 
@@ -373,7 +144,38 @@ def strip_prefix(rest: str, prefix: str) -> str:
     return rest[len(prefix) :] if rest.startswith(prefix) else rest
 
 
-class Handler(BaseHTTPRequestHandler):
+def split_route(path: str) -> tuple[str, str]:
+    """`(prefix, rest)` of a path with its leading slash removed."""
+    prefix, _, rest = path.partition("/")
+    # A query on a bare prefix — /catalog?full=1 — otherwise rides along
+    # in the prefix and matches no route.
+    if "?" in prefix:
+        prefix, _, query = prefix.partition("?")
+        rest = f"?{query}"
+    return prefix, rest
+
+
+def body_cap(prefix: str, command: str, store: SavesStore | None) -> int:
+    """The largest request body a route may send.
+
+    A save bundle and a catalog entry are the two bodies allowed to be
+    big — a retail WiiU tree runs to ~10k file rows at ~350 bytes each.
+    Everything else keeps the small cap, because an IGDB query is a line
+    or two.
+    """
+    if prefix == "saves" and command == "PUT" and store is not None:
+        return store.max_bytes
+    if prefix == "catalog" and command in ("PUT", "POST"):
+        # PUT: a decrypted WiiU tree runs to five figures of file rows.
+        # POST: /catalog/seen names every unchanged entry in one request,
+        # which for this library is a few hundred kilobytes of ids.
+        return CATALOG_MAX_BODY
+    if prefix == "art" and command == "PUT":
+        return ART_MAX_BODY
+    return MAX_BODY
+
+
+class Handler(ArtRoutes, SavesRoutes, CatalogRoutes, FileRoutes, AdminRoutes, BaseHTTPRequestHandler):
     config: Config
     tokens: TokenCache
     store: SavesStore | None
@@ -665,554 +467,63 @@ class Handler(BaseHTTPRequestHandler):
             body,
         )
 
-    # --- the fleet's tile pictures -------------------------------------------
-
-    def _art(self, rest: str, body: bytes | None) -> None:
-        """`/art` — every tile picture the fleet has resolved, held once.
-
-            GET    /art                        the whole index, in one answer
-            GET    /art/<platform>/<id>        the picture
-            PUT    /art/<platform>/<id>        the warmer, with the index token
-            PUT    /art/<platform>/<id>?miss=1 nothing has this one
-            DELETE /art/<platform>/<id>        forget it, so a warm looks again
-
-        Reading is open to any client token — the pictures are not secret and
-        the whole point is that a laptop gets them from here instead of from
-        an upstream. Writing is the index token's, for the same reason catalog
-        writes are: a client that could put bytes here could put anything
-        every other client then draws.
-        """
-        if self.art is None:
-            self._problem(503, "this service holds no art cache")
-            return
-        parts = urllib.parse.urlsplit("/" + rest)
-        segments = [urllib.parse.unquote(segment) for segment in parts.path.strip("/").split("/") if segment]
-
-        if not segments:
-            if self.command not in ("GET", "HEAD"):
-                self._problem(405, "the art index is a GET")
-                return
-            self._json(200, self.art.index())
-            return
-        if len(segments) != 2:
-            self._problem(404, "a picture lives at /art/<platform>/<id>")
-            return
-        platform, game_id = segments
-        # Checked here as well as in the cache: the cache raises, and a
-        # traceback per malformed path is a worse answer than a 400.
-        if not PLATFORM_RE.match(platform) or not ENTRY_ID_RE.match(game_id):
-            self._problem(400, "that is not a platform and an entry id")
-            return
-
-        try:
-            if self.command in ("GET", "HEAD"):
-                self._art_get(platform, game_id)
-            elif self.command == "PUT":
-                miss = urllib.parse.parse_qs(parts.query).get("miss", ["0"])[0] not in ("0", "")
-                self._art_put(platform, game_id, body, miss=miss)
-            elif self.command == "DELETE":
-                self._art_delete(platform, game_id)
-            else:
-                self._problem(405, f"{self.command} is not something /art answers")
-        except ValueError as error:
-            self._problem(400, str(error))
-        except OSError as error:
-            print(f"art cache error: {error}", file=sys.stderr)
-            self._problem(500, "art cache error")
-
-    def _art_get(self, platform: str, game_id: str) -> None:
-        found = self.art.get(platform, game_id)
-        if found is None:
-            # The two kinds of nothing are worth telling apart: "miss" is an
-            # answer — somebody looked and there is no art anywhere — and a
-            # client that hears it stops asking. "absent" only means nobody
-            # has warmed this one yet.
-            miss = self.art.is_miss(platform, game_id)
-            self._json(
-                404,
-                {"error": f"no art for {platform}/{game_id}", "miss": miss},
-                {"X-Gotg-Art": "miss" if miss else "absent"},
-            )
-            return
-        path, extension = found
-        fd = open_contained(path, self.art.root)
-        if fd is None:
-            self._problem(404, f"no art for {platform}/{game_id}")
-            return
-        with open(fd, "rb", closefd=True) as handle:
-            payload = handle.read()
-        # A strong ETag over bytes this small costs microseconds and saves the
-        # whole body on every prefetch after the first. The art itself never
-        # changes in place — a new picture is a new warm — so it is also
-        # immutable for as long as the client cares to keep it.
-        etag = f'"{hashlib.sha256(payload).hexdigest()}"'
-        headers = {"ETag": etag, "Cache-Control": "public, max-age=604800", "X-Gotg-Art": "hit"}
-        if self.headers.get("If-None-Match") == etag:
-            self._send(304, b"", CONTENT_TYPES[extension], headers)
-            return
-        self._send(200, payload, CONTENT_TYPES[extension], headers)
-
-    def _art_put(self, platform: str, game_id: str, body: bytes | None, *, miss: bool) -> None:
-        if not self._is_index():
-            self._problem(403, "writing art needs the index token")
-            return
-        if miss:
-            self.art.put_miss(platform, game_id)
-            self._json(200, {"stored": f"{platform}/{game_id}", "miss": True})
-            return
-        if not body:
-            self._problem(400, "a picture, or ?miss=1 to record that there is none")
-            return
-        if extension_for(body) is None:
-            # From the bytes, never the Content-Type: the cache is served back
-            # to every client's grid, so what goes in is a picture or nothing.
-            self._problem(415, "that is not a png, jpeg or webp")
-            return
-        path = self.art.put(platform, game_id, body)
-        self._json(200, {"stored": f"{platform}/{game_id}", "ext": path.suffix, "bytes": len(body)})
-
-    def _art_delete(self, platform: str, game_id: str) -> None:
-        if not self._is_index():
-            self._problem(403, "forgetting art needs the index token")
-            return
-        dropped = self.art.forget(platform, game_id)
-        self._json(200, {"forgot": f"{platform}/{game_id}", "had": dropped})
-
-    # --- the saves store ----------------------------------------------------
-
-    def _saves_user(self, principal: str) -> str:
-        """The namespace a principal's saves live in.
-
-        From authentication, never from the path: /saves/<attr> stays the
-        whole wire surface, so no request can name another user's saves.
-        Multiple devices — daniel-desktop, daniel-deck — share one user, which
-        is the whole point of the column.
-        """
-        if principal == "legacy":
-            return self.config.legacy_user
-        if principal == "indexer":
-            return "indexer"
-        if self.token_store is not None:
-            user = self.token_store.user_for(principal)
-            if user:
-                return user
-        # An introspected principal on a storeless pod never reaches here:
-        # saves 503 without a store. The remaining case is a token revoked
-        # between authentication and now; its own namespace beats a guess.
-        return default_user(principal)
-
-    def _saves(self, rest: str, body: bytes | None, user: str) -> None:
-        """`/saves/<attr>` is the head: PUT is `.save()`, GET is `.retrieve()`,
-        and `/saves/<attr>/meta` says what is current without moving the
-        bytes. Conflicts are answered here — a PUT carries the hash of the
-        generation it descends from, and a parent that is not the head is a
-        409 carrying what the head actually is. `/saves/<attr>/history` lists
-        the kept generations and `/saves/<attr>/gen/<n>` is one of them, for a
-        person picking a save to go back to."""
-        if self.store is None:
-            self._problem(503, "this service holds no saves store")
-            return
-
-        parts = urllib.parse.urlsplit("/" + rest)
-        segments = parts.path.strip("/").split("/")
-        attr = segments[0]
-        want_meta = segments[1:] == ["meta"]
-        want_history = segments[1:] == ["history"]
-        # Digits only, so "-1", "1.5" and a bundle's own name never parse.
-        want_gen = len(segments) == 3 and segments[1] == "gen" and segments[2].isascii() and segments[2].isdigit()
-        if segments[1:] not in ([], ["meta"], ["history"]) and not want_gen:
-            self._problem(404, f"nothing lives at /saves/{parts.path.strip('/')}")
-            return
-        if (want_history or want_gen) and self.command != "GET":
-            self._problem(405, f"{self.command} is not something saves history answers")
-            return
-
-        try:
-            if want_history:
-                history = self.store.history(user, attr)
-                self._json(200, {"generations": history})
-            elif want_gen:
-                found = self.store.generation_path(user, attr, int(segments[2]))
-                if found is None:
-                    self._problem(404, f"generation {segments[2]} of {attr} is not kept")
-                    return
-                path, record = found
-                self._send_bundle(path, record)
-            elif self.command == "GET" and want_meta:
-                meta = self.store.meta(user, attr)
-                if meta is None:
-                    self._problem(404, f"nothing has been pushed for {attr}")
-                    return
-                self._json(200, meta)
-            elif self.command == "GET":
-                meta = self.store.meta(user, attr)
-                path = self.store.bundle_path(user, attr)
-                if meta is None or path is None:
-                    self._problem(404, f"nothing has been pushed for {attr}")
-                    return
-                self._send_bundle(path, meta)
-            elif self.command == "PUT":
-                if not body:
-                    self._problem(400, "a save must arrive with its bundle as the body")
-                    return
-                published = self.store.save(
-                    user,
-                    attr,
-                    body,
-                    parent=self.headers.get("X-Gotg-Parent", ""),
-                    # Stored and echoed back in metadata, so it is made
-                    # printable and short rather than trusted.
-                    device="".join(c for c in self.headers.get("X-Gotg-Device", "") if c.isprintable())[:32],
-                    force="force=1" in parts.query.split("&"),
-                )
-                self._json(published.status, published.meta)
-            else:
-                self._problem(405, f"{self.command} is not something the saves store answers")
-        except ValueError as error:
-            self._problem(400, str(error))
-        except OSError as error:
-            self._problem(500, str(error))
-
-    def _send_bundle(self, path: Path, record: dict) -> None:
-        """A saved bundle's bytes, labelled with the generation and hash they are.
-
-        The head (`GET /saves/<attr>`) and a kept generation (`/gen/<n>`) each
-        wrote these five headers by hand; the two replies are now one shape.
-        """
-        self._send(
-            200,
-            path.read_bytes(),
-            "application/zstd",
-            {"X-Gotg-Generation": str(record["generation"]), "X-Gotg-Hash": record["hash"]},
-        )
-
-    def _files_url(self) -> str:
-        """The byte host as it stands right now, or "" for none.
-
-        With a port file configured, an unreadable or nonsense port means the
-        tunnel is down — advertising a byte host that cannot answer would turn
-        every download into a hang, so none is advertised and the client says
-        which host it could not reach.
-        """
-        base = self.config.files_url
-        if not base or not self.config.files_port_file:
-            return base
-        try:
-            port = int(Path(self.config.files_port_file).read_text().strip())
-        except (OSError, ValueError):
-            print(f"files_url withheld: no forwarded port at {self.config.files_port_file}", file=sys.stderr)
-            return ""
-        if not 0 < port < 65536:
-            print(f"files_url withheld: nonsense forwarded port {port}", file=sys.stderr)
-            return ""
-        return f"{base}:{port}"
-
-    def _catalog(self, rest: str, body: bytes | None) -> None:
-        """`/catalog` reads for everyone; writes for the index principal only.
-
-        PUT upserts one entry, and answers 409 when the stored entry points at
-        different bytes — two torrents producing the same id is a real error
-        the old hardlink collision used to surface, and an upsert must not
-        swallow it. The sweep reports what a completed scan did not confirm;
-        it deletes nothing.
-        """
-        if self.catalog is None:
-            self._problem(503, "this service holds no catalog")
-            return
-
-        try:
-            parts = urllib.parse.urlsplit("/" + rest)
-        except ValueError:
-            # urlsplit raises on an unbalanced "[" — /catalog//[x reaches this
-            # with any token, and an uncaught raise here kills the thread and
-            # drops the connection with no status.
-            self._problem(400, "malformed request path")
-            return
-        segments = [s for s in parts.path.strip("/").split("/") if s]
-        query = parts.query.split("&")
-
-        def needs_index() -> bool:
-            if not self.config.index_token:
-                self._problem(503, "no index token is configured; the catalog is read-only")
-                return False
-            if not self._is_index():
-                self._problem(403, "catalog writes need the index token")
-                return False
-            return True
-
-        try:
-            if self.command == "GET" and not segments:
-                full = "full=1" in query
-                if full and not self._is_index():
-                    self._problem(403, "the full catalog view needs the index token")
-                    return
-                # Server paths for the pod that has the library mounted; a
-                # client's view never carries them.
-                paths = "paths=1" in query
-                if paths and not (self._is_index() or self._principal() == "library"):
-                    self._problem(403, "server paths need the library token")
-                    return
-                view = self.catalog.view(full=full, paths=paths)
-                # The catalog names its own byte host, so clients need no
-                # files configuration — and a moving host (a VPN-fronted one
-                # changes address on reconnect) costs a re-read, not a rewrite.
-                files_url = self._files_url()
-                if files_url:
-                    view["files_url"] = files_url
-                # In order of preference; files_url stays the one every
-                # client can reach, so an older client keeps working.
-                hosts = [h for h in (self.config.files_preferred_url, files_url) if h]
-                if hosts:
-                    view["files_urls"] = list(dict.fromkeys(hosts))
-                self._json(200, view)
-            elif self.command == "PUT" and len(segments) == 2:
-                if not needs_index():
-                    return
-                if not body:
-                    self._problem(400, "an entry must arrive as the request body")
-                    return
-                entry = self.catalog.upsert(
-                    segments[0],
-                    segments[1],
-                    json.loads(body),
-                    force="force=1" in query,
-                )
-                self._json(200, entry)
-            elif self.command == "POST" and segments == ["seen"]:
-                if not needs_index():
-                    return
-                payload = json.loads(body) if body else {}
-                games = payload.get("games") if isinstance(payload, dict) else None
-                if not isinstance(games, list) or not all(isinstance(g, str) for g in games):
-                    self._problem(400, 'a touch is {"games": ["<platform>/<id>", ...]}')
-                    return
-                # An import that changed nothing still has to say it looked:
-                # seen_at is what the sweep reads to decide a game has
-                # vanished. Saying it for thousands of entries in one request
-                # is the difference between an import that takes a minute and
-                # one that takes many.
-                keys = []
-                for game in games:
-                    platform, _, game_id = game.partition("/")
-                    if not PLATFORM_RE.match(platform) or not ENTRY_ID_RE.match(game_id):
-                        self._problem(400, f"not a platform and an entry id: {game}")
-                        return
-                    keys.append((platform, game_id))
-                seen = self.catalog.touch(keys)
-                self._json(200, {"seen": seen, "asked": len(keys)})
-            elif self.command == "POST" and segments == ["sweep"]:
-                if not needs_index():
-                    return
-                payload = json.loads(body) if body else {}
-                if not isinstance(payload, dict):
-                    self._problem(400, "the sweep body must be a JSON object")
-                    return
-                report = self.catalog.sweep(
-                    str(payload.get("since", "")),
-                    confirm="confirm=1" in query,
-                )
-                self._json(200, report)
-            elif self.command == "DELETE" and len(segments) == 2:
-                if not needs_index():
-                    return
-                if self.catalog.delete(segments[0], segments[1]):
-                    self._send(200, b'{"deleted":true}', "application/json")
-                else:
-                    self._problem(404, f"no entry {segments[0]}/{segments[1]}")
-            else:
-                self._problem(404, f"nothing lives at /catalog/{parts.path.strip('/')}")
-        except Conflict as conflict:
-            self._json(409, {"error": str(conflict), "stored": conflict.stored})
-        except SweepRefused as refused:
-            self._problem(409, str(refused))
-        # JSONDecodeError is a ValueError; RecursionError is what a deeply
-        # nested body raises inside json.loads, and it must earn a 400 rather
-        # than a thread traceback.
-        except (ValueError, RecursionError) as error:
-            message = "malformed body" if isinstance(error, RecursionError) else str(error)
-            self._problem(400, message)
-        # Neither message reaches the client: a storage error string typically
-        # embeds server paths.
-        except sqlite3.Error as error:
-            print(f"catalog storage error: {error}", file=sys.stderr)
-            self._problem(500, "catalog storage error")
-        except OSError as error:
-            print(f"catalog error: {error}", file=sys.stderr)
-            self._problem(500, "catalog storage error")
-
-    def _games(self, rest: str) -> None:
-        """`GET /games/<platform>/<id>/<name>` streams one member file.
-
-        Everything about the response is resumable: Accept-Ranges, a single
-        byte range honored with 206, the sha256 as an ETag so If-Range makes a
-        resume against changed bytes restart cleanly instead of splicing two
-        files together.
-        """
-        if self.catalog is None:
-            self._problem(503, "this service holds no catalog")
-            return
-        if self.command not in ("GET", "HEAD"):
-            self._problem(405, f"{self.command} is not something the library answers")
-            return
-
-        parts = urllib.parse.urlsplit("/" + rest)
-        segments = [urllib.parse.unquote(s) for s in parts.path.strip("/").split("/") if s]
-        if len(segments) < 3:
-            self._problem(404, "a file lives at /games/<platform>/<id>/<name>")
-            return
-        # A member name may nest — a WiiU dump is fetched as its tree.
-        platform, game_id = segments[0], segments[1]
-        name = "/".join(segments[2:])
-
-        found = self.catalog.open_member(platform, game_id, name)
-        if found is None:
-            self._problem(404, f"no such file: {platform}/{game_id}/{name}")
-            return
-        meta, fd = found
-        if fd is None:
-            # The row exists and the bytes do not: the index is stale, and
-            # that is server news, not client news.
-            print(f"catalog names a missing file: {platform}/{game_id}/{name}", file=sys.stderr)
-            self._problem(404, f"no such file: {platform}/{game_id}/{name}")
-            return
-        try:
-            self._stream_fd(fd, name, meta.get("sha256"))
-        finally:
-            os.close(fd)
-
-    def _files(self, rest: str) -> None:
-        """`GET /files/<platform>/<name>` — keys and firmware, hand-placed.
-
-        The curated directory is the allowlist; this only insists the name is
-        shaped like a file someone would place there, and that what opens is a
-        regular file inside it. 404 for everything absent, so the client's
-        missing-keys path stays a warning.
-        """
-        if self.files_dir is None:
-            self._problem(503, "this service holds no files directory")
-            return
-        if self.command not in ("GET", "HEAD"):
-            self._problem(405, f"{self.command} is not something the files answer")
-            return
-
-        parts = urllib.parse.urlsplit("/" + rest)
-        segments = [urllib.parse.unquote(s) for s in parts.path.strip("/").split("/") if s]
-        if len(segments) != 2:
-            self._problem(404, "a file lives at /files/<platform>/<name>")
-            return
-        platform, name = segments
-        if not re.match(r"^[a-z0-9][a-z0-9_-]{0,15}$", platform) or not FILES_NAME_RE.match(name):
-            self._problem(404, f"no such file: {platform}/{name}")
-            return
-
-        fd = open_contained(self.files_dir / platform / name, self.files_dir)
-        if fd is None:
-            self._problem(404, f"no such file: {platform}/{name}")
-            return
-        try:
-            self._stream_fd(fd, name, None)
-        finally:
-            os.close(fd)
-
-    def _stream_fd(self, fd: int, name: str, sha256: str | None) -> None:
-        size = os.fstat(fd).st_size
-        etag = f'"{sha256}"' if sha256 else None
-
-        start, end, status = 0, size - 1, 200
-        wanted = RANGE_RE.match(self.headers.get("Range", ""))
-        if wanted:
-            # If-Range with a stale validator means the bytes changed since
-            # the client's partial: send the whole file rather than splice.
-            if_range = self.headers.get("If-Range", "")
-            if not if_range or (etag is not None and if_range == etag):
-                start = int(wanted.group(1))
-                if wanted.group(2):
-                    end = min(int(wanted.group(2)), size - 1)
-                if start >= size:
-                    self.send_response(416)
-                    self.send_header("Content-Range", f"bytes */{size}")
-                    self.send_header("Content-Length", "0")
-                    self.end_headers()
-                    return
-                if start > end:
-                    # An inverted range makes the whole header invalid, and an
-                    # invalid Range is ignored, not refused (RFC 9110 §14.1.1).
-                    start, end = 0, size - 1
-                else:
-                    status = 206
-
-        streaming = self.command == "GET"
-        # The cap is what keeps the saves and artwork halves answering while
-        # multi-gigabyte pulls are in flight — a thread per TCP connection has
-        # no other limit.
-        if streaming and not self.streams.acquire(blocking=False):
-            self.send_response(503)
-            self.send_header("Retry-After", "5")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
-        try:
-            count = end - start + 1
-            self.send_response(status)
-            self.send_header("Content-Type", "application/octet-stream")
-            self.send_header("Content-Length", str(count))
-            self.send_header("Accept-Ranges", "bytes")
-            if etag:
-                self.send_header("ETag", etag)
-            if status == 206:
-                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-            self.send_header(
-                "Content-Disposition",
-                f"attachment; filename*=UTF-8''{urllib.parse.quote(name.rsplit('/', 1)[-1])}",
-            )
-            self.end_headers()
-            if streaming:
-                self._send_range(fd, start, count)
-        finally:
-            if streaming:
-                self.streams.release()
-
-    def _send_range(self, fd: int, offset: int, remaining: int) -> None:
-        # socket.sendfile rather than a hand-rolled os.sendfile loop: it
-        # handles partial sends, EAGAIN under the socket timeout, and falls
-        # back to plain send() where sendfile is unsupported — and the
-        # timeout is what stops a client that quit reading from holding a
-        # stream slot forever.
-        self.wfile.flush()
-        if remaining <= 0:
-            # socket.sendfile treats a falsy count as "the whole file".
-            return
-        sent = 0
-        try:
-            with open(fd, "rb", buffering=0, closefd=False) as src:
-                sent = self.connection.sendfile(src, offset, remaining)
-        except OSError:
-            pass
-        if sent < remaining:
-            # A short body desynchronizes a kept-alive connection.
-            self.close_connection = True
-
     # --- routing ------------------------------------------------------------
 
     def _handle(self) -> None:
+        """Only routes: each decision below is a method or a pure function, and
+        the order is the contract -- listener, then the pre-auth routes, then
+        authentication, then the body, then the route."""
         path = self.path.lstrip("/")
         clean = path.split("?")[0]
-        top = clean.split("/")[0]
 
-        # Which half of the service this listener is. "public" never has
-        # /admin -- gotg-api.dcraw.net reaches it straight from the internet,
-        # past anything Cloudflare could put in front -- and "admin" has
-        # nothing else: one more door to the saves and the upstream keys is not
-        # what a second listener is for. Decided before authentication, so
-        # neither answers differently for a token it should not take.
+        if self._listener_refuses(clean.split("/")[0]) or self._serve_pre_auth(clean):
+            return
+
+        # Checked before the route is looked at, so an unauthenticated caller
+        # cannot learn which upstreams this proxy holds keys for by watching
+        # which paths answer 404 and which answer 503.
+        principal = self._principal()
+        if principal is None:
+            self._problem(401, "a bearer token is required", close=True)
+            return
+
+        prefix, rest = split_route(path)
+
+        # The admin token opens /admin and nothing else: outside its prefix it
+        # is indistinguishable from a wrong token, so it cannot be used to
+        # read saves — and nobody else reaches /admin (the 403 lives there).
+        if principal == "admin" and prefix != "admin":
+            self._problem(401, "a bearer token is required", close=True)
+            return
+
+        sent, body = self._read_body(body_cap(prefix, self.command, self.store))
+        if not sent:
+            return
+
+        if path_climbs(rest):
+            self._problem(400, "the path climbs out of the API it is proxied to")
+            return
+        self._dispatch(prefix, rest, body, principal)
+
+    def _listener_refuses(self, top: str) -> bool:
+        """Which half of the service this listener is. "public" never has
+        /admin -- gotg-api.dcraw.net reaches it straight from the internet,
+        past anything Cloudflare could put in front -- and "admin" has
+        nothing else: one more door to the saves and the upstream keys is not
+        what a second listener is for. Decided before authentication, so
+        neither answers differently for a token it should not take."""
         if self.listener == "public" and top == "admin":
             where = f": it is at {self.config.admin_url}/admin/" if self.config.admin_url else ""
             self._problem(404, f"administration is not on this listener{where}", close=True)
-            return
+            return True
         if self.listener == "admin" and top not in ("admin", "healthz"):
             self._problem(404, "this listener serves administration only", close=True)
-            return
+            return True
+        return False
 
+    def _serve_pre_auth(self, clean: str) -> bool:
+        """The three routes answered before anybody is authenticated: the admin
+        page, healthz and a claim. Whether one answered."""
         # The page and its parts: static, and holding no secret -- the token
         # is typed into it -- so before authentication, as healthz is. Not on
         # a deployment that holds no admin token (gotg-library): a page with
@@ -1226,7 +537,7 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             body, content_type = admin_page.ROUTES[clean]
             self._send_page(body, content_type)
-            return
+            return True
 
         # Before authentication, and the only thing that is: kubelet has no
         # token, and a health check is not a credentialed operation.
@@ -1234,10 +545,10 @@ class Handler(BaseHTTPRequestHandler):
         # connection: on kept-alive HTTP/1.1 the unread body would frame the
         # next request — behind an ingress that shares upstream connections,
         # that is request smuggling, not just the caller's own confusion.
-        if path.split("?")[0] == "healthz":
+        if clean == "healthz":
             self.close_connection = True
             self._send(200, b'{"ok":true}', "application/json")
-            return
+            return True
 
         # The other pre-auth route: the claim code IS the credential, and only
         # as a POST — any other verb falls through to the 401 below. Same
@@ -1250,62 +561,28 @@ class Handler(BaseHTTPRequestHandler):
                 # Kept for clients that predate the body form: it puts a live
                 # credential in the request line, which access logs keep.
                 self._claim(clean[len("claim/") :])
-            return
+            return True
+        return False
 
-        # Checked before the route is looked at, so an unauthenticated caller
-        # cannot learn which upstreams this proxy holds keys for by watching
-        # which paths answer 404 and which answer 503.
-        principal = self._principal()
-        if principal is None:
-            self._problem(401, "a bearer token is required", close=True)
-            return
-
-        prefix, _, rest = path.partition("/")
-        # A query on a bare prefix — /catalog?full=1 — otherwise rides along
-        # in the prefix and matches no route.
-        if "?" in prefix:
-            prefix, _, query = prefix.partition("?")
-            rest = f"?{query}"
-
-        # The admin token opens /admin and nothing else: outside its prefix it
-        # is indistinguishable from a wrong token, so it cannot be used to
-        # read saves — and nobody else reaches /admin (the 403 lives there).
-        if principal == "admin" and prefix != "admin":
-            self._problem(401, "a bearer token is required", close=True)
-            return
-
-        # A save bundle and a catalog entry are the two bodies allowed to be
-        # big — a retail WiiU tree runs to ~10k file rows at ~350 bytes each.
-        # Everything else keeps the small cap, because an IGDB query is a line
-        # or two. Auth has already passed by the time a body is read, so the
-        # bigger caps are spent only on credentialed callers.
-        max_body = MAX_BODY
-        if prefix == "saves" and self.command == "PUT" and self.store is not None:
-            max_body = self.store.max_bytes
-        elif prefix == "catalog" and self.command in ("PUT", "POST"):
-            # PUT: a decrypted WiiU tree runs to five figures of file rows.
-            # POST: /catalog/seen names every unchanged entry in one request,
-            # which for this library is a few hundred kilobytes of ids.
-            max_body = CATALOG_MAX_BODY
-        elif prefix == "art" and self.command == "PUT":
-            max_body = ART_MAX_BODY
-
+    def _read_body(self, max_body: int) -> tuple[bool, bytes | None]:
+        """`(proceed, body)`. When not proceeding, the refusal has been sent
+        (and closes the connection: the unread body would frame the next
+        request). Auth has already passed by now, so the bigger caps are spent
+        only on credentialed callers."""
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             self._problem(400, "malformed Content-Length", close=True)
-            return
+            return False, None
         if length < 0:
             self._problem(400, "negative Content-Length", close=True)
-            return
+            return False, None
         if length > max_body:
             self._problem(413, "request body too large", close=True)
-            return
-        body = self.rfile.read(length) if length else None
+            return False, None
+        return True, self.rfile.read(length) if length else None
 
-        if path_climbs(rest):
-            self._problem(400, "the path climbs out of the API it is proxied to")
-            return
+    def _dispatch(self, prefix: str, rest: str, body: bytes | None, principal: str) -> None:
         if prefix == "steamgriddb":
             self._steamgriddb(rest)
         elif prefix == "igdb":
@@ -1326,204 +603,6 @@ class Handler(BaseHTTPRequestHandler):
             self._admin(rest, body, principal)
         else:
             self._problem(404, f"nothing is proxied at /{prefix}")
-
-    # --- per-person tokens --------------------------------------------------
-
-    def _claim_from_body(self) -> None:
-        """The code arrives as a body so that no log holds it. Read before
-        authentication, so it carries its own cap rather than the post-auth
-        ones."""
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            self._problem(400, "malformed Content-Length")
-            return
-        if not 0 < length <= CLAIM_MAX_BODY:
-            self._problem(400, 'a claim is {"code": "gotgi_…"}')
-            return
-        try:
-            code = json.loads(self.rfile.read(length)).get("code", "")
-        except (ValueError, AttributeError):
-            code = ""
-        if not isinstance(code, str) or not code:
-            self._problem(400, 'a claim is {"code": "gotgi_…"}')
-            return
-        self._claim(code)
-
-    def _claim(self, code: str) -> None:
-        """One POST, one token. 410 for a code that existed (reuse means the
-        real holder should hear about it — logged), 404 for one that never
-        did; the split leaks only to whoever already holds the code."""
-        if self.token_store is None:
-            self._problem(503, "this deployment holds no token store")
-            return
-        outcome = self.token_store.claim(code)
-        if outcome is Absent:
-            self._problem(404, "no such claim code")
-            return
-        if outcome is Claimed:
-            print(f"claim code reused or expired: …{code[-4:]}", file=sys.stderr)
-            self._problem(410, "this claim code was already used or has expired")
-            return
-        name, token = outcome
-        self._json(200, {"name": name, "token": token})
-
-    def _auth(self, rest: str, principal: str) -> None:
-        if rest.split("?")[0] != "whoami":
-            self._problem(404, "nothing lives at /auth but whoami")
-            return
-        if self.command not in ("GET", "HEAD"):
-            self._problem(405, "whoami is a GET")
-            return
-        reply: dict = {"name": principal}
-        if self.token_store is not None:
-            user = self.token_store.user_for(principal)
-            if user:
-                reply["user"] = user
-        self._json(200, reply)
-
-    def _needs_admin(self, principal: str) -> bool:
-        if not self.config.admin_token:
-            self._problem(503, "no admin token is configured; administration is off")
-            return True
-        # The bearer, not the name — what _is_index does, and for the same
-        # reason. A principal is "admin" either because the token matched here
-        # or because {auth_url}/auth/whoami said so, and that reply is parsed
-        # unvalidated. Nothing can currently make a peer say "admin", but the
-        # gate on the credential store should not rest on that staying true.
-        if not hmac.compare_digest(self._bearer(), self.config.admin_token.encode()):
-            self._problem(403, "administration needs the admin token")
-            return True
-        return False
-
-    def _admin_scan(self, query: str) -> None:
-        """`GET /admin/scan` — what the library gained, and what has gone from it.
-
-        The missing half stats every member file, which is most of why this
-        sits behind the admin token: it is not a thing a client may ask for.
-        The added half is only as current as the indexer's last pass, since
-        nothing else turns a payload into a titled entry.
-        """
-        if self.catalog is None:
-            self._problem(503, "this service holds no catalog")
-            return
-        if self.command not in ("GET", "HEAD"):
-            self._problem(405, "a scan is a GET")
-            return
-        since = urllib.parse.parse_qs(query).get("since", [""])[0] or None
-        # One sweep at a time. It is thousands of blocking stats against a
-        # network mount, and a person who thinks it has hung will retry —
-        # which buys nothing and parks a second thread that a hung mount will
-        # not give back. The same discipline as the streaming semaphore.
-        if not self.scans.acquire(blocking=False):
-            self._problem(503, "a scan is already running; try again in a moment")
-            return
-        try:
-            report = self.catalog.scan(since=since)
-        except ValueError as error:
-            self._problem(400, str(error))
-            return
-        # As in _catalog: the message itself never reaches the client, because
-        # a storage error string typically embeds server paths.
-        except sqlite3.Error as error:
-            print(f"catalog scan storage error: {error}", file=sys.stderr)
-            self._problem(500, "catalog storage error")
-            return
-        except OSError as error:
-            print(f"catalog scan error: {error}", file=sys.stderr)
-            self._problem(500, "catalog storage error")
-            return
-        finally:
-            self.scans.release()
-        self._json(200, report)
-
-    def _admin(self, rest: str, body: bytes | None, principal: str) -> None:
-        if self._needs_admin(principal):
-            return
-        # partition, not urlsplit: on a doubled slash urlsplit reads the next
-        # segment as a netloc and drops it, so /admin//anything/tokens would
-        # reach the token routes that /admin/<one segment>/tokens must not.
-        # It also strips a #fragment, and raises on an unbalanced [ .
-        path, _, query = rest.partition("?")
-        segments = path.strip("/").split("/")
-
-        # The library half of /admin, and the only part that needs no token
-        # store: a deployment can hold a catalog without holding one.
-        if segments == ["scan"]:
-            self._admin_scan(query)
-            return
-
-        if self.token_store is None:
-            self._problem(503, "this deployment holds no token store")
-            return
-
-        if segments == ["info"]:
-            self._json(200, {"public_url": self.config.public_url})
-            return
-
-        if segments == ["invites"] and self.command in ("GET", "HEAD"):
-            self._json(200, {"invites": self.token_store.invites()})
-            return
-
-        if segments == ["invites"]:
-            if self.command != "POST":
-                self._problem(405, "minting an invite is a POST")
-                return
-            try:
-                asked = json.loads(body or b"{}")
-                name = asked.get("name", "")
-                user = asked.get("user") or None
-                ttl_days = float(asked.get("ttl_days", 7))
-            except (ValueError, AttributeError, TypeError):
-                self._problem(400, 'the body is {"name": ..., "user"?: ..., "ttl_days"?: ...}')
-                return
-            # False for NaN, refuses Infinity: json accepts both, and either
-            # overflows int() further down as an uncaught OverflowError.
-            if not 0 < ttl_days <= 3650:
-                self._problem(400, "ttl_days must be between 0 and 3650")
-                return
-            try:
-                code = self.token_store.mint_invite(name, ttl=ttl_days * 86400, user=user)
-            except (ValueError, TypeError, OverflowError) as error:
-                self._problem(400, str(error))
-                return
-            self._json(200, {"name": name, "code": code})
-            return
-
-        if segments == ["tokens"]:
-            if self.command not in ("GET", "HEAD"):
-                self._problem(405, "the token list is a GET")
-                return
-            self._json(200, {"tokens": self.token_store.tokens()})
-            return
-
-        if len(segments) == 2 and segments[0] == "tokens":
-            if self.command != "DELETE":
-                self._problem(405, "revoking is a DELETE")
-                return
-            if self.token_store.revoke(segments[1]):
-                self._json(200, {"revoked": segments[1]})
-            else:
-                self._problem(404, f"nothing live to revoke for {segments[1]!r}")
-            return
-
-        self._problem(404, "nothing lives at /admin but info, invites, tokens and scan")
-
-    def _send_page(self, body: bytes, content_type: str) -> None:
-        """The admin page, as strict as a page can be: its own script and
-        style only, nothing framed, nothing cached, no referrer -- it is
-        typed an admin token into."""
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Content-Security-Policy", admin_page.POLICY)
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("X-Frame-Options", "DENY")
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802
         self._handle()
