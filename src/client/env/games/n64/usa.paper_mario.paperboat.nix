@@ -77,11 +77,13 @@ in
     mkdir -p "$SHIP_HOME"
     cd "$SHIP_HOME"
 
-    # Select opens the port's own menu: see menuFromPad. libultraship's
-    # default name for the cvar; PaperBoat does not prefix it.
+    # Select opens the port's own menu: see menuFromPad. PaperBoat's
+    # cmake/lus-cvars.cmake prefixes libultraship's name, as the Zelda ports
+    # do -- gSettings.ControlNav. (A launch wrote the unprefixed gControlNav
+    # for a day; the game kept the key and ignored it.)
     ${helpers.menuFromPad {
       file = ''"$SHIP_HOME/paperboat.cfg.json"'';
-      cvar = "gControlNav";
+      cvar = "gSettings.ControlNav";
     }}
 
     # An archive belongs to the port version that made it -- 2Ship taught

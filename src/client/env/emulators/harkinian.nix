@@ -19,9 +19,11 @@ let
   # first launch anywhere has it, and a person who turned it off in the menu
   # stays heard. The settings file travels with each port's saves.
   #
-  # `cvar` is the port's name for it, which each one compiles in: libultraship's
-  # default is gControlNav (PaperBoat, BattleShip); SoH and 2Ship prefix theirs
-  # (gSettings.ControlNav). A dot is a level of JSON, as libultraship's Config
+  # `cvar` is the port's name for it, which each one compiles in -- read it
+  # off the port's own cmake/lus-cvars.cmake, not the game's config file:
+  # libultraship's default is gControlNav (BattleShip, which has no such
+  # file); SoH, 2Ship and PaperBoat set "${CVAR_PREFIX_SETTING}.ControlNav",
+  # gSettings.ControlNav. A dot is a level of JSON, as libultraship's Config
   # stores it; `file` is a shell expression for the settings file.
   menuFromPad =
     { file, cvar }:
