@@ -195,6 +195,38 @@ cmd_library() {
   fi
 }
 
+# One game brought up to date: every root it has here -- the plain game and
+# its variants, each an output of its own -- rebuilt from the library as it
+# is, and then whatever its install lacks fetched (an update, DLC, a pack:
+# download.sh's top-up). What Play would do on its way to the game, done
+# now without playing; what the picker's Update row runs.
+library_update_game() {
+  local key="$1" library attr rc found=0 failed=0 game
+  [[ "$key" =~ ^[a-z0-9][a-z0-9_-]*/[a-z]{3,5}\.[a-z0-9][a-z0-9_]*$ ]] || die "usage: gotg update <platform>/<id>"
+  library="$(gotg_library)"
+  [[ -n "$library" ]] || die "no library configured: set GOTG_LIBRARY, or \`library\` in $GOTG_CONFIG_FILE"
+  while IFS= read -r attr; do
+    [[ -n "$attr" && "$(updates_attr_key "$attr")" == "$key" ]] || continue
+    found=$((found + 1))
+    rc=0
+    library_build "$library" "$attr" || rc=$?
+    if ((rc == 0)); then
+      log "$attr: up to date"
+    elif ((rc == 3)); then
+      warn "$attr is no longer in the library; its last build still runs"
+    else
+      warn "$attr: could not rebuild; the build already here still runs"
+      failed=$((failed + 1))
+    fi
+  done < <(library_root_attrs)
+  ((found > 0)) || log "$key has no build here yet; a play will make one"
+  # And the install's missing releases, when the catalog is here to ask.
+  if manifest_cached && game="$(manifest_find "$key" 2>/dev/null)" && [[ -n "$game" ]]; then
+    _top_up_extras "$game"
+  fi
+  ((failed == 0)) || die "$failed build(s) of $key did not finish"
+}
+
 # The attributes with a root under games/: platform.region.name, a variant
 # after it. A root's stamp and an install's spec sit beside them and are not
 # games; nothing else is expected there, and anything else is left alone.
@@ -214,7 +246,8 @@ library_root_attrs() {
 # without its own needs, for what they now name.
 #
 # `--check [--force]` is the question instead of the work: what is out of
-# date here, as JSON (updates.sh), for the picker.
+# date here, as JSON (updates.sh), for the picker. `<platform>/<id>` is the
+# work for one game: the picker's Update row.
 cmd_update() {
   local library root attr failed=0
   case "${1:-}" in
@@ -224,8 +257,12 @@ cmd_update() {
       updates_json
       return 0
       ;;
+    */*)
+      library_update_game "$1"
+      return 0
+      ;;
     "") ;;
-    *) die "usage: gotg update [--check [--force]]" ;;
+    *) die "usage: gotg update [--check [--force] | <platform>/<id>]" ;;
   esac
   library="$(gotg_library)"
   [[ -n "$library" ]] || die "no library configured: set GOTG_LIBRARY, or \`library\` in $GOTG_CONFIG_FILE"

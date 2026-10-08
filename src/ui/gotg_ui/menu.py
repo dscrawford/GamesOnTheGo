@@ -36,6 +36,11 @@ UNINSTALL: tuple[str, str] = ("Uninstall", "uninstall")
 # from a sofa that is the wrong pair when what is wanted is the download now
 # and the game some other evening. Right under Play, where the eye is.
 INSTALL: tuple[str, str] = ("Install", "install")
+# For a game that is here with an update waiting -- a root the library would
+# build differently, a release the catalog attached since -- right under
+# Play: the thing the exclamation mark on the tile is about. Play would do
+# the same on its way to the game; this does it now, without playing.
+UPDATE: tuple[str, str] = ("Update", "update")
 # While one is on its way, the same row is the way to stop it.
 CANCEL_INSTALL: tuple[str, str] = ("Cancel install", "cancel-install")
 # Going back to an earlier save: a screen in this program, like storage. Only
@@ -72,6 +77,7 @@ class Menu:
         columns: int = COLUMNS,
         installing: bool = False,
         saves: frozenset[str | None] = frozenset(),
+        outdated: bool = False,
     ):
         self.game = game
         self.tile_index = tile_index
@@ -80,6 +86,8 @@ class Menu:
         self.columns = max(1, columns)
         self.installed = installed
         self.installing = installing
+        # An update waiting for a game that is here (updates.py).
+        self.outdated = outdated
         # Which of the plain game (None) and its mods have saves of their own.
         self.saves = saves
         self.variants = tuple(variants)
@@ -107,7 +115,8 @@ class Menu:
 
         if self.installed:
             own = [SAVES] if self.variant in self.saves else []
-            verbs = [ACTIONS[0], *own, *ACTIONS[1:], UNINSTALL]
+            update = [UPDATE] if self.outdated and not self.installing else []
+            verbs = [ACTIONS[0], *update, *own, *ACTIONS[1:], UNINSTALL]
         else:
             verbs = [ACTIONS[0], CANCEL_INSTALL if self.installing else INSTALL, *ACTIONS[1:]]
         # Above the verbs, because they decide what every row under them means.

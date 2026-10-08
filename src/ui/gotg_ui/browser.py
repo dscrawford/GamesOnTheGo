@@ -8,6 +8,8 @@ happens to the cursor when the ground moves under it.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from .catalog import Game, Library
 from .grid import Grid
 from .layout import COLUMNS, ROWS, SHELF_COLUMNS, SHELF_ROWS
@@ -50,6 +52,8 @@ class Browser:
         # On-disk keys from the client, kept off Game: this changes under the
         # grid (an uninstall), the catalog does not.
         self.installed: set[tuple[str, str]] = set(installed or ())
+        # Which of those have an update waiting, as the client says (updates.py).
+        self.outdated: frozenset[tuple[str, str]] = frozenset()
         self.presence = ALL
         # The shape the cursor steps in, and how many fit on a page. Two views
         # draw the same library differently -- ten big tiles, or twenty-four
@@ -121,6 +125,11 @@ class Browser:
         self.installed = set(keys)
         if self.presence != ALL:
             self._reframe()
+
+    def set_outdated(self, keys: Iterable[tuple[str, str]]) -> None:
+        """Which of the installed games have an update waiting (updates.py):
+        the exclamation mark in place of the arrow. Nothing changes shape."""
+        self.outdated = frozenset(keys)
 
     def set_view(self, view: str) -> None:
         """Switch between the grid and the shelf, and re-page for it."""

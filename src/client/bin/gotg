@@ -118,6 +118,7 @@ usage: gotg <command> [args]
   library [<ref>]    which library games are built from, or set it
   update             rebuild gotg, the picker and every game built here
                      --check [--force] says what is out of date instead (JSON)
+                     <platform>/<id> brings one game up to date
   login [--claim <url>] [--server <url>]
                      save the server URL and credentials (mode 600);
                      --claim exchanges a single-use invite link for a token
@@ -153,7 +154,7 @@ usage: gotg configure <id> [variant]    — open that environment's own settings
                                         — where games are kept; the first is where downloads land
 EOF
       ;;
-    update) echo "usage: gotg update [--check [--force]]    — rebuild gotg, the picker and every game built here from the library (GOTG_LIBRARY, or \`library\` in the config); --check only says what is out of date, as JSON" ;;
+    update) echo "usage: gotg update [--check [--force] | <platform>/<id>]    — rebuild gotg, the picker and every game built here from the library (GOTG_LIBRARY, or \`library\` in the config); --check only says what is out of date, as JSON; <platform>/<id> rebuilds one game and fetches what its install lacks" ;;
     library) echo "usage: gotg library [<flake ref or directory>]    — print the library games are built from, or set it" ;;
   esac
 }

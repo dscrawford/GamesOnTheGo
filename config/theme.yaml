@@ -14,6 +14,9 @@ colours:
   # The grid.
   tile: [38, 38, 44]
   tile_selected: [58, 104, 148]
+  # An update waiting: the exclamation mark on an installed game's tile, and
+  # the chip at the top right when gotg itself has one.
+  attention: [232, 176, 64]
 
   # The overlay's grey: the silhouette under a pad being revealed as it joins,
   # and a step of a rebind not reached yet. It was red, on the theory that a

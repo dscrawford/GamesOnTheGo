@@ -60,6 +60,7 @@ _gotg() {
             ;;
         update)
             mapfile -t COMPREPLY < <(compgen -W "--check --force" -- "$cur")
+            mapfile -t -O "${#COMPREPLY[@]}" COMPREPLY < <(_gotg_ids "$cur")
             ;;
         saves)
             case $COMP_CWORD in

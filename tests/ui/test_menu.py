@@ -246,6 +246,20 @@ def test_a_game_that_is_not_here_can_be_installed_from_the_menu():
     assert "uninstall" not in verbs
 
 
+def test_a_game_here_with_an_update_waiting_offers_update_under_play():
+    m = Menu(game(), tile_index=0, installed=True, outdated=True)
+    labels = [label for label, _ in m.actions]
+    assert labels[:2] == ["Play Game", "Update"]
+    assert ("Update", "update") in m.actions
+
+
+def test_update_is_not_offered_while_installing_nor_without_an_update_nor_for_a_game_not_here():
+    busy = Menu(game(), tile_index=0, installed=True, outdated=True, installing=True)
+    assert ("Update", "update") not in busy.actions
+    assert ("Update", "update") not in Menu(game(), tile_index=0, installed=True).actions
+    assert ("Update", "update") not in Menu(game(), tile_index=0, installed=False, outdated=True).actions
+
+
 def test_a_game_that_is_here_has_no_install_row():
     m = Menu(game(), 0, installed=True)
     verbs = [verb for _, verb in m.actions]

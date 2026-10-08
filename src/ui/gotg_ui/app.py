@@ -19,7 +19,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 
 import pygame
 
-from . import beside, config, display, filters, keys, meter, pads, prepare, trace
+from . import beside, config, display, filters, keys, meter, pads, prepare, trace, updates
 from .art import ArtStore
 from .browser import SHELF, Browser
 from .catalog import Game, Library
@@ -54,6 +54,8 @@ TILE = config.colour("theme.colours.tile", (38, 38, 44))
 TILE_SELECTED = config.colour("theme.colours.tile_selected", (58, 104, 148))
 TEXT = config.colour("theme.colours.text", (232, 232, 236))
 TEXT_DIM = config.colour("theme.colours.text_dim", (150, 150, 158))
+# An update waiting: the exclamation mark on a tile.
+ATTENTION = config.colour("theme.colours.attention", (232, 176, 64))
 # The menu's list, a shade off the background.
 PANEL = config.colour("theme.colours.panel", (26, 26, 30))
 
@@ -92,6 +94,20 @@ def draw_badge(screen, tile) -> None:
     pygame.draw.polygon(screen, TEXT, [(cx - head, cy), (cx + head, cy), (cx, cy + head)])
     pygame.draw.aalines(screen, TEXT, True, [(cx - head, cy), (cx + head, cy), (cx, cy + head)])
     pygame.draw.line(screen, TEXT, (cx - head, cy + head + 2), (cx + head, cy + head + 2), stroke)
+
+
+def draw_alert_badge(screen, tile) -> None:
+    """An exclamation mark where the download arrow would be: this game is
+    here, and the library would build it differently now, or has attached a
+    release the install lacks (updates.py). Drawn like the arrow, so the two
+    read as the same badge saying two things."""
+    r = max(10, tile.width // 14)
+    cx, cy = tile.x + r + 6, tile.y + r + 6
+    pygame.draw.aacircle(screen, BACKGROUND, (cx, cy), r + 2)
+    pygame.draw.aacircle(screen, ATTENTION, (cx, cy), r)
+    stroke = max(2, r // 4)
+    pygame.draw.line(screen, BACKGROUND, (cx, cy - r // 2), (cx, cy + r // 6), stroke)
+    pygame.draw.aacircle(screen, BACKGROUND, (cx, cy + r // 2), max(1, stroke // 2 + 1))
 
 
 def draw_ring(screen, centre, radius: int, fraction: float | None, failed: bool) -> None:
@@ -214,7 +230,15 @@ def draw_cover(screen, tile, game, picture, font_at, selected: bool) -> None:
 
 
 def draw_row(
-    screen, row, game, picture, font_at, selected: bool, installed: bool, ring: tuple[float | None, bool] | None = None
+    screen,
+    row,
+    game,
+    picture,
+    font_at,
+    selected: bool,
+    installed: bool,
+    ring: tuple[float | None, bool] | None = None,
+    outdated: bool = False,
 ) -> None:
     """One line of the list: an icon, a title, and the platform under it.
 
@@ -248,6 +272,8 @@ def draw_row(
         under = game.platform + ("   ·   install failed" if failed else "   ·   installing")
         r = max(6, side // 3)
         draw_ring(screen, (row.x + row.width - r - 12, row.y + row.height // 2), r, fraction, failed)
+    elif installed and outdated:
+        under = game.platform + "   ·   installed  ·  update available"
     else:
         under = game.platform + ("   ·   installed" if installed else "")
     small = font_at(max(11, size - 8)).render(under, True, TEXT_DIM)
@@ -262,6 +288,7 @@ def draw_shelf(
     status: str = "",
     installed: set[tuple[str, str]] | None = None,
     rings: dict[tuple[str, str], tuple[float | None, bool]] | None = None,
+    outdated: frozenset[tuple[str, str]] | None = None,
 ) -> None:
     """The list on the left, and the art of the one under the cursor on the
     right — the other way to look at the same library."""
@@ -305,6 +332,7 @@ def draw_shelf(
             index == state.selected,
             bool(installed and game.key in installed),
             rings.get(game.key) if rings else None,
+            bool(outdated and game.key in outdated),
         )
 
     if status:
@@ -322,6 +350,7 @@ def draw(
     menu=None,
     installed: set[tuple[str, str]] | None = None,
     rings: dict[tuple[str, str], tuple[float | None, bool]] | None = None,
+    outdated: frozenset[tuple[str, str]] | None = None,
 ) -> None:
     width, height = screen.get_size()
     screen.fill(BACKGROUND)
@@ -370,7 +399,10 @@ def draw(
             screen.blit(platform, (tile.x + 8, tile.y + tile.height - platform.get_height() - 8))
 
         if installed and game.key in installed:
-            draw_badge(screen, tile)
+            if outdated and game.key in outdated:
+                draw_alert_badge(screen, tile)
+            else:
+                draw_badge(screen, tile)
         if rings and game.key in rings:
             fraction, failed = rings[game.key]
             radius = max(14, tile.width // 5)
@@ -791,6 +823,16 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
     # Asked once, up front, and again only after an uninstall: the answer is
     # a walk of the whole catalog against the disk, not a per-frame question.
     browser = Browser(library, installed=installed_games())
+    # What is out of date, from the client's cache; and, since the client
+    # answered (so it knows the question), the check that refreshes that
+    # cache, behind the grid.
+    report = updates.ask()
+    browser.set_outdated(updates.outdated(report, browser.installed))
+    update_check: updates.Check | None = updates.Check() if report is not None else None
+
+    def refresh_badges() -> None:
+        browser.set_installed(installed_games())
+        browser.set_outdated(updates.outdated(updates.ask(), browser.installed))
     if installed_only:
         browser.toggle_installed()
     store = ArtStore()
@@ -923,6 +965,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             columns=browser.columns,
             installing=installs.running(game.key),
             saves=frozenset(v for v in (None, *variants) if has_own_saves(game, v)),
+            outdated=game.key in browser.outdated,
         )
 
     def pick(game: Game | None, verb: str = "play", variant: str | None = None, version: str | None = None) -> None:
@@ -953,6 +996,11 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             return
         if verb == "cancel-install":
             installs.cancel(game.key)
+            return
+        if verb == "update":
+            # The same ring as an install: `gotg update <platform>/<id>`
+            # rebuilds the game's roots and fetches what its install lacks.
+            installs.start(game, argv=("update",))
             return
         if verb == "uninstall":
             # Through the loader like steam-add, so what was removed is read
@@ -1384,8 +1432,11 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
             # Installs running behind the grid: one landing is a badge, and
             # the versions the client listed were about a game not yet there.
             if installs.poll():
-                browser.set_installed(installed_games())
+                refresh_badges()
                 forget_versions()
+            if update_check is not None and update_check.done():
+                update_check = None
+                browser.set_outdated(updates.outdated(updates.ask(), browser.installed))
             # The saves answer: a conflict is a choice, anything else starts
             # the game. No answer at all (no client, no service, too slow)
             # starts it too -- a launch is never held on a question.
@@ -1418,7 +1469,7 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     if after_prepare is None:
                         preparer = None  # steam add done — back to the grid
                     elif after_prepare in ("install", "uninstall"):
-                        browser.set_installed(installed_games())
+                        refresh_badges()
                         # What the client said about versions was about a game
                         # that is no longer there -- or not there yet.
                         forget_versions()
@@ -1483,9 +1534,29 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                 # The grid behind it, so changing a filter is visibly changing
                 # the thing underneath rather than a number on a form.
                 if browser.view == SHELF:
-                    draw_shelf(screen, state, font_at, art, browser.status, browser.installed, installs.rings())
+                    draw_shelf(
+                        screen,
+                        state,
+                        font_at,
+                        art,
+                        browser.status,
+                        browser.installed,
+                        installs.rings(),
+                        browser.outdated,
+                    )
                 else:
-                    draw(screen, state, font_at, art, browser.status, None, None, browser.installed, installs.rings())
+                    draw(
+                        screen,
+                        state,
+                        font_at,
+                        art,
+                        browser.status,
+                        None,
+                        None,
+                        browser.installed,
+                        installs.rings(),
+                        browser.outdated,
+                    )
                 draw_filters(screen, font_at, browser, panel, typing)
             else:
                 # Whatever the workers finished since the last frame stops being a
@@ -1501,12 +1572,32 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
                     # The menu is drawn over the list rather than swapping the
                     # screen back to the grid underneath it, which is what
                     # happened before and moved every game on screen.
-                    draw_shelf(screen, state, font_at, art, browser.status, browser.installed, installs.rings())
+                    draw_shelf(
+                        screen,
+                        state,
+                        font_at,
+                        art,
+                        browser.status,
+                        browser.installed,
+                        installs.rings(),
+                        browser.outdated,
+                    )
                 else:
                     # Typing still belongs to the grid: the search box is drawn
                     # there, and a shelf with its own copy would be two to keep
                     # in step.
-                    draw(screen, state, font_at, art, browser.status, typing, menu, browser.installed, installs.rings())
+                    draw(
+                        screen,
+                        state,
+                        font_at,
+                        art,
+                        browser.status,
+                        typing,
+                        menu,
+                        browser.installed,
+                        installs.rings(),
+                        browser.outdated,
+                    )
                 if menu is not None:
                     draw_menu(screen, menu, view_rects(browser, screen.get_size()), font_at)
 
@@ -1547,6 +1638,10 @@ def run(library: Library, installed_only: bool = False) -> tuple[Game, str] | No
         # terminal, so nothing else will ever stop it.
         if preparer is not None and (chosen is None or preparer.game != chosen[0]):
             preparer.cancel()
+        # Nor the update check: an evaluation left running under the game
+        # would take its CPU on a Deck.
+        if update_check is not None:
+            update_check.stop()
         # danstick goes on listening for a hold. It used to be told to stop
         # here, on the theory that a game has its own idea of what a button
         # does -- but the daemon seats only pads that hold no seat, so a

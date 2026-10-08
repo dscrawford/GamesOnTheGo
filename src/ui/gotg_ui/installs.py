@@ -38,11 +38,20 @@ class Installs:
     def running(self, key: tuple[str, str]) -> bool:
         return key in self._running
 
-    def start(self, game: Game, variant: str | None = None, version: str | None = None) -> None:
+    def start(
+        self,
+        game: Game,
+        variant: str | None = None,
+        version: str | None = None,
+        argv: tuple[str, ...] = ("install",),
+    ) -> None:
+        """Run the client's verb for this game behind the grid. Install by
+        default; an update (`gotg update <platform>/<id>`) rides the same
+        ring, since it is the same kind of wait with the same end."""
         if game.key in self._running:
             return
         self.failed.pop(game.key, None)
-        self._running[game.key] = Preparer(game, ["install"], variant, version)
+        self._running[game.key] = Preparer(game, list(argv), variant, version)
 
     def progress(self, key: tuple[str, str]) -> Progress | None:
         preparer = self._running.get(key)

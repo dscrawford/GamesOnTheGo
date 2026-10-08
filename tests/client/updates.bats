@@ -224,6 +224,25 @@ real_root() { printf '%s/store/%s' "$TEST_TMP" "$1"; }
   [ "$(jq -r .writable <<<"$output")" = true ]
 }
 
+@test "update <platform>/<id> rebuilds that game's roots, its variants with it, and no other" {
+  mkdir -p "$(GAMES)"
+  root_for n64.usa.zelda zelda
+  root_for n64.usa.zelda.rando zelda-rando
+  root_for n64.usa.mario mario
+  run gotg update n64/usa.zelda
+  [ "$status" -eq 0 ]
+  grep -qF "build $GOTG_LIBRARY#n64.usa.zelda -o $(GAMES)/n64.usa.zelda" "$NIX_LOG"
+  grep -qF "build $GOTG_LIBRARY#n64.usa.zelda.rando -o $(GAMES)/n64.usa.zelda.rando" "$NIX_LOG"
+  ! grep -qF "#n64.usa.mario" "$NIX_LOG"
+  [[ "$stderr" == *"n64.usa.zelda: up to date"* ]]
+}
+
+@test "update of a game with no build here says so and does not fail" {
+  run gotg update n64/usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"no build here yet"* ]]
+}
+
 @test "update with an argument it does not know says its usage" {
   run gotg update --frobnicate
   [ "$status" -ne 0 ]
