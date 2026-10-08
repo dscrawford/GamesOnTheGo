@@ -195,11 +195,38 @@ cmd_library() {
   fi
 }
 
+# The attributes with a root under games/: platform.region.name, a variant
+# after it. A root's stamp and an install's spec sit beside them and are not
+# games; nothing else is expected there, and anything else is left alone.
+library_root_attrs() {
+  local root attr
+  for root in "$(library_games_dir)"/*; do
+    [[ -e "$root" ]] || continue
+    attr="$(basename "$root")"
+    [[ "$attr" != *.by && "$attr" != *.spec ]] || continue
+    [[ "$attr" =~ ^[a-z0-9][a-z0-9_-]*\.[a-z]{3,5}\.[a-z0-9][a-z0-9_]*(\.[a-z0-9][a-z0-9_-]*)?$ ]] || continue
+    printf '%s\n' "$attr"
+  done
+}
+
 # Every game with a root rebuilt from the library -- and the client and picker
 # Steam starts, which it re-exports (mkLibrary) -- then the GL a machine
 # without its own needs, for what they now name.
+#
+# `--check [--force]` is the question instead of the work: what is out of
+# date here, as JSON (updates.sh), for the picker.
 cmd_update() {
   local library root attr failed=0
+  case "${1:-}" in
+    --check)
+      shift
+      updates_check "$@"
+      updates_json
+      return 0
+      ;;
+    "") ;;
+    *) die "usage: gotg update [--check [--force]]" ;;
+  esac
   library="$(gotg_library)"
   [[ -n "$library" ]] || die "no library configured: set GOTG_LIBRARY, or \`library\` in $GOTG_CONFIG_FILE"
   # It narrates itself, one line per game; a dialog on top of that is the
@@ -214,12 +241,9 @@ cmd_update() {
     warn "gotg-ui: could not build; see $GOTG_STATE_DIR/update-gotg-ui.log"
   fi
   mkdir -p "$(library_games_dir)"
-  for root in "$(library_games_dir)"/*; do
-    [[ -e "$root" ]] || continue
-    attr="$(basename "$root")"
-    # A root's stamp and an install's spec sit beside it; they are not games.
-    [[ "$attr" != *.by && "$attr" != *.spec ]] || continue
-    [[ "$attr" =~ ^[a-z0-9][a-z0-9_-]*\.[a-z]{3,5}\.[a-z0-9][a-z0-9_]*(\.[a-z0-9][a-z0-9_-]*)?$ ]] || continue
+  while IFS= read -r attr; do
+    [[ -n "$attr" ]] || continue
+    root="$(library_games_dir)/$attr"
     local rc=0
     library_build "$library" "$attr" || rc=$?
     if ((rc == 0)); then
@@ -232,7 +256,7 @@ cmd_update() {
       warn "$attr: could not rebuild; the build already here still runs"
       failed=$((failed + 1))
     fi
-  done
+  done < <(library_root_attrs)
   foreign_gl_sync
   ((failed == 0)) || die "$failed game(s) did not rebuild"
 }

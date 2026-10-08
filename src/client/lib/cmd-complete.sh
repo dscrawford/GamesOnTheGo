@@ -22,6 +22,7 @@ cmd_complete() {
     platforms) complete_platforms ;;
     ready) complete_ready "${2:-}" "${3:-}" ;;
     installed) complete_installed ;;
+    updates) complete_updates ;;
     *) return 0 ;;
   esac
 }
@@ -92,6 +93,11 @@ complete_ready() {
 # platform/id per line, from the same listing gotg list marks rows with, so
 # the grid and list cannot disagree about what is here.
 complete_installed() { manifest_installed_keys; }
+
+# What is out of date here, as updates.sh says it: from the cache and the
+# disk, never the network. A client too old to know this prints nothing,
+# which the picker reads as "no updates" (updates.py's parse).
+complete_updates() { updates_json; }
 
 # The versions of one game that are installed here, newest first, and which
 # one a launch would run. One line each: "<version>" with a leading "*" on the

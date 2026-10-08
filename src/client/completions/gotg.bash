@@ -58,6 +58,9 @@ _gotg() {
                 mapfile -t COMPREPLY < <(compgen -W "$(gotg complete variants "$sub")" -- "$cur")
             fi
             ;;
+        update)
+            mapfile -t COMPREPLY < <(compgen -W "--check --force" -- "$cur")
+            ;;
         saves)
             case $COMP_CWORD in
                 2) mapfile -t COMPREPLY < <(compgen -W "setup status push pull adopt" -- "$cur") ;;
