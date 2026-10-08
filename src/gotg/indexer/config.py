@@ -1,4 +1,4 @@
-"""Runtime configuration from the environment (IMPORTER_SPEC.md §10).
+"""Runtime configuration from the environment.
 
 The Kubernetes CronJob depends on these exact knobs, so treat the field names as a
 public interface. Validation is fail-fast: a misconfigured job should exit non-zero
@@ -56,7 +56,7 @@ def _abs_dir(env: dict[str, str], key: str) -> Path:
     return path
 
 
-def load(env: dict[str, str] | None = None, **_compat) -> Config:
+def load(env: dict[str, str] | None = None) -> Config:
     """Build a Config from the environment."""
     env = dict(os.environ if env is None else env)
 

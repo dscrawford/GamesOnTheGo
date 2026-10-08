@@ -11,10 +11,8 @@
 # 60. Installing the patch without it would leave a player stuck in a minigame
 # with no way out, so it ships switched on.
 #
-# Both version files are kept. Ryujinx matches a pchtxt to the executable by
-# the build id inside it (@nsobid), and the cheat files are *named* for those
-# build ids, so the 1.0.0 and 1.0.1 halves each apply to their own dump and lie
-# inert on the other.
+# Both version files are kept: the pchtxt and the cheat files (*named* for their
+# build ids, @nsobid) each apply to their own dump and lie inert on the other.
 { pkgs, lib }:
 let
   rev = "a398d55b625129365a975c3ab0b9ef25012d5fff";

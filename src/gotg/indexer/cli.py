@@ -1,4 +1,4 @@
-"""Command line entry point (IMPORTER_SPEC.md §10).
+"""Command line entry point.
 
 The Kubernetes CronJob invokes this image with ``--scan`` and configures
 everything else through the environment, so the flag surface is a stable
@@ -29,7 +29,7 @@ EXIT_CONFIG = 2
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="gotg-importer",
-        description="Organize completed game torrents into the GOTG /Games tree.",
+        description="Organize downloaded games into the GOTG /Games tree and publish them to the catalog.",
     )
     parser.add_argument(
         "--dry-run",
@@ -41,7 +41,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="DIR",
         nargs="+",
         help=(
-            "process these source directories by path instead of polling qBittorrent; "
+            "import these source directories rather than sweeping a tree with --scan; "
             "accepts several paths, or one comma-separated list"
         ),
     )
@@ -50,9 +50,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="DIR",
         type=Path,
         default=None,
-        help=(
-            "walk one directory, import everything that classifies as a game, and ignore the rest; needs no qBittorrent"
-        ),
+        help=("walk one directory, import everything that classifies as a game, and ignore the rest"),
     )
     parser.add_argument(
         "--match",
@@ -92,7 +90,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _bootstrap_paths(raw: list[str]) -> list[Path]:
     """Resolve --bootstrap arguments to directories.
 
-    IMPORTER_SPEC.md §10 documents a comma-separated list, but No-Intro directory
+    The original interface took one comma-separated list, but No-Intro directory
     names are full of commas ("Zelda, The - ... (En,Fr,Es)"), so a path that exists
     as given is always taken whole; only non-existent tokens are split on commas.
     """

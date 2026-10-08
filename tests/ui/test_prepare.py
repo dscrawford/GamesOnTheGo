@@ -228,7 +228,10 @@ def test_cancel_twice_does_not_raise(bin_env):
     assert p.running
     p.cancel()
     p.cancel()
-    assert not p.running
+    # `running` stays true until the reader thread has drained the pipe, which
+    # is a moment after the process has gone; in the sandbox that moment was
+    # long enough to fail an assertion made straight after cancel().
+    wait_done(p)
 
 
 def test_cancel_stops_the_whole_group_not_just_the_wrapper(bin_env, tmp_path):

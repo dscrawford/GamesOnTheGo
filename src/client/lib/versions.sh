@@ -51,10 +51,6 @@ versions_names() { versions_available "$1" | cut -f1; }
 # otherwise — and what the emulator would have picked for itself.
 versions_newest() { versions_names "$1" | head -n1; }
 
-# Whether this game has a choice to offer at all.
-versions_many() { [[ "$(versions_names "$1" | wc -l)" -gt 1 ]]; }
-
-# Is this one of the versions installed?
 versions_has() {
   local game="$1" want="$2" have
   while IFS= read -r have; do
@@ -89,10 +85,6 @@ versions_within() {
   done < <(versions_names "$game")
   return 1
 }
-
-# The newest version at or below a ceiling, or nothing — the open-floored case
-# of the above, kept because a ceiling alone is what most mods state.
-versions_at_most() { versions_within "$1" "" "$2"; }
 
 # A window in the words an error message wants: "1.4.2 or older", "1.6.0 or
 # newer", "1.1.0 to 1.4.2", "exactly 1.6.0". Empty when a mod states neither

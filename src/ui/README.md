@@ -111,5 +111,5 @@ the game needs work and then exec the client's verb; Add to Steam runs
 
 ## State
 
-All four milestones. `--platform` and `--search` still work from the command
-line and mean the same thing.
+Everything in `docs/ui-plan.md`'s milestones is built. `--platform` and
+`--search` still work from the command line and mean the same thing.

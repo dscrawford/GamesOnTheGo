@@ -25,9 +25,6 @@ The Kubernetes CronJob depends on these exact knobs — treat them as a public A
 
 | Env var | Meaning |
 |---|---|
-| `QBIT_URL` | e.g. `http://qbittorrent.default.svc.cluster.local:8080` |
-| `QBIT_USER`, `QBIT_PASS` | WebUI credentials (from a Secret) |
-| `QBIT_CATEGORY` | work-queue category (default `games`) |
 | `GAMES_ROOT` | absolute path of the organized tree, e.g. `/data/Games` |
 | `SOURCE_ROOT` | the folder to search, e.g. `/data/Torrents` |
 | `PATH_PREFIX` | prefix written into manifest paths, e.g. `/Games` |
@@ -35,13 +32,13 @@ The Kubernetes CronJob depends on these exact knobs — treat them as a public A
 
 | Flag | Meaning |
 |---|---|
-| `--once` | process one pass and exit (what the CronJob runs) |
+| `--scan DIR` | walk one directory and import everything that classifies as a game (what the CronJob runs) |
 | `--dry-run` | print the plan, write nothing |
-| `--bootstrap DIR [DIR...]` | process explicit paths instead of polling qBittorrent |
+| `--bootstrap DIR [DIR...]` | process explicit paths instead of sweeping a tree |
 | `--match REGEX` | with `--scan`: only the sources whose name the pattern is found in (case-insensitive), and no sweep — seconds for one release rather than minutes for the library |
 
 Exit `0` on success including "nothing to do"; non-zero only on hard failure (bad
-config, unwritable volume, qBittorrent unreachable).
+config, unwritable volume).
 
 > `--bootstrap` accepts several paths **or** one comma-separated list. A path that
 > exists as given is never split, because No-Intro directory names contain commas

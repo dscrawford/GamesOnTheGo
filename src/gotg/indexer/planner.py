@@ -6,7 +6,6 @@ would be written to /Games and why, without touching anything.
 
 from __future__ import annotations
 
-import collections
 from pathlib import Path
 
 from . import classify as cl
@@ -140,12 +139,3 @@ def _plan_classified(source, verdict, games_root: Path | str, rules: Rules) -> l
             pl.ACTION_MANUAL, verdict.platform, str(source.path), "", "", reason=f"unknown handler {verdict.handler!r}"
         )
     ]
-
-
-def summarize(ops: list[pl.Op]) -> str:
-    """The one-line run summary the CronJob logs (IMPORTER_SPEC.md §10)."""
-    counts: collections.Counter[str] = collections.Counter(op.action for op in ops)
-    return " ".join(
-        f"{action}={counts.get(action, 0)}"
-        for action in (pl.ACTION_HARDLINK, pl.ACTION_EXTRACT, pl.ACTION_ARCHIVE, pl.ACTION_MANUAL, pl.ACTION_SKIP)
-    )

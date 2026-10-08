@@ -35,7 +35,6 @@ def cfg(tmp_path):
             "SOURCE_ROOT": str(source),
             "STATE_DIR": str(tmp_path / "state"),
         },
-        require_qbit=False,
     )
 
 

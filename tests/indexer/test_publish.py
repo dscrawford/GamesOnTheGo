@@ -523,7 +523,6 @@ def test_the_games_root_pass_covers_what_no_longer_seeds(stub, tmp_path):
     (games / "n64" / "usa.pruned.z64").write_bytes(b"still here")
     cfg = load_config(
         {"GAMES_ROOT": str(games), "SOURCE_ROOT": str(tmp_path / "T"), "STATE_DIR": str(tmp_path / "s")},
-        require_qbit=False,
     )
     entries = {
         "/Games/n64/usa.pruned.z64": Entry("n64", "/Games/n64/usa.pruned.z64", "file", 10, "a" * 64, "Pruned"),
@@ -554,7 +553,6 @@ def test_a_games_root_entry_missing_on_disk_is_an_error_not_a_crash(stub, tmp_pa
     (tmp_path / "Games").mkdir()
     cfg = load_config(
         {"GAMES_ROOT": str(tmp_path / "Games"), "SOURCE_ROOT": str(tmp_path / "T"), "STATE_DIR": str(tmp_path / "s")},
-        require_qbit=False,
     )
     entries = {"/Games/n64/usa.gone.z64": Entry("n64", "/Games/n64/usa.gone.z64", "file", 4, "a" * 64, "Gone")}
     published, errors = publish_games_root(Publisher(CatalogAPI(base, "t")), entries, cfg)

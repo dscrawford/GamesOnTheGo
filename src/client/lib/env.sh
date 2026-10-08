@@ -170,7 +170,6 @@ env_built_attrs() {
     [[ "$name" =~ $GOTG_ATTR_RE && -e "$(env_root "$name")" ]] && printf '%s\n' "$name"
   done | awk '!seen[$0]++'
 }
-env_pinned() { [[ -n "${GOTG_PINNED_ATTR:-}" && "$1" == "$GOTG_PINNED_ATTR" ]]; }
 env_bin() { printf '%s/bin/gotg-play' "$(env_root "$1")"; }
 env_is_built() { [[ -x "$(env_bin "$1")" ]]; }
 

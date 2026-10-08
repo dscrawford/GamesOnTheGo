@@ -1,9 +1,9 @@
 # shellcheck shell=bash
 # The game catalog.
 #
-# The importer publishes it at <remote_root>/.gotg/manifest.json; this keeps a
-# local copy so `gotg list` works offline and Steam launches do not depend on the
-# server being reachable when the game is already installed.
+# The service serves it at /catalog; this keeps a local copy so `gotg list`
+# works offline and Steam launches do not depend on the server being reachable
+# when the game is already installed.
 #
 # Ids are unique per platform but not globally — the same title exists on both the
 # N64 and SNES sets, so "usa.bugs_life" is two different games. A bare id is
@@ -88,8 +88,7 @@ manifest_ensure() {
 # Where the bytes live. The catalog names its own byte host (files_url) so a
 # deployment can keep /games off the proxied control plane; an older service
 # or cache names none, and the one service url then serves both.
-manifest_files_url() { manifest_files_hosts | head -n1; }
-
+#
 # Every byte host, one per line, in the catalog's order of preference: the
 # tailnet address first for a machine on it, the universal host behind. A
 # caller that sits beside the service — a QA pod on the cluster — names its

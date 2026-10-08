@@ -6,5 +6,6 @@ and testable off-cluster:
     scan (I/O)  ->  classify  ->  plan  ->  execute (I/O)
 
 ``slugify`` and ``plan`` are the validated reference implementation and are kept
-verbatim; see ``Kubernetes/games/IMPORTER_SPEC.md`` for the full contract.
+verbatim; the full contract lives in IMPORTER_SPEC.md, which is kept outside this repo
+(``Kubernetes/GOTG/``).
 """

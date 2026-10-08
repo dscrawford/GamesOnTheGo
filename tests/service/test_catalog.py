@@ -256,15 +256,6 @@ def test_sweep_rail_refuses_a_mass_vanish(catalog, library):
     assert report["vanished"] == []
 
 
-def test_lookup_is_containment_checked(catalog, library):
-    catalog.upsert("n64", "usa.zelda", entry(library))
-    path = catalog.lookup("n64", "usa.zelda", "usa.zelda.z64")
-    assert path is not None and path.name == "usa.zelda.z64"
-    assert catalog.lookup("n64", "usa.zelda", "missing.z64") is None
-    assert catalog.lookup("n64", "usa.ghost", "usa.zelda.z64") is None
-    assert catalog.lookup("n64", "usa.zelda", "../escape") is None
-
-
 def test_concurrent_reads_during_writes(catalog, library):
     errors = []
 
@@ -590,7 +581,7 @@ def test_sweep_during_concurrent_upserts(catalog, library):
 def test_delete_cascades_to_files_and_frees_the_id(catalog, library):
     catalog.upsert("n64", "usa.zelda", entry(library))
     assert catalog.delete("n64", "usa.zelda") is True
-    assert catalog.lookup("n64", "usa.zelda", "usa.zelda.z64") is None, (
+    assert catalog.open_member("n64", "usa.zelda", "usa.zelda.z64") is None, (
         "an orphaned entry_file row would still grant a path"
     )
     other = entry(library)
@@ -657,7 +648,7 @@ def test_the_sweep_rail_boundary_is_one_in_five(catalog, library, monkeypatch):
 def test_sql_metacharacters_are_data_not_syntax(catalog, library, hostile):
     catalog.upsert("n64", "usa.zelda", entry(library))
     assert catalog.delete(hostile, "usa.zelda") is False
-    assert catalog.lookup(hostile, "usa.zelda", "usa.zelda.z64") is None
+    assert catalog.open_member(hostile, "usa.zelda", "usa.zelda.z64") is None
     assert len(catalog.view()["games"]) == 1
 
 

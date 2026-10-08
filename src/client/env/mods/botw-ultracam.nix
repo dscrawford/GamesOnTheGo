@@ -15,7 +15,10 @@
 #     load order — Ryujinx applies mods in name order, and this one wants to be
 #     first — so the name is kept exactly as the author chose it.
 #
-# Only 1.6.0 is patched, which is the last version of the game.
+# Only 1.6.0 is patched, the last version of the game and the only one its exefs
+# was built against. The variants state both ends of that window (min and max
+# 1.6.0), because a version below fails as surely as one above: on an older dump
+# the mod loads, hooks nothing, and the game is simply itself until it is not.
 { pkgs, lib }:
 let
   rev = "c41e68439ccd0c19bffc8a5bab08ffdf0b81b992";

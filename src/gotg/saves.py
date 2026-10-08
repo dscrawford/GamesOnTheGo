@@ -62,8 +62,9 @@ def _utc_now() -> str:
 @dataclass
 class Publish:
     """What a save() decided: the meta that is now current, and whether the
-    caller's bundle became it. `conflict` carries the head that was already
-    there, which is everything a client needs to explain the refusal."""
+    caller's bundle became it. `status` is 200 when it did (or was already the
+    head), 409 when it was refused, and then `meta` is the head that was
+    already there -- everything a client needs to explain the refusal."""
 
     status: int
     meta: dict

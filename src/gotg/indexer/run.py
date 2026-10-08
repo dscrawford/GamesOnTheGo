@@ -46,7 +46,7 @@ class RunStats:
         return bool(self.statuses[STATUS_ERROR])
 
     def summary(self) -> str:
-        """The one-line run summary (IMPORTER_SPEC.md §10)."""
+        """The one-line run summary the CronJob logs."""
         parts = [
             f"{action}={self.actions[action]}"
             for action in (

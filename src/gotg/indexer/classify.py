@@ -96,7 +96,7 @@ def _platform_from_files(source: Source, rules: Rules) -> tuple[str, int]:
 
 
 def classify(source: Source, rules: Rules) -> Classification:
-    """Decide how to import one payload. Priority order per IMPORTER_SPEC.md §4."""
+    """Decide how to import one payload: a file by extension, a directory by name, then contents."""
     if not source.is_dir:
         platform = rules.platform_for_ext(_ext(source.name))
         if platform:

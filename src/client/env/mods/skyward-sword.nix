@@ -2,8 +2,7 @@
 #
 # The game already runs at 60, which is the whole reason there is one variant
 # here rather than two: 120 is the only thing left to ask for. The patch is
-# Fl4sh9174's, from a repository of pchtxt mods for Switch emulators, and it
-# ships with a warning from its author — "this mod is experimental, had no time
+# Fl4sh9174's pchtxt pack, and it ships with a warning from its author — "this mod is experimental, had no time
 # to test it enough" — which is repeated here because a frame-rate patch on a
 # motion-controlled game is exactly where an untested one shows.
 #

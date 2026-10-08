@@ -110,10 +110,6 @@ dialog_started() {
   kill -0 "$1" 2>/dev/null
 }
 
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
-}
-
 # Ids come from the server and end up as paths and filenames, so check them
 # rather than trusting the catalog.
 validate_id() {
@@ -139,8 +135,8 @@ validate_attr() {
   [[ "$attr" =~ $GOTG_ATTR_RE ]] || die "invalid environment name: $attr"
 }
 # UTC stamp for the metadata a person reads when choosing between two saves.
-# Deliberately never an input to any decision — see docs/saves.md — so making it
-# deterministic for the tests costs nothing.
+# Deliberately never an input to any decision, so making it deterministic for
+# the tests costs nothing.
 iso_now() { printf '%s' "${GOTG_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"; }
 
 # The hard ceiling on a save bundle, enforced in both directions. This is the
@@ -175,13 +171,6 @@ validate_filename() {
   done
 }
 
-# Reject anything that could climb out of the games directory.
-validate_remote_path() {
-  local path="$1"
-  [[ "$path" == /* ]] || die "remote path must be absolute: $path"
-  [[ "$path" != *..* ]] || die "remote path may not contain '..': $path"
-}
-
 # Titles are free-form text from the catalog and end up inside a generated
 # script. Collapse them to one printable line so a newline cannot break out of
 # the comment it sits in and become a command.
@@ -196,12 +185,6 @@ sanitize_title() {
 escape_replacement() {
   local s="${1//\\/\\\\}"
   printf '%s' "${s//&/\\&}"
-}
-
-# Percent-encode each path segment but keep the separators. Game filenames are
-# full of spaces, apostrophes and parentheses.
-url_encode_path() {
-  jq -rn --arg p "$1" '$p | split("/") | map(@uri) | join("/")'
 }
 
 human_size() {

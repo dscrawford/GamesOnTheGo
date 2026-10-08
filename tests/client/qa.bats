@@ -464,20 +464,20 @@ overlay_frames() {
 
 @test "overlay: the bar and its ring over a game pass" {
   overlay_frames "$TEST_TMP"
-  run -0 qa_overlay_check "$TEST_TMP/game.png" "$TEST_TMP/with-bar.png"
+  run -0 qa_overlay_judge "$(qa_overlay_signature "$TEST_TMP/game.png")" "$(qa_overlay_signature "$TEST_TMP/with-bar.png")"
   [ "$(jq .pass <<<"$output")" = "true" ]
 }
 
 @test "overlay: a game with no bar fails" {
   overlay_frames "$TEST_TMP"
-  run -0 qa_overlay_check "$TEST_TMP/game.png" "$TEST_TMP/game.png"
+  run -0 qa_overlay_judge "$(qa_overlay_signature "$TEST_TMP/game.png")" "$(qa_overlay_signature "$TEST_TMP/game.png")"
   [ "$(jq .pass <<<"$output")" = "false" ]
 }
 
 @test "overlay: a game dark along its top is not mistaken for the bar" {
   # Dark where the bar goes, but no ring gained: that is the game, not us.
   overlay_frames "$TEST_TMP"
-  run -0 qa_overlay_check "$TEST_TMP/game.png" "$TEST_TMP/dark-top.png"
+  run -0 qa_overlay_judge "$(qa_overlay_signature "$TEST_TMP/game.png")" "$(qa_overlay_signature "$TEST_TMP/dark-top.png")"
   [ "$(jq .pass <<<"$output")" = "false" ]
 }
 

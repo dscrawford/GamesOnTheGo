@@ -263,7 +263,6 @@ _download_zenity() {
   return "$status"
 }
 
-# Pick the progress style that suits where we are running.
 _download_with_progress() {
   local url="$1" out="$2" etag="$3" title="$4" expected="$5"
   if is_tty; then

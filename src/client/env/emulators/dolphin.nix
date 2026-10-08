@@ -1,14 +1,10 @@
-# dolphin, for the two disc platforms that share it. Split out of helpers.nix:
-# what each emulator needs to be driven correctly is its own body of knowledge,
-# and they were only ever neighbours in one file.
+# dolphin, for the two disc platforms that share it.
 {
   pkgs,
   lib,
   discArchiveRecipe,
 }:
 {
-  # dolphin, for the two disc platforms that share it.
-  #
   # Two things here are about input rather than emulation, and both were learned
   # from a pad that worked in Dolphin's own configuration screen and did nothing
   # in the game:

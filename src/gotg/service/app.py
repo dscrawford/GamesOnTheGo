@@ -479,9 +479,6 @@ class Handler(BaseHTTPRequestHandler):
         _, sep, password = decoded.partition(b":")
         return password if sep else b""
 
-    def _authenticated(self) -> bool:
-        return self._principal() is not None
-
     def _principal(self) -> str | None:
         """Who this bearer is: "legacy" (the shared env token), "indexer",
         "admin", "library", a per-person token's name, or None. The names the

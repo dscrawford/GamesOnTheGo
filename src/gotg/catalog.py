@@ -477,25 +477,6 @@ class CatalogStore:
             games.append(game)
         return {"version": 2, "games": games}
 
-    def lookup(self, platform: str, game_id: str, name: str) -> Path | None:
-        """The resolved path behind one member file, containment-checked.
-
-        None means 404 whichever half is missing, so a caller cannot probe
-        which ids exist without also being allowed to read them. This answers
-        a question about the catalog; actually reading the file goes through
-        open_member, which is immune to the path being swapped underneath.
-        """
-        if not (PLATFORM_RE.match(platform) and ID_RE.match(game_id) and valid_filename(name)):
-            return None
-        with self._read() as conn:
-            row = conn.execute(
-                "SELECT path FROM entry_file WHERE platform = ? AND id = ? AND name = ?",
-                (platform, game_id, name),
-            ).fetchone()
-        if row is None or not self._contained(row["path"]):
-            return None
-        return Path(os.path.realpath(row["path"]))
-
     def open_member(self, platform: str, game_id: str, name: str) -> tuple[dict, int | None] | None:
         """One member's metadata and an open fd — or fd None for a stale row,
         or None outright when the catalog has no such member.

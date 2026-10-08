@@ -100,8 +100,9 @@ impl Link {
     }
 
     /// Read what has arrived and apply every complete line to `pairing`,
-    /// `rebind` and `seating`. Returns how many events were applied; a closed or broken
-    /// socket is dropped and retried later.
+    /// `rebind` and each of `others` (seating, native, departures...), `now`
+    /// being the loop's clock. Returns how many events were applied; a closed
+    /// or broken socket is dropped and retried later.
     pub fn pump(
         &mut self,
         pairing: &mut Pairing,

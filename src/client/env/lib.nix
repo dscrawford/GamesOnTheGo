@@ -229,12 +229,6 @@ let
     d: ''mkdir -p "$state"/${lib.escapeShellArg d}''
   ) savesDirs;
 
-  # Hints every emulator here needs, merged *under* an environment's own env so
-  # that a platform can still override one. Empty today; the Steam Controller
-  # hint that used to live here is a default now, below, because something
-  # after it has to be able to turn it off.
-  baseEnv = { };
-
   # The current Steam Controller has no evdev node at all — it is a hidapi
   # device, driven by SDL3's triton driver. That driver's IsEnabled() falls
   # back to SDL_HINT_JOYSTICK_HIDAPI when no Steam-specific hint is set, and
@@ -258,7 +252,7 @@ let
   steamHidapi = ''export SDL_JOYSTICK_HIDAPI_STEAM="''${SDL_JOYSTICK_HIDAPI_STEAM:-1}"'';
 
   exports = lib.concatLines (
-    lib.mapAttrsToList (k: v: "export ${k}=${render (toString v)}") (baseEnv // env)
+    lib.mapAttrsToList (k: v: "export ${k}=${render (toString v)}") env
   );
 
   # GL on a machine that is not NixOS: see foreign-gl.nix, which is also
@@ -533,7 +527,7 @@ pkgs.runCommand "gotg-env-${name}"
             # in particular decide whether a controller exists at all, so
             # binding a pad in a configure that lacked them would be binding a
             # pad the game will not have.
-            env = baseEnv // env;
+            inherit env;
           }
         )
       } $out/share/gotg/configure.json

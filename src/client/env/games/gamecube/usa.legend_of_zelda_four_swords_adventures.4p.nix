@@ -1,9 +1,7 @@
 # Four Swords Adventures for 4 — `gotg play usa.legend_of_zelda_four_swords_adventures 4p`.
 #
-# 4 Game Boy Advances, one per player, in one window with the game. See
-# mods/four-swords-split.nix for how the windows, the ports and the controllers
-# are kept in the same order; the plain launch (no variant) is the one-player
-# game on a GameCube controller, which needs none of this.
+# 4 Game Boy Advances, one per player, in one window with the game; see
+# mods/four-swords-split.nix. The plain launch is the one-player GameCube game.
 {
   base,
   helpers,

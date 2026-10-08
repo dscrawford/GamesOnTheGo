@@ -41,8 +41,10 @@ pub const EMPTY_SEAT: u8 = u8::MAX;
 
 /// The menu as the bar draws it: whose it is, the seats (a drawing each, or
 /// EMPTY_SEAT), where the cursor is (a seat; `rows` the game's controller;
-/// one past it Exit), the
-/// seat being carried (0 none), and the two holds' fills.
+/// then the saves row when there is one, then Exit), the
+/// seat being carried (0 none), the two holds' fills (A's and B's), and what
+/// the game's controller shows: each seat's presses and sticks, the owner's
+/// trying, the saves list.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MenuFrame {
     pub owner: i32,
@@ -208,42 +210,34 @@ impl Frame {
         frame
     }
 
-    /// This frame, saying whether nobody is seated.
     pub fn with_nobody(self, nobody: bool) -> Self {
         Self { nobody, ..self }
     }
 
-    /// This frame, with the menu on it.
     pub fn with_menu(self, menu: Option<MenuFrame>) -> Self {
         Self { menu, ..self }
     }
 
-    /// This frame, saying something.
     pub fn with_saying(self, saying: Saying) -> Self {
         Self { saying, ..self }
     }
 
-    /// This frame, with a rebind on it.
     pub fn with_rebind(self, rebind: Option<Rebinding>) -> Self {
         Self { rebind, ..self }
     }
 
-    /// How far each joining pad is, oldest press first.
     pub fn hold_fraction(&self) -> &[f32] {
         &self.hold_fraction[..self.hold_count]
     }
 
-    /// The seat each joining pad is filling towards.
     pub fn hold_player(&self) -> &[i32] {
         &self.hold_player[..self.hold_count]
     }
 
-    /// The drawing for each joining pad.
     pub fn hold_icon(&self) -> &[u8] {
         &self.hold_icon[..self.hold_count]
     }
 
-    /// The seats on the bar, by player.
     pub fn joined(&self) -> &[i32] {
         &self.joined[..self.joined_count]
     }
@@ -253,7 +247,6 @@ impl Frame {
         self.joined_fresh
     }
 
-    /// The drawing for each seat just taken.
     pub fn joined_icon(&self) -> &[u8] {
         &self.joined_icon[..self.joined_count]
     }

@@ -1,6 +1,6 @@
 # chore/simplify: the plan
 
-*2026-10-08. Five surveys (bash client, Nix, service/indexer, picker, Rust),
+*2026-10-07. Five surveys (bash client, Nix, service/indexer, picker, Rust),
 each read-only, each asked for three things: comments that restate the code
 or have gone stale, KISS/DRY opportunities with the check that guards each,
 and testing gaps. The house style stays: a comment that says what broke, why

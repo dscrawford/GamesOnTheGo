@@ -8,7 +8,8 @@
 #
 # They live beside the games on the server, in the platform's own directory, and
 # are deliberately not in the catalog: the manifest is built from what the
-# importer imported, and a key file is placed by hand. See IMPORTER_SPEC.md §11.
+# importer imported, and a key file is placed by hand. See IMPORTER_SPEC.md
+# §7a, in the cluster's config repository rather than this one.
 #
 # Kept out of the nix store on purpose. Keys belong to a console, are not
 # redistributable, and track firmware — so a store path holding them would be
@@ -16,10 +17,6 @@
 
 keys_manifest() { printf '%s/share/gotg/keys.json' "$(env_root "$1")"; }
 
-# Fetch whatever this environment declares it needs, into the environment's own
-# state directory. Missing keys are a warning and not a failure: the emulator is
-# still worth starting, since it says more about a specific game than we can.
-#
 # One key file, from whichever byte host answers first.
 #
 #   $1 platform   $2 file name   $3 where to write it
@@ -51,6 +48,10 @@ keys_fetch() {
   done
 }
 
+# Fetch whatever this environment declares it needs, into the environment's own
+# state directory. Missing keys are a warning and not a failure: the emulator is
+# still worth starting, since it says more about a specific game than we can.
+#
 #   $1 environment attribute   $2 the platform whose directory holds them
 keys_ensure() {
   local attr="$1" platform="$2" manifest into state file dest missing=0

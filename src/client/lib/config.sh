@@ -1,11 +1,11 @@
 # shellcheck shell=bash
-# Server credentials.
+# The local config file (preferences such as the library and games_dirs) and
+# the permission check shared with the credential files beside it.
 #
-# The password is stored in a 0600 file rather than a keyring: this runs headless
-# under Steam on single-user machines, where a keyring prompt would just hang.
-# The JWT is deliberately *not* stored — File Browser's tokens expire in hours,
-# so a cached one is a support burden for no gain when logging in again is one
-# cheap request.
+# The service credentials are not here: `gotg login` writes api.json, and this
+# file never holds a secret of its own. Kept out of a keyring on purpose --
+# this runs headless under Steam on single-user machines, where a keyring
+# prompt would just hang -- so a secret is a 0600 file.
 
 config_exists() { [[ -f "$GOTG_CONFIG_FILE" ]]; }
 
@@ -47,8 +47,8 @@ config_load() {
 # Merge keys into the config, keeping everything already there.
 #
 # This used to rebuild the whole object from its four arguments, which meant a
-# second `gotg login` silently dropped every other key — running it after
-# `gotg saves setup` would have unconfigured the save backend without saying so.
+# second `gotg login` silently dropped every other key and would have
+# unconfigured the save backend without saying so.
 config_patch() {
   local patch="$1" existing='{}'
   mkdir -p "$GOTG_CONFIG_DIR"
@@ -62,27 +62,12 @@ config_patch() {
   fi
 
   local tmp="$GOTG_CONFIG_FILE.tmp"
-  # Create with the right mode before writing, so the password is never briefly
+  # Create with the right mode before writing, so it is never briefly
   # world-readable.
   : >"$tmp"
   chmod 600 "$tmp"
   jq -n --argjson existing "$existing" --argjson patch "$patch" '$existing + $patch' >"$tmp"
   mv "$tmp" "$GOTG_CONFIG_FILE"
-}
-
-# One key, for the commands that configure a single thing.
-config_set() {
-  config_patch "$(jq -nc --arg k "$1" --arg v "$2" '{($k): $v}')"
-}
-
-config_write() {
-  local server="$1" username="$2" password="$3" remote_root="$4"
-  config_patch "$(jq -nc \
-    --arg server "$server" \
-    --arg username "$username" \
-    --arg password "$password" \
-    --arg remote_root "$remote_root" \
-    '{server: $server, username: $username, password: $password, remote_root: $remote_root}')"
 }
 
 prompt_secret() {

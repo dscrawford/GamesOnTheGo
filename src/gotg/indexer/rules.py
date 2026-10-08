@@ -31,7 +31,7 @@ class RulesError(Exception):
 
 @dataclass(frozen=True)
 class Target:
-    """The format a platform's emulator wants, per IMPORTER_SPEC.md §5a.
+    """The format a platform's emulator wants.
 
     An empty ``ext`` means the source is already usable and should be hardlinked,
     which is every platform imported so far — so adding this changes nothing for

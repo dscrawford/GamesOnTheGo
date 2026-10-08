@@ -1,21 +1,6 @@
-# Ryujinx. Split out of helpers.nix: what each emulator needs to be driven
-# correctly is its own body of knowledge, and they were only ever neighbours in
-# one file.
+# Ryujinx.
 { pkgs, lib }:
 let
-  # The half of a mod that is not files: what frame rate the emulated display
-  # is willing to run at.
-  #
-  # VSync travels with the mod because the two decide the frame rate
-  # *together*. A swap-interval patch says "present one frame per vblank", so
-  # whatever the emulated refresh rate is set to becomes the frame rate.
-  # Separating them would leave either half looking broken on its own.
-  #
-  # Pinned on every launch rather than seeded once: F1 changes the mode at
-  # runtime, and without this a stray press would persist into the next session.
-  #
-  # vsyncMode is 0 Switch (60Hz), 1 Unbounded, 2 Custom — measured by starting
-  # Ryujinx against each value and reading back what it logged.
   # One or more jq edits against the generated config. Pulled out of vsync
   # below because the frame rate is not the only machine-side setting a game
   # needs: Paper Mario's resolution mods want more emulated memory than the
@@ -59,6 +44,20 @@ let
       fi
     done <${lib.escapeShellArg enabled}
   '';
+
+  # The half of a mod that is not files: what frame rate the emulated display
+  # is willing to run at.
+  #
+  # VSync travels with the mod because the two decide the frame rate
+  # *together*. A swap-interval patch says "present one frame per vblank", so
+  # whatever the emulated refresh rate is set to becomes the frame rate.
+  # Separating them would leave either half looking broken on its own.
+  #
+  # Pinned on every launch rather than seeded once: F1 changes the mode at
+  # runtime, and without this a stray press would persist into the next session.
+  #
+  # vsyncMode is 0 Switch (60Hz), 1 Unbounded, 2 Custom — measured by starting
+  # Ryujinx against each value and reading back what it logged.
   vsync =
     {
       vsyncMode,
@@ -105,28 +104,6 @@ in
       '';
     };
 
-  # The same, for a mod that arrives as a directory rather than a lone patch.
-  #
-  # Ryujinx walks everything under mods/contents/<title id>/ and recognises
-  # three names wherever it finds them: exefs (executable patches), romfs
-  # (replaced game files) and cheats (runtime toggles). A mod that ships all
-  # three has to be installed whole — handing over only its pchtxt would leave
-  # the half that is data behind, and several of these patches replace a game
-  # file *and* the code that reads it.
-  #
-  # Every version file the archive ships is kept, not just the one matching the
-  # dump here. Ryujinx matches a pchtxt to the running executable by the build
-  # id inside it (@nsobid), so the files for other versions are inert, and
-  # keeping them means an update to the game does not silently turn the mod off.
-  #
-  # enabledCheats, when given, is the file listing which of those cheats start
-  # switched on. Ryujinx reads that list from one place per game rather than per
-  # mod, so the lines are merged in: a cheat a variant ships on is on -- the 60
-  # FPS one is the way out of a minigame, the text-speed one a hotkey that does
-  # nothing until pressed -- and every other line, a second mod's or the
-  # player's own in Ryujinx's cheat manager, is left as it was. (It used to be
-  # written only when the file was missing, which left a cheat added later off
-  # on every machine that had launched the game before.)
   # How much memory the emulated console has. The Switch has 4GiB and that is
   # the default; a game asking for more is a game running mods the hardware was
   # never expected to run. Paper Mario's in-engine resolution mods are one:
@@ -181,6 +158,28 @@ in
       + lib.optionalString (enabledCheats != null) (cheatsOn name enabledCheats);
     };
 
+  # The same, for a mod that arrives as a directory rather than a lone patch.
+  #
+  # Ryujinx walks everything under mods/contents/<title id>/ and recognises
+  # three names wherever it finds them: exefs (executable patches), romfs
+  # (replaced game files) and cheats (runtime toggles). A mod that ships all
+  # three has to be installed whole — handing over only its pchtxt would leave
+  # the half that is data behind, and several of these patches replace a game
+  # file *and* the code that reads it.
+  #
+  # Every version file the archive ships is kept, not just the one matching the
+  # dump here. Ryujinx matches a pchtxt to the running executable by the build
+  # id inside it (@nsobid), so the files for other versions are inert, and
+  # keeping them means an update to the game does not silently turn the mod off.
+  #
+  # enabledCheats, when given, is the file listing which of those cheats start
+  # switched on. Ryujinx reads that list from one place per game rather than per
+  # mod, so the lines are merged in: a cheat a variant ships on is on -- the 60
+  # FPS one is the way out of a minigame, the text-speed one a hotkey that does
+  # nothing until pressed -- and every other line, a second mod's or the
+  # player's own in Ryujinx's cheat manager, is left as it was. (It used to be
+  # written only when the file was missing, which left a cheat added later off
+  # on every machine that had launched the game before.)
   ryujinxModDir =
     {
       titleId,
@@ -202,5 +201,4 @@ in
       + lib.optionalString (enabledCheats != null) (cheatsOn name enabledCheats)
       + vsync { inherit vsyncMode customInterval; };
     };
-
 }

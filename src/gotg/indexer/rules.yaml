@@ -93,7 +93,7 @@ extensions:
   md: genesis
   gen: genesis
 
-# The format each platform's emulator wants (IMPORTER_SPEC.md §5a). A platform
+# The format each platform's emulator wants. A platform
 # absent here is imported as it arrives, which is every platform so far.
 targets:
   # Dolphin reads NKit images directly and rewraps them as RVZ, which is both

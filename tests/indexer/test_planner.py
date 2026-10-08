@@ -15,7 +15,7 @@ from gotg.indexer.plan import (
     ACTION_SKIP,
     plan_single_archive,
 )
-from gotg.indexer.planner import plan_source, summarize
+from gotg.indexer.planner import plan_source
 from gotg.indexer.rules import defaults
 from gotg.indexer.slugify import ENTRY_RE
 
@@ -207,13 +207,6 @@ def test_every_planned_id_is_a_valid_entry_id(roots):
     assert ops
     for op in ops:
         assert ENTRY_RE.match(op.entry_id), op
-
-
-def test_summary_line_format(roots):
-    src, games = roots
-    make_dir(src, "Nintendo - Nintendo 64 (BigEndian)", files=("Body Harvest (USA).zip",))
-    ops = plan_source(src / "Nintendo - Nintendo 64 (BigEndian)", games, RULES)
-    assert summarize(ops) == "hardlink=1 extract=0 archive=0 manual=0 skip=0"
 
 
 def test_lone_archive_converts_to_the_format_the_emulator_wants():

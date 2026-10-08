@@ -1,11 +1,20 @@
-"""The grid itself: the only part that needs a screen.
+"""The picker: the one loop that draws the library and reads the controllers.
 
-Kept thin on purpose. Which games exist and where the tiles go are both
-answerable without a display, and both live next door; what is left here is
-drawing them and reading a controller.
+Kept thin on purpose. Which games exist, where the tiles go, what a menu
+offers and what a press means are all answerable without a display, and live
+in the modules imported below as pure models; what is left here is drawing
+them (`draw*`, SDL and pygame only) and `run()`, which rebuilds each screen's
+state from every event.
 
-Milestone one draws placeholders and launches nothing. Art and `gotg play`
-come after this has been sat in front of on a Deck.
+The screens, all drawn over one scaled window (display.py): the grid and the
+shelf (browser.py) with cover art decoded off the loop; the per-game menu;
+the filters panel; the storage, saves and prepare screens; and the "Update
+available" chip at the top right. Input is the controller requirement from
+CLAUDE.md -- pads danstick has published, the keyboard once it has a seat,
+nothing else -- with the mouse as the way out of an unpaired window.
+
+`run()` returns the choice rather than launching it; `__main__` execs it once
+the display is given back.
 """
 
 from __future__ import annotations
@@ -217,37 +226,6 @@ def hovering(browser, pos, size) -> int | None:
     """
     finder = shelf_at if browser.view == SHELF else tile_at
     return finder(*pos, *size)
-
-
-def draw_cover(screen, tile, game, picture, font_at, selected: bool) -> None:
-    """One cover, fitted into its rectangle and never stretched.
-
-    The grid and the shelf draw the same thing at two sizes, and drawing it
-    twice is two places for the art to start being squashed in one of them.
-    """
-    if picture is not None:
-        art = fitted(picture, game.key, tile.width, tile.height)
-        size = art.get_size()
-        pygame.draw.rect(screen, TILE, tile.rect, border_radius=8)
-        screen.blit(
-            art,
-            (tile.x + (tile.width - size[0]) // 2, tile.y + (tile.height - size[1]) // 2),
-        )
-        return
-    pygame.draw.rect(screen, TILE_SELECTED if selected else TILE, tile.rect, border_radius=8)
-    inner = max(8, tile.width - 16)
-    text = game.title[:120]
-    base = max(10, min(20, tile.width // 6))
-    title = font_at(base).render(text, True, TEXT)
-    if title.get_width() > inner:
-        title = _fit(font_at, text, inner, base).render(text, True, TEXT)
-    # Clipped to its own cover. _fit gives up at its smallest size, and on a
-    # shelf cover that is still too wide for a long title -- which then runs
-    # across the game beside it.
-    before = screen.get_clip()
-    screen.set_clip(pygame.Rect(*tile.rect))
-    screen.blit(title, (tile.x + 8, tile.y + tile.height // 2 - title.get_height() // 2))
-    screen.set_clip(before)
 
 
 def draw_row(
@@ -817,21 +795,21 @@ def _steered(steer: Nav, event, now: float) -> Nav:
 
 
 def run(library: Library, installed_only: bool = False) -> tuple | Restart | None:
-    """Draw until somebody chooses an action or quits, and say which.
+    """Run the picker until somebody chooses an action or quits, and say which.
 
-    Returns (game, verb) — play or configure — both of which the caller execs;
-    or a Restart, after `gotg update self`, which the caller execs too: this
-    pid into the new picker (restart.py).
+    Returns (game, verb) -- play or configure -- both of which the caller
+    execs; or a Restart, after `gotg update self`, which the caller execs too:
+    this pid into the new picker (restart.py); or None for a quit.
+    `installed_only` shows only what is on disk.
 
     The game is *returned* rather than launched here: exec has to happen after
     pygame has given the display back, or the emulator inherits a window and a
     grabbed GPU from a process that is about to stop existing.
     """
     pygame.init()
-    # One window for the whole program. Full screen when
-    # the launcher says so, scaled from one layout size, and presented on the
-    # panel's own beat -- see display.py for why that last part is the one
-    # that mattered.
+    # One window for the whole program: full screen when the launcher says so,
+    # scaled from one layout size, presented on the panel's own beat -- see
+    # display.py for why that last part is the one that mattered.
     shown = display.open(WINDOW, fullscreen=config.fullscreen())
     screen = shown.surface
     if meter.wanted():
@@ -841,16 +819,16 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
     # the controller API, which is what makes "the right bumper" mean the same
     # button on every pad rather than index 5 on an Xbox one.
     sticks = pads.init()
-    # And every keyboard and mouse that is really a controller -- a Steam
-    # Controller's lizard mode, a Bluetooth Xbox pad's extra collections --
-    # held so the compositor never sees them. The joystick rule cannot reach
-    # those: to SDL a lizard-mode d-pad *is* the arrow keys. See hush.py.
     # Where a frame's time goes. Silent unless GOTG_UI_FPS=1 or a trace is
     # running: "it feels slow" is two different problems -- this program
     # drawing, and SDL presenting what it drew -- and they are fixed in
     # different places. See meter.py.
     fps = meter.Meter()
 
+    # And every keyboard and mouse that is really a controller -- a Steam
+    # Controller's lizard mode, a Bluetooth Xbox pad's extra collections --
+    # held so the compositor never sees them. The joystick rule cannot reach
+    # those: to SDL a lizard-mode d-pad *is* the arrow keys. See hush.py.
     hush = Hush()
     hush.refresh()
 

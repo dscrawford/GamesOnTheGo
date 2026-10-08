@@ -8,10 +8,9 @@
 # emulated display has to stay at 60Hz; raise it and the game runs fast rather
 # than smooth. That is why there is a 60fps variant here and no 120fps one.
 #
-# Both version files the archive ships are kept. Ryujinx matches a pchtxt to
-# the running executable by the build id inside it (@nsobid), so the 1.0.0 file
-# is inert on a 1.1.0 dump and vice versa, and shipping both means the variant
-# works whether or not the update is installed.
+# Both version files the archive ships are kept: Ryujinx matches a pchtxt by the
+# build id inside it (@nsobid), so each is inert on the other's dump and the
+# variant works whether or not the update is installed.
 { pkgs, lib }:
 let
   rev = "a398d55b625129365a975c3ab0b9ef25012d5fff";
@@ -27,10 +26,8 @@ let
   };
 in
 {
-  # Copied out to a name of our own rather than referenced where it lands: the
-  # archive's directories are "[60 FPS Static v1.1.0]", and a store path with a
-  # space and a bracket in it is one that has to be quoted correctly by every
-  # line that ever touches it.
+  # Copied out to a name of our own: the archive's directory is
+  # "[60 FPS Static v1.1.0]" (see skyward-sword.nix for why that matters).
   kirby60Mod = pkgs.runCommand "kirby-forgotten-land-60fps" { } ''
     cp -R --no-preserve=mode ${lib.escapeShellArg "${mods}/[60 FPS Static v1.1.0]"} $out
     test -f $out/exefs/1.1.0.pchtxt

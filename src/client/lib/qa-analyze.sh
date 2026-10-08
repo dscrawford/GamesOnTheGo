@@ -160,10 +160,6 @@ qa_region_mean() {
   magick "$1" -crop "$2" +repage -fx "$3" -format '%[fx:mean]' info: 2>/dev/null
 }
 
-qa_overlay_check() {
-  qa_overlay_judge "$(qa_overlay_signature "$1")" "$(qa_overlay_signature "$2")"
-}
-
 # Two signatures, before and after, to a verdict.
 qa_overlay_judge() {
   jq -n --argjson before "$1" --argjson after "$2" \

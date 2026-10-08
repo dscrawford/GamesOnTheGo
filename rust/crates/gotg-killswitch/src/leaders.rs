@@ -182,9 +182,12 @@ fn untangle(anchors: &[Anchor], slots: &[f32], rail_x: f32, label_height: f32) -
     assigned
 }
 
-/// How many leaders cross; zero once untangled. A test asserts it, so it has
-/// to be able to fail -- the tangled-layout test below makes sure it can.
-pub fn crossings(placed: &[Placed]) -> usize {
+/// How many leaders cross; zero once untangled. Only the tests ask: `place`
+/// untangles by construction, and this is how they check it. A test asserts
+/// it, so it has to be able to fail -- the tangled-layout test below makes
+/// sure it can.
+#[cfg(test)]
+fn crossings(placed: &[Placed]) -> usize {
     let mut total = 0;
     for (index, first) in placed.iter().enumerate() {
         for second in &placed[index + 1..] {

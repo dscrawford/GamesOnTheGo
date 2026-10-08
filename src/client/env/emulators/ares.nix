@@ -1,10 +1,6 @@
-# ares, for the cartridge platforms that share it. Split out of helpers.nix:
-# what each emulator needs to be driven correctly is its own body of knowledge,
-# and they were only ever neighbours in one file.
+# ares, for the cartridge platforms that share it.
 { pkgs, lib }:
 {
-  # ares, for the cartridge platforms that share it.
-  #
   # It does not consult XDG for saves. Emulator::locate reads settings.paths.saves,
   # which is empty by default, and falls back to the ROM's own path with the
   # extension swapped — so a memory save lands in ~/Games next to the ROM, where

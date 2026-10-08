@@ -1,4 +1,4 @@
-"""Env parsing per IMPORTER_SPEC.md §10 — the CronJob depends on these knobs."""
+"""Env parsing: the CronJob depends on these knobs."""
 
 from pathlib import Path
 

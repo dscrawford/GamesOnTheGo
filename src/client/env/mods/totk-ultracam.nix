@@ -13,6 +13,14 @@
 # one per section of the optimizer's Options.json, keys and values spelled as
 # that file spells them. Only Main.ini is written; the rest the mod defaults
 # (no cheats, no free camera unless its hotkey is pressed).
+#
+# The variants state a game-version window (1.1.0 to 1.4.2). UltraCam is machine
+# code written against one executable, and its newest build reaches 1.4.2: its own
+# README lists every version it supports and 1.4.3 is not among them (nx-optimizer
+# issue #300, PR #330: the bundled subsdk3 "lacked the required hooks", crashing
+# with a read at 0x0). The client runs the newest update at or below the maximum
+# rather than whatever is newest. The same subsdk3 was never given 1.0.0's hooks
+# either, so the launch-day dump fails the same way: hence the minimum.
 { pkgs, lib }:
 let
   rev = "c41e68439ccd0c19bffc8a5bab08ffdf0b81b992";

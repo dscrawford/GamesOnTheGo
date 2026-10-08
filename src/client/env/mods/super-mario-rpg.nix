@@ -5,11 +5,9 @@
 # the archive's own directory name, and it is passed through with the label
 # intact — this is the variant to suspect first if something misbehaves.
 #
-# The two files are not a patch and a revision of it but two different dumps:
-# they carry different build ids (@nsobid) for the same 1.0.1, so Ryujinx
-# applies whichever one matches the executable actually loaded and ignores the
-# other. Shipping both is what makes the variant work regardless of which dump
-# is installed.
+# The two files are two different dumps of 1.0.1 (different @nsobid), not a patch
+# and its revision; shipping both makes the variant work whichever is installed.
+# See skyward-sword.nix, which has the same pair.
 { pkgs, lib }:
 let
   rev = "a398d55b625129365a975c3ab0b9ef25012d5fff";

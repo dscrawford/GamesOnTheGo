@@ -1,4 +1,4 @@
-"""The catalog the client downloads (IMPORTER_SPEC.md §8).
+"""The catalog the client downloads.
 
 Lives at ``<GAMES_ROOT>/.gotg/manifest.json``; the dot-directory keeps it out of the
 File Browser listing people see. Entries are keyed by server path and merged, so a

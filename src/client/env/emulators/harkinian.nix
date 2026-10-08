@@ -1,6 +1,4 @@
-# The HarbourMasters native ports. Split out of helpers.nix: what each of these
-# needs to be driven correctly is its own body of knowledge, and they were only
-# ever neighbours in one file.
+# The HarbourMasters native ports.
 {
   lib,
   pkgs,
