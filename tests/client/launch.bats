@@ -135,8 +135,7 @@ spec_for() {
   export GOTG_KILLSWITCH_BIN="$TEST_TMP/fake-killswitch"
   gotg launch --spec "$(spec_for usa.zelda)"
   [ "$status" -eq 0 ]
-  local i
-  for i in $(seq 1 50); do [[ -s "$WATCHER_LOG" ]] && break; sleep 0.1; done
+  wait_for 5 test -s "$WATCHER_LOG" || true
   [[ "$(cat "$WATCHER_LOG")" == *"--saves env-n64"* ]]
 }
 

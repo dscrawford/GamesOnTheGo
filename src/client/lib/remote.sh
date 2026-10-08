@@ -44,7 +44,42 @@ saves_api_url() {
 service_curl() {
   config_check_perms "$(saves_api_file)"
   jq -r '"header = \"Authorization: Bearer \(.token)\""' "$(saves_api_file)" |
-    curl --config - --connect-timeout 10 "$@"
+    "${GOTG_CURL:-curl}" --config - --connect-timeout 10 "$@"
+}
+
+# One file of /files/<platform>/, from whichever byte host answers first, into
+# <dest> (removed again if nothing did):
+#
+#   service_fetch_file <platform> <file> <dest> <max-seconds> [<max-bytes>]
+#
+# The byte hosts are the catalog's to name, in its order of preference, and
+# they move: the files host sits behind a VPN whose forwarded port is reassigned
+# on every reconnect, so a cache from before one names a port nothing listens
+# on. When every host refused, the catalog is read once more and the hosts tried
+# again -- the same re-read a game download makes between attempts -- and
+# without it a reconnect is a console that cannot decrypt a game until somebody
+# thinks to run `gotg refresh`. /files lives beside /games, off the proxied
+# control plane, which answers for it with a 503 from a service that is working
+# perfectly, so the control plane is never asked.
+#
+# keys_fetch and firmware_fetch each had this loop, word for word but for the
+# timeout variable and a size cap, and each had to learn the re-read separately.
+service_fetch_file() {
+  local platform="$1" file="$2" dest="$3" seconds="$4" cap="${5:-}" host refreshed=0
+  while :; do
+    while IFS= read -r host; do
+      [[ -n "$host" ]] || continue
+      if service_curl -fsS --max-time "$seconds" ${cap:+--max-filesize "$cap"} \
+        "$host/files/$platform/$(jq -rn --arg n "$file" '$n | @uri')" \
+        >"$dest" 2>/dev/null && [[ -s "$dest" ]]; then
+        return 0
+      fi
+      rm -f "$dest"
+    done < <(manifest_files_hosts)
+    ((refreshed == 0)) || return 1
+    refreshed=1
+    manifest_refresh >/dev/null 2>&1 || return 1
+  done
 }
 
 service_url() { saves_api_url; }

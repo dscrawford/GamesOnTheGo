@@ -40,11 +40,7 @@ start_sgdb() {
   python3 "$BATS_TEST_DIRNAME/mock_steamgriddb.py" "$SGDB_PORT" "$@" &
   SGDB_PID=$!
   export SGDB_URL="http://127.0.0.1:$SGDB_PORT"
-  local i
-  for i in $(seq 1 50); do
-    curl -s -o /dev/null "$SGDB_URL/img/probe" 2>/dev/null && return 0
-    sleep 0.1
-  done
+  wait_for 5 curl -s -o /dev/null "$SGDB_URL/img/probe" && return 0
   echo "mock steamgriddb did not start" >&2
   return 1
 }

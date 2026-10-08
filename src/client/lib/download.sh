@@ -191,76 +191,41 @@ _progress_line() {
 _download_zenity() {
   local url="$1" out="$2" etag="$3" title="$4" expected="${5:-0}"
 
-  # A private directory for the fifo: mktemp -u then mkfifo races with anything
-  # else that could claim the name in between.
-  local pipedir pipe curl_pid zen_pid status=0
-  pipedir="$(dialog_dir)"
-  pipe="$pipedir/progress"
-  mkfifo "$pipe"
-
   local mode=(--auto-close)
   ((expected <= 0)) && mode+=(--pulsate)
 
-  zenity_run --progress --title="GOTG" \
-    --text="Downloading $title…" "${mode[@]}" <"$pipe" &
-  zen_pid=$!
-
-  exec 9>"$pipe"
-  # A dialog that never came up is not a cancellation: fetch without it.
-  if ! dialog_started "$zen_pid"; then
-    exec 9>&-
-    dialog_dir_remove "$pipedir"
-    warn "the progress dialog could not start; downloading $title without it"
-    _download_quiet "$url" "$out" "$etag"
-    return
-  fi
-  _curl_download "$url" "$out" "$etag" --silent --show-error &
-  curl_pid=$!
-
-  local size pct=0 resumed_from start now zrc
+  local resumed_from start
   resumed_from="$(stat -c '%s' "$out" 2>/dev/null || echo 0)"
   start="$(date +%s)"
-  while kill -0 "$curl_pid" 2>/dev/null; do
-    # The dialog is gone. Cancelled (zenity exits 1): stop the transfer and
-    # keep the partial file so the next attempt resumes. Anything else is
-    # the dialog failing, and the download goes on without it.
-    if ! kill -0 "$zen_pid" 2>/dev/null; then
-      wait "$zen_pid" 2>/dev/null
-      zrc=$?
-      exec 9>&-
-      dialog_dir_remove "$pipedir"
-      if [[ "$zrc" -eq 1 ]]; then
-        kill "$curl_pid" 2>/dev/null || true
-        wait "$curl_pid" 2>/dev/null || true
-        die "download stopped: the progress dialog was cancelled"
-      fi
-      warn "the progress dialog went away (zenity exited $zrc); downloading $title without it"
-      wait "$curl_pid" || status=$?
-      return "$status"
-    fi
-    size="$(stat -c '%s' "$out" 2>/dev/null || echo 0)"
-    now="$(date +%s)"
-    if [[ "$expected" -gt 0 ]]; then
-      pct=$((size * 100 / expected))
-      ((pct > 99)) && pct=99
-      printf '%s\n' "$pct" >&9
-    fi
-    printf '# %s\n' "$(_meter_line "$size" "$expected" "$resumed_from" "$start" "$now")" >&9
-    sleep "$PROGRESS_TICK"
-  done
+  # A dialog that never came up is not a cancellation: fetch without it
+  # (zenity_supervise's fallback). Cancelling it stops the transfer and keeps
+  # the partial file, so the next attempt resumes.
+  zenity_supervise "downloading $title" "download stopped" \
+    _download_tick "$out" "$expected" "$resumed_from" "$start" -- \
+    --progress --title="GOTG" --text="Downloading $title…" "${mode[@]}" -- \
+    _curl_download "$url" "$out" "$etag" --silent --show-error -- \
+    _download_quiet "$url" "$out" "$etag"
+}
 
-  wait "$curl_pid" || status=$?
-  # Only claim completion if it actually completed; jumping the bar to 100% on a
-  # failed transfer tells the user the opposite of what happened.
-  if [[ "$status" -eq 0 ]]; then
-    printf '100\n' >&9 || true
-  else
-    printf '# download failed\n' >&9 || true
+# What the dialog is told each tick: the percentage (when the size is known)
+# and the meter line; and, when the transfer failed, that it did.
+#   $1 file  $2 expected bytes  $3 resumed from  $4 start  $5 fd  $6 tick|failed
+_download_tick() {
+  local out="$1" expected="$2" resumed_from="$3" start="$4" fd="$5" event="$6" size pct now
+  # Every write may find the dialog gone (see zenity_supervise): not an error
+  # of the download's.
+  if [[ "$event" == failed ]]; then
+    dialog_say "$fd" '# download failed' 2>/dev/null || true
+    return
   fi
-  exec 9>&-
-  dialog_dir_remove "$pipedir"
-  wait "$zen_pid" 2>/dev/null || true
-  return "$status"
+  size="$(stat -c '%s' "$out" 2>/dev/null || echo 0)"
+  now="$(date +%s)"
+  if [[ "$expected" -gt 0 ]]; then
+    pct=$((size * 100 / expected))
+    ((pct > 99)) && pct=99
+    dialog_say "$fd" "$pct" 2>/dev/null || true
+  fi
+  dialog_say "$fd" "# $(_meter_line "$size" "$expected" "$resumed_from" "$start" "$now")" 2>/dev/null || true
 }
 
 _download_with_progress() {
@@ -433,13 +398,15 @@ download_game() {
   # Two fetches of one game share a staging directory, so a terminal
   # `gotg install` racing a Steam launch of the same title would interleave.
   # The lock makes the second wait and then see the finished install.
-  mkdir -p "$GOTG_STATE_DIR/locks"
-  exec 8>"$GOTG_STATE_DIR/locks/$id.lock"
-  if ! flock -w 3600 8; then
-    die "timed out waiting for another gotg process to finish downloading $id"
-  fi
+  with_lock "$GOTG_STATE_DIR/locks/$id.lock" 3600 \
+    "timed out waiting for another gotg process to finish downloading $id" \
+    _download_game_locked "$game" "$id" "$platform" "$handler" "$title" "$dest" "$staged"
+}
+
+# download_game's fetch, under the game's lock.
+_download_game_locked() {
+  local game="$1" id="$2" platform="$3" handler="$4" title="$5" dest="$6" staged="$7"
   if game_is_installed "$game"; then
-    exec 8>&-
     return 0
   fi
 
@@ -487,7 +454,6 @@ download_game() {
   esac
   rm -rf "$staged"
 
-  exec 8>&-
   log "installed $(game_installed_path "$game" || printf '%s' "$dest")"
 }
 
@@ -550,14 +516,19 @@ _top_up_extras() {
 
   mkdir -p "$GOTG_PARTIAL_DIR" "$GOTG_STATE_DIR/locks"
   staged="$(download_partial_path "$id")"
-  exec 8>"$GOTG_STATE_DIR/locks/$id.lock"
-  flock -w 3600 8 || die "timed out waiting for another gotg process to finish downloading $id"
+  with_lock "$GOTG_STATE_DIR/locks/$id.lock" 3600 \
+    "timed out waiting for another gotg process to finish downloading $id" \
+    _top_up_extras_locked "$game" "$staged" "$title" "$install" "$missing"
+}
+
+# _top_up_extras' fetch, under the game's lock.
+_top_up_extras_locked() {
+  local game="$1" staged="$2" title="$3" install="$4" missing="$5"
   service_have || die "no service configured — run: gotg login"
 
   _fetch_members "$game" "$staged" "$title" "$(jq -cR . <<<"$missing" | jq -cs .)"
   _run_recipe "$game" extras "$staged" "$install"
   rm -rf "$staged"
-  exec 8>&-
   log "added to $install: $(tr '\n' ' ' <<<"$missing")"
 }
 

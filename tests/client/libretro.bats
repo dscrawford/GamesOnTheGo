@@ -29,11 +29,7 @@ start_libretro() {
   python3 "$BATS_TEST_DIRNAME/mock_libretro.py" "$LR_PORT" "$@" &
   LR_PID=$!
   export LR_URL="http://127.0.0.1:$LR_PORT"
-  local i
-  for i in $(seq 1 50); do
-    curl -s -o /dev/null "$LR_URL/" 2>/dev/null && return 0
-    sleep 0.1
-  done
+  wait_for 5 curl -s -o /dev/null "$LR_URL/" && return 0
   echo "mock libretro did not start" >&2
   return 1
 }
@@ -177,11 +173,7 @@ picked() { jq -r '.libretro.matched' <<<"$output"; }
   SGDB_PORT="$(pick_port)"
   python3 "$BATS_TEST_DIRNAME/mock_steamgriddb.py" "$SGDB_PORT" &
   local sgdb=$!
-  local i
-  for i in $(seq 1 50); do
-    curl -s -o /dev/null "http://127.0.0.1:$SGDB_PORT/img/probe" 2>/dev/null && break
-    sleep 0.1
-  done
+  wait_for 5 curl -s -o /dev/null "http://127.0.0.1:$SGDB_PORT/img/probe" || true
 
   run art --base-url "http://127.0.0.1:$SGDB_PORT" --api-key testkey
   kill "$sgdb" 2>/dev/null || true

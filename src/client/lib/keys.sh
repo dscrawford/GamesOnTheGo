@@ -20,32 +20,12 @@ keys_manifest() { printf '%s/share/gotg/keys.json' "$(env_root "$1")"; }
 # One key file, from whichever byte host answers first.
 #
 #   $1 platform   $2 file name   $3 where to write it
+#
+# Fifteen minutes, as firmware gets: a key file is a few kilobytes, but
+# PaperBoat's HD texture archive comes this way too, and that is a gigabyte
+# over whatever the evening's connection is.
 keys_fetch() {
-  local platform="$1" file="$2" dest="$3" host refreshed=0
-  while :; do
-    while IFS= read -r host; do
-      [[ -n "$host" ]] || continue
-      # Fifteen minutes, as firmware gets: a key file is a few kilobytes, but
-      # PaperBoat's HD texture archive comes this way too, and that is a
-      # gigabyte over whatever the evening's connection is.
-      if service_curl -fsS --max-time "${GOTG_KEYS_FETCH_SECONDS:-900}" \
-        "$host/files/$platform/$(jq -rn --arg n "$file" '$n | @uri')" \
-        >"$dest" 2>/dev/null && [[ -s "$dest" ]]; then
-        return 0
-      fi
-      rm -f "$dest"
-    done < <(manifest_files_hosts)
-
-    # Every host in the cached catalog refused. The byte host is the catalog's
-    # to name and moves: it sits behind a VPN whose forwarded port is
-    # reassigned on every reconnect, so a cache from before one names a port
-    # nothing is listening on. Downloads already re-read the catalog between
-    # attempts for exactly this; without it here, a reconnect is a console
-    # that cannot decrypt a game until somebody thinks to run `gotg refresh`.
-    ((refreshed == 0)) || return 1
-    refreshed=1
-    manifest_refresh >/dev/null 2>&1 || return 1
-  done
+  service_fetch_file "$1" "$2" "$3" "${GOTG_KEYS_FETCH_SECONDS:-900}"
 }
 
 # Fetch whatever this environment declares it needs, into the environment's own

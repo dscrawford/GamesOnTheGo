@@ -50,14 +50,7 @@ fake_watcher() {
 
 # The watcher is spawned in the background and the shell it was spawned from
 # execs immediately, so its first write races the assertion.
-wait_for_watcher() {
-  local i
-  for i in $(seq 1 50); do
-    [[ -s "$WATCHER_LOG" ]] && return 0
-    sleep 0.1
-  done
-  return 1
-}
+wait_for_watcher() { wait_for 5 test -s "$WATCHER_LOG"; }
 
 @test "every launch starts the watcher" {
   fake_watcher
@@ -245,17 +238,11 @@ have_killswitch() {
   # already exited — and, on firing, signal a corpse.
   have_killswitch
   bash -c "sleep 0 & echo \$! >'$TEST_TMP/zombie.pid'; sleep 30" &
-  local holder=$! zombie="" i
-  for i in $(seq 1 50); do
-    [[ -s "$TEST_TMP/zombie.pid" ]] && break
-    sleep 0.1
-  done
+  local holder=$! zombie=""
+  is_zombie() { [[ "$(ps -o stat= -p "$1" 2>/dev/null)" == Z* ]]; }
+  wait_for 5 test -s "$TEST_TMP/zombie.pid"
   zombie="$(cat "$TEST_TMP/zombie.pid")"
-  for i in $(seq 1 50); do
-    [[ "$(ps -o stat= -p "$zombie" 2>/dev/null)" == Z* ]] && break
-    sleep 0.1
-  done
-  [[ "$(ps -o stat= -p "$zombie" 2>/dev/null)" == Z* ]] || skip "could not make a zombie here"
+  wait_for 5 is_zombie "$zombie" || skip "could not make a zombie here"
 
   run timeout 5 "$KS" --pid "$zombie" --poll-ms 50 --quiet
   [ "$status" -eq 0 ]
@@ -276,11 +263,8 @@ have_killswitch() {
   sleep 0.5
 
   kill -TERM "$watcher"
-  local i
-  for i in $(seq 1 50); do
-    kill -0 "$watcher" 2>/dev/null || break
-    sleep 0.1
-  done
+  has_exited() { ! kill -0 "$1" 2>/dev/null; }
+  wait_for 5 has_exited "$watcher" || true
   run ! kill -0 "$watcher"
   kill -0 "$game" || {
     echo "the watcher took the game with it" >&2

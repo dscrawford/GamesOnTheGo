@@ -225,8 +225,8 @@ EOF
   GOTG_DANSTICK_KEEPER_INTERVAL=0.2 danstick_keeper_start "$game"
   local keeper=$!
   wait "$game"
-  sleep 1.0
-  ! kill -0 "$keeper" 2>/dev/null
+  has_exited() { ! kill -0 "$1" 2>/dev/null; }
+  wait_for 5 has_exited "$keeper"
 }
 
 @test "the keeper can be switched off" {
@@ -295,11 +295,7 @@ EOF
   mkdir -p "$GOTG_ENV_DIR"
   : >"$GOTG_ENV_DIR/n64.nix"
   fake_env env-n64
-  {
-    printf '#!%s\n' "$(command -v bash)"
-    printf 'echo "emulator ran"\n'
-  } >"$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
-  chmod +x "$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
+  make_stub "$GOTG_ROOTS_DIR/env-n64/bin/gotg-play" 'echo "emulator ran"'
 
   gotg play usa.zelda
   [ "$status" -eq 0 ]
@@ -314,11 +310,7 @@ EOF
   mkdir -p "$GOTG_ENV_DIR"
   : >"$GOTG_ENV_DIR/n64.nix"
   fake_env env-n64
-  {
-    printf '#!%s\n' "$(command -v bash)"
-    printf 'echo "emulator ran"\n'
-  } >"$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
-  chmod +x "$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
+  make_stub "$GOTG_ROOTS_DIR/env-n64/bin/gotg-play" 'echo "emulator ran"'
 
   gotg play usa.zelda
   [ "$status" -eq 0 ]
@@ -499,11 +491,7 @@ ryujinx_env() {
   : >"$GOTG_ENV_DIR/n64.nix"
   fake_env env-n64
   export ORDER_LOG="$TEST_TMP/order"
-  {
-    printf '#!%s\n' "$(command -v bash)"
-    printf 'echo game >>"$ORDER_LOG"\n'
-  } >"$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
-  chmod +x "$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
+  make_stub "$GOTG_ROOTS_DIR/env-n64/bin/gotg-play" 'echo game >>"$ORDER_LOG"'
   # An environment with pads to bind, and an enumerator that says so -- and
   # records how it was asked, since how it is asked decides what it can see.
   echo '{"emulator":"ares","console":"Nintendo64"}' >"$GOTG_ROOTS_DIR/env-n64/share/gotg/pads.json"
@@ -683,11 +671,7 @@ pads_manifest() {
   : >"$GOTG_ENV_DIR/n64.nix"
   fake_env env-n64
   pads_manifest env-n64 <<<'{"emulator":"ares","console":"Nintendo64","identity":"xbox360"}'
-  {
-    printf '#!%s\n' "$(command -v bash)"
-    printf 'echo "emulator ran"\n'
-  } >"$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
-  chmod +x "$GOTG_ROOTS_DIR/env-n64/bin/gotg-play"
+  make_stub "$GOTG_ROOTS_DIR/env-n64/bin/gotg-play" 'echo "emulator ran"'
   mkdir -p "$TEST_TMP/data"
   cp "$(dirname "$GOTG_BIN")/../share/gotg/data/ares-pads.json" "$TEST_TMP/data/"
   export GOTG_DATA="$TEST_TMP/data"

@@ -66,9 +66,7 @@ manifest_refresh() {
   }
 
   mkdir -p "$GOTG_STATE_DIR"
-  local tmp="$GOTG_CACHE_FILE.tmp"
-  printf '%s' "$payload" >"$tmp"
-  mv "$tmp" "$GOTG_CACHE_FILE"
+  printf '%s' "$payload" | atomic_write "$GOTG_CACHE_FILE"
 
   local count
   count="$(jq '.games | length' "$GOTG_CACHE_FILE")"

@@ -435,7 +435,7 @@ EOF
   STEAM_WAIT=5 run add_to_steam
   [ "$status" -eq 0 ]
   # The relaunch is detached, so give it a moment to be recorded.
-  for _ in 1 2 3 4 5 6 7 8 9 10; do grep -qx "steam" "$SIDE" && break; sleep 0.2; done
+  wait_for 2 grep -qx "steam" "$SIDE" || true
   [ "$(grep -E '^(steam|gotg)' "$SIDE" | tr '\n' ';')" = "steam -shutdown;gotg steam picker;steam;" ]
 }
 

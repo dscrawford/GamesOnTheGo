@@ -153,13 +153,15 @@ updates_check() {
   stamp="$(library_stamp "$library")"
   now="$(date +%s)"
   ((force)) || ! _updates_fresh "$cache" "$stamp" "$now" || return 0
-  mkdir -p "$GOTG_STATE_DIR/locks"
-  exec 9>"$GOTG_STATE_DIR/locks/updates.lock"
-  flock 9
-  ((force)) || ! _updates_fresh "$cache" "$stamp" "$now" || {
-    exec 9>&-
-    return 0
-  }
+  with_lock "$GOTG_STATE_DIR/locks/updates.lock" "" "" \
+    _updates_check_locked "$library" "$cache" "$stamp" "$now" "$force"
+}
+
+# updates_check's work, under its lock. The freshness is asked again here, so
+# the asker that waited finds the answer the first one wrote.
+_updates_check_locked() {
+  local library="$1" cache="$2" stamp="$3" now="$4" force="$5"
+  ((force)) || ! _updates_fresh "$cache" "$stamp" "$now" || return 0
 
   local url="" latest="" stale=false
   url="$(updates_gotg_original "$library")"
@@ -185,17 +187,13 @@ updates_check() {
     apps="$(jq -c '{gotg: .app_want, ui: .ui_want}' "$cache" 2>/dev/null || true)"
     [[ -n "$apps" ]] || apps='{}'
   fi
-  if jq -n --arg stamp "$stamp" --argjson at "$now" --arg url "$url" --arg latest "$latest" \
+  # shellcheck disable=SC2016 # the quotes hold a jq/awk program, run by atomic_write
+  if atomic_write "$cache" -- jq -n --arg stamp "$stamp" --argjson at "$now" --arg url "$url" --arg latest "$latest" \
     --argjson stale "$stale" --argjson want "$want" --argjson apps "$apps" \
     '{version: 1, stamp: $stamp, checked_at: $at, url: $url, latest: $latest, stale: $stale,
-      want: $want, app_want: ($apps.gotg // null), ui_want: ($apps.ui // null)}' \
-    >"$cache.tmp"; then
-    mv -f "$cache.tmp" "$cache"
+      want: $want, app_want: ($apps.gotg // null), ui_want: ($apps.ui // null)}'; then
     updates_restamp "$library" "$stamp"
-  else
-    rm -f "$cache.tmp"
   fi
-  exec 9>&-
 }
 
 # The catalog rows that carry extras, each on a line: the only games whose

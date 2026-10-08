@@ -29,6 +29,13 @@ setup_env() {
   export GOTG_STEAM_SHORTCUTS="$TEST_TMP/steam-shortcuts.vdf"
   export GOTG_LOG_DIR="$GOTG_STATE_DIR/logs"
 
+  # A backstop, not a setting: every path above is already under TEST_TMP, and
+  # this is for the one that is not -- a new code path that falls back to
+  # $HOME/... would otherwise write into the real home of whoever ran bats.
+  # (nix.conf, ~/Games, ~/.config are all reached that way.)
+  export HOME="$TEST_TMP/home"
+  mkdir -p "$HOME"
+
   # Artwork has a source that needs no key, so it is reached on any `steam add`
   # — including from tests that are not about artwork at all. Pointed at a
   # closed port by default: refused instantly, and no test can quietly depend
@@ -41,6 +48,39 @@ setup_env() {
   export GOTG_HOST_GL="$TEST_TMP"
 
   mkdir -p "$GOTG_GAMES_DIR"
+}
+
+# Poll for a condition instead of sleeping for as long as it might take:
+#
+#   wait_for <seconds> <command...>
+#
+# Returns as soon as the command succeeds, and 1 if it still fails after the
+# time is up. Every fixed `sleep N` before an assertion is either too long (a
+# slow suite) or too short (a flaky one, on a loaded machine); the condition
+# the test is waiting for is nearly always something it can ask about.
+wait_for() {
+  local tries=$(($1 * 10)) i
+  shift
+  for ((i = 0; i < tries; i++)); do
+    if "$@"; then return 0; fi
+    sleep 0.1
+  done
+  "$@"
+}
+
+# A script standing in for a program: its shebang is this machine's bash (the
+# build sandbox has no /usr/bin/env) and each argument after the path is one
+# line of its body. Single-quote the lines, so that what is written is what is
+# typed here and `$1`, `$*` and `$LOG` are read when the stub runs.
+make_stub() {
+  local path="$1"
+  shift
+  mkdir -p "$(dirname "$path")"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf '%s\n' "$@"
+  } >"$path"
+  chmod +x "$path"
 }
 
 # A free port, so tests can run in parallel.
@@ -242,10 +282,7 @@ load_client_libs() {
   export GOTG_ENV_DIR="${GOTG_ENV_DIR:-$root/env}"
 
   # shellcheck source=/dev/null
-  local lib
-  for lib in color common config storage manifest download env launcher danstick pads pads-dolphin pads-ryujinx pads-cemu keys firmware remote saves qa-analyze cmd-qa cmd-launch library-play foreign-gl cmd-uninstall; do
-    source "$GOTG_LIB/$lib.sh"
-  done
+  source "$GOTG_LIB/all.sh"
 }
 
 # Play through a library, as `gotg play` does now (docs/nix-games.md), with

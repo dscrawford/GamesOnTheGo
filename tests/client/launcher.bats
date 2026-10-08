@@ -514,6 +514,77 @@ fake_zenity() {
   [[ "$stderr" == *"build stopped: the progress dialog was cancelled"* ]]
 }
 
+# The same dialog around a download. A curl that takes its time, so there is a
+# transfer for the dialog to be closed on. Through GOTG_CURL rather than PATH:
+# the client puts its own tools ahead of whatever PATH it inherited (the
+# packaged script's runtimeInputs, the dev shim's too), so a shim on PATH never
+# reached it and the "slow" download was over before the dialog had opened.
+slow_curl() {
+  local real
+  real="$(command -v curl)"
+  mkdir -p "$TEST_TMP/slowbin"
+  printf '#!%s\nsleep %s\nexec %s "$@"\n' "$(command -v bash)" "$1" "$real" >"$TEST_TMP/slowbin/curl"
+  chmod +x "$TEST_TMP/slowbin/curl"
+  export GOTG_CURL="$TEST_TMP/slowbin/curl"
+}
+
+@test "closing the dialog stops a download, and says so" {
+  add_game n64 "usa.zelda.z64" "rom-content"
+  gotg refresh
+  fake_zenity ok
+  printf '#!%s\nsleep 0.8\nexit 1\n' "$(command -v bash)" >"$GOTG_ZENITY"
+  slow_curl 5
+
+  gotg download usa.zelda
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"download stopped: the progress dialog was cancelled"* ]]
+  [ ! -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
+}
+
+@test "a dialog that dies for its own reasons does not stop a download" {
+  add_game n64 "usa.zelda.z64" "rom-content"
+  gotg refresh
+  fake_zenity ok
+  printf '#!%s\nsleep 0.8\necho "This option is not available." >&2\nexit 255\n' "$(command -v bash)" >"$GOTG_ZENITY"
+  slow_curl 3
+
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"went away (zenity exited 255)"* ]]
+  [[ "$stderr" != *"download stopped"* ]]
+  [ "$(cat "$GOTG_GAMES_DIR/n64/usa.zelda.z64")" = rom-content ]
+}
+
+@test "a download shows its dialog a full bar when it finishes" {
+  add_game n64 "usa.zelda.z64" "rom-content"
+  gotg refresh
+  fake_zenity ok
+  printf '#!%s\ncat >"$ZENITY_IN"\nexit 0\n' "$(command -v bash)" >"$GOTG_ZENITY"
+  export ZENITY_IN="$TEST_TMP/zenity.in"
+  slow_curl 1
+
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [ "$(tail -n1 "$ZENITY_IN")" = "100" ]
+  [ "$(cat "$GOTG_GAMES_DIR/n64/usa.zelda.z64")" = rom-content ]
+}
+
+@test "a download that fails tells its dialog so, rather than filling the bar" {
+  add_game n64 "usa.zelda.z64" "rom-content"
+  gotg refresh
+  fake_zenity ok
+  printf '#!%s\ncat >"$ZENITY_IN"\nexit 0\n' "$(command -v bash)" >"$GOTG_ZENITY"
+  export ZENITY_IN="$TEST_TMP/zenity.in"
+  # The bytes go away between the catalog and the fetch.
+  rm -f "$SERVICE_LIBRARY_DIR/n64/usa.zelda.z64"
+  slow_curl 1
+
+  gotg download usa.zelda
+  [ "$status" -ne 0 ]
+  grep -q "# download failed" "$ZENITY_IN"
+  ! grep -qx "100" "$ZENITY_IN"
+}
+
 # --- a root built by an older gotg ---------------------------------------------
 #
 # `play` built a missing environment and never looked at one that was there,

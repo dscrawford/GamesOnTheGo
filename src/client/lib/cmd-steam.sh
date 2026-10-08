@@ -141,9 +141,19 @@ steam_pending_file() {
 # not happened yet: changing your mind should not leave the queue adding a game
 # in order to take it straight back out.
 steam_queue() {
+  local file
+  file="$(steam_pending_file)"
+  with_lock "$file.lock" 10 "another gotg is writing the Steam queue; try again" _steam_queue_add "$@"
+}
+
+# The write itself, under steam_queue's lock: the queue is a file rewritten in
+# place and two runs can want it at once -- the picker adds one game per press,
+# and a person with two terminals is not doing anything strange. The same flock
+# the download and firmware caches use, on a lock file of its own so that the
+# losing run waits rather than writing over the winner.
+_steam_queue_add() {
   local op="$1" want="$2" variant="${3:-}" file tmp
   file="$(steam_pending_file)"
-  steam_queue_lock
   [[ -f "$file" ]] || printf '[]\n' >"$file"
   tmp="$(mktemp "$file.XXXXXX")"
   if jq --arg op "$op" --arg id "$want" --arg variant "$variant" \
@@ -152,33 +162,47 @@ steam_queue() {
      + [ { op: $op, id: $id, variant: $variant } ]' \
     "$file" >"$tmp"; then
     mv "$tmp" "$file"
-    steam_queue_unlock
   else
     # Loudly, because the whole promise of queueing is that the change is not
     # lost. A pending file that has stopped being JSON — hand-edited, or a
     # machine that went down mid-write — would otherwise take every change from
     # here on while printing the same reassuring paragraph about it waiting.
     rm -f "$tmp"
-    steam_queue_unlock
     die "could not record this in $file — it is no longer readable as JSON.
      Look at it, or remove it and ask again: rm $file"
   fi
 }
 
-# One writer at a time. The queue is a file rewritten in place and two runs can
-# want it at once — the picker adds one game per press, and a person with two
-# terminals is not doing anything strange. The same flock the download and
-# firmware caches use, on a lock file of its own so that the losing run waits
-# rather than writing over the winner.
-steam_queue_lock() {
-  local file
-  file="$(steam_pending_file)"
-  mkdir -p "$(dirname "$file")"
-  exec 9>"$file.lock"
-  flock -w 10 9 || die "another gotg is writing the Steam queue; try again"
-}
+# Take the rows out of the queue, under steam_flush's lock: _steam_flush_claim
+# <file> <array-name> fills the caller's array, and drops the file once the
+# catalog is known to be there.
+#
+# Claimed under the lock so that two runs cannot both take the same rows and
+# apply everything twice. Only objects: a file that has stopped being a list
+# of records would otherwise reach the reads below as a bare number and take
+# the whole command down with a jq error.
+_steam_flush_claim() {
+  local file="$1"
+  local -n out="$2"
+  mapfile -t out < <(
+    jq -c '.[]? | select(type == "object" and (.op | type) == "string")' \
+      "$file" 2>/dev/null
+  )
+  if ((${#out[@]} == 0)); then
+    # The file existed and was not empty, so something was in it and is now
+    # going in the bin. Said out loud: a change nobody can see disappearing is
+    # the failure this whole queue exists to avoid.
+    warn "the Steam queue in $file held nothing readable; discarding it"
+    rm -f "$file"
+    return 0
+  fi
 
-steam_queue_unlock() { exec 9>&-; }
+  # Before the file is dropped, not after: manifest_ensure dies when there is no
+  # catalog cached and no network to fetch one, and a queue deleted on the way
+  # into that death is three changes the person made and will never see again.
+  manifest_ensure
+  rm -f "$file"
+}
 
 # Apply everything that was waiting, now that Steam is not.
 #
@@ -199,31 +223,8 @@ steam_flush() {
   [[ -s "$file" ]] || return 0
   ! steam_running || return 0
 
-  # Claimed under the lock so that two runs cannot both take the same rows and
-  # apply everything twice. Only objects: a file that has stopped being a list
-  # of records would otherwise reach the reads below as a bare number and take
-  # the whole command down with a jq error.
-  steam_queue_lock
-  mapfile -t rows < <(
-    jq -c '.[]? | select(type == "object" and (.op | type) == "string")' \
-      "$file" 2>/dev/null
-  )
-  if ((${#rows[@]} == 0)); then
-    # The file existed and was not empty, so something was in it and is now
-    # going in the bin. Said out loud: a change nobody can see disappearing is
-    # the failure this whole queue exists to avoid.
-    warn "the Steam queue in $file held nothing readable; discarding it"
-    rm -f "$file"
-    steam_queue_unlock
-    return 0
-  fi
-
-  # Before the file is dropped, not after: manifest_ensure dies when there is no
-  # catalog cached and no network to fetch one, and a queue deleted on the way
-  # into that death is three changes the person made and will never see again.
-  manifest_ensure
-  rm -f "$file"
-  steam_queue_unlock
+  with_lock "$file.lock" 10 "another gotg is writing the Steam queue; try again" _steam_flush_claim "$file" rows
+  ((${#rows[@]} > 0)) || return 0
 
   log "Steam is closed; applying $(steam_count "${#rows[@]}") that waited for it."
   for row in "${rows[@]}"; do

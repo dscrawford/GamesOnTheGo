@@ -203,11 +203,9 @@ controllers_order_set() {
   local file
   file="$(pads_order_file)"
   mkdir -p "$GOTG_CONFIG_DIR"
-  if ! jq -n --argjson order "$keys" '{order: $order}' >"$file.tmp"; then
-    rm -f "$file.tmp"
+  # shellcheck disable=SC2016 # the quotes hold a jq/awk program, run by atomic_write
+  atomic_write "$file" -- jq -n --argjson order "$keys" '{order: $order}' ||
     die "could not write $file"
-  fi
-  mv "$file.tmp" "$file" || die "could not write $file"
 
   controllers_order
 }

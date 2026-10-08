@@ -61,13 +61,8 @@ config_patch() {
       die "$GOTG_CONFIG_FILE is not a JSON object — move it aside and run: gotg login"
   fi
 
-  local tmp="$GOTG_CONFIG_FILE.tmp"
-  # Create with the right mode before writing, so it is never briefly
-  # world-readable.
-  : >"$tmp"
-  chmod 600 "$tmp"
-  jq -n --argjson existing "$existing" --argjson patch "$patch" '$existing + $patch' >"$tmp"
-  mv "$tmp" "$GOTG_CONFIG_FILE"
+  # Mode 600 before the first byte, so it is never briefly world-readable.
+  json_merge_file "$GOTG_CONFIG_FILE" "$patch" 600
 }
 
 prompt_secret() {
@@ -111,7 +106,7 @@ prompt_line() {
 # at it, unless Nix already reads a netrc of its own, whose other credentials
 # a second file would hide: then the line to add is said, never the token.
 login_netrc() {
-  local url="$1" token="$2" host netrc tmp conf system current
+  local url="$1" token="$2" host netrc conf system current
   host="${url#*://}"
   host="${host%%/*}"
   host="${host%%:*}"
@@ -120,13 +115,10 @@ login_netrc() {
     return 0
   }
   netrc="$GOTG_CONFIG_DIR/netrc"
-  tmp="$(mktemp "$netrc.XXXXXX")"
-  chmod 600 "$tmp"
   {
     [[ ! -f "$netrc" ]] || grep -v "^machine $host " "$netrc" || true
     printf 'machine %s login gotg password %s\n' "$host" "$token"
-  } >"$tmp"
-  mv "$tmp" "$netrc"
+  } | atomic_write "$netrc" 600
 
   conf="${XDG_CONFIG_HOME:-$HOME/.config}/nix/nix.conf"
   system="${GOTG_SYSTEM_NETRC:-/etc/nix/netrc}"
@@ -250,19 +242,12 @@ cmd_login() {
     curl --config - -fsS --connect-timeout 10 --max-time 30 "$url$probe" >/dev/null 2>&1 ||
     die "the service at $url did not accept that token"
 
-  local file tmp
+  local file patch
   file="${GOTG_API_FILE:-$GOTG_CONFIG_DIR/api.json}"
   mkdir -p "$(dirname "$file")"
-  tmp="$(mktemp "$file.XXXXXX")"
-  if [[ -f "$file" ]]; then
-    jq --arg url "$url" --arg token "$token" --arg name "$name" \
-      '. + {url: $url, token: $token} + (if $name != "" then {name: $name} else {} end)' "$file" >"$tmp"
-  else
-    jq -n --arg url "$url" --arg token "$token" --arg name "$name" \
-      '{url: $url, token: $token} + (if $name != "" then {name: $name} else {} end)' >"$tmp"
-  fi
-  chmod 600 "$tmp"
-  mv "$tmp" "$file"
+  patch="$(jq -n --arg url "$url" --arg token "$token" --arg name "$name" \
+    '{url: $url, token: $token} + (if $name != "" then {name: $name} else {} end)')"
+  json_merge_file "$file" "$patch" 600
   log "saved $file (mode 600)${name:+ — you are $name}"
 
   login_netrc "$url" "$token"

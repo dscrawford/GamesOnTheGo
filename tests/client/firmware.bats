@@ -108,6 +108,32 @@ registered_dir() { printf '%s/%s/%s' "$GOTG_STATE_DIR/env" "${1:-env-switch}" "$
   start_saves_service
 }
 
+@test "a catalog naming a byte host that has moved is re-read, not given up on" {
+  # As for the keys: the byte host sits behind a VPN whose port changes on
+  # reconnect, and a cache from before one names a port nothing answers on.
+  fake_firmware_env
+  serve_firmware
+  gotg refresh
+  jq '. + {files_url: "http://127.0.0.1:1"}' "$GOTG_CACHE_FILE" >"$GOTG_CACHE_FILE.tmp"
+  mv "$GOTG_CACHE_FILE.tmp" "$GOTG_CACHE_FILE"
+
+  run firmware_ensure env-switch switch
+  [ "$status" -eq 0 ]
+  [ -f "$(registered_dir)/aaaa.nca/00" ]
+}
+
+@test "and a firmware host that is simply down is a warning, not an endless retry" {
+  fake_firmware_env
+  gotg refresh
+  jq '. + {files_url: "http://127.0.0.1:1"}' "$GOTG_CACHE_FILE" >"$GOTG_CACHE_FILE.tmp"
+  mv "$GOTG_CACHE_FILE.tmp" "$GOTG_CACHE_FILE"
+
+  run firmware_ensure env-switch switch
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no switch firmware"* ]]
+  [ ! -e "$(registered_dir)" ]
+}
+
 @test "no firmware anywhere warns and still lets the launch happen" {
   fake_firmware_env
   run firmware_ensure env-switch switch

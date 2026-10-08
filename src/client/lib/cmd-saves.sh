@@ -110,19 +110,15 @@ saves_cmd_setup() {
   if [[ -n "$url" ]]; then
     [[ "$url" == http://* || "$url" == https://* ]] ||
       die "the service is an http(s) URL: $url"
-    local token existing='{}' file
+    local token file
     file="$(saves_api_file)"
     token="$(prompt_secret "token for ${url%/}: ")"
     [[ -n "$token" ]] || die "a token is required — it is what keeps the service closed"
 
     mkdir -p "$GOTG_CONFIG_DIR"
     chmod 700 "$GOTG_CONFIG_DIR"
-    [[ -f "$file" ]] && existing="$(cat "$file")"
-    : >"$file.tmp"
-    chmod 600 "$file.tmp"
-    jq -n --argjson existing "$existing" --arg url "${url%/}" --arg token "$token" \
-      '$existing + {url: $url, token: $token}' >"$file.tmp"
-    mv "$file.tmp" "$file"
+    json_merge_file "$file" \
+      "$(jq -n --arg url "${url%/}" --arg token "$token" '{url: $url, token: $token}')" 600
   fi
 
   saves_have_remote ||

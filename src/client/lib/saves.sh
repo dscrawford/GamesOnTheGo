@@ -125,10 +125,7 @@ saves_journal_set() {
   local file
   file="$(saves_journal_path "$1")"
   mkdir -p "$GOTG_SAVES_DIR"
-  local existing='{}'
-  [[ -f "$file" ]] && existing="$(cat "$file")"
-  jq -n --argjson existing "$existing" --argjson patch "$2" '$existing + $patch' >"$file.tmp"
-  mv "$file.tmp" "$file"
+  json_merge_file "$file" "$2"
 }
 
 # --------------------------------------------------------------- the manifest

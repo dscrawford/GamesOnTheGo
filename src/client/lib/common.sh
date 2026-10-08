@@ -110,6 +110,129 @@ dialog_started() {
   kill -0 "$1" 2>/dev/null
 }
 
+# Run a command behind a zenity progress dialog and supervise both:
+#
+#   zenity_supervise <what> <stopped> [<tick...>] -- <zenity args...> -- <work...> -- <fallback...>
+#
+# <what> is the gerund the messages use ("building env-n64"), <stopped> the
+# first words of the death when the person closes the dialog ("build stopped").
+# The work runs in the background and its status is returned. A tick, when
+# there is one, is run each interval as `tick... <fd> tick`, to write to the
+# dialog's pipe on that descriptor, and once as `tick... <fd> failed` when the
+# work failed (instead of the bar being filled). The fallback is the work again
+# without a dialog, for a dialog that never came up.
+#
+# The rules, and the day each was learned:
+# - A dialog that never came up (dead inside the grace) is not a cancellation:
+#   the work goes on without it. On the Deck zenity refused GOTG's own arguments
+#   and every build was killed as "cancelled".
+# - A dialog that goes away mid-work says why in its exit status: 1 is the
+#   person closing it, and that stops the work (the partial stays, so the next
+#   run resumes); anything else -- an option it refused, a display it lost --
+#   is the dialog's problem and not a reason to lose a build or a download.
+# - 100 is written only when the work succeeded: a bar jumping to full on a
+#   failure tells the person the opposite of what happened.
+#
+# _download_zenity and _env_build_zenity each carried this loop, differing in
+# the tick, two messages and the fd (9 and 6, one of them the lock's); the
+# download's cancel path had no test at all.
+zenity_supervise() {
+  # The dialog is the fifo's only reader, and it can go away between any
+  # check and the next write -- for certain after the work has ended, which is
+  # where the full bar is written. A write to a fifo nobody reads is SIGPIPE,
+  # and SIGPIPE ends this shell with no word said: a download that finished
+  # after its dialog had been closed died with status 141 and no message.
+  # Ignored for the supervisor's lifetime, the write fails with EPIPE instead,
+  # which `|| true` can absorb. The work inherits the disposition; curl writes
+  # to a file and nix to a socket it owns, neither minds.
+  trap '' PIPE
+  local rc=0
+  _zenity_supervise "$@" || rc=$?
+  trap - PIPE
+  return "$rc"
+}
+
+# One line to the dialog's fifo. Its reader may be gone (see above), so the
+# caller says what a failed write means -- for every caller so far, nothing.
+dialog_say() { printf '%s\n' "$2" >&"$1"; }
+
+_zenity_supervise() {
+  local what="$1" stopped="$2" part=tick fd
+  shift 2
+  local tick=() zargs=() work=() fallback=() arg
+  for arg in "$@"; do
+    if [[ "$arg" == "--" ]]; then
+      case "$part" in
+        tick) part=zargs ;;
+        zargs) part=work ;;
+        work) part=fallback ;;
+      esac
+      continue
+    fi
+    case "$part" in
+      tick) tick+=("$arg") ;;
+      zargs) zargs+=("$arg") ;;
+      work) work+=("$arg") ;;
+      fallback) fallback+=("$arg") ;;
+    esac
+  done
+
+  # A private directory for the fifo: mktemp -u then mkfifo races with anything
+  # else that could claim the name in between.
+  local pipedir pipe work_pid zen_pid status=0 zrc
+  pipedir="$(dialog_dir)"
+  pipe="$pipedir/progress"
+  mkfifo "$pipe"
+
+  zenity_run "${zargs[@]}" <"$pipe" &
+  zen_pid=$!
+  exec {fd}>"$pipe"
+
+  if ! dialog_started "$zen_pid"; then
+    exec {fd}>&-
+    dialog_dir_remove "$pipedir"
+    warn "the progress dialog could not start; $what without it"
+    "${fallback[@]}"
+    return
+  fi
+
+  "${work[@]}" &
+  work_pid=$!
+
+  while kill -0 "$work_pid" 2>/dev/null; do
+    if ! kill -0 "$zen_pid" 2>/dev/null; then
+      # `wait` is a command like any other to errexit: `wait; zrc=$?` left
+      # the shell before zrc was read whenever the dialog's exit was not 0,
+      # which for a cancel (1) is always. The build path never saw it because
+      # its caller ran it under `||`; the download path had no test until now.
+      wait "$zen_pid" 2>/dev/null && zrc=0 || zrc=$?
+      exec {fd}>&-
+      dialog_dir_remove "$pipedir"
+      if [[ "$zrc" -eq 1 ]]; then
+        kill "$work_pid" 2>/dev/null || true
+        wait "$work_pid" 2>/dev/null || true
+        die "$stopped: the progress dialog was cancelled"
+      fi
+      warn "the progress dialog went away (zenity exited $zrc); $what without it"
+      wait "$work_pid" || status=$?
+      return "$status"
+    fi
+    if ((${#tick[@]} > 0)); then "${tick[@]}" "$fd" tick; fi
+    sleep "${GOTG_PROGRESS_TICK:-0.5}"
+  done
+
+  wait "$work_pid" || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    dialog_say "$fd" 100 2>/dev/null || true
+  elif ((${#tick[@]} > 0)); then
+    "${tick[@]}" "$fd" failed || true
+  fi
+  exec {fd}>&-
+  dialog_dir_remove "$pipedir"
+  wait "$zen_pid" 2>/dev/null || true
+  return "$status"
+}
+
 # Ids come from the server and end up as paths and filenames, so check them
 # rather than trusting the catalog.
 validate_id() {
@@ -195,4 +318,110 @@ human_size() {
     while (b >= 1024 && i < 5) { b /= 1024; i++ }
     printf (i == 1 ? "%d %s" : "%.1f %s"), b, u[i]
   }'
+}
+
+# --------------------------------------------------------------- writing files
+
+# Replace <path> with what a command printed (or stdin did), all or nothing:
+#
+#   atomic_write <path> [mode] [-- <command...>]
+#
+# Without a command it copies stdin. A command is the safer form: its exit
+# status decides whether the file is replaced, which a `producer | atomic_write`
+# pipeline cannot do (the mv has happened before the producer's status is known).
+# An empty mode means "as the umask makes any file".
+#
+# This replaced a `>"$file.tmp"` ... `mv` written out at some twenty sites, each
+# with its own answer to two questions that only matter when they go wrong: was
+# the mode set before the secret went in (a config written 0600 after the fact
+# was world-readable for as long as jq ran), and what is left behind when the
+# writer fails (a `.tmp` that the next run trips over, or -- where the failure
+# was not checked -- an empty file mv'd over a good one). The scratch file is
+# mktemp'd beside the target, so two writers do not share it, and it is removed
+# on every failure. The caller still decides what to say; this only returns 1.
+atomic_write() {
+  local path="$1" mode="" tmp
+  shift
+  if [[ $# -gt 0 && "$1" != "--" ]]; then
+    mode="$1"
+    shift
+  fi
+  [[ "${1:-}" != "--" ]] || shift
+  tmp="$(mktemp "$path.XXXXXX")" || return 1
+  if [[ -n "$mode" ]]; then
+    chmod "$mode" "$tmp"
+  else
+    chmod "$(printf '%o' "$((0666 & ~$(umask)))")" "$tmp"
+  fi
+  if [[ $# -gt 0 ]]; then
+    "$@" >"$tmp" || {
+      rm -f "$tmp"
+      return 1
+    }
+  else
+    cat >"$tmp" || {
+      rm -f "$tmp"
+      return 1
+    }
+  fi
+  mv -f "$tmp" "$path" || {
+    rm -f "$tmp"
+    return 1
+  }
+}
+
+# Merge a JSON patch into the object in <path> (an empty object when there is
+# no file), and write the result atomically:
+#
+#   json_merge_file <path> <patch-json> [mode]
+#
+# The same read-existing, `$existing + $patch`, chmod, mv sequence stood in
+# config_patch, the saves setup, the saves journal and login, each reading the
+# file its own way. A file that is not JSON, or a patch that is not, fails here
+# and leaves the file exactly as it was.
+json_merge_file() {
+  local path="$1" patch="$2" mode="${3:-}" existing='{}'
+  [[ ! -f "$path" ]] || existing="$(cat "$path")"
+  # shellcheck disable=SC2016 # the quotes hold a jq program
+  atomic_write "$path" "$mode" -- \
+    jq -n --argjson existing "$existing" --argjson patch "$patch" '$existing + $patch'
+}
+
+# ------------------------------------------------------------------- locking
+
+# Run a command holding an exclusive lock on <lockfile>:
+#
+#   with_lock <lockfile> <wait-seconds|""> <timeout-message> <command...>
+#
+# An empty wait blocks for as long as it takes. When the wait runs out the
+# caller's message is `die`d -- here, rather than as a status for the caller to
+# test, because a command run on the left of `||` has errexit switched off for
+# all of it, and a download or a queue write must not lose that.
+#
+# This replaced five `exec N>file; flock N` sequences, each with its release
+# (`exec N>&-`) written out by hand on every path that left the function:
+# two in the download, one in updates_check, one in library_update_self and a
+# lock/unlock pair around the Steam queue. A path that forgot kept the lock
+# for the rest of the process, and a fixed fd number could collide with the
+# progress pipe, which download.sh keeps on 9. The descriptor is allocated by
+# bash here ({fd}), above 9, and closed in the one place.
+#
+# A command that dies ends the process, which drops the lock with it. Anything
+# the command starts in the background inherits the descriptor and so keeps the
+# lock, exactly as it did with the hand-written form.
+with_lock() {
+  local lockfile="$1" wait="$2" message="$3" fd rc
+  shift 3
+  mkdir -p "$(dirname "$lockfile")"
+  exec {fd}>"$lockfile" || die "cannot open the lock $lockfile"
+  if ! flock ${wait:+-w "$wait"} "$fd"; then
+    exec {fd}>&-
+    die "$message"
+  fi
+  # Not `"$@" || rc=$?`: see above. Under errexit a failing command ends the
+  # process here, which drops the lock; with errexit off it falls through.
+  "$@"
+  rc=$?
+  exec {fd}>&-
+  return "$rc"
 }

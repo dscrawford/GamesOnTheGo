@@ -81,10 +81,10 @@ pads_dolphin_rewrite() {
 # Set one key of one section of an ini, adding either if it is missing.
 pads_dolphin_ini_set() {
   local file="$1" section="$2" key="$3" value="$4"
-  local tmp="$file.gotg-tmp"
 
   touch "$file"
-  awk -v section="[$section]" -v key="$key" -v value="$value" '
+  # shellcheck disable=SC2016 # the quotes hold a jq/awk program, run by atomic_write
+  atomic_write "$file" -- awk -v section="[$section]" -v key="$key" -v value="$value" '
     BEGIN { line = key " = " value }
     # Leaving the section without having written the key: write it now, before
     # the header that ends the section.
@@ -100,11 +100,7 @@ pads_dolphin_ini_set() {
         print line
       }
     }
-  ' "$file" >"$tmp" || {
-    rm -f "$tmp"
-    return 1
-  }
-  mv "$tmp" "$file"
+  ' "$file"
 }
 
 # Seat each attached controller in the GameCube port of its own number.

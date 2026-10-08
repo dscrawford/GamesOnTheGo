@@ -14,11 +14,7 @@ setup() {
   # A stand-in gotg-pads, so these run with no controller attached.
   export GOTG_PADS="$TEST_TMP/bin/gotg-pads"
   mkdir -p "$TEST_TMP/bin"
-  {
-    printf '#!%s\n' "$(command -v bash)"
-    printf 'cat "$GOTG_PADS_FIXTURE"\n'
-  } >"$GOTG_PADS"
-  chmod +x "$GOTG_PADS"
+  make_stub "$GOTG_PADS" 'cat "$GOTG_PADS_FIXTURE"'
 
   export GOTG_PADS_FIXTURE="$TEST_TMP/pads.json"
   jq -n '[{instance: 1, name: "Xbox Wireless Controller",

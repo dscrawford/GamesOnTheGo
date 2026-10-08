@@ -201,57 +201,11 @@ env_pads_manifest() {
 _env_build_zenity() {
   local ref="$1" root="$2" attr="$3"
   shift 3
-  local pipedir pipe build_pid zen_pid status=0
-  pipedir="$(dialog_dir)"
-  pipe="$pipedir/progress"
-  mkfifo "$pipe"
-
-  zenity_run --progress --title="GOTG" --text="Preparing $attr…" \
-    --pulsate --auto-close <"$pipe" &
-  zen_pid=$!
-  exec 6>"$pipe"
-
   # A dialog that never came up is not a cancellation: build without it.
-  if ! dialog_started "$zen_pid"; then
-    exec 6>&-
-    dialog_dir_remove "$pipedir"
-    warn "the progress dialog could not start; building $attr without it"
+  zenity_supervise "building $attr" "build stopped" -- \
+    --progress --title="GOTG" --text="Preparing $attr…" --pulsate --auto-close -- \
+    "$(nix_bin)" build "$ref" -o "$root" "$@" -- \
     "$(nix_bin)" build "$ref" -o "$root" "$@"
-    return
-  fi
-
-  "$(nix_bin)" build "$ref" -o "$root" "$@" &
-  build_pid=$!
-
-  local zrc
-  while kill -0 "$build_pid" 2>/dev/null; do
-    # The dialog is gone. zenity says why in its exit status: 1 is the
-    # person closing or cancelling it, and that stops the build; anything
-    # else -- an option it refused, a display it lost -- is the dialog's
-    # problem and not a reason to lose an emulator build.
-    if ! kill -0 "$zen_pid" 2>/dev/null; then
-      wait "$zen_pid" 2>/dev/null
-      zrc=$?
-      exec 6>&-
-      dialog_dir_remove "$pipedir"
-      if [[ "$zrc" -eq 1 ]]; then
-        kill "$build_pid" 2>/dev/null || true
-        wait "$build_pid" 2>/dev/null || true
-        die "build stopped: the progress dialog was cancelled"
-      fi
-      warn "the progress dialog went away (zenity exited $zrc); building $attr without it"
-      wait "$build_pid" || status=$?
-      return "$status"
-    fi
-    sleep "${GOTG_PROGRESS_TICK:-0.5}"
-  done
-
-  wait "$build_pid" || status=$?
-  [[ "$status" -eq 0 ]] && printf '100\n' >&6
-  exec 6>&-
-  dialog_dir_remove "$pipedir"
-  wait "$zen_pid" 2>/dev/null || true
-  return "$status"
 }
 
 # nix's progress, as the lines the picker draws.

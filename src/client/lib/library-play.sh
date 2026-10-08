@@ -216,15 +216,18 @@ cmd_library() {
 # The check that follows runs as the *new* client, so a fix to the check
 # ships with the update.
 library_update_self() {
-  local library app_out ui_out app_was ui_was
+  local library
   library="$(gotg_library)"
   [[ -n "$library" ]] || die "no library configured: set GOTG_LIBRARY, or \`library\` in $GOTG_CONFIG_FILE"
   [[ -d "$library" && -w "$library" && "$library" != /nix/store/* ]] ||
     die "the library at $library is not a directory this can write; its pin cannot be moved from here"
   [[ -f "$library/flake.lock" ]] || die "the library at $library has no flake.lock to move"
-  mkdir -p "$GOTG_STATE_DIR/locks"
-  exec 9>"$GOTG_STATE_DIR/locks/library.lock"
-  flock 9
+  with_lock "$GOTG_STATE_DIR/locks/library.lock" "" "" _library_update_self_locked "$library"
+}
+
+# library_update_self's work, one at a time per machine.
+_library_update_self_locked() {
+  local library="$1" app_out ui_out app_was ui_was
   export GOTG_NO_DIALOG=1
   app_was="$(readlink "$GOTG_APP_ROOT" 2>/dev/null || true)"
   ui_was="$(readlink "$GOTG_UI_ROOT" 2>/dev/null || true)"
@@ -266,7 +269,6 @@ library_update_self() {
     "$GOTG_APP_ROOT/bin/gotg" update --check --force >/dev/null 2>&1 || true
   fi
   foreign_gl_sync
-  exec 9>&-
   printf 'picker\t%s\n' "$(readlink -f "$GOTG_UI_ROOT")"
 }
 

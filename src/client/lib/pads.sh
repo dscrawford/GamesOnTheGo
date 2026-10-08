@@ -200,9 +200,8 @@ pads_ares_ensure_block() {
     *) return 1 ;;
   esac
 
-  local tmp
-  tmp="$(mktemp "$file.XXXXXX")" || return 1
-  c="$console" b="    $block" anchor="$anchor" payload="$payload" awk '
+  # shellcheck disable=SC2016 # the quotes hold a jq/awk program, run by atomic_write
+  c="$console" b="    $block" anchor="$anchor" payload="$payload" atomic_write "$file" 600 -- awk '
     BEGIN {
       c = ENVIRON["c"]; b = ENVIRON["b"]
       anchor = ENVIRON["anchor"]; payload = ENVIRON["payload"]
@@ -214,20 +213,16 @@ pads_ares_ensure_block() {
     !done && inC && anchor == "console" && indent == 0 { print payload; done = 1 }
     !done && inI && anchor == "input" && indent == 2 { print payload; done = 1 }
     !done && inI && anchor == "block" && indent == 4 && $0 == b { print payload; done = 1 }
-  ' "$file" >"$tmp" || {
-    rm -f "$tmp"
-    return 1
-  }
-  mv "$tmp" "$file"
+  ' "$file"
 }
 
 pads_ares_rewrite() {
   local file="$1" console="$2" block="$3" pad="$4" bindings="$5"
 
-  local tmp="$file.gotg-tmp"
   jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<<"$bindings" >"$file.gotg-map"
 
-  awk -v console="$console" -v block="$block" -v pad="$pad" -v mapfile="$file.gotg-map" '
+  # shellcheck disable=SC2016 # the quotes hold a jq/awk program, run by atomic_write
+  atomic_write "$file" -- awk -v console="$console" -v block="$block" -v pad="$pad" -v mapfile="$file.gotg-map" '
     BEGIN {
       while ((getline line < mapfile) > 0) {
         split(line, f, "\t")
@@ -269,12 +264,10 @@ pads_ares_rewrite() {
       }
     }
     { print }
-  ' "$file" >"$tmp" || {
-    rm -f "$tmp" "$file.gotg-map"
+  ' "$file" || {
+    rm -f "$file.gotg-map"
     return 1
   }
-
-  mv "$tmp" "$file"
   rm -f "$file.gotg-map"
 }
 

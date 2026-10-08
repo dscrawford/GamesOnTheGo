@@ -19,11 +19,7 @@ setup() {
 
   export GOTG_PADS="$TEST_TMP/bin/gotg-pads"
   mkdir -p "$TEST_TMP/bin"
-  {
-    printf '#!%s\n' "$(command -v bash)"
-    printf 'cat "$GOTG_PADS_FIXTURE"\n'
-  } >"$GOTG_PADS"
-  chmod +x "$GOTG_PADS"
+  make_stub "$GOTG_PADS" 'cat "$GOTG_PADS_FIXTURE"'
   export GOTG_PADS_FIXTURE="$TEST_TMP/pads.json"
   pads_are "$GYRO_PAD"
 }
