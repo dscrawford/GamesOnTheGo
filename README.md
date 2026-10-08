@@ -317,6 +317,21 @@ on the real one or a stand-in; `--spec <file>` is a game exactly as its
 output launches it; `--bless` keeps the frame as the golden image.
 `nix run github:dscrawford/GamesOnTheGo#qa`.
 
+## Session logs
+
+```bash
+gotg logs on | off | status
+```
+
+Off unless you turn it on. On, every launch keeps what the game, danstick
+and the overlay printed (`console.log`, 16 MiB at most), danstick's own log
+and a `session.json` (which game, variant, machine, gotg rev, when), and a
+watcher uploads the bundle to the service when the game ends -- tokens,
+keys and anything that looks like a credential redacted first. The server
+keeps 250 MiB per person, oldest sessions dropped first; nobody but an admin
+reads them (`gotg admin logs`, below). Pending uploads wait in
+`~/.local/state/gotg/sessions/` for the next launch.
+
 ## Admin
 
 ```console
@@ -338,7 +353,9 @@ From a terminal, the same, with `admin_url` in `~/.config/gotg/api.json` or
 `GOTG_ADMIN_URL`: `invite <name>` prints a claim url for one person and device
 (`nix run gotg#login -- --claim <url>` redeems it); `tokens`, `revoke <name>`;
 `import [--follow] [--match <re>]` runs the indexer now; `art warm|status|search|set`;
-`scan` asks whichever deployment holds the catalog.
+`scan` asks whichever deployment holds the catalog; `logs [<user>]` lists the
+session logs people opted into sharing, `logs get <user> <session> [dir]`
+unpacks one, `logs rm <user> <session>` drops it.
 `nix run github:dscrawford/GamesOnTheGo#admin`.
 
 ## home-manager

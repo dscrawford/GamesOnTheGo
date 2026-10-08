@@ -61,6 +61,12 @@ usage: gotg admin <command> [args]
                                 plain run still reports everything since the
                                 last one.
 
+  logs                          players' session logs: user, sessions, MiB
+  logs <user>                   that user's sessions: id, MiB, device
+  logs get <user> <session-id> [dir]
+                                download and unpack one (default ./<session-id>/)
+  logs rm <user> <session-id>   delete one
+
 The admin token comes from GOTG_ADMIN_TOKEN:
   export GOTG_ADMIN_TOKEN="$(kubectl get secret gotg-api -o jsonpath='{.data.admin-token}' | base64 -d)"
 
@@ -494,11 +500,58 @@ cmd_admin() {
     import) admin_import "$@" ;;
     scan) admin_scan "$@" ;;
     art) admin_art "$@" ;;
+    logs) admin_logs "$@" ;;
     help | --help | -h | "") admin_usage ;;
     *)
       printf 'error: unknown admin command: %s\n\n' "$sub" >&2
       admin_usage >&2
       exit 1
+      ;;
+  esac
+}
+
+admin_logs_ids() {
+  [[ "${1:-}" =~ ^[A-Za-z0-9._-]+$ && "$1" != . && "$1" != .. ]] ||
+    die "not a user name: ${1:-}"
+  [[ "${2:-}" =~ ^[0-9]{8}T[0-9]{6}Z-env-[a-z0-9_-]+$ ]] || die "not a session id: ${2:-}"
+}
+
+admin_logs() {
+  local sub="${1:-}"
+  case "$sub" in
+    "")
+      admin_call GET /logs | jq -r '.users[]? | [.user, (.sessions | length), ((.bytes / 1048576 * 10 | round) / 10)] | @tsv' |
+        { printf '%-20s %9s %8s\n' USER SESSIONS MiB; while IFS=$'\t' read -r user n mib; do printf '%-20s %9s %8s\n' "$user" "$n" "$mib"; done; }
+      ;;
+    get)
+      local user="${2:-}" id="${3:-}" dir out
+      [[ -n "$user" && -n "$id" ]] || die "usage: gotg admin logs get <user> <session-id> [dir]"
+      admin_logs_ids "$user" "$id"
+      dir="${4:-./$id}"
+      out="$(mktemp "${TMPDIR:-/tmp}/gotg-admin-logs.XXXXXX")"
+      if [[ "$(admin_curl -o "$out" -w '%{http_code}' "$(admin_api_url)/logs/$user/$id")" != 200 ]]; then
+        rm -f "$out"
+        die "the service has no session $id for $user"
+      fi
+      mkdir -p "$dir"
+      tar --zstd --no-same-owner -C "$dir" -xf "$out" || {
+        rm -f "$out"
+        die "could not unpack the bundle for $id"
+      }
+      rm -f "$out"
+      printf '%s\n' "$dir"
+      ;;
+    rm)
+      [[ -n "${2:-}" && -n "${3:-}" ]] || die "usage: gotg admin logs rm <user> <session-id>"
+      admin_logs_ids "$2" "$3"
+      admin_call DELETE "/logs/$2/$3" >/dev/null
+      log "removed $3 for $2"
+      ;;
+    *)
+      [[ "$sub" =~ ^[A-Za-z0-9._-]+$ ]] || die "not a user name: $sub"
+      admin_call GET /logs | jq -r --arg u "$sub" \
+        '.users[]? | select(.user == $u) | .sessions[] | [.id, ((.bytes / 1048576 * 10 | round) / 10), (.device // "")] | @tsv' |
+        { printf '%-52s %8s  %s\n' SESSION MiB DEVICE; while IFS=$'\t' read -r id mib device; do printf '%-52s %8s  %s\n' "$id" "$mib" "$device"; done; }
       ;;
   esac
 }

@@ -32,7 +32,7 @@ _gotg() {
     sub="${COMP_WORDS[2]:-}"
     COMPREPLY=()
 
-    local commands="login refresh download install uninstall play configure steam saves controllers admin update library help"
+    local commands="login refresh download install uninstall play configure steam saves logs controllers admin update library help"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
         mapfile -t COMPREPLY < <(compgen -W "$commands" -- "$cur")
@@ -112,12 +112,16 @@ _gotg() {
                     ;;
             esac
             ;;
+        logs)
+            [[ $COMP_CWORD -eq 2 ]] && mapfile -t COMPREPLY < <(compgen -W "on off status push" -- "$cur")
+            ;;
         admin)
             case $COMP_CWORD in
-                2) mapfile -t COMPREPLY < <(compgen -W "invite tokens revoke import scan art" -- "$cur") ;;
+                2) mapfile -t COMPREPLY < <(compgen -W "invite tokens revoke import scan art logs" -- "$cur") ;;
                 3)
                     case "$sub" in
                         art) mapfile -t COMPREPLY < <(compgen -W "warm status search set miss show forget" -- "$cur") ;;
+                        logs) mapfile -t COMPREPLY < <(compgen -W "get rm" -- "$cur") ;;
                         invite) mapfile -t COMPREPLY < <(compgen -W "--ttl --user" -- "$cur") ;;
                         scan) mapfile -t COMPREPLY < <(compgen -W "--since --all --json" -- "$cur") ;;
                         import) mapfile -t COMPREPLY < <(compgen -W "--follow --timeout" -- "$cur") ;;

@@ -144,6 +144,15 @@ play_launch() {
   # Before the watcher, which reads it from the environment it inherits.
   play_session "$$"
 
+  # Before the overlay, so its output is in the log too; never at the cost of the launch.
+  if logs_sharing; then
+    if logs_session_begin "$PLAY_ATTR" "$PLAY_GAME" "$variant"; then
+      logs_watch_start "$LOGS_SESSION_DIR" "$$" || warn "could not start the session log's watcher"
+    else
+      warn "could not start the session log"
+    fi
+  fi
+
   # "$$" survives the exec below, so what the watcher holds is the emulator.
   killswitch_start "$$" "$(killswitch_console "$PLAY_ATTR" "$(manifest_field "$PLAY_GAME" platform)")" "$PLAY_ATTR"
   danstick_keeper_start "$$"

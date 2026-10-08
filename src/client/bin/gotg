@@ -59,6 +59,8 @@ usage: gotg <command> [args]
                      --claim exchanges a single-use invite link for a token
   admin <command>    mint invites, list and revoke tokens (admin help)
   qa <id> [variant]  run it headless with a virtual pad and grade the recording
+  logs on|off|status keep each game session's output and send it to the server
+                     when the game ends (off by default)
   controllers <cmd>  what SDL sees, and where its inputs land
   steam <command>    add / remove / list non-Steam games (steam help)
 
@@ -129,6 +131,7 @@ main() {
     versions) cmd_versions "$@" ;;
     qa) cmd_qa "$@" ;;
     saves) cmd_saves "$@" ;;
+    logs) cmd_logs "$@" ;;
     controllers) cmd_controllers "$@" ;;
     configure) cmd_configure "$@" ;;
     steam) cmd_steam "$@" ;;

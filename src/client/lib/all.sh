@@ -28,6 +28,8 @@ source "$GOTG_LIB/versions.sh"
 source "$GOTG_LIB/danstick.sh"
 # shellcheck source=lib/killswitch.sh
 source "$GOTG_LIB/killswitch.sh"
+# shellcheck source=lib/logs.sh
+source "$GOTG_LIB/logs.sh"
 # shellcheck source=lib/cmd-play.sh
 source "$GOTG_LIB/cmd-play.sh"
 # shellcheck source=lib/cmd-uninstall.sh

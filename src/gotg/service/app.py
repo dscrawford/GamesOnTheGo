@@ -49,6 +49,7 @@ from pathlib import Path
 
 from .._http import NO_REDIRECT_OPENER
 from ..catalog import CatalogStore
+from ..logs import LogsStore
 from ..saves import SavesStore
 from ..tokens import TOKEN_RE, TokenStore
 from . import admin_page
@@ -59,6 +60,7 @@ from .routes_admin import AdminRoutes
 from .routes_art import ArtRoutes
 from .routes_catalog import CatalogRoutes
 from .routes_files import FileRoutes
+from .routes_logs import LogsRoutes
 from .routes_saves import SavesRoutes
 from .token_cache import TokenCache
 
@@ -155,7 +157,18 @@ def split_route(path: str) -> tuple[str, str]:
     return prefix, rest
 
 
-def body_cap(prefix: str, command: str, store: SavesStore | None) -> int:
+def admin_token_reaches(prefix: str, command: str, listener: str) -> bool:
+    """Whether the admin token is taken for this route at all.
+
+    /admin, and the read side of /logs -- but not on the public listener, which
+    must not answer to the admin token for anything.
+    """
+    if prefix == "admin":
+        return True
+    return prefix == "logs" and command in ("GET", "DELETE") and listener != "public"
+
+
+def body_cap(prefix: str, command: str, store: SavesStore | None, logs: LogsStore | None = None) -> int:
     """The largest request body a route may send.
 
     A save bundle and a catalog entry are the two bodies allowed to be
@@ -165,6 +178,8 @@ def body_cap(prefix: str, command: str, store: SavesStore | None) -> int:
     """
     if prefix == "saves" and command == "PUT" and store is not None:
         return store.max_bytes
+    if prefix == "logs" and command == "PUT" and logs is not None:
+        return logs.max_upload_bytes
     if prefix == "catalog" and command in ("PUT", "POST"):
         # PUT: a decrypted WiiU tree runs to five figures of file rows.
         # POST: /catalog/seen names every unchanged entry in one request,
@@ -175,10 +190,11 @@ def body_cap(prefix: str, command: str, store: SavesStore | None) -> int:
     return MAX_BODY
 
 
-class Handler(ArtRoutes, SavesRoutes, CatalogRoutes, FileRoutes, AdminRoutes, BaseHTTPRequestHandler):
+class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, AdminRoutes, BaseHTTPRequestHandler):
     config: Config
     tokens: TokenCache
     store: SavesStore | None
+    logs: LogsStore | None
     catalog: CatalogStore | None
     files_dir: Path | None
     streams: threading.BoundedSemaphore
@@ -501,14 +517,14 @@ class Handler(ArtRoutes, SavesRoutes, CatalogRoutes, FileRoutes, AdminRoutes, Ba
 
         prefix, rest = split_route(path)
 
-        # The admin token opens /admin and nothing else: outside its prefix it
-        # is indistinguishable from a wrong token, so it cannot be used to
-        # read saves — and nobody else reaches /admin (the 403 lives there).
-        if principal == "admin" and prefix != "admin":
+        # The admin token opens /admin and the read side of /logs, nothing else:
+        # outside them it is indistinguishable from a wrong token, so it cannot
+        # be used to read saves -- and nobody else reaches /admin (the 403 lives there).
+        if principal == "admin" and not admin_token_reaches(prefix, self.command, self.listener):
             self._problem(401, "a bearer token is required", close=True)
             return
 
-        sent, body = self._read_body(body_cap(prefix, self.command, self.store))
+        sent, body = self._read_body(body_cap(prefix, self.command, self.store, self.logs))
         if not sent:
             return
 
@@ -528,7 +544,7 @@ class Handler(ArtRoutes, SavesRoutes, CatalogRoutes, FileRoutes, AdminRoutes, Ba
             where = f": it is at {self.config.admin_url}/admin/" if self.config.admin_url else ""
             self._problem(404, f"administration is not on this listener{where}", close=True)
             return True
-        if self.listener == "admin" and top not in ("admin", "healthz"):
+        if self.listener == "admin" and top not in ("admin", "healthz", "logs"):
             self._problem(404, "this listener serves administration only", close=True)
             return True
         return False
@@ -601,6 +617,8 @@ class Handler(ArtRoutes, SavesRoutes, CatalogRoutes, FileRoutes, AdminRoutes, Ba
             self._igdb(rest, body)
         elif prefix == "saves":
             self._saves(rest, body, self._saves_user(principal))
+        elif prefix == "logs":
+            self._logs(rest, body, principal)
         elif prefix == "catalog":
             self._catalog(rest, body)
         elif prefix == "art":
@@ -645,6 +663,7 @@ def make_server(
     auth_cache_ttl: float = 60.0,
     auth_neg_ttl: float = 5.0,
     listener: str = "both",
+    logs: LogsStore | None = None,
 ) -> ThreadingHTTPServer:
     """Threading, because one slow upstream must not block every other client.
 
@@ -660,6 +679,7 @@ def make_server(
             "config": config,
             "tokens": TokenCache(),
             "store": store,
+            "logs": logs,
             "catalog": catalog,
             "files_dir": files_dir,
             "streams": threading.BoundedSemaphore(stream_slots),

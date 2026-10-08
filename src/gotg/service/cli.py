@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from ..catalog import CatalogStore
+from ..logs import DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_QUOTA_BYTES, LogsStore
 from ..saves import DEFAULT_KEEP, DEFAULT_MAX_BYTES, SavesStore
 from ..tokens import TokenStore
 from .app import Config, make_server
@@ -113,6 +114,19 @@ def store_from_env(env: Mapping[str, str] | None = None) -> SavesStore | None:
     )
 
 
+def logs_from_env(env: Mapping[str, str] | None = None) -> LogsStore | None:
+    """The session-logs store, or None: no directory means /logs answers 503."""
+    env = os.environ if env is None else env
+    root = env.get("GOTG_LOGS_DIR", "")
+    if not root:
+        return None
+    return LogsStore(
+        root=Path(root),
+        quota_bytes=int(env.get("GOTG_LOGS_QUOTA_BYTES", str(DEFAULT_QUOTA_BYTES))),
+        max_upload_bytes=int(env.get("GOTG_LOGS_MAX_UPLOAD_BYTES", str(DEFAULT_MAX_UPLOAD_BYTES))),
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     port = int(os.environ.get("PORT", "8080"))
@@ -123,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("GOTG_ADMIN_PORT must differ from PORT: it is the point of it")
         catalog = catalog_from_env()
         store = store_from_env()
+        logs = logs_from_env()
         token_store = token_store_from_env()
         art = ArtCache(Path(config.art_dir)) if config.art_dir else None
         # A catalog row grants read on its path, so the library must not be
@@ -152,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     shared = {
         "store": store,
+        "logs": logs,
         "catalog": catalog,
         "files_dir": files_dir,
         "stream_slots": stream_slots,
@@ -168,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         threading.Thread(target=admin.serve_forever, name="admin", daemon=True).start()
     held = [name for name, on in (("steamgriddb", config.steamgriddb_key), ("igdb", config.igdb_client_id)) if on]
     saves = f"saves under {store.root}" if store else "no saves store"
+    saves += f", logs under {logs.root}" if logs else ", no logs store"
     games = f"catalog at {catalog.db}" if catalog else "no catalog"
     creds = ", ".join(held) or "nothing"
     if token_store:
