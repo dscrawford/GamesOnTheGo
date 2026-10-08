@@ -249,7 +249,11 @@ whose build the library would now do differently, or whose install lacks a
 release the catalog attached, wears an **!** instead of the download arrow,
 and **Update** sits under Play in its menu (`gotg update <platform>/<id>`).
 Behind it: `gotg update --check` (the network and the evaluation, once per
-six hours) and `gotg complete updates` (the cached answer).
+six hours) and `gotg complete updates` (the cached answer). A mod placed on
+the server by hand (`/Games/<platform>/mods/<id>/<release>/`, a texture pack
+say) is such a release: the importer attaches it to the game, the game
+installs as a directory with it beside the ROM, and the environment reads it
+from there -- PaperBoat's HD pack is one.
 
 On a Steam Deck the Switch variants are the same names with a Deck
 profile: handheld 720p unless a television is connected, the console's own
