@@ -475,14 +475,9 @@ _extras_missing() {
   done < <(game_extras_releases "$2")
 }
 
-# An installed game whose catalog row has since gained updates or DLC.
-#
-# A bundle fetches only what it is missing and unpacks it beside the game: the
-# case is Tears of the Kingdom, 32 GB installed with 1.4.3, and then 1.4.2 --
-# the one version its mods run on -- attached to the catalog half a gigabyte
-# later. A single file placed under its own name before extras existed is
-# left as it is and said so; turning it into a bundle is a reinstall, which is
-# not done behind anyone's back.
+# Fetch the extras a bundle lacks (a 32 GB TOTK is not downloaded again for a
+# half-gigabyte update). A plain-file install is first renamed into the bundle
+# shape, when the environment's recipe can merge into one.
 _top_up_extras() {
   local game="$1" id title install legacy missing staged
   id="$(manifest_field "$game" id)"
@@ -492,13 +487,14 @@ _top_up_extras() {
 
   legacy="$(game_legacy_path "$game" "$(game_games_dir "$game")")" || legacy=""
   if [[ -n "$legacy" && -f "$legacy" ]]; then
-    warn "$id is installed without its updates and DLC — uninstall and install again to fetch them"
-    return 0
+    install="$(dirname "$legacy")/$id"
+    missing="$(game_extras_releases "$game")"
+  else
+    legacy=""
+    install="$(game_installed_path "$game")" || return 0
+    [[ -d "$install" ]] || return 0
+    missing="$(_extras_missing "$install" "$game")"
   fi
-  install="$(game_installed_path "$game")" || return 0
-  [[ -d "$install" ]] || return 0
-
-  missing="$(_extras_missing "$install" "$game")"
   [[ -n "$missing" ]] || return 0
 
   # An extra is never worth a launch that does not start. An environment
@@ -518,15 +514,29 @@ _top_up_extras() {
   staged="$(download_partial_path "$id")"
   with_lock "$GOTG_STATE_DIR/locks/$id.lock" 3600 \
     "timed out waiting for another gotg process to finish downloading $id" \
-    _top_up_extras_locked "$game" "$staged" "$title" "$install" "$missing"
+    _top_up_extras_locked "$game" "$staged" "$title" "$install" "$missing" "$legacy"
+}
+
+# A plain <id>.<ext> becomes <id>/<id>.<ext>; an empty <id>/ left by a failed
+# move would hide the file from game_installed_path, so it is removed.
+_bundle_in_place() {
+  local game="$1" legacy="$2" install="$3" ext
+  ext="${legacy##*.}"
+  [[ -f "$legacy" && ! -e "$install" ]] || return 0
+  mkdir "$install"
+  mv -- "$legacy" "$install/$(manifest_field "$game" id).${ext,,}" || {
+    rmdir "$install"
+    die "could not move $legacy into $install"
+  }
 }
 
 # _top_up_extras' fetch, under the game's lock.
 _top_up_extras_locked() {
-  local game="$1" staged="$2" title="$3" install="$4" missing="$5"
+  local game="$1" staged="$2" title="$3" install="$4" missing="$5" legacy="${6:-}"
   service_have || die "no service configured — run: gotg login"
 
   _fetch_members "$game" "$staged" "$title" "$(jq -cR . <<<"$missing" | jq -cs .)"
+  [[ -z "$legacy" ]] || _bundle_in_place "$game" "$legacy" "$install"
   _run_recipe "$game" extras "$staged" "$install"
   rm -rf "$staged"
   log "added to $install: $(tr '\n' ' ' <<<"$missing")"

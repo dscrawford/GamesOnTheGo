@@ -6,12 +6,20 @@ would be written to /Games and why, without touching anything.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterable
 from pathlib import Path
 
+from ..contract import ENTRY_ID_RE
 from . import classify as cl
 from . import plan as pl
 from .rules import Rules
 from .scan import SINGLE_ARCHIVE_EXTS, Source, scan
+
+log = logging.getLogger("gotg-importer")
+
+MODS_DIR = "mods"
+MOD_ROLE = "mod"
 
 
 def _rom_files(source: Source, rules: Rules) -> list[str]:
@@ -139,3 +147,67 @@ def _plan_classified(source, verdict, games_root: Path | str, rules: Rules) -> l
             pl.ACTION_MANUAL, verdict.platform, str(source.path), "", "", reason=f"unknown handler {verdict.handler!r}"
         )
     ]
+
+
+def mod_platforms(games_root: Path | str) -> list[str]:
+    """The platforms under the games root that have a hand-placed ``mods/`` tree.
+
+    Read from the tree rather than listed here: which consoles have mods is
+    whatever a person put on the server, and a list in code would have to be
+    edited for each one.
+    """
+    root = Path(games_root)
+    if not root.is_dir():
+        return []
+    return sorted(p.name for p in root.iterdir() if (p / MODS_DIR).is_dir())
+
+
+def _visible_dirs(parent: Path) -> list[Path]:
+    return [p for p in sorted(parent.iterdir()) if p.is_dir() and not p.name.startswith(".")]
+
+
+def plan_mods(games_root: Path | str, platforms: Iterable[str]) -> list[pl.Op]:
+    """One attach per hand-placed mod release: ``<platform>/mods/<base-id>/<release>/``.
+
+    Mods are not downloads the importer can find, so a person puts them on the
+    server the way they put keys, and this only reads. Each release becomes
+    ``extras/mod_<release>/<file>`` on its base game, the same slot an update
+    or DLC takes, so the client installs and tops it up through one path.
+
+    There is no platform gate (``plan.EXTRAS_PLATFORMS`` guards the attaches the
+    importer *guesses* at, from release names): placing the directory is the
+    decision, and a console whose environment cannot take extras says so when
+    the client installs it. A directory that cannot be a release -- no files, a
+    dot name, a base that is no id -- is logged and passed over, never an error:
+    a half-copied tree must not stop the import of the library.
+    """
+    ops: list[pl.Op] = []
+    for platform in platforms:
+        mods = Path(games_root) / platform / MODS_DIR
+        if not mods.is_dir():
+            continue
+        for base in sorted(mods.iterdir()):
+            if not base.is_dir():
+                continue
+            if base.name.startswith(".") or not ENTRY_ID_RE.match(base.name):
+                log.info("mods: %s is not a game id, skipping %s", base.name, base)
+                continue
+            for release in _visible_dirs(base):
+                if not any(f.is_file() for f in release.iterdir()):
+                    log.info("mods: %s holds no files, skipping", release)
+                    continue
+                ops.append(
+                    pl.Op(
+                        pl.ACTION_ATTACH,
+                        platform,
+                        str(release),
+                        "",
+                        base.name,
+                        title=base.name,
+                        reason=f"{MOD_ROLE} {release.name} for {base.name}",
+                        type="dir",
+                        role=MOD_ROLE,
+                        version="",
+                    )
+                )
+    return ops

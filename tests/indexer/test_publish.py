@@ -769,3 +769,89 @@ def test_everything_unchanged_is_marked_seen_in_one_request(stub):
     assert publisher.touch() == 2
     assert handler.sweeps == [{"games": ["gb/usa.tetris", "n64/usa.zelda"]}]
     assert publisher.unchanged == set(), "said once, not again next time"
+
+
+# --- mods: hand-placed releases ride the same extras slots ---------------------
+
+
+def mod_result(tmp_path, release="refolded", base="usa.paper_mario"):
+    from gotg.indexer.planner import plan_mods
+
+    d = tmp_path / "Games" / "n64" / "mods" / base / release
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "paperboat-hd.o2r").write_bytes(b"pack")
+    (op,) = [o for o in plan_mods(tmp_path / "Games", ["n64"]) if o.reason.startswith(f"mod {release} ")]
+    return Result(op, STATUS_DONE), d / "paperboat-hd.o2r"
+
+
+def n64_base_row(tmp_path, extras=()):
+    rom = tmp_path / "Torrents" / "Paper Mario (USA).z64"
+    rom.parent.mkdir(exist_ok=True)
+    rom.write_bytes(b"rom")
+    files = [{"name": "Paper Mario (USA).z64", "path": str(rom), "size_bytes": 3, "mtime": 1, "sha256": "a" * 64}]
+    for name, path in extras:
+        files.append({"name": name, "path": str(path), "size_bytes": 1, "mtime": 1, "sha256": "b" * 64})
+    return {
+        "platform": "n64",
+        "id": "usa.paper_mario",
+        "handler": "single_file",
+        "title": "Paper Mario",
+        "files": files,
+    }
+
+
+def test_a_mod_release_is_listed_under_its_slug(tmp_path):
+    result, pack = mod_result(tmp_path)
+    assert [(m.name, m.path) for m in _members(result.op)] == [("extras/mod_refolded/paperboat-hd.o2r", pack)]
+
+
+def test_a_mod_release_name_with_a_dash_slugs_to_underscores(tmp_path):
+    result, _ = mod_result(tmp_path, release="refolded-4k")
+    assert [m.name for m in _members(result.op)] == ["extras/mod_refolded_4k/paperboat-hd.o2r"]
+
+
+def test_a_mod_publishes_onto_the_stored_base_with_the_files_path(tmp_path, stub):
+    url, handler = stub
+    handler.games.append(n64_base_row(tmp_path))
+    result, pack = mod_result(tmp_path)
+
+    Publisher(CatalogAPI(url, "t")).publish(result)
+
+    path, payload = handler.puts[-1]
+    assert path == "/catalog/n64/usa.paper_mario"
+    assert payload["handler"] == "single_file" and payload["title"] == "Paper Mario"
+    assert [(f["name"], f["path"]) for f in payload["files"]] == [
+        ("Paper Mario (USA).z64", str(tmp_path / "Torrents" / "Paper Mario (USA).z64")),
+        ("extras/mod_refolded/paperboat-hd.o2r", str(pack)),
+    ]
+    assert all(f["sha256"] for f in payload["files"])
+
+
+def test_a_mod_without_a_base_is_a_publish_error(tmp_path, stub):
+    url, handler = stub
+    result, _ = mod_result(tmp_path)
+
+    with pytest.raises(PublishError, match="no base game"):
+        Publisher(CatalogAPI(url, "t")).publish(result)
+    assert handler.puts == []
+
+
+def test_a_base_republished_keeps_its_mod(tmp_path, stub):
+    url, handler = stub
+    _, pack = mod_result(tmp_path)
+    handler.games.append(n64_base_row(tmp_path, extras=[("extras/mod_refolded/paperboat-hd.o2r", pack)]))
+    rom = tmp_path / "Torrents" / "Paper Mario (USA).z64"
+    op = Op(
+        ACTION_EXTRACT,
+        "n64",
+        str(rom),
+        "/g/n64/usa.paper_mario.z64",
+        "usa.paper_mario",
+        title="Paper Mario",
+        handler="single_file",
+    )
+
+    Publisher(CatalogAPI(url, "t")).publish(Result(op, STATUS_DONE))
+
+    _, payload = handler.puts[-1]
+    assert [f["name"] for f in payload["files"]] == ["Paper Mario (USA).z64", "extras/mod_refolded/paperboat-hd.o2r"]

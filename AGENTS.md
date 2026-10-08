@@ -118,9 +118,12 @@ nixpkgs#rustc nixpkgs#pkg-config nixpkgs#sdl3.dev nixpkgs#wayland.dev`). `ruff f
 
 ## Code Style & Conventions
 
-- **Prose comments are the house style.** Module and function docstrings say
-  what broke, why this shape, and what it cost to find out. Match that
-  density; do not strip it to "what the code does".
+- **Comments: short, and only the why.** One to three lines above the thing
+  that needs it, saying the non-obvious reason or the bug it guards against.
+  Never what the code does, never the history of an edit, never a paragraph
+  where a sentence will do. A file header is one or two lines. A story that
+  needs more goes in the commit message or `docs/`, with a one-line pointer
+  at most.
 - **Models are pure and tested; drawing and sockets are not.** In the picker
   a screen's state is a frozen dataclass rebuilt from each event (`menu.Menu`,
   `filters.Filters`); in the overlay the decisions are plain Rust modules with

@@ -38,6 +38,10 @@
       # somewhere ares never reads, indistinguishable from losing it — so an
       # unconfirmed directory adopts nothing.
       system ? null,
+      # What the catalog can attach beside a game and how it installs: a
+      # helpers.bundleRecipe, for a platform whose games take mods as extras.
+      # Unset, the platform declares no recipe and every game stays a plain file.
+      recipe ? null,
     }:
     {
       emulator = pkgs.ares;
@@ -108,6 +112,7 @@
         aresSystem
       ]
       ++ [ "{target}" ];
+      recipes = lib.optionalAttrs (recipe != null) recipe;
       saves = [ "saves/**" ];
       # Save states are tied to the ares that wrote them, so one carried from
       # another machine may simply refuse to load. Memory saves always travel.

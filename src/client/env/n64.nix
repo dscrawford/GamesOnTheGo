@@ -10,4 +10,7 @@
 helpers.aresPlatform {
   platform = "n64";
   console = "Nintendo64";
+  # PaperBoat's HD pack is the first mod to travel as an extra: a .o2r beside
+  # the ROM, which the game's launcher links in (gotg_extra).
+  recipe = helpers.bundleRecipe [ "*.o2r" ];
 }

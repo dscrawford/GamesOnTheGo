@@ -22,7 +22,7 @@ from . import publish as pub
 from . import scan as sc
 from .config import Config
 from .execute import CLIENT_ACTIONS, STATUS_ERROR, STATUS_MANUAL, Result, cleanup_staging, execute
-from .planner import plan_source
+from .planner import mod_platforms, plan_mods, plan_source
 from .rules import Rules
 
 log = logging.getLogger("gotg-importer")
@@ -242,10 +242,14 @@ def _plan_all(
 
     An update publishes onto its base's entry, which must exist first; the
     directory order is the release groups' naming. Stable, so the rest keeps
-    its given order.
+    its given order. The hand-placed mods are one more attach group, so they
+    land after every base through the same sort.
     """
     sources = sources or {}
     planned = [(path, plan_source(path, cfg.games_root, rules, source=sources.get(path))) for path in paths]
+    mods = plan_mods(cfg.games_root, mod_platforms(cfg.games_root))
+    if mods:
+        planned.append((Path(cfg.games_root), mods))
     return sorted(planned, key=lambda item: any(op.action == pl.ACTION_ATTACH for op in item[1]))
 
 

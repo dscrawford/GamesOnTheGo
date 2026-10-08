@@ -24,6 +24,26 @@ let
     ];
   };
 
+  # A single file plus whatever the catalog attached beside it, installed as
+  # <id>/<id>.<ext> with the extras flattened under extras/. `keep` is the
+  # globs that count as an extra (see steps.collectExtrasOf). Only the two
+  # handlers a plain file can arrive by: a game with no extras never reaches
+  # the recipe and stays a plain file (download.sh, game_has_extras).
+  bundleRecipe = keep: {
+    single_file = [
+      steps.pickBase
+      (steps.collectExtrasOf keep)
+      steps.placeBundle
+    ];
+    # Releases that arrived after the game was installed: the raw directory
+    # holds only the new extras/<release>/ entries, and the destination is
+    # the bundle they join.
+    extras = [
+      (steps.collectExtrasOf keep)
+      steps.mergeExtras
+    ];
+  };
+
   # A Switch release plus whatever updates and DLC the catalog attached,
   # unpacked beside it and installed as one directory Ryujinx is pointed at.
   # Three handlers for the three ways a base arrives: rar set, 7z, loose file.
@@ -41,19 +61,11 @@ let
       steps.collectExtras
       steps.placeBundle
     ];
-    single_file = [
-      steps.pickBase
-      steps.collectExtras
-      steps.placeBundle
-    ];
-    # Updates or DLC that arrived after the game was installed: the raw
-    # directory holds only the new extras/<release>/ entries, and the
-    # destination is the bundle they join.
-    extras = [
-      steps.collectExtras
-      steps.mergeExtras
-    ];
-  };
+  }
+  // bundleRecipe [
+    "*.nsp"
+    "*.xci"
+  ];
 
   # A disc image that travelled as a 7z: extract, convert to the RVZ the
   # emulator wants, keep nothing else. Space cost is transient (staging holds
@@ -99,6 +111,7 @@ in
     sceneArchiveRecipe
     discArchiveRecipe
     switchRecipe
+    bundleRecipe
     ;
 }
 // lib.foldl' (a: b: a // b) { } (emulators ++ mods)

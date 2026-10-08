@@ -599,7 +599,7 @@ publish_bundle_game_plus_update() {
   [ ! -e "$GOTG_GAMES_DIR/switch/world.zelda" ]
 }
 
-@test "a game installed before its extras arrived is still the game, and says so" {
+@test "a game installed before its extras arrived is moved into a bundle and topped up" {
   add_game switch "world.zelda.nsp" "base-bytes" "Zelda"
   gotg refresh
   gotg download world.zelda
@@ -615,18 +615,120 @@ publish_bundle_game_plus_update() {
   [[ "$output" == *"switch/world.zelda"* ]]
   gotg download world.zelda
   [ "$status" -eq 0 ]
-  [[ "$stderr" == *"without its updates and DLC"* ]]
-  [ ! -d "$GOTG_GAMES_DIR/switch/world.zelda" ]
+  local install="$GOTG_GAMES_DIR/switch/world.zelda"
+  # The plain file became the bundle's game in place, not a second download.
+  [ ! -e "$GOTG_GAMES_DIR/switch/world.zelda.nsp" ]
+  [ "$(cat "$install/world.zelda.nsp")" = base-bytes ]
+  [ "$(cat "$install/extras/update_1.4.3-u.rar")" = update-rar ]
+  [ "$(cat "$install/extras/dlc_pack-pack.nsp")" = dlc-bytes ]
+  [ "$(cat "$install/handler")" = extras ]
+  [[ "$stderr" != *"without its updates"* ]]
+
   gotg play world.zelda
   [ "$status" -eq 0 ]
-  [[ "$output" == *"env-switch launched with: $GOTG_GAMES_DIR/switch/world.zelda.nsp"* ]]
+  [[ "$output" == *"env-switch launched with: $install/world.zelda.nsp"* ]]
 
   gotg uninstall world.zelda
   [ "$status" -eq 0 ]
+  [ ! -e "$install" ]
   [ ! -e "$GOTG_GAMES_DIR/switch/world.zelda.nsp" ]
+}
+
+@test "a plain install whose environment cannot take extras stays plain, and says to rebuild" {
+  add_game switch "world.zelda.nsp" "base-bytes" "Zelda"
+  gotg refresh
   gotg download world.zelda
   [ "$status" -eq 0 ]
-  [ -f "$GOTG_GAMES_DIR/switch/world.zelda/extras/dlc_pack-pack.nsp" ]
+  publish_bundle_game
+  stub_bundle_recipe_env
+  jq -n '{handlers: ["single_file"]}' >"$GOTG_ROOTS_DIR/env-switch/share/gotg/recipe.json"
+  gotg refresh
+  gotg download world.zelda
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"gotg update"* ]]
+  [ -f "$GOTG_GAMES_DIR/switch/world.zelda.nsp" ]
+  [ ! -d "$GOTG_GAMES_DIR/switch/world.zelda" ]
+}
+
+# --- mods as extras (n64) -------------------------------------------------------
+
+# PaperBoat's HD pack: a base ROM with one mod release attached by the importer.
+publish_mod_game() {
+  local dir="$SERVICE_LIBRARY_DIR/n64"
+  mkdir -p "$dir/mods"
+  printf 'rom-bytes' >"$dir/usa.paper_mario.z64"
+  printf 'hd-pack' >"$dir/mods/paperboat-hd.o2r"
+  local files
+  files="$(jq -n --arg d "$dir" \
+    --arg s1 "$(sha256sum "$dir/usa.paper_mario.z64" | cut -d' ' -f1)" \
+    --arg s2 "$(sha256sum "$dir/mods/paperboat-hd.o2r" | cut -d' ' -f1)" \
+    '[{name: "usa.paper_mario.z64", path: ($d + "/usa.paper_mario.z64"), size_bytes: 9, mtime: 1, sha256: $s1},
+      {name: "extras/mod_refolded/paperboat-hd.o2r", path: ($d + "/mods/paperboat-hd.o2r"), size_bytes: 7, mtime: 1, sha256: $s2}]')"
+  add_member_game n64 usa.paper_mario "Paper Mario" single_file "$files"
+}
+
+# env-n64's recipe as bundleRecipe makes it: single_file and extras.
+stub_n64_bundle_recipe_env() {
+  stub_recipe_env n64
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    cat <<'SHIM'
+handler="$1"; raw="$2"; dest="$3"
+mkdir -p "$dest/extras"
+[ -f "$raw"/usa.paper_mario.z64 ] && cp "$raw"/usa.paper_mario.z64 "$dest/usa.paper_mario.z64"
+for release in "$raw"/extras/*/; do
+  name="$(basename "$release")"
+  for f in "$release"/*; do cp "$f" "$dest/extras/$name-$(basename "$f")"; done
+done
+printf '%s' "$handler" >"$dest/handler"
+SHIM
+  } >"$GOTG_ROOTS_DIR/env-n64/bin/gotg-recipe"
+  chmod +x "$GOTG_ROOTS_DIR/env-n64/bin/gotg-recipe"
+  jq -n '{handlers: ["single_file", "extras"]}' >"$GOTG_ROOTS_DIR/env-n64/share/gotg/recipe.json"
+}
+
+@test "an n64 game with a mod release installs as a bundle and launches the rom inside" {
+  publish_mod_game
+  stub_n64_bundle_recipe_env
+  gotg refresh
+  gotg download usa.paper_mario
+  [ "$status" -eq 0 ]
+  local install="$GOTG_GAMES_DIR/n64/usa.paper_mario"
+  [ "$(cat "$install/usa.paper_mario.z64")" = rom-bytes ]
+  [ "$(cat "$install/extras/mod_refolded-paperboat-hd.o2r")" = hd-pack ]
+  [ ! -e "$GOTG_GAMES_DIR/n64/usa.paper_mario.z64" ]
+
+  gotg play usa.paper_mario
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"env-n64 launched with: $install/usa.paper_mario.z64"* ]]
+}
+
+@test "an n64 rom installed before its mod release is moved into a bundle in place" {
+  add_game n64 "usa.paper_mario.z64" "rom-bytes" "Paper Mario"
+  gotg refresh
+  gotg download usa.paper_mario
+  [ "$status" -eq 0 ]
+  [ -f "$GOTG_GAMES_DIR/n64/usa.paper_mario.z64" ]
+
+  publish_mod_game
+  stub_n64_bundle_recipe_env
+  gotg refresh
+  gotg download usa.paper_mario
+  [ "$status" -eq 0 ]
+  local install="$GOTG_GAMES_DIR/n64/usa.paper_mario"
+  [ ! -e "$GOTG_GAMES_DIR/n64/usa.paper_mario.z64" ]
+  [ "$(cat "$install/usa.paper_mario.z64")" = rom-bytes ]
+  [ "$(cat "$install/extras/mod_refolded-paperboat-hd.o2r")" = hd-pack ]
+}
+
+@test "an n64 game without extras still installs as a plain file under a recipe-capable environment" {
+  stub_n64_bundle_recipe_env
+  add_game n64 "usa.zelda.z64" "rom" "Zelda"
+  gotg refresh
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [ -f "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
+  [ ! -d "$GOTG_GAMES_DIR/n64/usa.zelda" ]
 }
 
 @test "GOTG_FILES_URL names where the bytes come from, over the catalog's own host" {

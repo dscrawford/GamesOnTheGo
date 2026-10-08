@@ -505,3 +505,56 @@ def test_a_match_that_matches_nothing_imports_nothing(cfg, caplog):
     assert publisher.swept == []
     assert not stats.failed
     assert "matched 0 of 1" in caplog.text
+
+
+# --- mods: hand-placed extras follow the bases ---------------------------------
+
+
+def place_mod(cfg, platform="n64", base="usa.body_harvest", release="refolded"):
+    d = cfg.games_root / platform / "mods" / base / release
+    d.mkdir(parents=True)
+    (d / "pack.o2r").write_bytes(b"pack")
+    return d
+
+
+def test_a_dry_run_lists_the_mod_after_the_base(cfg, capsys):
+    make_set(cfg, "Nintendo - Nintendo 64 (BigEndian)", ["Body Harvest (USA).zip"])
+    place_mod(cfg)
+
+    stats = run_scan(cfg.source_root, cfg, RULES, dry_run=True)
+
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) > 1 and not any(line.startswith("attach") for line in lines[:-1])
+    assert lines[-1].startswith("attach    n64") and "[usa.body_harvest]" in lines[-1]
+    assert "mod refolded for usa.body_harvest" in lines[-1]
+    assert stats.actions["attach"] == 1
+
+
+def test_a_run_publishes_the_mod_after_its_base(cfg):
+    make_set(cfg, "Nintendo - Nintendo 64 (BigEndian)", ["Body Harvest (USA).zip"])
+    place_mod(cfg)
+    publisher = FakePublisher()
+
+    stats = run_scan(cfg.source_root, cfg, RULES, dry_run=False, publisher=publisher)
+
+    assert publisher.published == ["usa.body_harvest", "usa.body_harvest"]
+    assert stats.actions["attach"] == 1
+
+
+def test_a_bootstrap_carries_the_mods_too(cfg):
+    make_set(cfg, "Nintendo - Nintendo 64 (BigEndian)", ["Body Harvest (USA).zip"])
+    place_mod(cfg)
+    publisher = FakePublisher()
+
+    run_paths([cfg.source_root / "Nintendo - Nintendo 64 (BigEndian)"], cfg, RULES, dry_run=False, publisher=publisher)
+
+    assert publisher.published == ["usa.body_harvest", "usa.body_harvest"]
+
+
+def test_a_mod_whose_base_is_missing_is_a_per_entry_publish_error(cfg):
+    place_mod(cfg, base="usa.nothing_here")
+    publisher = FakePublisher(publish_error=PublishError("no base game"))
+
+    stats = run_paths([], cfg, RULES, dry_run=False, publisher=publisher)
+
+    assert stats.publish_errors == 1

@@ -322,6 +322,18 @@ let
       # shellcheck disable=SC2034
       install="''${GOTG_INSTALL:-$target}"
 
+      # The first file under $install/extras/ matching a glob, or nothing
+      # (never an error) for a plain-file install or a release not fetched.
+      gotg_extra() {
+        local f
+        [ -d "$install/extras" ] || return 0
+        while IFS= read -r -d "" f; do
+          printf '%s\n' "$f"
+          return 0
+        done < <(find "$install/extras" -maxdepth 1 -type f -name "$1" -print0 2>/dev/null | sort -z)
+        return 0
+      }
+
       state="''${GOTG_ENV_STATE:-''${XDG_STATE_HOME:-$HOME/.local/state}/gotg/env/${name}}"
       mkdir -p "$state"
       ${seedSavesDirs}

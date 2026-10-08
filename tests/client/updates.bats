@@ -314,6 +314,23 @@ wants() { export EVAL_GAMES_JSON="$1"; }
   [ "$(jq -r '.games | length' <<<"$output")" = 0 ]
 }
 
+@test "an n64 game lacking its mod release has an extras update" {
+  local dir="$SERVICE_LIBRARY_DIR/n64"
+  mkdir -p "$dir/mods"
+  printf 'rom' >"$dir/usa.paper_mario.z64"
+  printf 'pack' >"$dir/mods/paperboat-hd.o2r"
+  add_member_game n64 usa.paper_mario "Paper Mario" single_file "$(jq -n --arg d "$dir" --arg a "$(sha a)" --arg b "$(sha b)" \
+    '[{name: "usa.paper_mario.z64", path: ($d + "/usa.paper_mario.z64"), size_bytes: 3, mtime: 1, sha256: $a},
+      {name: "extras/mod_refolded/paperboat-hd.o2r", path: ($d + "/mods/paperboat-hd.o2r"), size_bytes: 4, mtime: 1, sha256: $b}]')"
+  GOTG_LIBRARY= gotg refresh
+  mkdir -p "$GOTG_GAMES_DIR/n64/usa.paper_mario/extras"
+  printf 'rom' >"$GOTG_GAMES_DIR/n64/usa.paper_mario/usa.paper_mario.z64"
+  gotg complete updates
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.games | map(.key)' <<<"$output")" = '["n64/usa.paper_mario"]' ]
+  [ "$(jq -c '.games[0].reasons' <<<"$output")" = '["extras"]' ]
+}
+
 # --- one game brought up to date -------------------------------------------------
 
 @test "update <platform>/<id> rebuilds that game's roots, its variants with it, and no other" {

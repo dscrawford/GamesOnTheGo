@@ -1,35 +1,6 @@
-# Paper Mario — PaperBoat, Harbour Masters' native port on the Paper Mario DX
-# decompilation. `nix run gotg#usa.paper_mario.paperboat`. It replaced ReCut, the
-# Windows-only static recompilation this variant used to run under Wine: this
-# one ships for Linux, renders through libultraship (resolution scaling,
-# interpolated frame rates, aspect ratios, a mod menu), and is the same
-# family as the Ocarina of Time, Majora's Mask and Smash ports beside it.
-#
-# Three things about it shape this file:
-#
-#   * **Everything it writes goes to $SHIP_HOME.** It is a portable build,
-#     so without that it writes into its working directory -- the archive,
-#     the saves, the settings. Pointed into the environment's state, one
-#     directory holds all of it, and the read-only files it ships are found
-#     beside the binary in the store (see pkgs/paperboat).
-#
-#   * **The ROM is unpacked here, not by a recipe.** The Harkinian ports get
-#     a bare .z64 from data/overrides.json's `unzip`, but that is keyed by
-#     game, and this game's plain entry is ares, which reads the No-Intro zip
-#     as it is. So the zip stays a zip and the first launch takes the .z64
-#     out of it, as ReCut did.
-#
-#   * **The archive is made by a command, not by its wizard.** PaperBoat
-#     extracts pm64.o2r behind two popups ("No O2R files found. Generate one
-#     now?", "ROMs found ...") that a ROM on the command line does not skip
-#     (src/port/Engine.cpp), and every machine asked again. Torch, the
-#     extractor PaperBoat links in, is packaged on its own (pkgs/paperboat-
-#     torch) and run here as BattleShip runs it: same commit, same options,
-#     the same config.yml and asset yamls from PaperBoat's own package.
-#     Checked against an archive the wizard made from the same ROM: all
-#     60,824 entries alike, version and portVersion included; the wizard's
-#     has one more, audio/portVersion, a copy of the stamp nothing reads.
-#     About thirty seconds, once per machine and PaperBoat version.
+# Paper Mario on PaperBoat, the native port. The zip is unpacked here rather
+# than by a recipe (the plain entry is ares, which reads the zip), and the
+# archive is made by Torch, not the port's wizard, whose popups block a launch.
 {
   pkgs,
   gotgPkgs,
@@ -40,30 +11,16 @@
 let
   port = gotgPkgs.paperboat;
   torch = gotgPkgs.paperboat-torch;
-  # The archive config.yml names. Matched against the port's own list
-  # (sRomArchives); only the US cartridge is supported, so only one name.
+  # The name the port's config.yml gives the US cartridge's archive.
   archive = "pm64.o2r";
 in
 {
   emulator = port;
   bin = "Paperboat";
-  # A port, not the platform emulator: `gotg play <id> emulate` is the way
-  # back to ares when this one misbehaves, as it is for DK64 and the
-  # Harkinian ports.
   nativePort = true;
-  # A wired Xbox 360 pad, to this port, as ReCut had and this replacement
-  # lost. libultraship reads pads through SDL2 and the gamecontrollerdb.txt
-  # it ships, and a clone mirroring the Deck's own controls (28de:1205, a
-  # hidraw pad with no SDL mapping as an evdev device) was in no database:
-  # on the Deck nothing moved, the left stick included, while every pad SDL
-  # knew by heart worked at a desk. 045e:028e is the one every SDL maps.
-  # The identity also makes the clone the same GUID on every machine, so the
-  # port mapping in paperboat.cfg.json, which travels with the saves, fits
-  # wherever it lands -- and it puts the overlay on the generic walk, whose
-  # right stick and left trigger are the C buttons and Z this port reads;
-  # the N64 walk lit neither.
+  # SDL2's gamecontrollerdb knows no Deck clone (28de:1205): nothing moved on
+  # a Deck until the clones looked like the one pad every SDL maps.
   padIdentity = "xbox360";
-  # Its settings are inside the game, behind Esc; there is no launcher.
   configurable = false;
   isolate = true;
   args = [ ];
@@ -72,32 +29,24 @@ in
     pkgs.jq
   ];
 
-  # MasterKillua's Refolded textures -- the game redrawn in 4K -- as the
-  # port's HD archive. PaperBoat loads one file by name beside its own:
-  # paperboat-hd.o2r in $SHIP_HOME (Engine.cpp, "Loading HD asset
-  # archive"), before anything in mods/. The pack is the author's, released
-  # through their Patreon and nowhere a build could fetch it from, so it
-  # travels the way console keys and firmware do: hand-placed on the
-  # library's files directory as n64/paperboat-hd.o2r, fetched into the
-  # game's state on the first launch that lacks it, never in a store path.
-  # Absent on the server it is a warning and the game runs as shipped. The
-  # archive is excluded from the saves below (boat/*.o2r), as it is made
-  # for a PaperBoat version and is better fetched than synced.
-  keys = {
-    into = "boat";
-    files = [ "paperboat-hd.o2r" ];
-  };
-
   preLaunch = ''
     export SHIP_HOME="$state/boat"
     mkdir -p "$SHIP_HOME"
+
+    # The HD texture pack (a mod extra in the bundle) is linked in under the
+    # one name the port loads. A regular file left by the old fetch stays; a
+    # link whose bundle is gone is removed before the port trips on it.
+    paperboat_hd="$(gotg_extra '*.o2r')"
+    if [ -n "$paperboat_hd" ]; then
+      ln -sfn "$paperboat_hd" "$SHIP_HOME/paperboat-hd.o2r"
+    elif [ -L "$SHIP_HOME/paperboat-hd.o2r" ] && [ ! -e "$SHIP_HOME/paperboat-hd.o2r" ]; then
+      rm -f "$SHIP_HOME/paperboat-hd.o2r"
+    fi
+
     cd "$SHIP_HOME"
 
-    # The port's settings as a launch leaves them: see lusSettings. Names
-    # off PaperBoat's cmake/lus-cvars.cmake and PaperboatMenuSettings.cpp --
-    # it prefixes libultraship's, as the Zelda ports do. (A launch wrote the
-    # unprefixed gControlNav for a day; the game kept the key and ignored
-    # it.)
+    # Cvar names from PaperBoat's cmake/lus-cvars.cmake: it prefixes
+    # libultraship's (an unprefixed gControlNav was silently ignored).
     ${helpers.lusSettings {
       file = ''"$SHIP_HOME/paperboat.cfg.json"'';
       unsaid = {
@@ -108,18 +57,14 @@ in
       };
     }}
 
-    # An archive belongs to the port version that made it -- 2Ship taught
-    # that one (see harkinianPort): an outdated archive stops on a modal no
-    # pad reaches. Stamped, and re-extracted when the stamp differs.
+    # An archive from another port version stops on a modal no pad reaches.
     paperboat_stamp="$SHIP_HOME/.gotg-archive-version"
     if [ "$(cat "$paperboat_stamp" 2>/dev/null)" != "${lib.getVersion port}" ]; then
       rm -f "$SHIP_HOME/${archive}"
     fi
 
     if [ ! -e "$SHIP_HOME/${archive}" ]; then
-      # $target, not $install: with extras attached (a texture pack) the game
-      # installs as a directory and $install is that directory, while $target
-      # is the zip inside it -- and the zip itself when there are none.
+      # $target is the zip whether or not the game is a bundle.
       echo "first run: extracting game assets from $target -- half a minute, once" >&2
       paperboat_work="$state/.extract"
       rm -rf "$paperboat_work"
@@ -127,10 +72,8 @@ in
       unzip -q -o "$target" -d "$paperboat_work/rom"
       paperboat_rom="$(find "$paperboat_work/rom" -name '*.z64' | head -1)"
       [ -n "$paperboat_rom" ] || { echo "no .z64 inside $target" >&2; exit 1; }
-      # -s is where config.yml and the asset yamls are: PaperBoat's own, so
-      # the recipe is the one this port reads. -u writes portVersion, as
-      # PaperBoat's extractor does. Into a scratch directory and then moved,
-      # so an extraction that is stopped leaves no half an archive behind.
+      # Torch with PaperBoat's own yamls and version stamp, into scratch so an
+      # interrupted extraction leaves no half-archive.
       (cd "$paperboat_work" && ${torch}/bin/torch o2r \
         -s "${port}/share/paperboat" -d "$paperboat_work/out" \
         -u "${lib.getVersion port}" "$paperboat_rom" >"$paperboat_work/torch.log" 2>&1) || {
@@ -144,9 +87,7 @@ in
     fi
   '';
 
-  # JSON saves, one per slot plus globals, and the settings beside them.
-  # The archive is made from the ROM by the first launch anywhere, so it
-  # does not travel.
+  # The archive is remade from the ROM anywhere, so it does not travel.
   saves = [
     "boat/saves/**"
     "boat/paperboat.cfg.json"

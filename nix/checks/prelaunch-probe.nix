@@ -52,6 +52,32 @@ let
     builtins.appendContext (builtins.unsafeDiscardStringContext text) wanted;
   script = name: text: pkgs.writeText "probe-${name}.sh" (keep text);
 
+  # PaperBoat's preLaunch, with the port and its extractor as bare names (the
+  # archive and its stamp exist in the probe, so neither is run). gotg_extra
+  # is the launcher's (machinery/lib.nix); the probe carries a copy of its
+  # contract -- the first regular file matching a glob directly under
+  # $install/extras, nothing and status 0 when there is none.
+  gotgExtra = ''
+    gotg_extra() {
+      local f
+      for f in "$install"/extras/$1; do
+        if [ -f "$f" ]; then printf '%s\n' "$f"; return 0; fi
+      done
+      return 0
+    }
+  '';
+  paperboatEnv = import ../../src/client/env/games/n64/usa.paper_mario.paperboat.nix {
+    inherit pkgs lib helpers;
+    gotgPkgs = {
+      paperboat = {
+        name = "paperboat-1.0";
+        version = "1.0";
+        outPath = "/nonexistent/paperboat";
+      };
+      paperboat-torch = "/nonexistent/torch";
+    };
+  };
+
   # Fixtures the Ryujinx mod helpers copy from.
   modDir = pkgs.runCommand "probe-mod" { } ''
     mkdir -p $out/exefs
@@ -100,6 +126,7 @@ let
       }
     );
     switch = script "switch" switchEnv.preLaunch;
+    paperboat = script "paperboat" (gotgExtra + paperboatEnv.preLaunch);
   };
 in
 pkgs.runCommand "check-prelaunch-probe"
@@ -285,6 +312,38 @@ pkgs.runCommand "check-prelaunch-probe"
     # Pinned on every launch, not seeded once: a config that drifted is put back.
     launch "$d" ${scripts.switch}
     config "$d" '.update_checker_type == "Off" and .dram_size == 0'
+
+    echo "== paperboat.nix"
+    # The archive and its stamp are there, so the extraction is not entered.
+    boat() {
+      d=$(fresh "$1")
+      mkdir -p "$d/state/boat"
+      touch "$d/state/boat/pm64.o2r"
+      printf '%s' 1.0 >"$d/state/boat/.gotg-archive-version"
+      echo "$d"
+    }
+    # A pack in the bundle is linked, not copied; a second launch keeps it.
+    d=$(boat boat-pack)
+    mkdir -p "$d/install/extras"
+    echo hd >"$d/install/extras/mod_refolded-paperboat-hd.o2r"
+    launch "$d" ${scripts.paperboat} install="$d/install"
+    hd="$d/state/boat/paperboat-hd.o2r"
+    [ -L "$hd" ] && [ "$(readlink "$hd")" = "$d/install/extras/mod_refolded-paperboat-hd.o2r" ] ||
+      fail "paperboat: the pack is not linked to the bundle's"
+    launch "$d" ${scripts.paperboat} install="$d/install"
+    [ "$(cat "$hd")" = hd ] || fail "paperboat: the link did not survive a second launch"
+    # No pack: a link whose bundle is gone goes, a plain install changes nothing.
+    d=$(boat boat-dangling)
+    ln -s "$d/install/extras/gone.o2r" "$d/state/boat/paperboat-hd.o2r"
+    launch "$d" ${scripts.paperboat} install="$d/install"
+    [ ! -e "$d/state/boat/paperboat-hd.o2r" ] && [ ! -L "$d/state/boat/paperboat-hd.o2r" ] ||
+      fail "paperboat: a dangling link was left"
+    # A regular file the stopgap fetched is the player's pack until a bundle brings one.
+    d=$(boat boat-stopgap)
+    echo stopgap >"$d/state/boat/paperboat-hd.o2r"
+    launch "$d" ${scripts.paperboat}
+    [ ! -L "$d/state/boat/paperboat-hd.o2r" ] && [ "$(cat "$d/state/boat/paperboat-hd.o2r")" = stopgap ] ||
+      fail "paperboat: the stopgap's file was touched"
 
     [ -z "$failed" ] || exit 1
     touch $out

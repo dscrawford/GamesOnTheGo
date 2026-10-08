@@ -16,7 +16,75 @@
 # is what lets a test stub a multi-gigabyte conversion into an echo.
 { pkgs }:
 
+let
+  inherit (pkgs) lib;
+
+  # Updates and DLC ride beside the game as extras/<release>/ — a rar set, a
+  # 7z, or loose containers. Each unpacks into one directory for place-bundle
+  # to carry; the cursor stays on the game. No extras/ at all is fine.
+  #
+  # `keep` is the globs a loose or unpacked file must match to be an extra:
+  # *.nsp and *.xci for Switch, *.o2r for a PaperBoat pack. A release holding
+  # none of them is refused rather than installed empty.
+  collectExtrasOf =
+    keep:
+    let
+      pred = lib.concatMapStringsSep " -o " (g: "-iname '${g}'") keep;
+    in
+    {
+      name = "collect-extras";
+      tools.UNRAR = "${pkgs.unrar}/bin/unrar";
+      tools.P7Z = "${pkgs._7zz}/bin/7zz";
+      tools.RHASH = "${pkgs.rhash}/bin/rhash";
+      script = ''
+        out="$stage/extras"
+        mkdir -p "$out"
+        for release in "$raw"/extras/*/; do
+          [ -d "$release" ] || continue
+          name="$(basename "$release")"
+          case "$name" in *[!A-Za-z0-9._-]* | "") fail "unusable extras release name: $name" ;; esac
+          unpacked="$stage/extras-$name"
+          mkdir -p "$unpacked"
+          sfv="$(find "$release" -maxdepth 1 -name '*.sfv' | head -1 || true)"
+          if [ -n "$sfv" ]; then
+            (cd "$release" && "$RHASH" -c "$sfv") || fail "sfv verification failed in $name"
+          fi
+          rar="$(find "$release" -maxdepth 1 -name '*.rar' | head -1 || true)"
+          sevenz="$(find "$release" -maxdepth 1 -name '*.7z' | head -1 || true)"
+          # Both flatten (`e`), as the unrar step does, and both run under a
+          # file-size cap: the catalog hash covers the archive, not what it
+          # expands to, and the stage is on the games volume.
+          if [ -n "$rar" ]; then
+            (
+              ulimit -f $((64 * 1024 * 1024))
+              exec "$UNRAR" e -idq -o+ "$rar" "$unpacked/"
+            ) || fail "unrar failed in $name"
+          elif [ -n "$sevenz" ]; then
+            (
+              ulimit -f $((64 * 1024 * 1024))
+              exec "$P7Z" e -bd -y -o"$unpacked" "$sevenz"
+            ) >/dev/null || fail "extract failed in $name"
+          else
+            find "$release" -maxdepth 1 -type f \( ${pred} \) -exec mv -t "$unpacked" {} +
+          fi
+          [ -z "$(find "$unpacked" -type l -print -quit)" ] || fail "refusing a symlink in $name"
+          found=0
+          while IFS= read -r -d "" f; do
+            # The name is the archive's to choose and lands in Ryujinx's json;
+            # it is only a label there, so anything odd becomes an underscore.
+            base="$(basename "$f")"
+            base="''${base//[^A-Za-z0-9._-]/_}"
+            mv "$f" "$out/$name-$base" || fail "could not collect $base"
+            found=1
+          done < <(find "$unpacked" -type f \( ${pred} \) -print0)
+          [ "$found" = 1 ] || fail "no ${lib.concatMapStringsSep " or " (g: lib.removePrefix "*" g) keep} in $name"
+        done
+      '';
+    };
+in
 {
+  inherit collectExtrasOf;
+
   # Scene releases ship an .sfv; when one is present the volume set has to
   # match it before anything is unpacked. No .sfv is fine — not every source
   # has one — but a failing check is a refusal.
@@ -146,59 +214,11 @@
     '';
   };
 
-  # Updates and DLC ride beside the game as extras/<release>/ — a rar set, a
-  # 7z, or loose containers. Each unpacks into one directory for place-bundle
-  # to carry; the cursor stays on the game. No extras/ at all is fine.
-  collectExtras = {
-    name = "collect-extras";
-    tools.UNRAR = "${pkgs.unrar}/bin/unrar";
-    tools.P7Z = "${pkgs._7zz}/bin/7zz";
-    tools.RHASH = "${pkgs.rhash}/bin/rhash";
-    script = ''
-      out="$stage/extras"
-      mkdir -p "$out"
-      for release in "$raw"/extras/*/; do
-        [ -d "$release" ] || continue
-        name="$(basename "$release")"
-        case "$name" in *[!A-Za-z0-9._-]* | "") fail "unusable extras release name: $name" ;; esac
-        unpacked="$stage/extras-$name"
-        mkdir -p "$unpacked"
-        sfv="$(find "$release" -maxdepth 1 -name '*.sfv' | head -1 || true)"
-        if [ -n "$sfv" ]; then
-          (cd "$release" && "$RHASH" -c "$sfv") || fail "sfv verification failed in $name"
-        fi
-        rar="$(find "$release" -maxdepth 1 -name '*.rar' | head -1 || true)"
-        sevenz="$(find "$release" -maxdepth 1 -name '*.7z' | head -1 || true)"
-        # Both flatten (`e`), as the unrar step does, and both run under a
-        # file-size cap: the catalog hash covers the archive, not what it
-        # expands to, and the stage is on the games volume.
-        if [ -n "$rar" ]; then
-          (
-            ulimit -f $((64 * 1024 * 1024))
-            exec "$UNRAR" e -idq -o+ "$rar" "$unpacked/"
-          ) || fail "unrar failed in $name"
-        elif [ -n "$sevenz" ]; then
-          (
-            ulimit -f $((64 * 1024 * 1024))
-            exec "$P7Z" e -bd -y -o"$unpacked" "$sevenz"
-          ) >/dev/null || fail "extract failed in $name"
-        else
-          find "$release" -maxdepth 1 -type f \( -iname '*.nsp' -o -iname '*.xci' \) -exec mv -t "$unpacked" {} +
-        fi
-        [ -z "$(find "$unpacked" -type l -print -quit)" ] || fail "refusing a symlink in $name"
-        found=0
-        while IFS= read -r -d "" f; do
-          # The name is the archive's to choose and lands in Ryujinx's json;
-          # it is only a label there, so anything odd becomes an underscore.
-          base="$(basename "$f")"
-          base="''${base//[^A-Za-z0-9._-]/_}"
-          mv "$f" "$out/$name-$base" || fail "could not collect $base"
-          found=1
-        done < <(find "$unpacked" -type f \( -iname '*.nsp' -o -iname '*.xci' \) -print0)
-        [ "$found" = 1 ] || fail "no .nsp or .xci in $name"
-      done
-    '';
-  };
+  # Switch's: updates and DLC are containers Ryujinx reads.
+  collectExtras = collectExtrasOf [
+    "*.nsp"
+    "*.xci"
+  ];
 
   # Terminal: the game as <id>/<id>.<ext> with its extras/ beside it — a
   # directory install, so the emulator's update and DLC registration has one

@@ -8,6 +8,7 @@ import pytest
 
 from gotg.indexer.plan import (
     ACTION_ARCHIVE,
+    ACTION_ATTACH,
     ACTION_CONVERT,
     ACTION_EXTRACT,
     ACTION_HARDLINK,
@@ -15,7 +16,7 @@ from gotg.indexer.plan import (
     ACTION_SKIP,
     plan_single_archive,
 )
-from gotg.indexer.planner import plan_source
+from gotg.indexer.planner import plan_mods, plan_source
 from gotg.indexer.rules import defaults
 from gotg.indexer.slugify import ENTRY_RE
 
@@ -434,3 +435,106 @@ def test_an_archive_set_without_a_target_format_keeps_the_archive_name(roots):
 
     ops = plan_archive_set("snes", "/g", "/t/set", ["Chrono Trigger (USA).7z"], target_ext="")
     assert [(o.action, o.dst) for o in ops] == [(ACTION_EXTRACT, "/g/snes/usa.chrono_trigger.7z")]
+
+
+# --- mods: hand-placed extras ---------------------------------------------------
+
+
+def place_mod(games, platform, base, release, files=("pack.o2r",)):
+    d = games / platform / "mods" / base / release
+    d.mkdir(parents=True, exist_ok=True)
+    for name in files:
+        (d / name).write_bytes(b"mod")
+    return d
+
+
+def test_a_mod_release_is_one_attach_op_on_its_base(tmp_path):
+    release = place_mod(tmp_path, "n64", "usa.paper_mario", "refolded", ["paperboat-hd.o2r"])
+
+    ops = plan_mods(tmp_path, ["n64"])
+
+    assert len(ops) == 1
+    op = ops[0]
+    assert (op.action, op.platform, op.src, op.dst) == (ACTION_ATTACH, "n64", str(release), "")
+    assert (op.entry_id, op.title, op.type, op.role, op.version) == (
+        "usa.paper_mario",
+        "usa.paper_mario",
+        "dir",
+        "mod",
+        "",
+    )
+    assert op.reason == "mod refolded for usa.paper_mario"
+
+
+def test_every_release_of_every_base_is_its_own_op(tmp_path):
+    place_mod(tmp_path, "n64", "usa.paper_mario", "refolded")
+    place_mod(tmp_path, "n64", "usa.paper_mario", "refolded-4k")
+    place_mod(tmp_path, "n64", "usa.zelda", "hd")
+
+    ops = plan_mods(tmp_path, ["n64"])
+
+    assert [(o.entry_id, o.reason) for o in ops] == [
+        ("usa.paper_mario", "mod refolded for usa.paper_mario"),
+        ("usa.paper_mario", "mod refolded-4k for usa.paper_mario"),
+        ("usa.zelda", "mod hd for usa.zelda"),
+    ]
+
+
+def test_an_empty_release_dir_is_skipped(tmp_path, caplog):
+    place_mod(tmp_path, "n64", "usa.paper_mario", "empty", [])
+    nested = tmp_path / "n64" / "mods" / "usa.paper_mario" / "only_dirs" / "sub"
+    nested.mkdir(parents=True)
+    place_mod(tmp_path, "n64", "usa.paper_mario", "real")
+
+    with caplog.at_level("INFO"):
+        ops = plan_mods(tmp_path, ["n64"])
+
+    assert [o.reason for o in ops] == ["mod real for usa.paper_mario"]
+    assert "empty" in caplog.text
+
+
+@pytest.mark.parametrize("base", [".hidden", "Not A Valid Id", "usa", "UPPER.case"])
+def test_a_base_that_is_not_an_id_is_skipped(tmp_path, base, caplog):
+    place_mod(tmp_path, "n64", base, "refolded")
+
+    with caplog.at_level("INFO"):
+        assert plan_mods(tmp_path, ["n64"]) == []
+    assert base in caplog.text
+
+
+def test_a_dotfile_release_is_skipped(tmp_path):
+    place_mod(tmp_path, "n64", "usa.paper_mario", ".stfolder")
+    assert plan_mods(tmp_path, ["n64"]) == []
+
+
+def test_a_loose_file_beside_the_releases_is_not_a_release(tmp_path):
+    place_mod(tmp_path, "n64", "usa.paper_mario", "refolded")
+    (tmp_path / "n64" / "mods" / "usa.paper_mario" / "notes.txt").write_text("x")
+    (tmp_path / "n64" / "mods" / "README").write_text("x")
+
+    assert [o.reason for o in plan_mods(tmp_path, ["n64"])] == ["mod refolded for usa.paper_mario"]
+
+
+def test_two_platforms_are_both_walked(tmp_path):
+    place_mod(tmp_path, "n64", "usa.paper_mario", "refolded")
+    place_mod(tmp_path, "switch", "world.zelda", "hd")
+
+    ops = plan_mods(tmp_path, ["n64", "switch"])
+
+    assert [(o.platform, o.entry_id) for o in ops] == [("n64", "usa.paper_mario"), ("switch", "world.zelda")]
+
+
+def test_no_mods_dir_plans_nothing(tmp_path):
+    (tmp_path / "n64").mkdir()
+    assert plan_mods(tmp_path, ["n64", "absent"]) == []
+
+
+def test_mod_platforms_come_from_the_tree_not_a_list(tmp_path):
+    from gotg.indexer.planner import mod_platforms
+
+    place_mod(tmp_path, "n64", "usa.paper_mario", "refolded")
+    (tmp_path / "snes").mkdir()
+    (tmp_path / "stray-file").write_text("x")
+
+    assert mod_platforms(tmp_path) == ["n64"]
+    assert mod_platforms(tmp_path / "missing") == []
