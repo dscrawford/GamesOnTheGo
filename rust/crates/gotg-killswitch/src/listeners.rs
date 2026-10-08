@@ -7,6 +7,7 @@
 //! goes is here, taking the link as a closure so it is tested with none.
 
 use crate::departures::Departures;
+use crate::hold::Hold;
 use crate::menu::Focused;
 use crate::native::Native;
 use crate::padlink::Link;
@@ -22,6 +23,7 @@ pub struct Listeners {
     pub focused: Focused,
     pub native: Native,
     pub departures: Departures,
+    pub hold: Hold,
 }
 
 impl Listeners {
@@ -35,6 +37,7 @@ impl Listeners {
             focused: Focused::default(),
             native: Native::default(),
             departures: Departures::default(),
+            hold: Hold::default(),
         }
     }
 
@@ -48,6 +51,7 @@ impl Listeners {
                 &mut self.focused,
                 &mut self.native,
                 &mut self.departures,
+                &mut self.hold,
             ],
             now,
         );
@@ -61,6 +65,7 @@ impl Listeners {
             self.pairing.room(None);
             self.seating.lost();
             self.native.lost();
+            self.hold.lost();
         } else if let Some(line) = self.seating.wanted()
             && !send(&line)
         {
@@ -88,6 +93,18 @@ mod tests {
         });
         assert_eq!(sent.len(), 2, "asked again, the first never reached danstick");
         listeners.settle(true, |_| panic!("asked a third time"));
+    }
+
+    #[test]
+    fn a_hold_is_sent_with_the_other_asks_and_again_on_a_new_connection() {
+        let mut listeners = Listeners::new(1.5);
+        listeners.hold.want(true);
+        assert!(listeners.hold.wanted().is_some());
+        listeners.settle(false, |_| panic!("no connection to send on"));
+        assert!(
+            listeners.hold.wanted().is_some(),
+            "the old connection's hold is gone"
+        );
     }
 
     #[test]

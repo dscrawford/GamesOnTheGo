@@ -160,6 +160,13 @@ impl MenuDriver {
         self.apply(action, owner, client, saves, now)
     }
 
+    /// Close the menu from outside, as its owner's B would: Steam's overlay
+    /// has the pads, so nothing here should still be listening to them.
+    pub fn dismiss(&mut self, client: &str, saves: &str, now: f64) -> Option<Step> {
+        let owner = self.menu.as_ref()?.owner;
+        self.apply(Action::Close, owner, client, saves, now)
+    }
+
     /// What an action of the menu does to the state here, and what is left
     /// for the loop.
     pub fn apply(&mut self, action: Action, owner: i32, client: &str, saves: &str, now: f64) -> Option<Step> {

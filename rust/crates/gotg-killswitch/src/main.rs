@@ -36,6 +36,8 @@ use gotg_killswitch::painter::{self, Painter};
 use gotg_killswitch::pressing::Held;
 use gotg_killswitch::procstat;
 use gotg_killswitch::rebind::Rebind;
+use gotg_killswitch::steam_overlay::{Seen, Transition};
+use gotg_killswitch::steam_overlay_x11::Watcher;
 use gotg_killswitch::views;
 use sdl3_sys::everything::*;
 
@@ -93,6 +95,10 @@ half a second loads it: the game starts again on it, everybody still
 seated), and Exit (A held half a second) -- which stops the game
 and, with --saves and --client, runs `CLIENT saves push ENV` on the way
 out. B held half a second closes it.
+
+While Steam's overlay is up (under gamescope; GOTG_OVERLAY_STEAM_FILE=PATH
+stands in for it: the file existing is the overlay up) every seated pad is
+held back from the game (danstick's `hold`) and none of the above answers.
 
 A bar comes down over the game while the hold runs, and while a
 controller is holding a button to join danstick -- unless --no-overlay
@@ -575,6 +581,15 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
     let console_index = consoles::for_platform(&options.platform);
     let console = &CONSOLES[console_index];
     let mut next_alive_ms = 0;
+    // Steam's overlay over the game: nothing is watched beside the picker,
+    // whose pads Steam's overlay is not in the way of.
+    let mut steam = if options.overlay_only {
+        None
+    } else {
+        Watcher::from_env()
+    };
+    let mut steam_seen = Seen::default();
+    let mut steam_up = false;
     while !STOP.load(Ordering::Relaxed) {
         // SAFETY: SDL is initialised; the event is plain data SDL fills.
         unsafe {
@@ -611,6 +626,45 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         }
         listeners.pump(&mut link, clock);
         listeners.settle(link.fd().is_some(), |line| link.send(line));
+        if let Some(watcher) = steam.as_mut() {
+            match steam_seen.edge(watcher.up()) {
+                Transition::Up => {
+                    steam_up = true;
+                    listeners.hold.want(true);
+                    if !options.quiet {
+                        eprintln!(
+                            "gotg-killswitch: steam overlay up; {} pad(s) held back",
+                            listeners.rebind.seated().len()
+                        );
+                    }
+                    forget_holds(&mut native_holds, pads, options.hold_ms);
+                    if let Some(Step::Close { owner }) = menu.dismiss(&options.client, &options.saves, clock)
+                    {
+                        close_menu(owner, &mut link, &listeners.focused, &mut bar, clock);
+                    }
+                }
+                Transition::Down => {
+                    steam_up = false;
+                    forget_holds(&mut native_holds, pads, options.hold_ms);
+                    listeners.hold.want(false);
+                    if !options.quiet {
+                        eprintln!("gotg-killswitch: steam overlay down");
+                    }
+                }
+                Transition::None => {}
+            }
+        }
+        if link.fd().is_some()
+            && let Some(line) = listeners.hold.wanted()
+            && !link.send(&line)
+        {
+            listeners.hold.lost();
+        }
+        if listeners.hold.take_refused() {
+            eprintln!(
+                "gotg-killswitch: danstick cannot hold every seat; Steam's overlay presses reach the game"
+            );
+        }
         // A pad that went away takes its seat with it, in the picker too.
         while let Some(line) = listeners.departures.wanted() {
             if !options.quiet {
@@ -639,7 +693,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         for watched in &mut pads.0 {
             // SAFETY: every watched pad is open.
             let input = unsafe { read_pad(watched.pad) };
-            if options.overlay_only {
+            if options.overlay_only || steam_up {
                 continue;
             }
             // A seated pad's chords are its own controls, which danstick says
@@ -654,7 +708,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
             // SAFETY: every watched pad is open.
             round.add(sample, || (player, unsafe { read_held(pad) }.controls));
         }
-        if listeners.native.active() && !options.overlay_only {
+        if listeners.native.active() && !options.overlay_only && !steam_up {
             let seated: Vec<i32> = listeners.rebind.seated().iter().map(|seat| seat.player).collect();
             native_holds.retain_seated(&seated);
             for player in seated {
@@ -705,10 +759,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
             clock,
         );
         match step {
-            Some(Step::Close { owner }) => {
-                send_focus(&mut link, &listeners.focused, owner, false);
-                bar.want_over(false, clock, MENU_CLOSE_SECONDS);
-            }
+            Some(Step::Close { owner }) => close_menu(owner, &mut link, &listeners.focused, &mut bar, clock),
             Some(Step::Exit { owner }) => send_focus(&mut link, &listeners.focused, owner, false),
             Some(Step::Rebind { owner, player }) => {
                 send_focus(&mut link, &listeners.focused, owner, false);
@@ -855,6 +906,21 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
 fn announce(sample: &gotg_killswitch::chords::Sample, options: &Options) {
     if !options.quiet && sample.started {
         eprintln!("gotg-killswitch: kill switch held; {}ms to go", options.hold_ms);
+    }
+}
+
+/// The menu is closed: let go of its owner's pad and bring the bar up.
+fn close_menu(owner: i32, link: &mut Link, focused: &Focused, bar: &mut Bar, clock: f64) {
+    send_focus(link, focused, owner, false);
+    bar.want_over(false, clock, MENU_CLOSE_SECONDS);
+}
+
+/// A chord half held when Steam's overlay came up or went must not fire
+/// off the time it was held before: every hold starts over.
+fn forget_holds(native_holds: &mut NativeHolds, pads: &mut Pads, hold_ms: u64) {
+    *native_holds = NativeHolds::default();
+    for watched in &mut pads.0 {
+        watched.holds = Holds::new(hold_ms);
     }
 }
 
