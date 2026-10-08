@@ -73,5 +73,15 @@ base
       titleId = "0100ecd018ebe000";
       name = "lighting-fix";
       dir = helpers.paperMarioTtydMod "Lighting Fix V3 1.0.1";
+    }).preLaunch
+    # The remake's text crawls, and the 60 FPS patch slows it further. The
+    # same author's fix: a little faster and skippable by the patch, and a
+    # cheat whose hotkeys set the pace -- ZR + D-pad Down fast, ZR + D-pad
+    # Up instant. See paperMarioTtydCheats.
+    + (helpers.ryujinxModOnly {
+      titleId = "0100ecd018ebe000";
+      name = "faster-text";
+      dir = helpers.paperMarioTtydMod "Faster Text Speed v1.0.1";
+      enabledCheats = helpers.paperMarioTtydCheats "Faster Text Speed v1.0.1";
     }).preLaunch;
 }

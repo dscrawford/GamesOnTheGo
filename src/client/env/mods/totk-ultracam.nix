@@ -119,7 +119,10 @@ in
         for pair in "${npdm}:main.npdm" "${subsdk}:subsdk3"; do
           src="''${pair%%:*}"
           name="''${pair##*:}"
-          if ! cmp -s "$src" "$mods/$name"; then
+          # Without the game's LD_PRELOAD: sdl2-compat aborts any program it is
+          # preloaded into that has no SDL3 beside it (ryujinx.nix, cheatsOn),
+          # and cmp aborting read as "different" and copied on every launch.
+          if ! LD_PRELOAD=''' cmp -s "$src" "$mods/$name"; then
             cp --no-preserve=mode "$src" "$mods/$name"
             echo "installed UltraCam ($name)" >&2
           fi

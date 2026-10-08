@@ -40,6 +40,25 @@ let
       fi
     '';
 
+  # The lines of `enabled` that enabled.txt lacks, appended to it. See
+  # ryujinxModDir's note on enabledCheats.
+  #
+  # grep without the game's LD_PRELOAD: the launch exports sdl2-compat's
+  # libSDL2 for Ryujinx (switch.nix), and preloaded into a program with no
+  # SDL3 beside it that library prints "Failed loading SDL3 library" and
+  # aborts -- grep, cmp, anything from PATH; the store's jq happens to
+  # survive it, which is why the config edits never showed the problem.
+  cheatsOn = name: enabled: ''
+    mkdir -p "$contents/cheats"
+    touch "$contents/cheats/enabled.txt"
+    while IFS= read -r cheat; do
+      [ -n "$cheat" ] || continue
+      if ! LD_PRELOAD=''' grep -qxF -- "$cheat" "$contents/cheats/enabled.txt"; then
+        printf '%s\n' "$cheat" >>"$contents/cheats/enabled.txt"
+        echo "switched a ${name} cheat on" >&2
+      fi
+    done <${lib.escapeShellArg enabled}
+  '';
   vsync =
     {
       vsyncMode,
@@ -102,8 +121,12 @@ in
   #
   # enabledCheats, when given, is the file listing which of those cheats start
   # switched on. Ryujinx reads that list from one place per game rather than per
-  # mod — so it is written only when there is none, leaving both a second mod's
-  # cheats and the player's own choices in Ryujinx's cheat manager alone.
+  # mod, so the lines are merged in: a cheat a variant ships on is on -- the 60
+  # FPS one is the way out of a minigame, the text-speed one a hotkey that does
+  # nothing until pressed -- and every other line, a second mod's or the
+  # player's own in Ryujinx's cheat manager, is left as it was. (It used to be
+  # written only when the file was missing, which left a cheat added later off
+  # on every machine that had launched the game before.)
   # How much memory the emulated console has. The Switch has 4GiB and that is
   # the default; a game asking for more is a game running mods the hardware was
   # never expected to run. Paper Mario's in-engine resolution mods are one:
@@ -139,6 +162,7 @@ in
       name,
       dir,
       onDeck ? true,
+      enabledCheats ? null,
     }:
     {
       preLaunch = ''
@@ -153,7 +177,8 @@ in
           cp -R --no-preserve=mode ${lib.escapeShellArg dir}/. "$contents/${name}/"
           echo "installed the ${name} mod" >&2
         fi
-      '';
+      ''
+      + lib.optionalString (enabledCheats != null) (cheatsOn name enabledCheats);
     };
 
   ryujinxModDir =
@@ -174,14 +199,7 @@ in
           echo "installed the ${name} mod" >&2
         fi
       ''
-      + lib.optionalString (enabledCheats != null) ''
-        if [ ! -f "$contents/cheats/enabled.txt" ]; then
-          mkdir -p "$contents/cheats"
-          cp --no-preserve=mode ${lib.escapeShellArg enabledCheats} \
-            "$contents/cheats/enabled.txt"
-          echo "switched the ${name} cheats on" >&2
-        fi
-      ''
+      + lib.optionalString (enabledCheats != null) (cheatsOn name enabledCheats)
       + vsync { inherit vsyncMode customInterval; };
     };
 

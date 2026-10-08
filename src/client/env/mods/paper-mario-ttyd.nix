@@ -28,7 +28,7 @@ let
   };
   mod = "${mods}/[60FPS v1.0.1]";
 in
-{
+rec {
   # Copied out to a name of our own: the archive's directory is
   # "[60FPS v1.0.1]", and a store path with a space and a bracket in it is one
   # that has to be quoted correctly by every line that ever touches it.
@@ -64,10 +64,20 @@ in
   # Read back out of the archive rather than written down here, so that a later
   # revision that renames a cheat cannot leave this list quietly pointing at a
   # name that no longer exists.
-  paperMarioTtyd60Cheats =
-    pkgs.runCommand "paper-mario-ttyd-60fps-enabled-cheats" { }
+  #
+  # For any folder of the pack with cheats in it. The 60 FPS one, and the
+  # text-speed one: the remake's text crawls, and the 60 FPS patch slows it
+  # further (its delta time). "Faster Text Speed" is the same author's answer --
+  # a patch that quickens it a little and lets a press skip it, and a cheat
+  # whose hotkeys pick the speed, ZR + D-pad Down fast and ZR + D-pad Up
+  # instant. Shipped as the author made it (CC BY-NC-ND), so the hotkeys are
+  # the way to instant, not a setting.
+  paperMarioTtydCheats =
+    folder:
+    pkgs.runCommand "paper-mario-ttyd-${lib.replaceStrings [ " " "." ] [ "-" "-" ] folder}-enabled-cheats"
+      { }
       ''
-        for cheats in ${lib.escapeShellArg mod}/cheats/*.txt; do
+        for cheats in ${lib.escapeShellArg "${mods}/[${folder}]"}/cheats/*.txt; do
           id="$(basename "$cheats" .txt | tr '[:lower:]' '[:upper:]')"
           ${pkgs.gawk}/bin/awk -v id="$id" '
             # The archive keeps DOS line endings, and Ryujinx reads the file a
@@ -92,4 +102,5 @@ in
         test "$(${pkgs.gnugrep}/bin/grep -cE '^[0-9A-F]{16}-<[^][]+ Cheat>$' $out)" \
           = "$(wc -l <$out)"
       '';
+  paperMarioTtyd60Cheats = paperMarioTtydCheats "60FPS v1.0.1";
 }
