@@ -248,10 +248,9 @@ impl Game {
         }
     }
 
-    /// Everything the game started, not just the process we were handed:
-    /// `gotg play` execs the wrapper that execs the emulator, so the pid is
-    /// usually its process group's leader, and an emulator under a shim has
-    /// children a signal to one pid would leave running.
+    /// The process group, when the pid leads one: what a job from a terminal
+    /// is, and what catches a helper that double-forked out of the tree.
+    /// Not enough on its own -- see `stop`.
     fn signal(&self, signal: libc::c_int) {
         if !self.same() {
             eprintln!(
@@ -275,34 +274,34 @@ impl Game {
 
     /// Politely first: an emulator that takes SIGTERM writes its save, which
     /// is the difference between quitting a game and losing an hour of it.
+    ///
+    /// The whole tree under the pid, not the pid: the launch's shell became
+    /// `danstick-rs exec`, which spawns the game under bwrap rather than
+    /// becoming it, so the pid alone was danstick's wrapper -- and stopping
+    /// that stopped the daemon and this overlay and left Paper Mario running
+    /// on a Deck with nobody watching. `loading::stop_tree_unless` reads the
+    /// children off /proc; the group is signalled as well for anything that
+    /// forked out of the tree, where the pid leads one.
     fn stop(&self, grace_ms: u64, poll_ms: u64) {
         eprintln!("gotg-killswitch: kill switch held; stopping {}", self.pid);
-        self.signal(libc::SIGTERM);
-        let mut waited = 0;
-        while waited < grace_ms && !STOP.load(Ordering::Relaxed) {
-            if !procstat::alive(self.pid) {
-                eprintln!("gotg-killswitch: stopped");
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(poll_ms));
-            waited += poll_ms;
-        }
-        if !procstat::alive(self.pid) {
-            eprintln!("gotg-killswitch: stopped");
+        if !self.same() {
             return;
         }
-        // Asked to go ourselves -- a launcher tidying up, a session ending --
-        // while the game is still writing its save: it keeps its SIGTERM, and
-        // is not killed for our leaving.
-        if STOP.load(Ordering::Relaxed) {
-            eprintln!(
+        self.signal(libc::SIGTERM);
+        match loading::stop_tree_unless(self.pid, grace_ms, poll_ms, &|| STOP.load(Ordering::Relaxed)) {
+            loading::Stopped::Gently => eprintln!("gotg-killswitch: stopped"),
+            // Asked to go ourselves -- a launcher tidying up, a session
+            // ending -- while the game is still writing its save: it keeps
+            // its SIGTERM, and is not killed for our leaving.
+            loading::Stopped::LeftToIt => eprintln!(
                 "gotg-killswitch: asked to go mid-grace; leaving {} its SIGTERM",
                 self.pid
-            );
-            return;
+            ),
+            loading::Stopped::Killed => {
+                eprintln!("gotg-killswitch: it did not go; killed");
+                self.signal(libc::SIGKILL);
+            }
         }
-        eprintln!("gotg-killswitch: it did not go; killing");
-        self.signal(libc::SIGKILL);
     }
 }
 

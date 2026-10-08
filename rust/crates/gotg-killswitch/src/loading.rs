@@ -220,15 +220,51 @@ fn processes() -> Vec<(i32, i32)> {
 /// Stop the game and what it started, and nothing else: SIGTERM, a grace to
 /// write its own saves in, then SIGKILL for whatever is left.
 pub fn stop_tree(game: i32, grace_ms: u64, poll_ms: u64) {
+    stop_tree_unless(game, grace_ms, poll_ms, &|| false);
+}
+
+/// What became of the tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stopped {
+    /// Everything went on its SIGTERM.
+    Gently,
+    /// Something had to be killed.
+    Killed,
+    /// `abort` said to stop waiting; what is left keeps its SIGTERM.
+    LeftToIt,
+}
+
+/// [`stop_tree`], giving up the wait when `abort` says so -- the kill switch
+/// asked to go itself mid-grace leaves the game its SIGTERM rather than
+/// killing it for our leaving.
+///
+/// The tree, not the one pid. The kill switch is handed the launch's shell,
+/// which `exec`s into `danstick-rs exec`, and that *spawns* the game -- under
+/// bwrap, with the raw pads hidden -- rather than becoming it. A signal to
+/// the pid alone stopped danstick's wrapper (and with it the daemon that
+/// follows that pid, and the overlay) and left the game running with nobody
+/// watching it: Paper Mario on a Deck, exited from the menu, played on.
+/// Signalling the process group would have covered it from a terminal, where
+/// a job is its own group, but under Steam and the picker the pid is a
+/// member of somebody else's. The children of each process are read off
+/// /proc, so a wrapper that forwards nothing is no obstacle.
+pub fn stop_tree_unless(game: i32, grace_ms: u64, poll_ms: u64, abort: &dyn Fn() -> bool) -> Stopped {
     let tree = descendants(game, &processes());
     for &pid in tree.iter().rev() {
         // SAFETY: a signal to a pid; nothing is shared.
         unsafe { libc::kill(pid, libc::SIGTERM) };
     }
+    let alive = |tree: &[i32]| tree.iter().any(|&pid| crate::procstat::alive(pid));
     let mut waited = 0;
-    while waited < grace_ms && tree.iter().any(|&pid| crate::procstat::alive(pid)) {
+    while waited < grace_ms && alive(&tree) && !abort() {
         std::thread::sleep(std::time::Duration::from_millis(poll_ms.max(10)));
         waited += poll_ms.max(10);
+    }
+    if !alive(&tree) {
+        return Stopped::Gently;
+    }
+    if abort() {
+        return Stopped::LeftToIt;
     }
     for &pid in &tree {
         if crate::procstat::alive(pid) {
@@ -236,6 +272,7 @@ pub fn stop_tree(game: i32, grace_ms: u64, poll_ms: u64) {
             unsafe { libc::kill(pid, libc::SIGKILL) };
         }
     }
+    Stopped::Killed
 }
 
 #[cfg(test)]
@@ -338,6 +375,57 @@ mod tests {
         assert!(crate::procstat::alive(beside.id() as i32), "and nothing else did");
         let _ = beside.kill();
         let _ = beside.wait();
+    }
+
+    #[test]
+    fn a_wrapper_that_forwards_nothing_does_not_shield_the_game() {
+        // danstick-rs exec's shape: a parent that spawns the game and waits,
+        // forwarding no signal, in a process group it does not lead. The game
+        // ignores the first polite word, as an emulator mid-save might.
+        let mut wrapper = Command::new("sh")
+            .args(["-c", "sh -c 'trap \"\" TERM; sleep 30' & echo $! ; wait"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("sh runs");
+        let mut game = String::new();
+        std::io::BufRead::read_line(
+            &mut std::io::BufReader::new(wrapper.stdout.take().expect("piped")),
+            &mut game,
+        )
+        .expect("the game's pid");
+        let game: i32 = game.trim().parse().expect("a pid");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let outcome = stop_tree_unless(wrapper.id() as i32, 300, 20, &|| false);
+        let _ = wrapper.wait();
+        assert_eq!(
+            outcome,
+            Stopped::Killed,
+            "the game sat out its grace and was killed"
+        );
+        // SIGKILL lands a moment after it is sent.
+        let mut waited = 0;
+        while crate::procstat::alive(game) && waited < 2000 {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            waited += 20;
+        }
+        assert!(!crate::procstat::alive(game), "and is gone");
+    }
+
+    #[test]
+    fn an_abort_mid_grace_leaves_the_tree_its_sigterm() {
+        let mut game = Command::new("sh")
+            .args(["-c", "trap '' TERM; sleep 30"])
+            .spawn()
+            .expect("sh runs");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let outcome = stop_tree_unless(game.id() as i32, 2000, 20, &|| true);
+        assert_eq!(outcome, Stopped::LeftToIt);
+        assert!(
+            crate::procstat::alive(game.id() as i32),
+            "not killed for our leaving"
+        );
+        let _ = game.kill();
+        let _ = game.wait();
     }
 
     #[test]
