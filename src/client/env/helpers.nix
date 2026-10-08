@@ -73,6 +73,7 @@ let
     (import ./emulators/dolphin.nix { inherit pkgs lib discArchiveRecipe; })
     (import ./emulators/ryujinx.nix { inherit pkgs lib; })
     (import ./emulators/harkinian.nix { inherit pkgs lib steps; })
+    (import ./emulators/recomp-port.nix { inherit pkgs steps; })
   ];
 
   # What a mod does to one game's own files, one game per file.
@@ -85,6 +86,7 @@ let
     (import ./mods/four-swords-split.nix { inherit pkgs lib; })
     (import ./mods/sm64-coop-split.nix { inherit pkgs lib; })
     (import ./mods/oot-coop-split.nix { inherit pkgs lib; })
+    (import ./mods/coop-variant.nix { })
     (import ./mods/kirby-forgotten-land.nix { inherit pkgs lib; })
     (import ./mods/paper-mario-ttyd.nix { inherit pkgs lib; })
     (import ./mods/super-mario-rpg.nix { inherit pkgs lib; })

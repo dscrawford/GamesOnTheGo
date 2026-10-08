@@ -21,15 +21,12 @@
 # the mod loads, hooks nothing, and the game is simply itself until it is not.
 { pkgs, lib }:
 let
-  rev = "c41e68439ccd0c19bffc8a5bab08ffdf0b81b992";
-  exefs = "https://raw.githubusercontent.com/MaxLastBreath/nx-optimizer/${rev}/src/PatchInfo/Breath%20Of%20The%20Wild/UltraCam/exefs";
-  npdm = pkgs.fetchurl {
-    url = "${exefs}/main.npdm";
-    hash = "sha256-fO27V7qT46tuZgSQoKe5MnFoVABHhqKsQtOdv4uF5ng=";
-  };
-  subsdk = pkgs.fetchurl {
-    url = "${exefs}/subsdk3";
-    hash = "sha256-EhbVjLPrgCipBaPIixBKEzi0jP8rHf6sVxv/e5gm2sY=";
+  inherit (import ../emulators/jq-edit.nix { inherit pkgs; }) gotgJqEdit;
+  nx = import ./nx-optimizer.nix { inherit pkgs; };
+  optimizer = nx.nxOptimizerExefs {
+    game = "Breath%20Of%20The%20Wild";
+    npdmHash = "sha256-fO27V7qT46tuZgSQoKe5MnFoVABHhqKsQtOdv4uF5ng=";
+    subsdkHash = "sha256-EhbVjLPrgCipBaPIixBKEzi0jP8rHf6sVxv/e5gm2sY=";
   };
 in
 {
@@ -95,33 +92,20 @@ in
         width = lib.min width 1920;
         height = lib.min height 1080;
       };
-      # The console's own 60Hz at or below 60; a custom rate above it, since
-      # the emulated display is what the game's frames are handed to.
-      vsyncFor =
-        fps:
-        if fps <= 60 then
-          ".vsync_mode = 0 | .enable_custom_vsync_interval = false"
-        else
-          ".vsync_mode = 2 | .enable_custom_vsync_interval = true | .custom_vsync_interval = ${toString fps}";
+      inherit (nx) vsyncFor;
       vsync = vsyncFor fps;
       deckVsync = vsyncFor deckFps;
     in
     {
+      window = {
+        gameVersionMin = "1.6.0";
+        gameVersionMax = "1.6.0";
+      };
       preLaunch = ''
         ryujinx="$XDG_CONFIG_HOME/Ryujinx"
         mod="$ryujinx/mods/contents/01007ef00011e000/!!!BOTW Optimizer"
         mkdir -p "$mod/exefs" "$mod/romfs/UltraCam"
-        for pair in "${npdm}:main.npdm" "${subsdk}:subsdk3"; do
-          src="''${pair%%:*}"
-          name="''${pair##*:}"
-          # Without the game's LD_PRELOAD: sdl2-compat aborts any program it is
-          # preloaded into that has no SDL3 beside it (ryujinx.nix, cheatsOn),
-          # and cmp aborting read as "different" and copied on every launch.
-          if ! LD_PRELOAD=''' cmp -s "$src" "$mod/exefs/$name"; then
-            cp --no-preserve=mode "$src" "$mod/exefs/$name"
-            echo "installed UltraCam ($name)" >&2
-          fi
-        done
+        ${optimizer.install "$mod/exefs"}
         if [ "''${GOTG_MACHINE:-}" = deck ]; then
           if [ "''${GOTG_EXTERNAL_DISPLAY:-0}" = 1 ]; then
             cp --no-preserve=mode ${deckTvIni} "$mod/romfs/UltraCam/maxlastbreath.ini"
@@ -135,12 +119,11 @@ in
         fi
 
         if [ -f "$ryujinx/Config.json" ]; then
-          if ${pkgs.jq}/bin/jq "$ultracam_vsync" \
-            "$ryujinx/Config.json" >"$ryujinx/Config.json.gotg"; then
-            mv "$ryujinx/Config.json.gotg" "$ryujinx/Config.json"
-          else
-            rm -f "$ryujinx/Config.json.gotg"
-          fi
+          ${gotgJqEdit {
+            file = "$ryujinx/Config.json";
+            filterVar = "ultracam_vsync";
+            indent = "  ";
+          }}
         fi
       '';
     };

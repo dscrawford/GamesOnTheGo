@@ -16,6 +16,7 @@
 let
   anchorPort = 43383; # the relay listens here and nowhere else; it has no flag
   seat = import ./coop-seats.nix { inherit pkgs; };
+  inherit (import ../emulators/jq-edit.nix { inherit pkgs; }) gotgJqEdit;
 in
 {
   harkinianCoopSplit =
@@ -128,12 +129,16 @@ in
                 printf '{}\n' >"$gotg_cfg"
               fi
             fi
-            ${pkgs.jq}/bin/jq --arg name "P$gotg_n" \
-              '.CVars.gRemote.Anchor = ((.CVars.gRemote.Anchor // {}) + {
-                 Enabled: 1, Host: "127.0.0.1", Port: ${toString anchorPort},
-                 RoomId: "gotg", TeamId: "default", Name: $name })
-               | .Window.Fullscreen.Enabled = false' \
-              "$gotg_cfg" >"$gotg_cfg.gotg" && mv "$gotg_cfg.gotg" "$gotg_cfg"
+            ${gotgJqEdit {
+              file = "$gotg_cfg";
+              args = ''--arg name "P$gotg_n"'';
+              filter = ''
+                .CVars.gRemote.Anchor = ((.CVars.gRemote.Anchor // {}) + {
+                   Enabled: 1, Host: "127.0.0.1", Port: ${toString anchorPort},
+                   RoomId: "gotg", TeamId: "default", Name: $name })
+                 | .Window.Fullscreen.Enabled = false'';
+              indent = "  ";
+            }}
 
             # This player's controller, as the one input device the copy can
             # see -- or none. See coop-seats.nix for why never everyone's.

@@ -11,18 +11,13 @@
 # The resolution stays 1080p on purpose: the mod's own notes cap this game at
 # 1152x2048 before it crashes, and the frame rate is what this variant is for.
 { base, helpers, ... }:
-base
+helpers.withMod base (
+  helpers.botwUltraCam {
+    fps = 120;
+    width = 1920;
+    height = 1080;
+  }
+)
 // {
   title = "Breath of the Wild (120fps)";
-
-  # The version window is explained in mods/botw-ultracam.nix.
-  gameVersionMax = "1.6.0";
-  gameVersionMin = "1.6.0";
-  preLaunch =
-    (base.preLaunch or "")
-    + (helpers.botwUltraCam {
-      fps = 120;
-      width = 1920;
-      height = 1080;
-    }).preLaunch;
 }

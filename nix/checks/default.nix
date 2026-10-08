@@ -35,6 +35,7 @@
   aresSystem = import ./ares-system.nix { inherit pkgs; };
   inheritsPlatform = import ./inherits-platform.nix { inherit pkgs; };
   sm64Coop = import ./sm64-coop.nix { inherit pkgs; };
+  prelaunchProbe = import ./prelaunch-probe.nix { inherit pkgs; };
   rust = import ./rust.nix { inherit pkgs; };
   ruff = import ./ruff.nix { inherit pkgs; };
 }

@@ -22,9 +22,9 @@ let
       ;
   };
 in
-pc
-// (helpers.sm64CoopSplit {
-  inherit gotgPkgs;
+helpers.coopVariant {
+  split = helpers.sm64CoopSplit;
   players = 4;
+  inherit gotgPkgs;
   base = pc;
-})
+}

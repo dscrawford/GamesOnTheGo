@@ -13,20 +13,9 @@
 # (tenry92/sbk-decomp) but nobody has built a port on that yet, so
 # usa.snowboard_kids stays on ares at 30fps.
 #
-# Two things about this port shape the file, both inherited from the shared
-# N64ModernRuntime and both checked against this binary:
-#
-#   * **It ignores XDG_CONFIG_HOME.** Run with XDG_CONFIG_HOME and HOME
-#     pointed at different directories and the settings land in
-#     "$HOME/.config/SnowboardKids2Recompiled" regardless. `isolate` only
-#     exports the XDG variables, so redirecting HOME is what actually keeps
-#     this out of the player's real home.
-#
-#   * **The ROM goes through the launcher's picker, once.** The binary
-#     carries check_all_stored_roms/load_stored_rom, the same pair DK64 has:
-#     it keeps its own copy after you choose one. So the recipe leaves a bare
-#     .z64 in the games directory and the first launch is one "Load ROM"
-#     click at it; no launch after it asks again.
+# What every N64Recomp port shares -- it ignores XDG_CONFIG_HOME, the ROM is
+# stored by the port once, the pad it wants -- is in emulators/recomp-port.nix.
+# This file is the part that is Snowboard Kids 2's: the name of its stored ROM.
 {
   pkgs,
   lib,
@@ -34,48 +23,12 @@
   gotgPkgs,
   ...
 }:
-{
+helpers.recompPort {
   emulator = gotgPkgs.snowboardkids2recomp;
   bin = "SnowboardKids2Recompiled";
-  # Not the platform emulator: a native port. `gotg play <id> emulate`
-  # is the way back to ares/dolphin when this one misbehaves.
-  nativePort = true;
-  # A wired Xbox 360 pad, to this port. It reads its own controller database
-  # (recompcontrollerdb.txt beside the binary) and a clone mirroring a Steam
-  # Controller is in no database at all; 045e:028e is the one every SDL maps
-  # by heart. See docs/requests/look-like-an-xbox-pad.md.
-  padIdentity = "xbox360";
-  # Its settings are in-game — the launcher's own Settings entry — so there
-  # is no separate configuration screen to open, and `gotg configure`
-  # opening it would just start the game.
-  configurable = false;
-  isolate = true;
-  # The ROM is not a command-line argument here; the launcher holds it.
-  args = [ ];
-
-  # The port reads a bare .z64, not the No-Intro zip it travels as. Both
-  # handlers, because one zip is single_file from the games-root pass and
-  # no_intro_set from the DAT path. The matching half is data/overrides.json
-  # marking this entry `unzip`, which is what makes {target} the .z64 inside.
-  recipes =
-    let
-      unpacked = [
-        helpers.steps.unzip
-        helpers.steps.placeTree
-      ];
-    in
-    {
-      single_file = unpacked;
-      no_intro_set = unpacked;
-    };
-
-  env = {
-    # The one that does the isolating. See the note at the top.
-    HOME = "{state}";
-  };
-
-  path = [ pkgs.unzip ];
-
+  dir = "SnowboardKids2Recompiled";
+}
+// {
   preLaunch = ''
     export HOME="$state"
     config="$state/.config/SnowboardKids2Recompiled"
@@ -104,20 +57,4 @@
       cp -f "$target" "$config/snowboardkids2.n64.us.z64"
     fi
   '';
-
-  # Saves and the settings beside them are small and worth keeping in step
-  # across machines. mod_config travels too: which mods are switched on is a
-  # choice, not a derived file.
-  saves = [
-    ".config/SnowboardKids2Recompiled/saves/**"
-    ".config/SnowboardKids2Recompiled/*.json"
-    ".config/SnowboardKids2Recompiled/mod_config/**"
-  ];
-  saveExcludes = [
-    ".config/SnowboardKids2Recompiled/mods/**"
-    # The ROM copy the launcher stored. Nothing in `saves` matches a .z64
-    # today, so this guards a widening of that glob rather than a live path —
-    # a copyrighted ROM must never start syncing between machines.
-    ".config/SnowboardKids2Recompiled/*.z64"
-  ];
 }

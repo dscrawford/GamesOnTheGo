@@ -15,16 +15,12 @@
 # build ids, @nsobid) each apply to their own dump and lie inert on the other.
 { pkgs, lib }:
 let
-  rev = "a398d55b625129365a975c3ab0b9ef25012d5fff";
-  mods = pkgs.fetchzip {
-    url =
-      "https://raw.githubusercontent.com/Fl4sh9174/Switch-Emulator-Ultrawide-FPS-Mods/"
-      + "${rev}/Paper%20Mario%20The%20Thousand-Year%20Door%20%5B0100ECD018EBE000%5D%5Bmods%5D.zip";
+  fl4sh = import ./fl4sh.nix { inherit pkgs lib; };
+  mods = fl4sh.fl4shPack {
+    archive = "Paper%20Mario%20The%20Thousand-Year%20Door%20%5B0100ECD018EBE000%5D%5Bmods%5D.zip";
     hash = "sha256-pGNfImmUxXdVu8F0Wdf6GiuAk5vfqgUxOjmF6mNeiQY=";
-    stripRoot = false;
     name = "paper-mario-ttyd-mods";
   };
-  mod = "${mods}/[60FPS v1.0.1]";
 
   # NatalieWhatever's "Text Always Skippable" (gamebanana.com/mods/516121):
   # the remake lets a box be mashed through only on a second reading, and
@@ -81,14 +77,16 @@ let
   slug = folder: lib.replaceStrings [ " " "." ] [ "-" "-" ] folder;
 in
 rec {
-  # Copied out to a name of our own: the archive's directory is
-  # "[60FPS v1.0.1]", and a store path with a space and a bracket in it is one
-  # that has to be quoted correctly by every line that ever touches it.
-  paperMarioTtyd60Mod = pkgs.runCommand "paper-mario-ttyd-60fps" { } ''
-    cp -R --no-preserve=mode ${lib.escapeShellArg mod} $out
-    test -f $out/exefs/1.0.1.pchtxt
-    test -f $out/romfs/data/battle/weapon/data_battle_weapon_party.elf.zst
-  '';
+  # The archive's directory is "[60FPS v1.0.1]".
+  paperMarioTtyd60Mod = fl4sh.fl4shMod {
+    name = "paper-mario-ttyd-60fps";
+    pack = mods;
+    folder = "[60FPS v1.0.1]";
+    checks = [
+      "test -f $out/exefs/1.0.1.pchtxt"
+      "test -f $out/romfs/data/battle/weapon/data_battle_weapon_party.elf.zst"
+    ];
+  };
 
   # Any other folder out of the same archive, by name.
   #
@@ -96,15 +94,14 @@ rec {
   # patch is one folder of about twenty. The rest are in-engine resolutions
   # from 720p to 8K, the lighting fix the ones above 1080p need, level of
   # detail, and switches for the game's own sharpening and colour filters.
-  # Copied out to a name without spaces or brackets in it, for the same reason
-  # the 60 FPS one is.
   paperMarioTtydMod =
     folder:
-    pkgs.runCommand "paper-mario-ttyd-${lib.replaceStrings [ " " "." ] [ "-" "-" ] folder}" { }
-      ''
-        cp -R --no-preserve=mode ${lib.escapeShellArg "${mods}/[${folder}]"} $out
-        test -d $out/exefs
-      '';
+    fl4sh.fl4shMod {
+      name = "paper-mario-ttyd-${slug folder}";
+      pack = mods;
+      folder = "[${folder}]";
+      checks = [ "test -d $out/exefs" ];
+    };
 
   # The cheat list for any folder of Fl4sh9174's pack with cheats in it. The
   # 60 FPS one, and the text-speed one: the remake's text crawls, and the 60

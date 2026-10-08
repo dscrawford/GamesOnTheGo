@@ -7,24 +7,22 @@
 #
 # The two files are two different dumps of 1.0.1 (different @nsobid), not a patch
 # and its revision; shipping both makes the variant work whichever is installed.
-# See skyward-sword.nix, which has the same pair.
+# See fl4sh.nix, and skyward-sword.nix, which has the same pair.
 { pkgs, lib }:
 let
-  rev = "a398d55b625129365a975c3ab0b9ef25012d5fff";
-  mods = pkgs.fetchzip {
-    url =
-      "https://raw.githubusercontent.com/Fl4sh9174/Switch-Emulator-Ultrawide-FPS-Mods/"
-      + "${rev}/Super%20Mario%20RPG%20%5B0100BC0018138000%5D%5Bmods%5D.zip";
+  fl4sh = import ./fl4sh.nix { inherit pkgs lib; };
+  pack = fl4sh.fl4shPack {
+    archive = "Super%20Mario%20RPG%20%5B0100BC0018138000%5D%5Bmods%5D.zip";
     hash = "sha256-up3i4q8bSMJEY4TtGi9/lzsGeFNVqD5/jX8l/18V5qI=";
-    stripRoot = false;
     name = "super-mario-rpg-mods";
   };
 in
 {
-  # Copied out to a name of our own: the archive's directory is
-  # "[120FPS v1.0.1]WIP", brackets, space and all.
-  superMarioRpg120Mod = pkgs.runCommand "super-mario-rpg-120fps" { } ''
-    cp -R --no-preserve=mode ${lib.escapeShellArg "${mods}/[120FPS v1.0.1]WIP"} $out
-    test -f $out/exefs/1.0.1.pchtxt
-  '';
+  # The archive's directory is "[120FPS v1.0.1]WIP".
+  superMarioRpg120Mod = fl4sh.fl4shMod {
+    name = "super-mario-rpg-120fps";
+    inherit pack;
+    folder = "[120FPS v1.0.1]WIP";
+    checks = [ "test -f $out/exefs/1.0.1.pchtxt" ];
+  };
 }

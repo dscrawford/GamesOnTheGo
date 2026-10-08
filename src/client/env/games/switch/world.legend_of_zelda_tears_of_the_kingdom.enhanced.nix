@@ -14,19 +14,14 @@
 # Its own environment, so its saves and settings are separate from 60fps
 # and from the plain launch.
 { base, helpers, ... }:
-base
+helpers.withMod base (
+  helpers.totkUltraCam {
+    fps = 120;
+    width = 2560;
+    height = 1440;
+    shadows = 2048;
+  }
+)
 // {
   title = "Tears of the Kingdom (enhanced)";
-  # The version window is explained in mods/totk-ultracam.nix.
-  gameVersionMax = "1.4.2";
-  gameVersionMin = "1.1.0";
-
-  preLaunch =
-    (base.preLaunch or "")
-    + (helpers.totkUltraCam {
-      fps = 120;
-      width = 2560;
-      height = 1440;
-      shadows = 2048;
-    }).preLaunch;
 }

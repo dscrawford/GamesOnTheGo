@@ -23,15 +23,12 @@
 # either, so the launch-day dump fails the same way: hence the minimum.
 { pkgs, lib }:
 let
-  rev = "c41e68439ccd0c19bffc8a5bab08ffdf0b81b992";
-  exefs = "https://raw.githubusercontent.com/MaxLastBreath/nx-optimizer/${rev}/src/PatchInfo/Tears%20Of%20The%20Kingdom/UltraCam/exefs";
-  npdm = pkgs.fetchurl {
-    url = "${exefs}/main.npdm";
-    hash = "sha256-1ZOoDl5T+GA6+rBlWvMbrAqjfr+KuOIFAX44tYHZoAY=";
-  };
-  subsdk = pkgs.fetchurl {
-    url = "${exefs}/subsdk3";
-    hash = "sha256-MnOh9s9a82pRNdp0ztZuKS5GVRdIB+iDq0QItzpjb7k=";
+  inherit (import ../emulators/jq-edit.nix { inherit pkgs; }) gotgJqEdit;
+  nx = import ./nx-optimizer.nix { inherit pkgs; };
+  optimizer = nx.nxOptimizerExefs {
+    game = "Tears%20Of%20The%20Kingdom";
+    npdmHash = "sha256-1ZOoDl5T+GA6+rBlWvMbrAqjfr+KuOIFAX44tYHZoAY=";
+    subsdkHash = "sha256-MnOh9s9a82pRNdp0ztZuKS5GVRdIB+iDq0QItzpjb7k=";
   };
   # The optimizer writes its dropdown values as "{W.00, H.00}".
   pair = a: b: "{${toString a}.00, ${toString b}.00}";
@@ -111,30 +108,19 @@ in
           ;
       };
       deckIni = iniFor deck;
-      vsyncFor =
-        fps:
-        if fps <= 60 then
-          ".vsync_mode = 0 | .enable_custom_vsync_interval = false"
-        else
-          ".vsync_mode = 2 | .enable_custom_vsync_interval = true | .custom_vsync_interval = ${toString fps}";
+      inherit (nx) vsyncFor;
       configFor = profile: ".dram_size = ${toString profile.dram} | ${vsyncFor profile.fps}";
     in
     {
+      window = {
+        gameVersionMin = "1.1.0";
+        gameVersionMax = "1.4.2";
+      };
       preLaunch = ''
         ryujinx="$XDG_CONFIG_HOME/Ryujinx"
         mods="$ryujinx/mods/contents/0100f2c0115b6000/UltraCam/exefs"
         mkdir -p "$mods"
-        for pair in "${npdm}:main.npdm" "${subsdk}:subsdk3"; do
-          src="''${pair%%:*}"
-          name="''${pair##*:}"
-          # Without the game's LD_PRELOAD: sdl2-compat aborts any program it is
-          # preloaded into that has no SDL3 beside it (ryujinx.nix, cheatsOn),
-          # and cmp aborting read as "different" and copied on every launch.
-          if ! LD_PRELOAD=''' cmp -s "$src" "$mods/$name"; then
-            cp --no-preserve=mode "$src" "$mods/$name"
-            echo "installed UltraCam ($name)" >&2
-          fi
-        done
+        ${optimizer.install "$mods"}
         # "Config" is the file, not a folder holding one. The optimizer joins
         # the SD card with PatchInfo's ModConfig ("UltraCam/TOTK/Config"),
         # creates that path's *dirname*, and writes the ini there — so the
@@ -156,12 +142,11 @@ in
         fi
 
         if [ -f "$ryujinx/Config.json" ]; then
-          if ${pkgs.jq}/bin/jq "$ultracam_config" \
-            "$ryujinx/Config.json" >"$ryujinx/Config.json.gotg"; then
-            mv "$ryujinx/Config.json.gotg" "$ryujinx/Config.json"
-          else
-            rm -f "$ryujinx/Config.json.gotg"
-          fi
+          ${gotgJqEdit {
+            file = "$ryujinx/Config.json";
+            filterVar = "ultracam_config";
+            indent = "  ";
+          }}
         fi
       '';
     };

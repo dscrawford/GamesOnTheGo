@@ -13,6 +13,8 @@
   ...
 }:
 let
+  inherit (import ./emulators/jq-edit.nix { inherit pkgs; }) gotgJqEdit;
+
   # Reads NCA headers to find what an install holds; see switch/content.py.
   contentPython = pkgs.python3.withPackages (p: [ p.cryptography ]);
 in
@@ -73,12 +75,13 @@ in
       # with the controller already bound instead of on the launch after.
       gotg_ryujinx_pads="$XDG_CONFIG_HOME/../input-config.json"
       if [ -s "$gotg_ryujinx_pads" ] && [ -f "$gotg_ryujinx_config" ]; then
-        if ${pkgs.jq}/bin/jq --slurpfile saved "$gotg_ryujinx_pads" \
-          '.input_config = $saved[0]' "$gotg_ryujinx_config" >"$gotg_ryujinx_config.pads"; then
-          mv "$gotg_ryujinx_config.pads" "$gotg_ryujinx_config"
-        else
-          rm -f "$gotg_ryujinx_config.pads"
-        fi
+        ${gotgJqEdit {
+          file = "$gotg_ryujinx_config";
+          args = ''--slurpfile saved "$gotg_ryujinx_pads"'';
+          filter = ".input_config = $saved[0]";
+          suffix = ".pads";
+          indent = "    ";
+        }}
       fi
     fi
 
@@ -93,14 +96,14 @@ in
     # and any game opening the controller applet aborts on ILibraryAppletAccessor
     # 90 — both calls a real console answers and neither one the game needs.
     if [ -f "$gotg_ryujinx_config" ]; then
-      if ${pkgs.jq}/bin/jq --argjson fs "$([ -n "$gotg_fullscreen" ] && echo true || echo false)" \
-        '.update_checker_type = "Off" | .show_confirm_exit = false | .start_fullscreen = $fs
-         | .ignore_missing_services = true' \
-        "$gotg_ryujinx_config" >"$gotg_ryujinx_config.gotg"; then
-        mv "$gotg_ryujinx_config.gotg" "$gotg_ryujinx_config"
-      else
-        rm -f "$gotg_ryujinx_config.gotg"
-      fi
+      ${gotgJqEdit {
+        file = "$gotg_ryujinx_config";
+        args = ''--argjson fs "$([ -n "$gotg_fullscreen" ] && echo true || echo false)"'';
+        filter = ''
+          .update_checker_type = "Off" | .show_confirm_exit = false | .start_fullscreen = $fs
+           | .ignore_missing_services = true'';
+        indent = "  ";
+      }}
     fi
     # A Deck's defaults. Ryujinx's own is docked mode -- a 1080p render for a
     # 1280x800 panel, 2.25 times the pixels, on a machine that gains nothing
@@ -113,13 +116,12 @@ in
     # in the config is already what the Deck guides and EmuDeck ship. See
     # docs/research/switch-on-deck.md.
     if [ "''${GOTG_MACHINE:-}" = deck ] && [ -f "$gotg_ryujinx_config" ]; then
-      if ${pkgs.jq}/bin/jq --argjson docked "$([ "''${GOTG_EXTERNAL_DISPLAY:-0}" = 1 ] && echo true || echo false)" \
-        '.docked_mode = $docked | .dram_size = 0' \
-        "$gotg_ryujinx_config" >"$gotg_ryujinx_config.gotg"; then
-        mv "$gotg_ryujinx_config.gotg" "$gotg_ryujinx_config"
-      else
-        rm -f "$gotg_ryujinx_config.gotg"
-      fi
+      ${gotgJqEdit {
+        file = "$gotg_ryujinx_config";
+        args = ''--argjson docked "$([ "''${GOTG_EXTERNAL_DISPLAY:-0}" = 1 ] && echo true || echo false)"'';
+        filter = ".docked_mode = $docked | .dram_size = 0";
+        indent = "  ";
+      }}
     fi
 
     # Ryujinx reads updates and DLC only from games/<title>/{updates,dlc}.json,

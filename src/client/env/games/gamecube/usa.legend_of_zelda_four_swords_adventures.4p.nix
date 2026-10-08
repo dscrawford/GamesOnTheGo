@@ -8,8 +8,8 @@
   gotgPkgs,
   ...
 }:
-base
-// (helpers.fourSwordsSplit {
-  inherit gotgPkgs base;
+helpers.coopVariant {
+  split = helpers.fourSwordsSplit;
   players = 4;
-})
+  inherit base gotgPkgs;
+}

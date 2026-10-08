@@ -1,6 +1,8 @@
 # Ryujinx.
 { pkgs, lib }:
 let
+  inherit (import ./jq-edit.nix { inherit pkgs; }) gotgJqEdit;
+
   # One or more jq edits against the generated config. Pulled out of vsync
   # below because the frame rate is not the only machine-side setting a game
   # needs: Paper Mario's resolution mods want more emulated memory than the
@@ -14,12 +16,11 @@ let
       # composing over the platform base.
       config="$XDG_CONFIG_HOME/Ryujinx/Config.json"
       if [ -f "$config" ]; then
-        if ${pkgs.jq}/bin/jq '${lib.concatStringsSep " | " edits}' \
-          "$config" >"$config.gotg"; then
-          mv "$config.gotg" "$config"
-        else
-          rm -f "$config.gotg"
-        fi
+        ${gotgJqEdit {
+          file = "$config";
+          filter = lib.concatStringsSep " | " edits;
+          indent = "  ";
+        }}
       else
         echo "gotg: no Ryujinx config yet; this applies next launch" >&2
       fi
@@ -75,6 +76,23 @@ let
     );
 in
 {
+  # A game's variant file, with a mod's preLaunch added after the platform's
+  # and the game-version window the mod states carried along. Five files
+  # (the TOTK and BotW UltraCam variants) each wrote `preLaunch = (base.preLaunch
+  # or "") + (mod).preLaunch` and, beside it, the same two `gameVersion*`
+  # lines for their mod -- the window belongs to the mod's executable patch,
+  # so it travels in the mod's `window` and is stated once where the reason
+  # for it is (totk-ultracam.nix, botw-ultracam.nix). `base // patch`
+  # *replaces* preLaunch, which is why this appends rather than assigns
+  # (checks.inheritsPlatform).
+  withMod =
+    base: mod:
+    base
+    // (mod.window or { })
+    // {
+      preLaunch = (base.preLaunch or "") + mod.preLaunch;
+    };
+
   # A Ryujinx mod that is a single executable patch, together with the VSync
   # mode it wants.
   #

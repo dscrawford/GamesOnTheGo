@@ -5,6 +5,8 @@
   steps,
 }:
 let
+  inherit (import ./jq-edit.nix { inherit pkgs; }) gotgJqEdit;
+
   # A libultraship port's settings, as a launch leaves them.
   #
   # `unsaid` is cvar -> value, each written only when the file does not say
@@ -57,8 +59,15 @@ let
       if [ ! -e "$lus_cfg" ]; then
         jq -n --argjson fs "$lus_fs" '{} | ${program}' >"$lus_cfg"
       else
-        jq --argjson fs "$lus_fs" '${program}' "$lus_cfg" >"$lus_cfg.gotg-tmp" \
-          && mv -f "$lus_cfg.gotg-tmp" "$lus_cfg"
+        ${gotgJqEdit {
+          file = "$lus_cfg";
+          filter = program;
+          args = ''--argjson fs "$lus_fs"'';
+          suffix = ".gotg-tmp";
+          jq = "jq";
+          force = true;
+          indent = "  ";
+        }}
       fi
     '';
 in

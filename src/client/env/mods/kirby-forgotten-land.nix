@@ -13,23 +13,19 @@
 # variant works whether or not the update is installed.
 { pkgs, lib }:
 let
-  rev = "a398d55b625129365a975c3ab0b9ef25012d5fff";
-  mods = pkgs.fetchzip {
-    url =
-      "https://raw.githubusercontent.com/Fl4sh9174/Switch-Emulator-Ultrawide-FPS-Mods/"
-      + "${rev}/Kirby%20and%20the%20Forgotten%20Land%20%5B01004D300C5AE000%5D%5Bmods%5D.zip";
+  fl4sh = import ./fl4sh.nix { inherit pkgs lib; };
+  pack = fl4sh.fl4shPack {
+    archive = "Kirby%20and%20the%20Forgotten%20Land%20%5B01004D300C5AE000%5D%5Bmods%5D.zip";
     hash = "sha256-TXPd8d3iWXDyIJgKCmDoJuxPUFP5P/rL2EGqTomr7CU=";
-    # One directory per mod at the top of the archive, so there is no single
-    # root to strip.
-    stripRoot = false;
     name = "kirby-forgotten-land-mods";
   };
 in
 {
-  # Copied out to a name of our own: the archive's directory is
-  # "[60 FPS Static v1.1.0]" (see skyward-sword.nix for why that matters).
-  kirby60Mod = pkgs.runCommand "kirby-forgotten-land-60fps" { } ''
-    cp -R --no-preserve=mode ${lib.escapeShellArg "${mods}/[60 FPS Static v1.1.0]"} $out
-    test -f $out/exefs/1.1.0.pchtxt
-  '';
+  # The archive's directory is "[60 FPS Static v1.1.0]".
+  kirby60Mod = fl4sh.fl4shMod {
+    name = "kirby-forgotten-land-60fps";
+    inherit pack;
+    folder = "[60 FPS Static v1.1.0]";
+    checks = [ "test -f $out/exefs/1.1.0.pchtxt" ];
+  };
 }

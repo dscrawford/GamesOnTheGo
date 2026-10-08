@@ -4,18 +4,13 @@
 # with 1440p and larger shadows, which is a GPU asking price this one does not
 # make. On a handheld or a 1080p panel this is the one to try first.
 { base, helpers, ... }:
-base
+helpers.withMod base (
+  helpers.totkUltraCam {
+    fps = 120;
+    width = 1920;
+    height = 1080;
+  }
+)
 // {
   title = "Tears of the Kingdom (120fps)";
-  # The version window is explained in mods/totk-ultracam.nix.
-  gameVersionMax = "1.4.2";
-  gameVersionMin = "1.1.0";
-
-  preLaunch =
-    (base.preLaunch or "")
-    + (helpers.totkUltraCam {
-      fps = 120;
-      width = 1920;
-      height = 1080;
-    }).preLaunch;
 }

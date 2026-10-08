@@ -7,18 +7,13 @@
 # Its own environment, so its saves and settings are separate from the plain
 # launch and from 120fps.
 { base, helpers, ... }:
-base
+helpers.withMod base (
+  helpers.botwUltraCam {
+    fps = 60;
+    width = 1920;
+    height = 1080;
+  }
+)
 // {
   title = "Breath of the Wild (60fps)";
-
-  # The version window is explained in mods/botw-ultracam.nix.
-  gameVersionMax = "1.6.0";
-  gameVersionMin = "1.6.0";
-  preLaunch =
-    (base.preLaunch or "")
-    + (helpers.botwUltraCam {
-      fps = 60;
-      width = 1920;
-      height = 1080;
-    }).preLaunch;
 }

@@ -4,25 +4,12 @@
 # the easier one — upstream ships a native Linux build, so there is no Wine prefix, just
 # the binary patched onto nixpkgs' libraries in pkgs/dk64recomp.
 #
-# Two things about this port shape the file:
+# What every N64Recomp port shares -- it ignores XDG_CONFIG_HOME, the ROM is
+# stored by the port once, the pad it wants -- is in emulators/recomp-port.nix.
+# What is this game's: the mods below, and the name its stored ROM goes by.
 #
-#   * **It ignores XDG_CONFIG_HOME.** Measured, not assumed: run with
-#     XDG_CONFIG_HOME and HOME pointed at different directories and the
-#     settings land in "$HOME/.config/DK64Recompiled" every time. `isolate`
-#     only exports the XDG variables, so on its own it would leave this
-#     writing into the player's real home. Redirecting HOME is what actually
-#     isolates it, and everything below is relative to that.
-#
-#   * **The ROM goes through the launcher's picker, once.** Unlike ReCut,
-#     which documented a path to drop the ROM at, this one stores the ROM
-#     itself after you choose it ("check_all_stored_roms" in the binary) and
-#     the FAQ answers "how do I choose a different ROM?" with "you don't".
-#     So the recipe below leaves a bare .z64 in the games directory and the
-#     first launch is one "Load ROM" click at it; no launch after it asks
-#     again.
-#
-# The unpacking is the recipe's job, not this file's — see the `recipes`
-# attribute. Doing it in preLaunch instead would mean reimplementing the
+# The unpacking is the recipe's job, not this file's — see `recipes` in
+# recomp-port.nix. Doing it in preLaunch instead would mean reimplementing the
 # extraction limits and the symlink refusal that steps.unzip and
 # steps.placeTree already carry, once per environment that needs a bare ROM.
 {
@@ -68,50 +55,12 @@ let
     '') mods
   );
 in
-{
+helpers.recompPort {
   emulator = gotgPkgs.dk64recomp;
   bin = "DK64Recompiled";
-  # Not the platform emulator: a native port. `gotg play <id> emulate`
-  # is the way back to ares/dolphin when this one misbehaves.
-  nativePort = true;
-  # A wired Xbox 360 pad, to this port. It reads its own controller database
-  # (recompcontrollerdb.txt beside the binary) and a clone mirroring a Steam
-  # Controller is in no database at all; 045e:028e is the one every SDL maps
-  # by heart. See docs/requests/look-like-an-xbox-pad.md.
-  padIdentity = "xbox360";
-  # Its settings are in-game — the launcher's own Settings entry — so there is
-  # no separate configuration screen to open, and `gotg configure` opening it
-  # would just start the game.
-  configurable = false;
-  isolate = true;
-  # The ROM is not a command-line argument here; the launcher holds it.
-  args = [ ];
-
-  # The port reads a bare .z64, not the No-Intro zip it travels as — the same
-  # need the HarbourMasters ports have, met the same way. Both handlers,
-  # because one zip is single_file from the games-root pass and no_intro_set
-  # from the DAT torrent path. The matching half is data/overrides.json
-  # marking this entry `unzip`, which is what puts the unpacked tree where
-  # `gotg list` can find it offline and makes {target} the .z64 inside it.
-  recipes =
-    let
-      unpacked = [
-        helpers.steps.unzip
-        helpers.steps.placeTree
-      ];
-    in
-    {
-      single_file = unpacked;
-      no_intro_set = unpacked;
-    };
-
-  env = {
-    # The one that does the isolating. See the note at the top.
-    HOME = "{state}";
-  };
-
-  path = [ pkgs.unzip ];
-
+  dir = "DK64Recompiled";
+}
+// {
   preLaunch = ''
     export HOME="$state"
     mods_dir="$state/.config/DK64Recompiled/mods"
@@ -139,22 +88,4 @@ in
       cp -f "$target" "$state/.config/DK64Recompiled/DK64.z64"
     fi
   '';
-
-  # The FAQ names the save location, and the settings beside it are small and
-  # worth keeping in step across machines. mod_config travels too: which mods
-  # are switched on is a choice, not a derived file.
-  saves = [
-    ".config/DK64Recompiled/saves/**"
-    ".config/DK64Recompiled/*.json"
-    ".config/DK64Recompiled/mod_config/**"
-  ];
-  # The .nrm files are refetched by the store on any machine, and the ROM copy
-  # is the player's own — neither is worth carrying.
-  saveExcludes = [
-    ".config/DK64Recompiled/mods/**"
-    # The ROM the launcher stored. Nothing in `saves` matches a .z64 today, so
-    # this guards a widening of that glob rather than a live path — a 32MB
-    # copyrighted ROM must never start syncing between machines.
-    ".config/DK64Recompiled/*.z64"
-  ];
 }

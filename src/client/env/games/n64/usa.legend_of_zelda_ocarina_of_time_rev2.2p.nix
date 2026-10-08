@@ -8,8 +8,8 @@
   gotgPkgs,
   ...
 }:
-base
-// (helpers.harkinianCoopSplit {
-  inherit gotgPkgs base;
+helpers.coopVariant {
+  split = helpers.harkinianCoopSplit;
   players = 2;
-})
+  inherit base gotgPkgs;
+}
