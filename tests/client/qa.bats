@@ -626,7 +626,7 @@ overlay_frames() {
 
 @test "qa step: the report names each axis as pass, FAIL or skip" {
   run _qa_verdict_lines <<<'{"checks":{"boots":{"pass":true},"audio":{"pass":false},"graphics":{"pass":null}}}'
-  [[ "$output" == *"  boots     pass"* ]]
-  [[ "$output" == *"  audio     FAIL"* ]]
-  [[ "$output" == *"  graphics  skip"* ]]
+  [[ "$output" == *"  boots      pass"* ]]
+  [[ "$output" == *"  audio      FAIL"* ]]
+  [[ "$output" == *"  graphics   skip"* ]]
 }

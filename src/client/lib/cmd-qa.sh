@@ -714,7 +714,7 @@ _qa_golden() {
 # pass, FAIL (the check said false) or skip (it did not run).
 _qa_verdict_lines() {
   jq -r '.checks | to_entries[] |
-    "  " + (.key + "        " | .[0:10]) +
+    "  " + (.key + "          " | .[0:11]) +
     (if .value.pass == true then "pass" elif .value.pass == false then "FAIL" else "skip" end)'
 }
 
