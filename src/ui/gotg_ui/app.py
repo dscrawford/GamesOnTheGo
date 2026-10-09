@@ -29,16 +29,17 @@ from concurrent.futures import Future, ThreadPoolExecutor
 
 import pygame
 
-from . import beside, config, display, filters, intents, keys, meter, pads, plans, trace, updates
+from . import beside, config, display, filters, intents, keys, meter, pads, plans, remembered, trace, updates
 from .art import ArtStore
 from .badges import Asker, Badges, land
-from .browser import SHELF, Browser
+from .browser import INSTALLED, SHELF, Browser
 from .buttons import step_for
 from .catalog import Game, Library
 from .chip import ChipState
 from .danstick import DaemonWatch, Danstick, ensure_daemon
 from .decode import PENDING, Decoder
 from .draw_grid import draw, draw_menu, draw_shelf, hovering, menu_rects, view_rects
+from .draw_keyboard import draw_keyboard, key_at
 from .draw_screens import draw_filters, draw_prepare, draw_saves_choice, draw_storage
 from .fetch import Loader
 from .filters import Filters
@@ -47,6 +48,7 @@ from .hush import Hush
 from .installed import installed_games
 from .installs import Installs
 from .intents import BACK, Intent, keyboard_heard
+from .keyboard import Keyboard
 from .keys import KeyHold
 from .menu import Menu
 from .nav import Nav
@@ -169,6 +171,9 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
     # Asked once, up front, and again only after an uninstall: the answer is
     # a walk of the whole catalog against the disk, not a per-frame question.
     browser = Browser(library, installed=installed_games())
+    # Where it was left last time (remembered.py), kept up to date below.
+    kept = remembered.Remembered.open()
+    remembered.apply(browser, kept.last)
 
     # What is out of date, from the client's cache -- asked on a worker, as
     # every later refresh is: the answer is two subprocesses, a quarter of a
@@ -239,7 +244,7 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
             running = False
 
     if installed_only:
-        browser.toggle_installed()
+        browser.set_presence(INSTALLED)
     store = ArtStore()
     loader = Loader(store)
     # Decoded surfaces, keyed by (platform, id). Decoding is not free and the
@@ -272,7 +277,8 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
         return picture
 
     chosen: tuple[Game, str, str | None, str | None] | None = None
-    typing: str | None = None
+    # The keyboard on screen while a search is typed (keyboard.py).
+    typing: Keyboard | None = None
     typing_from = ""  # the search before typing began, for Escape
     menu: Menu | None = None
     # The filter panel, while it is open. None is the grid.
@@ -570,37 +576,63 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
             if panel.open:
                 panel.choose(browser)
             elif panel.press(browser) == filters.TYPING:
-                typing = typing_from = browser.search
+                typing, typing_from = Keyboard(browser.search), browser.search
         elif pressed == pads.START:
             # Start closes it the way Start opened it.
             panel = None
 
-    def on_typing(event) -> None:
-        # While typing, every key is text. Nothing else runs, or the letters
-        # of a search would also be moving the cursor.
+    def press_key(board: Keyboard) -> None:
         nonlocal typing
-        if event.type != pygame.KEYDOWN:
-            return
-        text, outcome = edit(typing, event.key, event.unicode)
-        if outcome == CANCEL:
-            # Cancelled: the grid goes back to the search it had.
-            browser.set_search(typing_from)
-            typing = None
-        elif outcome == COMMIT:
-            browser.set_search(typing)
-            typing = None
-        elif outcome == EDITED:
-            typing = text
-            # Applied as it is typed: the grid narrowing under the letters is
-            # the feedback that the letters went in.
-            browser.set_search(text)
+        typing = None if board.closes else board.press()
+
+    def on_typing(event) -> None:
+        # The keyboard on screen owns the input: a pad walks its keys and a
+        # real keyboard types straight into it. Nothing else runs, or the
+        # letters of a search would also be moving the cursor.
+        nonlocal typing
+        if event.type == pygame.KEYDOWN:
+            text, outcome = edit(typing.text, event.key, event.unicode)
+            if outcome == CANCEL:
+                # Cancelled: the grid goes back to the search it had.
+                browser.set_search(typing_from)
+                typing = None
+            elif outcome == COMMIT:
+                typing = None
+            elif outcome == EDITED:
+                typing = typing.with_text(text)
+            elif (said := intents.intent(key=event.key)).kind == "move":
+                typing = typing.move(said.dx, said.dy)
+        elif event.type == pygame.MOUSEMOTION:
+            over = key_at(typing, font_at, screen.get_size(), event.pos)
+            if over is not None:
+                typing = typing.at(*over)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            over = key_at(typing, font_at, screen.get_size(), event.pos)
+            if over is not None:
+                press_key(typing.at(*over))
+        else:
+            said, pressed = _heard(event)
+            if said.kind == "move":
+                typing = typing.move(said.dx, said.dy)
+            elif said.confirms():
+                press_key(typing)
+            elif said == BACK or pressed == pads.START:
+                typing = None
+            elif pressed == pads.X:
+                typing = typing.backspace()
+            elif pressed == pads.Y:
+                typing = typing.typed(" ")
+        # Applied as it is typed: the grid narrowing under the letters is
+        # the feedback that the letters went in.
+        if typing is not None and typing.text != browser.search:
+            browser.set_search(typing.text)
 
     def on_grid_key(event) -> None:
         nonlocal running, typing, typing_from, panel, storage, menu
         if event.key in (pygame.K_ESCAPE, pygame.K_q):
             running = False
         elif event.key in (pygame.K_SLASH, pygame.K_f):
-            typing = typing_from = browser.search
+            typing, typing_from = Keyboard(browser.search), browser.search
         elif event.key == pygame.K_TAB:
             # The panel: every filter in one place, both directions on each,
             # so a controller reaches all of them.
@@ -644,7 +676,7 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
         elif action == "platform":
             browser.cycle_platform(1)
         elif action == "search":
-            typing = typing_from = browser.search
+            typing, typing_from = Keyboard(browser.search), browser.search
         elif action == "panel":
             panel = Filters()
         elif action == "update":
@@ -732,7 +764,9 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
         nonlocal chip
         view = grid_view()
         chip = chip.drawn(draw_shelf(screen, font_at, view) if browser.view == SHELF else draw(screen, font_at, view))
-        draw_filters(screen, font_at, browser, panel, typing)
+        draw_filters(screen, font_at, browser, panel, typing.text if typing is not None else None)
+        if typing is not None:
+            draw_keyboard(screen, font_at, typing)
 
     def paint_grid() -> None:
         nonlocal chip
@@ -754,9 +788,11 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
         else:
             # Typing still belongs to the grid: the search box is drawn there,
             # and a shelf with its own copy would be two to keep in step.
-            chip = chip.drawn(draw(screen, font_at, view, typing, menu))
+            chip = chip.drawn(draw(screen, font_at, view, typing.text if typing is not None else None, menu))
         if menu is not None:
             draw_menu(screen, menu, view_rects(browser, screen.get_size()), font_at)
+        if typing is not None:
+            draw_keyboard(screen, font_at, typing)
 
     painters = {
         Screen.PREPARE: paint_prepare,
@@ -864,6 +900,9 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
 
                 handlers[current_screen()](event)
 
+            # Written when they change, not on the way out: a picker gamescope
+            # closes has no way out to write on.
+            kept = kept.keep(remembered.snapshot(browser))
             # Installs running behind the grid: one landing is a badge, and
             # the versions the client listed were about a game not yet there.
             if installs.poll():
