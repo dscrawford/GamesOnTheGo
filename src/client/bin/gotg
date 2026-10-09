@@ -36,7 +36,8 @@ and from this repository: nix run github:dscrawford/GamesOnTheGo#{admin,qa,contr
 
 usage: gotg <command> [args]
 
-  launch --spec <f>  a game as its Nix output runs it
+  launch --spec <f>  a game as its Nix output runs it; --refresh moves the
+                     library to the newest gotg and catalog first
   play <id> [variant] build it from the library if needed, then launch
                      --version <v> runs a particular update of the game
   install <id>       fetch it, build it from the library, write a Steam launcher

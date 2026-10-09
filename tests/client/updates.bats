@@ -63,6 +63,7 @@ updates_nix() {
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$NIX_LOG"
 [[ -z "${NIX_OFFLINE:-}" ]] || exit 1
+if [[ "$1" == run ]]; then echo "ran: $*"; exit 0; fi
 if [[ -n "${FAIL_MATCH:-}" && "$*" =~ $FAIL_MATCH ]]; then echo "error: refused by the test" >&2; exit 1; fi
 case "$1 $2" in
   "flake metadata") printf '{"locked":{"rev":"%s"}}\n' "$LIBRARY_LATEST"; exit 0 ;;
@@ -437,6 +438,24 @@ assert_untouched() {
     "$(grep -n -- ' -o ' "$NIX_LOG" | head -1 | cut -d: -f1)" ]
   # The last line, for the picker: where the new picker is.
   [ "$(tail -n1 <<<"$output")" = "$(printf 'picker\t%s' "$TEST_TMP/store/gotg-ui-out")" ]
+}
+
+@test "a launch with --refresh moves the pin, then runs the game again from the library" {
+  prep_self_update
+  mkdir -p "$TEST_TMP/store/env/bin"
+  printf '#!/bin/sh\n' >"$TEST_TMP/store/env/bin/gotg-play"
+  chmod +x "$TEST_TMP/store/env/bin/gotg-play"
+  local catalog
+  catalog="$(curl -gfsS -H "Authorization: Bearer test-token" "$GOTG_SERVICE_URL/catalog")"
+  jq -n --argjson c "$catalog" --arg env "$TEST_TMP/store/env" --arg server "$GOTG_SERVICE_URL" \
+    '{version: 1, server: $server, files_urls: [($c.files_url // empty)], attr: "env-n64", env: $env,
+      variant: "", output: "n64.usa.zelda", game: ($c.games[] | select(.id == "usa.zelda"))}' >"$TEST_TMP/spec.json"
+  gotg launch --spec "$TEST_TMP/spec.json" --refresh --version 1.1 --fast
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .nodes.gotg.locked.rev "$GOTG_LIBRARY/flake.lock")" = ffffffff ]
+  grep -q "^flake update gotg catalog --flake $GOTG_LIBRARY\$" "$NIX_LOG"
+  [ "$(tail -n1 "$NIX_LOG")" = "run $GOTG_LIBRARY#n64.usa.zelda -- --version 1.1 --fast" ]
+  [[ "$output" == *"ran: run $GOTG_LIBRARY#n64.usa.zelda"* ]]
 }
 
 @test "update self that fails at any step leaves the lock and both roots as they were" {

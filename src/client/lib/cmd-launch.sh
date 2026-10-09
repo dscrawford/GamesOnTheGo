@@ -16,10 +16,14 @@
 #    "game": {"id": ..., "platform": ..., "handler": ..., "files": [...]}}
 
 cmd_launch() {
-  local spec="" want_version=""
+  local spec="" want_version="" refresh=0
   local -a rest=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --refresh)
+        refresh=1
+        shift
+        ;;
       --spec)
         spec="${2:-}"
         shift 2 || shift
@@ -42,9 +46,40 @@ cmd_launch() {
         ;;
     esac
   done
-  [[ -n "$spec" && -f "$spec" ]] || die "usage: gotg launch --spec <file> [--version v] [emulator args...]"
+  [[ -n "$spec" && -f "$spec" ]] || die "usage: gotg launch --spec <file> [--refresh] [--version v] [emulator args...]"
   launch_spec_load "$spec"
+  if ((refresh)); then
+    launch_refreshed "$spec" "$want_version" ${rest[@]+"${rest[@]}"}
+  fi
+  launch_update_notice
   play_launch "$LAUNCH_WANT" "$LAUNCH_VARIANT" "$want_version" ${rest[@]+"${rest[@]}"}
+}
+
+# `nix run gotg#<game> -- --refresh`: the library moved to the newest gotg and
+# catalog, gotg and the picker rebuilt, and the game run again from it. Nix's
+# own --refresh cannot do this -- it never moves a lock -- and the output
+# running this was built from the pin as it was, so the run is a new one.
+launch_refreshed() {
+  local spec="$1" want_version="$2"
+  shift 2
+  local library output
+  library="$(gotg_library)"
+  [[ -n "$library" ]] || die "no library to refresh: set GOTG_LIBRARY, or \`library\` in $GOTG_CONFIG_FILE"
+  output="$(jq -r '.output // empty' "$spec")"
+  [[ -n "$output" ]] || output="${LAUNCH_WANT%%/*}.${LAUNCH_WANT#*/}${LAUNCH_VARIANT:+.$LAUNCH_VARIANT}"
+  library_update_self >/dev/null
+  log "running $output from the refreshed library"
+  exec "$(nix_bin)" run "$library#$output" -- ${want_version:+--version "$want_version"} "$@"
+}
+
+# What the picker's chip says, in a line: the cached check (updates.sh), so
+# a launch from a terminal knows it is behind without asking the network.
+launch_update_notice() {
+  local cache
+  cache="$(updates_cache_file)"
+  [[ -f "$cache" ]] || return 0
+  [[ "$(jq -r '.gotg.available // false' "$cache" 2>/dev/null)" == true ]] || return 0
+  log "GOTG has an update; \`-- --refresh\` on this launch takes it"
 }
 
 # Check a spec and take its game and environment as this run's: what `launch`

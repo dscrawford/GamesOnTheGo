@@ -101,6 +101,7 @@ platform only.
 nix run gotg#n64.usa.legend_of_zelda_ocarina_of_time_rev2.rando        # a variant
 nix run gotg#n64.usa.donkey_kong_64.emulate                              # a native port, back on the emulator
 nix run gotg#switch.world.legend_of_zelda_tears_of_the_kingdom -- --version 1.4.2   # one of its updates
+nix run gotg#n64.usa.donkey_kong_64 -- --refresh                        # the library moved to the newest gotg and catalog first, then the game
 nix flake update catalog --flake ~/.config/gotg/library                  # games added on the server since
 ~/.local/state/gotg/app/bin/gotg help     # the launcher inside every game: built by the library, never installed
 ```

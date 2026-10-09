@@ -52,6 +52,7 @@
             files_urls = filesUrls;
             inherit (chosen) attr;
             variant = if variant == null then "" else variant;
+            output = name;
             env = "${env}";
             game = builtins.removeAttrs game [ "path" ];
           };
