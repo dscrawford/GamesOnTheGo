@@ -651,7 +651,7 @@ _qa_run_session() {
   # the fullscreen handoff through cage's XWayland WM is a coin toss — when it
   # loses, the viewport comes up black and stays black. Windowed is the one
   # behavior that lands every time, and a capture with the emulator's chrome
-  # in it grades the same.
+  # in it grades the same. Set by hand, it is the fullscreen path under test.
   # WLR_RENDERER is inherited on purpose. It is a person's choice for their
   # own compositor, and on the one desktop this was measured on it is also
   # the choice that works: sway on Vulkan handed cage Vulkan, and cage on
@@ -660,7 +660,7 @@ _qa_run_session() {
   # lets cage pick, and it picks right there.
   env -u DISPLAY -u WAYLAND_DISPLAY \
     WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
-    GOTG_FULLSCREEN=0 \
+    GOTG_FULLSCREEN="${GOTG_FULLSCREEN:-0}" \
     PULSE_SINK="gotgqa$$" SDL_AUDIODRIVER=pulseaudio SDL_AUDIO_DRIVER=pulseaudio \
     GOTG_QA_DIR="$rundir" GOTG_QA_DURATION="$QA_DURATION" \
     GOTG_QA_OVERLAY_AT="$QA_OVERLAY_AT" GOTG_QA_KILLSWITCH="$QA_KILLSWITCH" \

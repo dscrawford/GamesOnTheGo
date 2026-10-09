@@ -144,6 +144,14 @@ play_launch() {
   # Before the watcher, which reads it from the environment it inherits.
   play_session "$$"
 
+  # The launcher goes fullscreen when stdout is not a terminal, and the
+  # session log below puts a tee in front of it: with logs on, every launch
+  # from a terminal was fullscreen. Answered here, while stdout is still the
+  # terminal's.
+  if [[ -z "${GOTG_FULLSCREEN:-}" ]] && [[ -t 1 ]]; then
+    export GOTG_FULLSCREEN=0
+  fi
+
   # Before the overlay, so its output is in the log too; never at the cost of the launch.
   if logs_sharing; then
     if logs_session_begin "$PLAY_ATTR" "$PLAY_GAME" "$variant"; then

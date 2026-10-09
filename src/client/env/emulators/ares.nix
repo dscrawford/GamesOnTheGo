@@ -47,6 +47,12 @@
       emulator = pkgs.ares;
       bin = "ares";
       isolate = true;
+      # Not --fullscreen: that re-creates ares' GL window as an override-redirect
+      # child of the X root (ruby/video/glx.cpp), which Xwayland under sway or
+      # cage shows by luck -- black and stuck when it loses, and it lost on a
+      # desktop every time. This one fullscreens the GTK window the compositor
+      # manages, and the GL output stays where it was.
+      fullscreenFlag = "--pseudofullscreen";
       padConsole = console;
       args = [
         # A launch from the sofa goes straight to the game; the windowed UI is
