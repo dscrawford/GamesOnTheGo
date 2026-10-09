@@ -9,15 +9,13 @@ nix run gotg#n64.usa.legend_of_zelda_majoras_mask
 ```
 
 First run: the bytes come down from your server, the emulator or port is
-built, the controllers in the room are mapped. Every run: saves are pulled
-before and pushed by the overlay's Exit after, and a game picked up on the
-Deck continues where the desktop left it.
+built, the room's controllers mapped. Every run: saves pulled before, the
+overlay up, Exit pushes them after; the Deck continues where the desktop
+left off.
 
 **GOTG ships no games and downloads none from anyone but your own server.**
-It is for games you have obtained legally: cartridges and discs you own and
-have dumped yourself, or titles bought digitally. The same goes for console
-keys and firmware. Do not point the indexer at material you do not have the
-right to copy.
+It is for games you own and dumped yourself, or bought digitally -- console
+keys and firmware too. Do not index material you have no right to copy.
 
 | Component | Does | Runs |
 |---|---|---|
@@ -36,7 +34,7 @@ curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/dscrawfo
   | bash -s -- --server https://gotg.example.org --claim <invite url>
 ```
 
-What it does, step by step (`bash -s -- --dry-run` prints this and changes nothing):
+`bash -s -- --dry-run` prints the steps and changes nothing:
 
 ```console
   GOTG — installing onto this machine
@@ -60,22 +58,15 @@ Dry run done. Nothing was changed.
 ```
 
 Nothing goes in a Nix profile. The **library** is the install: a flake in
-`~/.config/gotg/library` naming your server and pinning its catalog, each game
-an output of it ([docs/nix-games.md](docs/nix-games.md)). `--server` names
-the GOTG server it is a library of; `--claim <url>` signs in with an invite
-link from its admin, or without one the token is asked for. With Nix already
-here, the whole of it by hand:
+`~/.config/gotg/library` naming your server (`--server`) and pinning its
+catalog, each game an output of it ([docs/nix-games.md](docs/nix-games.md)).
+`--claim <url>` signs in with an admin's invite link; without one the token
+is asked for. By hand, and after a SteamOS update: [docs/install.md](docs/install.md).
 
 ```bash
-nix flake new ~/.config/gotg/library -t github:dscrawford/GamesOnTheGo#library
-nix run github:dscrawford/GamesOnTheGo#login     # the token first: the catalog is fetched with it
-nix flake lock ~/.config/gotg/library            # by its path; a lock is not written through the registry
-nix registry add gotg ~/.config/gotg/library     # so it is gotg#… from anywhere, as below
+nix flake update gotg --flake ~/.config/gotg/library && nix run gotg#update   # upgrade (or the installer again)
+curl … /uninstall.sh | bash -s -- --games        # uninstall; --games takes games and saves too, Nix stays
 ```
-
-Upgrade: the installer again, or `nix flake update gotg --flake ~/.config/gotg/library && nix run gotg#update`.
-Uninstall: `curl … /uninstall.sh | bash -s -- --games` (`--games` takes games and saves too; Nix stays).
-More: [docs/install.md](docs/install.md).
 
 ## Play
 
@@ -89,10 +80,10 @@ nix run ~/.config/gotg/library#n64.usa.donkey_kong_64                   # any li
 nix build ~/.config/gotg/library#n64.usa.donkey_kong_64 && ./result/bin/gotg-n64-usa-donkey_kong_64   # built once, run as a program
 ```
 
-`#play` pins the library it makes to the GOTG it ran from, and adds no udev
-rule: until `install.sh` has, the keyboard and mouse are the controllers.
-`nix registry add gotg ~/.config/gotg/library` (the installer's doing) is
-what makes a library `gotg#…` from anywhere:
+`#play` pins its library to the GOTG it ran from and adds no udev rule:
+until `install.sh` has, keyboard and mouse are the controllers.
+`nix registry add gotg ~/.config/gotg/library` (the installer does it) makes
+a library `gotg#…` from anywhere:
 
 ```console
 $ nix search gotg majora
@@ -102,22 +93,21 @@ $ nix search gotg majora
 $ nix run gotg#n64.usa.legend_of_zelda_majoras_mask
 ```
 
-An id is `<region>.<title_slug>`, unique per platform, so the attribute is
-`<platform>.<region>.<title>`; `gotg#usa.legend_of_zelda_majoras_mask` works
-when the id is on one platform only.
+An id is `<region>.<title_slug>`, unique per platform; the attribute is
+`<platform>.<region>.<title>`, or `gotg#usa.<title>` when the id is on one
+platform only.
 
 ```bash
 nix run gotg#n64.usa.legend_of_zelda_ocarina_of_time_rev2.rando        # a variant
 nix run gotg#n64.usa.donkey_kong_64.emulate                              # a native port, back on the emulator
 nix run gotg#switch.world.legend_of_zelda_tears_of_the_kingdom -- --version 1.4.2   # one of its updates
 nix flake update catalog --flake ~/.config/gotg/library                  # games added on the server since
+~/.local/state/gotg/app/bin/gotg help     # the launcher inside every game: built by the library, never installed
 ```
 
-Behind every game is the launcher, `gotg`, which the library builds and nobody
-installs: `~/.local/state/gotg/app/bin/gotg`. It answers `help`; the `gotg …`
-lines further down are that program. What a game printed is kept only with
-`gotg logs on` ([Session logs](#session-logs)); the picker Steam starts logs
-to `~/.local/state/gotg/logs/gotg-ui.log`.
+The `gotg …` lines below are that program. What a game printed is kept only
+with `gotg logs on` ([Session logs](#session-logs)); the picker Steam starts
+logs to `~/.local/state/gotg/logs/gotg-ui.log`.
 
 ## Picker
 
@@ -145,7 +135,7 @@ $ nix run gotg#steam -- picker            # in Steam, as "Games On The Go"
 | X | `/` or `f` | search, on a keyboard drawn over the grid: D-pad walks the keys, A types one, X deletes, Y is a space; **Close** at the bottom right (or B) brings it down. A real keyboard types straight in; Esc puts the search back |
 | Y | — | next platform |
 | Start | Tab | menu: Platform, Region, Installed, Search, Clear all, View |
-| Select | — | update, when the chip at the top right says one is available ([Variants](#variants)) |
+| Select | — | update, when the chip at the top right says one is available ([docs/variants.md](docs/variants.md)) |
 | hold any button | hold `Space` | take a free seat — the pad (or keyboard) icon above the grid fills in, then you are that player |
 | — | `i` | installed only |
 | — | `s` | storage |
@@ -169,45 +159,24 @@ Steam Controller
 ```
 
 Launches run through [danstick](https://github.com/dscrawford/danstick):
-pads are republished via `/dev/uinput`, seated by holding a button, and bound
-before the emulator starts -- ares (`settings.bml`), Dolphin (`GCPadNew.ini`),
-Ryujinx (`Config.json`), Cemu (`controllerProfiles/*.xml`). Motion goes over
-DSU (`127.0.0.1:26760`, slot = player − 1); `DANSTICK_DSU_PORT=0` turns it off.
+pads republished via `/dev/uinput`, seated by a held button, bound before
+the emulator starts. **Every session starts with nobody seated.** Hold a
+button for a second and a half: the bar at the top fills in your colour, you
+are player one, the next hold is player two, and games are bound in that
+order. Over any game:
 
-**Every session starts with nobody seated**, picker and game alike. Pick a
-controller up, hold a button for a second and a half, and the bar at the top
-fills in your colour: you are player one, the next to hold is player two, and
-that is the numbering every game is bound against. A controller danstick has
-no buttons for gets them walked right there, over the game.
+| Chord | Does |
+|---|---|
+| L + R + Select, held ½ s | that player's menu: the seats, the game's controller lit by every press, rebind, reorder, unseat, port off/on, a save to load, **Exit** (pushes saves) — [docs/overlay.md](docs/overlay.md) |
+| L + R + Start, held 3 s | stop the game |
+| Select | a libultraship port's own menu (Paper Mario, Ocarina, Majora, Smash) |
 
-**L + R + Select** held half a second brings a menu down for that player alone:
-the seats as a row of controller icons; the game's controller under them,
-every press lighting the presser's icon beside the button it hit (A on it
-starts a button test for you alone, Select held ends it); A on a seat
-rebinds that controller, A held then left/right carries it to another seat,
-X takes it out of its seat, Y turns its game port off or on; for a game with
-saves of its own, a save to load (A held: the game restarts on it with every
-seat kept); **Exit** (A held) stops the game and pushes its saves; B held
-closes the menu. Every hold in it is half a second. **L + R + Start** held
-three seconds stops any game. In the libultraship ports (Paper Mario,
-Ocarina of Time, Majora's Mask, Smash) **Select** opens the port's own menu
--- its settings, enhancements and controller screen -- which they ship with
-that turned off. The same launch leaves them full screen at the screen's own
-resolution, the frame rate matched to its refresh (Smash has no
-interpolation to match) and 4x MSAA, as defaults: anything changed in the
-port's menu stays changed.
-
-Only pads danstick has published move the picker -- the keyboard takes a seat
-too (hold `Space`), and a controller that is also a keyboard (a Steam
-Controller in lizard mode, a Bluetooth Xbox pad's extra collections) is held
-quiet at the kernel while the picker runs. That is a requirement with a test
-against a real daemon and real kernel devices:
+Only pads danstick has published move the picker; the keyboard takes a seat
+too (hold `Space`), and a controller that is also a keyboard is held quiet
+at the kernel. Tested against a real daemon and real devices:
 
 ```bash
 nix run github:dscrawford/GamesOnTheGo#test-controllers      # from a checkout (or GOTG_DEV_ROOT=<one>); /dev/uinput writable, no danstick daemon up
-```
-
-```bash
 gotg controllers list --as-game      # what a game sees: inside danstick's sandbox, clones only
 gotg controllers order --set xbox    # pin player 1; --clear to undo
 gotg controllers apply [<id>|--all]  # write bindings without launching
@@ -235,9 +204,8 @@ before changes, restart it to see them. The rest of what it cost to find out:
 
 ## Variants
 
-```console
-$ nix eval --raw gotg#n64.usa.legend_of_zelda_ocarina_of_time_rev2.rando.gotgSpec.attr
-env-n64-usa_legend_of_zelda_ocarina_of_time_rev2-rando
+```bash
+nix run gotg#n64.usa.legend_of_zelda_four_swords_adventures.2p
 ```
 
 | Game | Variants |
@@ -247,7 +215,7 @@ env-n64-usa_legend_of_zelda_ocarina_of_time_rev2-rando
 | `n64.usa.super_mario_64` | `pc`, `pc-2p`, `pc-3p`, `pc-4p` (sm64coopdx, split-screen) |
 | `n64.usa.legend_of_zelda_majoras_mask` | `rando` |
 | `n64.usa.legend_of_zelda_ocarina_of_time_rev2` | `rando`, `2p`, `3p`, `4p` (Anchor co-op, split-screen) |
-| `n64.usa.paper_mario` | `paperboat` (MasterKillua's Refolded textures, when a mod release holding the pack sits at `/Games/n64/mods/usa.paper_mario/<release>/`) |
+| `n64.usa.paper_mario` | `paperboat` (MasterKillua's Refolded textures, from a mod release at `/Games/n64/mods/usa.paper_mario/<release>/`) |
 | `gba.world.pokemon_emerald_version` | `rogue` |
 | `switch.world.legend_of_zelda_breath_of_the_wild` | `60fps`, `120fps` (needs 1.6.0) |
 | `switch.world.legend_of_zelda_tears_of_the_kingdom` | `60fps`, `120fps`, `enhanced` (needs 1.1.0–1.4.2) |
@@ -257,43 +225,14 @@ env-n64-usa_legend_of_zelda_ocarina_of_time_rev2-rando
 | `switch.world.paper_mario_the_thousand_year_door` | `60fps` (text always skippable; ZR + D-pad Down fast, ZR + D-pad Up instant) |
 | `switch.world.super_mario_rpg` | `120fps` |
 
-A variant is a file: `src/client/env/games/<platform>/<id>.<variant>.nix`,
-beside `<id>.nix` for one game's settings and `<platform>.nix` for the rest.
-One whose version range matches nothing installed is hidden from the picker.
-
-**Updates, from the picker.** When the library is behind where it came
-from, or the picker and client Steam starts are not what the library would
-build, a chip at the top right says **Update available**; Select (or a
-click) runs `gotg update self` on the loading screen -- the pin moved, both
-built, the two roots swapped, the picker restarted into the new build with
-everybody's seats kept -- and nothing is changed if any step fails. A game
-whose build the library would now do differently, or whose install lacks a
-release the catalog attached, wears an **!** instead of the download arrow,
-and **Update** sits under Play in its menu (`gotg update <platform>/<id>`).
-Behind it: `gotg update --check` (the network and the evaluation, once per
-six hours) and `gotg complete updates` (the cached answer). A mod placed on
-the server by hand (`/Games/<platform>/mods/<id>/<release>/`, a texture pack
-say) is such a release: the importer attaches it to the game, the game
-installs as a directory with it beside the ROM, and the environment reads it
-from there -- PaperBoat's HD pack is one.
-
-On a Steam Deck the Switch variants are the same names with a Deck
-profile: handheld 720p unless a television is connected, the console's own
-4 GiB, caps no higher than 60 with UltraCam's DynamicFPS turning a miss into
-a dropped frame rather than slow motion, and Paper Mario's 1080p mod left
-out. The launcher tells a Deck by its firmware name (`GOTG_MACHINE=deck`)
-and a television by the kernel's connectors (`GOTG_EXTERNAL_DISPLAY=1`);
-both can be set by hand. Why: [docs/research/switch-on-deck.md](docs/research/switch-on-deck.md).
-
-Native ports, not emulated: Ocarina of Time and Master Quest (Ship of
-Harkinian), Majora's Mask (2 Ship 2 Harkinian), Donkey Kong 64 (recomp),
-Snowboard Kids 2 (recomp), Super Smash Bros. (BattleShip), Pikmin (Open
-Nectar), Super Mario 64 `pc` (sm64coopdx), Paper Mario `paperboat`
-(PaperBoat), Animal Crossing (ACGC PC Port, Wine), Super Smash Bros. Melee
-(melee-pc). A port that replaces the whole game has an `.emulate` attribute
-that puts it back on the emulator -- a port is younger than what it
-replaces, and that is how you find out which of the two has the bug; for
-the variants (`pc`, `paperboat`) the plain attribute already is the emulator.
+A variant is a file, `src/client/env/games/<platform>/<id>.<variant>.nix`;
+one whose version range matches nothing installed is hidden. Native ports
+(Ship of Harkinian, 2S2H, the recomps, BattleShip, Open Nectar, sm64coopdx,
+PaperBoat, ACGC, melee-pc) replace the emulator, and `.emulate` puts a
+whole-game port back on it. The **Update available** chip, the **!** badge,
+`gotg update`, mods placed on the server by hand, and the Deck profile the
+Switch variants get (`GOTG_MACHINE`, `GOTG_EXTERNAL_DISPLAY`):
+[docs/variants.md](docs/variants.md).
 
 ## Saves
 
@@ -305,12 +244,11 @@ gotg saves check  <id> [variant] [--json]       # conflict? which machine, and w
 gotg saves keep   <id> [variant] here|remote    # settle one
 ```
 
-A launch pulls first when the server is ahead and nothing local changed;
-the overlay's **Exit** pushes on the way out, and so does loading another
-save from it. A game closed any other way keeps its saves here until the
-next `gotg saves push`. **Both sides changed since they last matched** is a
-conflict: starting that game from the picker shows both saves -- the machine
-each is on and when -- and keeps the one you pick, the other set aside. A
+A launch pulls when the server is ahead and nothing local changed; the
+overlay's **Exit** pushes (so does loading another save from it), and a
+plain quit keeps saves here until the next `gotg saves push`. **Both sides
+changed since they last matched** is a conflict: the picker shows both
+saves, machine and time, and keeps the one you pick, the other set aside. A
 push against a newer server copy is refused (409) unless `--force`. Local
 history: `~/.local/state/gotg/saves/local/`, last 3 (`GOTG_SAVES_KEEP`).
 Wii U saves are not synced yet.
@@ -363,22 +301,26 @@ $ gotg admin scan
 1 added, 1 missing since 2026-08-14T09:11:02Z — 2431 in the catalog
 ```
 
-Administration can live on a listener of its own, kept off the public
-internet: set `GOTG_ADMIN_PORT` (with `GOTG_ADMIN_URL`, where it is reached,
-and `GOTG_PUBLIC_URL`, where claim links point) and expose that port only on
-a private network. The public listener then answers `/admin` with a 404 that
-says where it went. In a browser, `<admin url>/admin/` is a page to invite
-someone (it hands you the claim link and the command they run), see every
-token and when it was last used, and revoke one.
+```bash
+gotg admin invite <name>          # a claim url for one person and device; nix run github:dscrawford/GamesOnTheGo#login -- --claim <url> redeems it
+gotg admin tokens                 # every token and when it was last used
+gotg admin revoke <name>
+gotg admin import [--follow] [--match <re>]   # run the indexer now
+gotg admin art warm|status|search|set
+gotg admin scan                   # asks the service at the admin URL
+gotg admin logs [<user>]          # the session logs people opted into sharing
+gotg admin logs get <user> <session> [dir]    # unpack one; logs rm <user> <session> drops it
+nix run github:dscrawford/GamesOnTheGo#admin  # the same, with nothing installed
+```
 
-From a terminal, the same, with `admin_url` in `~/.config/gotg/api.json` or
-`GOTG_ADMIN_URL`: `invite <name>` prints a claim url for one person and device
-(`nix run github:dscrawford/GamesOnTheGo#login -- --claim <url>` redeems it);
-`tokens`, `revoke <name>`; `import [--follow] [--match <re>]` runs the
-indexer now; `art warm|status|search|set`; `scan` asks the service at the
-admin URL; `logs [<user>]` lists the session logs people opted into sharing,
-`logs get <user> <session> [dir]` unpacks one, `logs rm <user> <session>`
-drops it. `nix run github:dscrawford/GamesOnTheGo#admin`.
+Administration can live on its own listener, off the public internet:
+`GOTG_ADMIN_PORT`, with `GOTG_ADMIN_URL` (where it is reached) and
+`GOTG_PUBLIC_URL` (where claim links point), exposed only on a private
+network; the public `/admin` then answers 404 and says where it went.
+`<admin url>/admin/` in a browser invites someone (the claim link and the
+command they run), lists tokens with their last use, and revokes. The
+terminal finds it through `admin_url` in `~/.config/gotg/api.json` or
+`GOTG_ADMIN_URL`.
 
 ## home-manager
 
@@ -419,7 +361,7 @@ copy, so edits reach a dev shell and nothing else.
 | `GOTG_SERVER` | the server for `install.sh` and `#play` (default `https://gotg.dcraw.net`) |
 | `GOTG_KILLSWITCH=0` / `GOTG_KILLSWITCH_OVERLAY=0` | disable the stop combo / its overlay |
 | `GOTG_KILLSWITCH_HOLD_MS` | stop-combo hold time (default 3000) |
-| `GOTG_MACHINE` / `GOTG_EXTERNAL_DISPLAY` | `deck`, and `1` with a television on: the Deck profile above, guessed from DMI and DRM |
+| `GOTG_MACHINE` / `GOTG_EXTERNAL_DISPLAY` | `deck`, and `1` with a television on: the Deck profile, guessed from DMI and DRM |
 | `GOTG_FULLSCREEN` | `1`/`0`; by default a launch is full screen unless started from a terminal |
 | `GOTG_SAVES_KEEP` | local save history kept per game (default 3) |
 | `GOTG_CONFIG` | picker config directory (dev shell only) |
