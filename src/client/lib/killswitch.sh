@@ -49,6 +49,34 @@ killswitch_console() {
   printf '%s' "$platform"
 }
 
+# Put this launch, and everything it starts from here on, in a cgroup of its
+# own -- gotg-game-<pid>.scope under the user's systemd -- so the kill switch
+# stops the game by its scope (contain.rs) and nothing it forks outlives it.
+# Called after the watcher, the daemon and the log's tee have started, which
+# stay outside. Never fatal: without it the kill switch walks the tree.
+game_contain() {
+  local pid="$1" title="${2:-}" busctl unit cg
+  [[ "${GOTG_CONTAIN:-1}" != "0" ]] || return 0
+  busctl="${GOTG_BUSCTL:-busctl}"
+  command -v "$busctl" >/dev/null 2>&1 || return 0
+  [[ -r "/proc/$pid/cgroup" ]] || return 0
+  unit="gotg-game-$pid.scope"
+  if ! "$busctl" --user call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
+    org.freedesktop.systemd1.Manager StartTransientUnit 'ssa(sv)a(sa(sv))' \
+    "$unit" fail 3 PIDs au 1 "$pid" CollectMode s inactive-or-failed \
+    Description s "GOTG: ${title:-a game}" 0 >/dev/null 2>&1; then
+    warn "could not put the game in a scope of its own; the controller stops its process tree instead"
+    return 0
+  fi
+  # The move is a job: the game must not start until it has landed.
+  for _ in $(seq 1 50); do
+    cg="$(<"/proc/$pid/cgroup")"
+    [[ "$cg" != *"/$unit" ]] || return 0
+    sleep 0.02
+  done
+  warn "the game's scope ($unit) did not take this launch in time"
+}
+
 # Start the watcher for a process that is about to become the game.
 #
 # Called before the exec that turns this shell into the emulator, so the pid it

@@ -143,6 +143,48 @@ wait_for_watcher() { wait_for 5 test -s "$WATCHER_LOG"; }
   [[ "$(cat "$WATCHER_LOG")" == *"--client /"*"/bin/gotg"* ]]
 }
 
+# A busctl that records the call and moves nothing, or refuses.
+fake_busctl() {
+  export BUSCTL_LOG="$TEST_TMP/busctl.args"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    printf 'printf "%%s\\n" "$*" >>"%s"\n' "$BUSCTL_LOG"
+    printf '%s\n' "${1:-exit 0}"
+  } >"$TEST_TMP/busctl"
+  chmod +x "$TEST_TMP/busctl"
+  export GOTG_BUSCTL="$TEST_TMP/busctl"
+}
+
+@test "the launch asks for a game scope of its own, for the pid the watcher is told, after the watcher" {
+  fake_watcher
+  fake_busctl
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"env-n64 launched with"* ]]
+  wait_for_watcher
+  local pid
+  pid="$(sed -n 's/.*--pid \([0-9]*\).*/\1/p' "$WATCHER_LOG")"
+  grep -q "StartTransientUnit .* gotg-game-$pid.scope fail 3 PIDs au 1 $pid " "$BUSCTL_LOG"
+  grep -q "Description s GOTG: Zelda" "$BUSCTL_LOG"
+}
+
+@test "a scope that cannot be made still plays the game, and says the switch walks the tree" {
+  fake_watcher
+  fake_busctl "exit 1"
+  gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"env-n64 launched with"* ]]
+  [[ "$stderr" == *"stops its process tree instead"* ]]
+}
+
+@test "GOTG_CONTAIN=0 asks for no scope" {
+  fake_watcher
+  fake_busctl
+  GOTG_CONTAIN=0 gotg play usa.zelda
+  [ "$status" -eq 0 ]
+  [ ! -e "$BUSCTL_LOG" ]
+}
+
 @test "GOTG_KILLSWITCH=0 turns it off and the game still runs" {
   fake_watcher
   GOTG_KILLSWITCH=0 gotg play usa.zelda

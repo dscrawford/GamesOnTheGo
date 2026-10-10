@@ -9,6 +9,8 @@ setup_env() {
   unset DISPLAY WAYLAND_DISPLAY
 
   export TEST_TMP="$BATS_TEST_TMPDIR"
+  # A real busctl would put every test's launch in a real scope on the desk.
+  export GOTG_BUSCTL="$TEST_TMP/no-busctl"
   export GOTG_CONFIG_DIR="$TEST_TMP/config"
   export GOTG_STATE_DIR="$TEST_TMP/state"
   export GOTG_GAMES_DIR="$TEST_TMP/Games"

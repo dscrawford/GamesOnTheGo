@@ -164,6 +164,7 @@ play_launch() {
   # "$$" survives the exec below, so what the watcher holds is the emulator.
   killswitch_start "$$" "$(killswitch_console "$PLAY_ATTR" "$(manifest_field "$PLAY_GAME" platform)")" "$PLAY_ATTR"
   danstick_keeper_start "$$"
+  game_contain "$$" "$(manifest_field "$PLAY_GAME" title)"
   danstick_exec "$(env_bin "$PLAY_ATTR")" "$PLAY_TARGET" "$@"
 }
 

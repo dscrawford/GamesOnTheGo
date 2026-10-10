@@ -8,6 +8,7 @@ pub mod bar;
 pub mod chords;
 pub mod clones;
 pub mod consoles;
+pub mod contain;
 pub mod departures;
 pub mod driver;
 pub mod events;

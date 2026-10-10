@@ -25,6 +25,7 @@ use gotg_killswitch::bar::Bar;
 use gotg_killswitch::chords::{Holds, NativeHolds, Round};
 use gotg_killswitch::clones;
 use gotg_killswitch::consoles::{self, CONSOLES};
+use gotg_killswitch::contain::{self, Scope};
 use gotg_killswitch::driver::{MenuDriver, Opening, Step};
 use gotg_killswitch::frame::{Frame, ROWS_MAX, Saying};
 use gotg_killswitch::killswitch::Input;
@@ -282,14 +283,26 @@ impl Game {
     /// that stopped the daemon and this overlay and left Paper Mario running
     /// on a Deck with nobody watching. `loading::stop_tree_unless` reads the
     /// children off /proc; the group is signalled as well for anything that
-    /// forked out of the tree, where the pid leads one.
+    /// forked out of the tree, where the pid leads one. A launch that put
+    /// itself in a game scope is stopped by the scope (contain.rs).
     fn stop(&self, grace_ms: u64, poll_ms: u64) {
         eprintln!("gotg-killswitch: kill switch held; stopping {}", self.pid);
         if !self.same() {
             return;
         }
-        self.signal(libc::SIGTERM);
-        match loading::stop_tree_unless(self.pid, grace_ms, poll_ms, &|| STOP.load(Ordering::Relaxed)) {
+        let abort = || STOP.load(Ordering::Relaxed);
+        let stopped = match Scope::of(self.pid) {
+            Some(scope) => contain::stop_scope_unless(&scope, self.pid, grace_ms, poll_ms, &abort),
+            None => {
+                eprintln!(
+                    "gotg-killswitch: {} is in no game scope; stopping its process tree",
+                    self.pid
+                );
+                self.signal(libc::SIGTERM);
+                loading::stop_tree_unless(self.pid, grace_ms, poll_ms, &abort)
+            }
+        };
+        match stopped {
             loading::Stopped::Gently => eprintln!("gotg-killswitch: stopped"),
             // Asked to go ourselves -- a launcher tidying up, a session
             // ending -- while the game is still writing its save: it keeps

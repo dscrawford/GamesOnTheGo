@@ -204,7 +204,7 @@ pub fn parent(line: &str) -> Option<i32> {
     rest.split(' ').filter(|t| !t.is_empty()).nth(1)?.parse().ok()
 }
 
-fn processes() -> Vec<(i32, i32)> {
+pub fn processes() -> Vec<(i32, i32)> {
     let Ok(entries) = fs::read_dir("/proc") else {
         return Vec::new();
     };
