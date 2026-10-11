@@ -162,9 +162,9 @@ updates_check() {
     _updates_check_locked "$library" "$cache" "$stamp" "$now" "$force"
 }
 
-# Whether GitHub's head is older than GOTG_UPDATE_REV_TTL in the cache: one
-# cheap question, asked far more often than the evaluation, so a push shows
-# as an update within minutes rather than six hours.
+# Whether GitHub's head is older than GOTG_UPDATE_REV_TTL in the cache. The
+# picker sets it to 0, so every opening asks: one cheap question, where the
+# evaluation is answered by the lock's hash and needs no clock.
 _updates_rev_due() {
   local at
   at="$(jq -r '.rev_at // .checked_at // 0' "$1" 2>/dev/null)"
@@ -178,6 +178,7 @@ _updates_rev_locked() {
   _updates_rev_due "$cache" "$now" || return 0
   url="$(updates_gotg_original "$library")"
   [[ -n "$url" ]] || return 0
+  manifest_refresh >/dev/null 2>&1 || true
   latest="$(updates_latest_rev "$url")"
   [[ -n "$latest" ]] || return 0
   # shellcheck disable=SC2016 # a jq program, run by atomic_write

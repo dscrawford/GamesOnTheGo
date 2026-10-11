@@ -5,7 +5,9 @@ lands as "nothing to say", never a crash or a stray exclamation mark."""
 from __future__ import annotations
 
 import json
+import pathlib
 
+from gotg_ui import updates
 from gotg_ui.updates import ALERT, INSTALLED, NONE, RING, ask, badge, outdated, parse
 
 
@@ -125,3 +127,15 @@ def test_an_older_client_that_prints_nothing_and_a_failing_one_both_say_nothing(
     assert ask() is None
     monkeypatch.setenv("GOTG_BIN", str(tmp_path / "missing"))
     assert ask() is None
+
+
+def test_the_check_the_picker_starts_asks_for_gotgs_head_every_time(fake_client, tmp_path):
+    # An opening is when somebody looks for an update; a six-hour-old head
+    # hid a push that had landed minutes before.
+    seen = tmp_path / "env"
+    script = pathlib.Path(fake_client.path)
+    script.write_text(f"#!/bin/sh\nprintf '%s' \"$GOTG_UPDATE_REV_TTL\" >{seen}\n")
+    check = updates.Check()
+    assert check.process is not None
+    check.process.wait(timeout=10)
+    assert seen.read_text() == "0"

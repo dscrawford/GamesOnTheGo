@@ -204,8 +204,8 @@ wants() { export EVAL_GAMES_JSON="$1"; }
   jq '.rev_at -= 601' "$(cache_file)" >"$(cache_file).new" && mv "$(cache_file).new" "$(cache_file)"
   gotg update --check
   [ "$status" -eq 0 ]
-  [ "$(grep -c . "$NIX_LOG")" -eq 1 ]
   grep -q "^flake metadata --refresh --json" "$NIX_LOG"
+  ! grep -q "^eval" "$NIX_LOG"
   gotg complete updates
   [ "$(jq -r .gotg.latest <<<"$output")" = bbbbbbbb ]
   [ "$(jq -r .gotg.available <<<"$output")" = true ]

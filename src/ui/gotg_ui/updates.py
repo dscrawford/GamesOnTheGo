@@ -193,6 +193,8 @@ class Check:
         try:
             self.process = subprocess.Popen(  # noqa: S603 — argv is ours, shell=False
                 [*prefix, gotg_bin(), "update", "--check"],
+                # Every opening asks GitHub for gotg's head (updates.sh).
+                env={**os.environ, "GOTG_UPDATE_REV_TTL": "0"},
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
