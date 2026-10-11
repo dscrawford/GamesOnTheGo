@@ -159,7 +159,7 @@ wants() { export EVAL_GAMES_JSON="$1"; }
   export LIBRARY_LATEST="bbbbbbbb"
   gotg update --check
   [ "$status" -eq 0 ]
-  grep -q "^flake metadata --json github:dscrawford/GamesOnTheGo" "$NIX_LOG"
+  grep -q "^flake metadata --refresh --json github:dscrawford/GamesOnTheGo" "$NIX_LOG"
   [ "$(jq -r .gotg.locked <<<"$output")" = aaaaaaaa ]
   [ "$(jq -r .gotg.latest <<<"$output")" = bbbbbbbb ]
   [ "$(jq -r .gotg.behind <<<"$output")" = true ]
@@ -194,6 +194,29 @@ wants() { export EVAL_GAMES_JSON="$1"; }
   [ ! -e "$NIX_LOG" ]
   gotg update --check --force
   grep -q "flake metadata" "$NIX_LOG"
+}
+
+@test "inside the evaluation's interval, a head older than its own is asked again, alone" {
+  gotg update --check
+  rm -f "$NIX_LOG"
+  export LIBRARY_LATEST="bbbbbbbb"
+  # A push since: the head is the one thing that moved, and it is cheap to ask.
+  jq '.rev_at -= 601' "$(cache_file)" >"$(cache_file).new" && mv "$(cache_file).new" "$(cache_file)"
+  gotg update --check
+  [ "$status" -eq 0 ]
+  [ "$(grep -c . "$NIX_LOG")" -eq 1 ]
+  grep -q "^flake metadata --refresh --json" "$NIX_LOG"
+  gotg complete updates
+  [ "$(jq -r .gotg.latest <<<"$output")" = bbbbbbbb ]
+  [ "$(jq -r .gotg.available <<<"$output")" = true ]
+}
+
+@test "a launch from a terminal says when the library is behind" {
+  export LIBRARY_LATEST="bbbbbbbb"
+  gotg update --check
+  load_client_libs
+  run launch_update_notice
+  [[ "$output" == *"GOTG has an update"* ]]
 }
 
 @test "a library whose gotg is not GitHub's has no head to be behind" {

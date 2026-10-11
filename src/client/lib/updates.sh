@@ -58,7 +58,8 @@ updates_gotg_locked() {
 
 # The head of that reference, or nothing when offline or refused.
 updates_latest_rev() {
-  timeout "${GOTG_UPDATE_EVAL_TIMEOUT:-120}" "$(nix_bin)" flake metadata --json "$1" 2>/dev/null |
+  # --refresh: without it Nix answers from its tarball-ttl cache, an hour old.
+  timeout "${GOTG_UPDATE_EVAL_TIMEOUT:-120}" "$(nix_bin)" flake metadata --refresh --json "$1" 2>/dev/null |
     jq -r '.locked.rev // empty' 2>/dev/null || true
 }
 
@@ -152,9 +153,35 @@ updates_check() {
   cache="$(updates_cache_file)"
   stamp="$(library_stamp "$library")"
   now="$(date +%s)"
-  ((force)) || ! _updates_fresh "$cache" "$stamp" "$now" || return 0
+  if ((!force)) && _updates_fresh "$cache" "$stamp" "$now"; then
+    _updates_rev_due "$cache" "$now" || return 0
+    with_lock "$GOTG_STATE_DIR/locks/updates.lock" "" "" _updates_rev_locked "$library" "$cache" "$now"
+    return 0
+  fi
   with_lock "$GOTG_STATE_DIR/locks/updates.lock" "" "" \
     _updates_check_locked "$library" "$cache" "$stamp" "$now" "$force"
+}
+
+# Whether GitHub's head is older than GOTG_UPDATE_REV_TTL in the cache: one
+# cheap question, asked far more often than the evaluation, so a push shows
+# as an update within minutes rather than six hours.
+_updates_rev_due() {
+  local at
+  at="$(jq -r '.rev_at // .checked_at // 0' "$1" 2>/dev/null)"
+  [[ "$at" =~ ^[0-9]+$ ]] || return 0
+  (($2 - at >= ${GOTG_UPDATE_REV_TTL:-600}))
+}
+
+# Only the head, under the check's lock; offline keeps what the cache had.
+_updates_rev_locked() {
+  local library="$1" cache="$2" now="$3" url latest
+  _updates_rev_due "$cache" "$now" || return 0
+  url="$(updates_gotg_original "$library")"
+  [[ -n "$url" ]] || return 0
+  latest="$(updates_latest_rev "$url")"
+  [[ -n "$latest" ]] || return 0
+  # shellcheck disable=SC2016 # a jq program, run by atomic_write
+  atomic_write "$cache" -- jq --arg latest "$latest" --argjson at "$now" '.latest = $latest | .rev_at = $at' "$cache"
 }
 
 # updates_check's work, under its lock. The freshness is asked again here, so
@@ -193,7 +220,7 @@ _updates_check_locked() {
   # shellcheck disable=SC2016 # the quotes hold a jq/awk program, run by atomic_write
   if atomic_write "$cache" -- jq -n --arg stamp "$stamp" --argjson at "$now" --arg url "$url" --arg latest "$latest" \
     --argjson stale "$stale" --argjson want "$want" --argjson apps "$apps" \
-    '{version: 1, stamp: $stamp, checked_at: $at, url: $url, latest: $latest, stale: $stale,
+    '{version: 1, stamp: $stamp, checked_at: $at, rev_at: $at, url: $url, latest: $latest, stale: $stale,
       want: $want, app_want: ($apps.gotg // null), ui_want: ($apps.ui // null)}'; then
     updates_restamp "$library" "$stamp"
   fi

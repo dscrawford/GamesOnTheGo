@@ -75,10 +75,8 @@ launch_refreshed() {
 # What the picker's chip says, in a line: the cached check (updates.sh), so
 # a launch from a terminal knows it is behind without asking the network.
 launch_update_notice() {
-  local cache
-  cache="$(updates_cache_file)"
-  [[ -f "$cache" ]] || return 0
-  [[ "$(jq -r '.gotg.available // false' "$cache" 2>/dev/null)" == true ]] || return 0
+  [[ -f "$(updates_cache_file)" ]] || return 0
+  [[ "$(updates_json 2>/dev/null | jq -r '.gotg.available // false')" == true ]] || return 0
   log "GOTG has an update; \`-- --refresh\` on this launch takes it"
 }
 
