@@ -575,8 +575,13 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
         elif said.confirms(space=True):
             if panel.open:
                 panel.choose(browser)
-            elif panel.press(browser) == filters.TYPING:
-                typing, typing_from = Keyboard(browser.search), browser.search
+            else:
+                pressed_row = panel.press(browser)
+                if pressed_row == filters.TYPING:
+                    typing, typing_from = Keyboard(browser.search), browser.search
+                elif pressed_row == filters.UPDATE:
+                    panel = None
+                    self_update()
         elif pressed == pads.START:
             # Start closes it the way Start opened it.
             panel = None
@@ -636,7 +641,7 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
         elif event.key == pygame.K_TAB:
             # The panel: every filter in one place, both directions on each,
             # so a controller reaches all of them.
-            panel = Filters()
+            panel = Filters.opened(chip.words(learned.report, updates.self_root(), time.monotonic()))
         elif event.key == pygame.K_LEFT:
             state.move(-1, 0)
         elif event.key == pygame.K_RIGHT:
@@ -678,7 +683,7 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
         elif action == "search":
             typing, typing_from = Keyboard(browser.search), browser.search
         elif action == "panel":
-            panel = Filters()
+            panel = Filters.opened(chip.words(learned.report, updates.self_root(), time.monotonic()))
         elif action == "update":
             self_update()
 

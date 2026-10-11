@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from . import updates
 from .browser import ALL as PRESENCE_ALL
 from .browser import INSTALLED as PRESENCE_INSTALLED
 from .browser import MISSING as PRESENCE_MISSING
@@ -30,6 +31,7 @@ INSTALLED = "installed"
 SEARCH = "search"
 CLEAR = "clear"
 VIEW = "view"
+UPDATE = "update"
 
 # In the order somebody reaches for them: what console, then where it is from,
 # then whether it is on this machine. Search last because typing is the slow
@@ -43,7 +45,12 @@ LABELS = {
     SEARCH: "Search",
     CLEAR: "Clear all",
     VIEW: "View",
+    UPDATE: "Update GOTG",
 }
+
+# What the chip can say that a press acts on. The rest (updating, up to date)
+# are a moment after a press, not an offer.
+OFFERS = (updates.UPDATE_AVAILABLE, updates.RESTART_TO_UPDATE, updates.UPDATE_FAILED)
 
 # What a row does when it is pressed rather than nudged.
 TYPING = "typing"
@@ -87,6 +94,15 @@ class Filters:
     index: int = 0
     rows: tuple[str, ...] = field(default=ROWS)
     choice: Choice | None = None
+    # The chip's words when it offers an update: the row a pad reaches it by.
+    offer: str | None = None
+
+    @classmethod
+    def opened(cls, chip_words: str | None) -> Filters:
+        """The panel as Start opens it: an update on offer is the top row."""
+        if chip_words in OFFERS:
+            return cls(rows=(UPDATE, *ROWS), offer=chip_words)
+        return cls()
 
     @property
     def row(self) -> str:
@@ -122,12 +138,12 @@ class Filters:
         """A or Enter on the current row.
 
         Opens the row's list of choices, or does the row's one thing. Returns
-        TYPING when the row wants the keyboard -- the caller owns the text box,
-        and on a Deck the Steam keyboard rises over it.
+        TYPING when the row wants the keyboard, UPDATE when it wants the
+        update run: the caller owns both.
         """
         row = self.row
-        if row == SEARCH:
-            return TYPING
+        if row in (SEARCH, UPDATE):
+            return TYPING if row == SEARCH else UPDATE
         if row == CLEAR:
             clear(browser)
             return None
@@ -224,11 +240,11 @@ def rows_for(browser, panel: Filters, typing: str | None = None) -> list[tuple[s
     cursor. The panel stays up while the letters go in, and a row that kept
     the old search until Enter was a box typed into blind.
     """
-    return [
-        (
-            LABELS[row],
-            f"{typing}_" if row == SEARCH and typing is not None else value_of(browser, row),
-            index == panel.index,
-        )
-        for index, row in enumerate(panel.rows)
-    ]
+    def shown(row: str) -> str:
+        if row == SEARCH and typing is not None:
+            return f"{typing}_"
+        if row == UPDATE:
+            return panel.offer or ""
+        return value_of(browser, row)
+
+    return [(LABELS[row], shown(row), index == panel.index) for index, row in enumerate(panel.rows)]

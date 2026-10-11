@@ -135,7 +135,7 @@ $ nix run gotg#steam -- picker            # in Steam, as "Games On The Go"
 | LB / RB | PgUp / PgDn | page |
 | X | `/` or `f` | search, on a keyboard drawn over the grid: D-pad walks the keys, A types one, X deletes, Y is a space; **Close** at the bottom right (or B) brings it down. A real keyboard types straight in; Esc puts the search back |
 | Y | — | next platform |
-| Start | Tab | menu: Platform, Region, Installed, Search, Clear all, View |
+| Start | Tab | menu: Platform, Region, Installed, Search, Clear all, View — and **Update GOTG** at the top when one is available |
 | Select | — | update, when the chip at the top right says one is available ([docs/variants.md](docs/variants.md)) |
 | hold any button | hold `Space` | take a free seat — the pad (or keyboard) icon above the grid fills in, then you are that player |
 | — | `i` | installed only |

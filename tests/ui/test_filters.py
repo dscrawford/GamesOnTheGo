@@ -357,3 +357,27 @@ def test_an_empty_search_being_typed_is_a_cursor_not_a_dash():
     rows = filters.rows_for(browser(), panel, typing="")
     by_label = {label: value for label, value, _ in rows}
     assert by_label[filters.LABELS[filters.SEARCH]] == "_"
+
+
+# --- the update, reachable from a pad -------------------------------------------
+
+
+def test_an_update_on_offer_is_the_top_row_and_pressing_it_asks_for_the_update():
+    from gotg_ui import updates
+
+    ours = browser()
+    panel = filters.Filters.opened(updates.UPDATE_AVAILABLE)
+    assert panel.row == filters.UPDATE
+    assert panel.press(ours) == filters.UPDATE
+    label, value, selected = filters.rows_for(ours, panel)[0]
+    assert (label, value, selected) == ("Update GOTG", updates.UPDATE_AVAILABLE, True)
+    assert panel.rows[1:] == filters.ROWS
+
+
+def test_no_offer_no_row():
+    from gotg_ui import updates
+
+    for words in (None, updates.UPDATING, updates.UP_TO_DATE, updates.UPDATED_HERE):
+        assert filters.Filters.opened(words).rows == filters.ROWS, words
+    for words in (updates.RESTART_TO_UPDATE, updates.UPDATE_FAILED):
+        assert filters.Filters.opened(words).rows[0] == filters.UPDATE, words
