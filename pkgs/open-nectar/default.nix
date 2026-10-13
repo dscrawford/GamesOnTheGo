@@ -50,13 +50,13 @@
 }:
 stdenv.mkDerivation (finalAttrs: {
   pname = "open-nectar";
-  version = "0.9.1";
+  version = "0.9.2";
 
   src = fetchurl {
     url =
       "https://github.com/SSunnKing/Open-Nectar---Pikmin-Native-PC-Mobile-Port/"
       + "releases/download/${finalAttrs.version}/nectar-linux.tar.gz";
-    hash = "sha256-vdjyv+2HxdjGYPd54YavIMVTBrKlcUMIY+RuxERV/Y8=";
+    hash = "sha256-ymwDdiRgdtwgy1FyjPgL6K7uv7ejnMElllUDOQzo5FA=";
   };
 
   nativeBuildInputs = [
