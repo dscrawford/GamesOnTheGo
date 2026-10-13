@@ -33,17 +33,19 @@
   libglvnd,
   libGL,
   zlib,
+  vulkan-loader,
+  shaderc,
 }:
 let
   pname = "paperboat";
-  version = "1.0.2";
+  version = "1.0.3";
   # Harbour Masters name releases, not versions; the asset carries the name.
-  release = "Mulberry-Charlie";
+  release = "Mulberry-Delta";
   zip = fetchurl {
     url =
       "https://github.com/HarbourMasters/PaperBoat/releases/download/"
       + "${version}/Paperboat-${release}-Linux.zip";
-    hash = "sha256-D5D2YuSRmHZ9SPe/OmhwMVYkte9/0faP3tqkbQfHSQg=";
+    hash = "sha256-9sclZOjBSF32AirtJOM8USKBXJxskFiUEfP70j5W/6I=";
   };
   unpacked = stdenv.mkDerivation {
     name = "${pname}-${version}-zip";
@@ -66,14 +68,16 @@ stdenv.mkDerivation {
     makeWrapper
   ];
 
-  # The binary asks for little: SDL2 and libOpenGL by name. The X11, Wayland
-  # and audio libraries are SDL's business and arrive with it. zlib is
-  # libzip's.
+  # The binary asks for little: SDL2 and libOpenGL by name, and since 1.0.3
+  # Vulkan and shaderc. The X11, Wayland and audio libraries are SDL's
+  # business and arrive with it. zlib is libzip's.
   buildInputs = [
     SDL2
     libglvnd
     libGL
     zlib
+    vulkan-loader
+    shaderc
   ];
 
   dontConfigure = true;
@@ -89,6 +93,9 @@ stdenv.mkDerivation {
     cp usr/lib/lib{zip,spdlog,fmt,bz2,zstd}* $share/lib/
     cp ${unpacked}/gamecontrollerdb.txt $share/
     chmod +x $share/Paperboat
+    # nixpkgs builds shaderc only as libshaderc_shared; the twelve symbols
+    # 1.0.3 calls are all in it.
+    patchelf --replace-needed libshaderc.so.1 libshaderc_shared.so.1 $share/Paperboat
 
     makeWrapper $share/Paperboat $out/bin/Paperboat \
       --prefix LD_LIBRARY_PATH : $share/lib \
