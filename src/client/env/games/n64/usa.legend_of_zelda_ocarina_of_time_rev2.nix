@@ -7,11 +7,12 @@
 #
 # The matching half is in data/overrides.json, which marks the entry `unzip`:
 # the port reads a bare .z64, not the No-Intro archive it is distributed in.
-{ helpers, pkgs, ... }:
+{ helpers, pkgs, gotgPkgs, ... }:
 helpers.harkinianPort {
-  port = pkgs.shipwright;
+  port = gotgPkgs.shipwright;
   bin = "soh";
   appName = "soh";
+  romArgument = true;
   config = "shipofharkinian.json";
   archives = [
     "oot.o2r"

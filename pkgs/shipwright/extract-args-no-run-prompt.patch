@@ -1,0 +1,15 @@
+--- a/soh/soh/OTRGlobals.cpp
++++ b/soh/soh/OTRGlobals.cpp
+@@ -586,6 +586,12 @@
+             }
+             case ES_EXTRACT_ARGS: {
+ #if !defined(__SWITCH__) && !defined(__WIIU__)
++                if (args.empty() &&
++                    (std::filesystem::exists(Ship::Context::GetAppDirectoryPath(appShortName) + "/oot.o2r") ||
++                     std::filesystem::exists(Ship::Context::GetAppDirectoryPath(appShortName) + "/oot-mq.o2r"))) {
++                    extractStep = ES_VERIFY;
++                    continue;
++                }
+                 if (args.empty()) {
+                     SohGui::RegisterPopup(
+                         "Run Ship of Harkinian", "All files have been processed. Run SoH?", "Yes", "No",

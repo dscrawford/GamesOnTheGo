@@ -102,6 +102,10 @@ in
   #             its dot ("gSettings."; BattleShip has none and "g"), and
   #             `refresh` the match-refresh-rate cvar, which each port names
   #             for itself (2Ship: gMatchRefreshRate) or lacks (null)
+  #   romArgument  hand the first run its ROM on the command line rather than
+  #             leave it to be found: Ship of Harkinian 9.3 asks "Generate
+  #             one now?" before it scans, and only its argument path extracts
+  #             without asking (pkgs/shipwright's patch drops the question after)
   harkinianPort =
     {
       port,
@@ -110,6 +114,7 @@ in
       archives,
       config,
       settings ? { },
+      romArgument ? false,
     }:
     let
       prefix = settings.prefix or "gSettings.";
@@ -219,7 +224,7 @@ in
           # Hand the process over rather than coming back here: after
           # extracting, the port offers to start the game, so returning would
           # launch a second copy the moment the player quit the first.
-          exec ${port}/bin/${bin}
+          exec ${port}/bin/${bin}${lib.optionalString romArgument " \"$harkinian_data/gotg-extract.z64\""}
         fi
         # The staged copy is only needed until the archive exists.
         rm -f "$harkinian_data/gotg-extract.z64"

@@ -148,6 +148,9 @@ stdenv.mkDerivation (finalAttrs: {
   patches = [
     ./darwin-fixes.patch
     ./disable-downloading-stb_image.patch
+    # GOTG's: a ROM extracted from the command line starts the game rather than
+    # asking "Run SoH?" -- a modal no pad was reaching on a first run.
+    ./extract-args-no-run-prompt.patch
   ];
 
   nativeBuildInputs = [
