@@ -64,7 +64,7 @@ catalog, each game an output of it ([docs/nix-games.md](docs/nix-games.md)).
 is asked for. By hand, and after a SteamOS update: [docs/install.md](docs/install.md).
 
 ```bash
-nix flake update gotg --flake ~/.config/gotg/library && nix run gotg#update   # upgrade (or the installer again)
+nix run gotg#update                              # upgrade: the library follows origin, then everything built from it
 curl … /uninstall.sh | bash -s -- --games        # uninstall; --games takes games and saves too, Nix stays
 ```
 

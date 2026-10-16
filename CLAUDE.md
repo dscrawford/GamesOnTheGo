@@ -24,8 +24,7 @@ the shell still runs it; `.envrc` lists anything untracked under `src/client`,
 a launch from Steam or a bare terminal runs. Keep it current:
 
 ```bash
-git push && nix flake update gotg --flake "$(gotg library)"   # the library follows origin
-nix run gotg#update                                            # and the copies Steam launches
+git push && nix run gotg#update   # the library follows origin, then the copies Steam launches
 ```
 
 Nothing of GOTG is in a profile. Games are played from a **library**

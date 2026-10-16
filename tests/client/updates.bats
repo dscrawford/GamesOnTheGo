@@ -510,6 +510,29 @@ assert_untouched() {
   [ ! -e "$GOTG_LIBRARY/flake.lock.before-update" ]
 }
 
+@test "update with nothing named moves the pin first, then rebuilds gotg, the picker and the games from it" {
+  prep_self_update
+  root_for n64.usa.zelda old-zelda
+  gotg update
+  [ "$status" -eq 0 ]
+  grep -q "^flake update gotg catalog --flake $GOTG_LIBRARY\$" "$NIX_LOG"
+  [ "$(jq -r .nodes.gotg.locked.rev "$GOTG_LIBRARY/flake.lock")" = ffffffff ]
+  [ "$(grep -n '^flake update' "$NIX_LOG" | cut -d: -f1)" -lt "$(grep -n '^build' "$NIX_LOG" | head -1 | cut -d: -f1)" ]
+  [ "$(readlink -f "$(APP_ROOT)")" = "$TEST_TMP/store/gotg-out" ]
+  [ "$(readlink -f "$(UI_ROOT)")" = "$TEST_TMP/store/gotg-ui-out" ]
+  grep -qF "build $GOTG_LIBRARY#n64.usa.zelda -o $(GAMES)/n64.usa.zelda" "$NIX_LOG"
+  [[ "$output" != *picker* ]]
+}
+
+@test "update of a library in the store moves no pin and rebuilds what it pins" {
+  export GOTG_LIBRARY="/nix/store/zzzz-library"
+  gotg update
+  [ "$status" -eq 0 ]
+  ! grep -q '^flake update' "$NIX_LOG"
+  grep -qF "build $GOTG_LIBRARY#gotg -o $(APP_ROOT)" "$NIX_LOG"
+  grep -qF "build $GOTG_LIBRARY#gotg-ui -o $(UI_ROOT)" "$NIX_LOG"
+}
+
 @test "update with an argument it does not know says its usage" {
   gotg update --frobnicate
   [ "$status" -ne 0 ]

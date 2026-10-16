@@ -63,7 +63,7 @@ so: give Nix the netrc yourself, `nix.settings.netrc-file =
 Upgrade later:
 
 ```bash
-nix flake update gotg --flake ~/.config/gotg/library && nix run gotg#update
+nix run gotg#update   # the library follows origin, then everything built from it
 ```
 
 Steam needs a built copy to start, which `#update` keeps under

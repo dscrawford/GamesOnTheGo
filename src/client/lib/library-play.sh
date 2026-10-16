@@ -227,10 +227,14 @@ library_update_self() {
   local library
   library="$(gotg_library)"
   [[ -n "$library" ]] || die "no library configured: set GOTG_LIBRARY, or \`library\` in $GOTG_CONFIG_FILE"
-  [[ -d "$library" && -w "$library" && "$library" != /nix/store/* ]] ||
+  library_writable "$library" ||
     die "the library at $library is not a directory this can write; its pin cannot be moved from here"
   [[ -f "$library/flake.lock" ]] || die "the library at $library has no flake.lock to move"
   with_lock "$GOTG_STATE_DIR/locks/library.lock" "" "" _library_update_self_locked "$library"
+}
+
+library_writable() {
+  [[ -d "$1" && -w "$1" && "$1" != /nix/store/* ]]
 }
 
 # library_update_self's work, one at a time per machine.
@@ -277,7 +281,6 @@ _library_update_self_locked() {
     "$GOTG_APP_ROOT/bin/gotg" update --check --force >/dev/null 2>&1 || true
   fi
   foreign_gl_sync
-  printf 'picker\t%s\n' "$(readlink -f "$GOTG_UI_ROOT")"
 }
 
 # One game brought up to date: every root it has here -- the plain game and
@@ -327,7 +330,9 @@ library_root_attrs() {
 
 # Every game with a root rebuilt from the library -- and the client and picker
 # Steam starts, which it re-exports (mkLibrary) -- then the GL a machine
-# without its own needs, for what they now name.
+# without its own needs, for what they now name. A library this can write
+# follows origin first, so one command is the whole upgrade; a copy in the
+# store is rebuilt as it is pinned.
 #
 cmd_update() {
   local library root attr failed=0
@@ -344,6 +349,8 @@ cmd_update() {
       ;;
     self)
       library_update_self
+      # The last line, for the picker: where the new picker is.
+      printf 'picker\t%s\n' "$(readlink -f "$GOTG_UI_ROOT")"
       return 0
       ;;
     "") ;;
@@ -354,13 +361,17 @@ cmd_update() {
   # It narrates itself, one line per game; a dialog on top of that is the
   # same news twice, and under the installer a window nobody asked for.
   export GOTG_NO_DIALOG=1
-  "$(nix_bin)" build "$library#gotg" -o "$GOTG_APP_ROOT" || die "could not build gotg from $library"
-  log "gotg: up to date"
-  # Best effort: a machine without the picker's dependencies still updates.
-  if "$(nix_bin)" build "$library#gotg-ui" -o "$GOTG_UI_ROOT" 2>"$GOTG_STATE_DIR/update-gotg-ui.log"; then
-    log "gotg-ui: up to date"
+  if library_writable "$library" && [[ -f "$library/flake.lock" ]]; then
+    library_update_self
   else
-    warn "gotg-ui: could not build; see $GOTG_STATE_DIR/update-gotg-ui.log"
+    "$(nix_bin)" build "$library#gotg" -o "$GOTG_APP_ROOT" || die "could not build gotg from $library"
+    log "gotg: up to date"
+    # Best effort: a machine without the picker's dependencies still updates.
+    if "$(nix_bin)" build "$library#gotg-ui" -o "$GOTG_UI_ROOT" 2>"$GOTG_STATE_DIR/update-gotg-ui.log"; then
+      log "gotg-ui: up to date"
+    else
+      warn "gotg-ui: could not build; see $GOTG_STATE_DIR/update-gotg-ui.log"
+    fi
   fi
   mkdir -p "$(library_games_dir)"
   while IFS= read -r attr; do
