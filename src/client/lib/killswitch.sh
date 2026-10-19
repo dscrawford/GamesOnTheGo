@@ -40,8 +40,16 @@ killswitch_bin() {
 # third of its controls along with the rebind chord. Such a game is played with
 # the generic pad, whose walk (or, with none, the pad's own layout) is the one
 # that fits it.
+#
+# An environment that names its controller outright wins over both: Four
+# Swords is a GameCube disc played on a Game Boy Advance per player.
 killswitch_console() {
-  local attr="$1" platform="$2"
+  local attr="$1" platform="$2" named
+  named="$(danstick_controller "$attr")"
+  if [[ -n "$named" ]]; then
+    printf '%s' "$named"
+    return 0
+  fi
   if [[ -n "$attr" && "$(danstick_identity "$attr")" == xbox360* ]]; then
     printf 'generic'
     return 0

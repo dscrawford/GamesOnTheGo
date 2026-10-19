@@ -611,6 +611,24 @@ pads_manifest() {
   [ "$output" = "n64" ]
 }
 
+@test "an environment that names its controller is drawn with that one" {
+  # Four Swords is a GameCube disc, and every player holds a Game Boy
+  # Advance: the overlay showed a GameCube pad for a GBA's buttons.
+  source "$GOTG_LIB/killswitch.sh"
+  fake_env env-fsa
+  pads_manifest env-fsa <<<'{"emulator":"dolphin","reserve":4,"controller":"gba"}'
+  run killswitch_console env-fsa gamecube
+  [ "$output" = "gba" ]
+  # Named outright beats the identity's fallback to the generic pad.
+  pads_manifest env-fsa <<<'{"emulator":"dolphin","identity":"xbox360","controller":"gba"}'
+  run killswitch_console env-fsa gamecube
+  [ "$output" = "gba" ]
+  # A name that is not a platform's cannot reach the overlay's command line.
+  pads_manifest env-fsa <<<'{"emulator":"dolphin","controller":"../etc"}'
+  run killswitch_console env-fsa gamecube
+  [ "$output" = "gamecube" ]
+}
+
 @test "Ryujinx never gets it, whatever the environment says" {
   # Every clone is 045e:028e under it and Ryujinx blanks the name CRC to
   # make its device id, so four players would land on one id and one seat.

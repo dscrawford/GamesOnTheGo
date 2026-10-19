@@ -214,6 +214,20 @@ danstick_identity() {
   printf '%s' "$identity"
 }
 
+# The controller this environment is played with, as a platform name, where
+# it says one; nothing where the platform's own is right. Shaped like a
+# platform because it reaches `gotg-killswitch --platform`, which refuses
+# anything else.
+danstick_controller() {
+  local attr="$1" manifest controller
+  [[ -n "$attr" ]] || return 0
+  manifest="$(env_pads_manifest "$attr")" || return 0
+  [[ -f "$manifest" ]] || return 0
+  controller="$(jq -r '.controller // ""' "$manifest" 2>/dev/null)" || return 0
+  [[ "$controller" =~ ^[A-Za-z0-9_-]+$ ]] || return 0
+  printf '%s' "$controller"
+}
+
 # How many seats this environment wants to exist before the game starts, as
 # `exec`'s flag, or nothing.
 #

@@ -126,6 +126,10 @@
   # mid-play (Four Swords). Every seat up to it exists from the start, empty
   # until somebody takes it; `danstick-rs exec --reserve`, from danstick.sh.
   padReserve ? null,
+  # The controller the overlay draws and walks, named as a GOTG platform, where
+  # it is not this platform's own: Four Swords is a GameCube game played on a
+  # Game Boy Advance per player. Null is the platform's controller.
+  padController ? null,
   # Whether `gotg configure` can open this emulator's own settings screen.
   #
   # Defaults to whether the environment isolates, because without isolation
@@ -544,7 +548,9 @@ pkgs.runCommand "gotg-env-${name}"
         )
       } $out/share/gotg/configure.json
     ''}
-    ${lib.optionalString (padEmulator != null || padIdentity != null || padReserve != null) ''
+    ${lib.optionalString (
+      padEmulator != null || padIdentity != null || padReserve != null || padController != null
+    ) ''
       cp ${
         pkgs.writeText "pads.json" (
           builtins.toJSON (
@@ -559,6 +565,7 @@ pkgs.runCommand "gotg-env-${name}"
             // lib.optionalAttrs (padConsole != null) { console = padConsole; }
             // lib.optionalAttrs (padIdentity != null) { identity = padIdentity; }
             // lib.optionalAttrs (padReserve != null) { reserve = padReserve; }
+            // lib.optionalAttrs (padController != null) { controller = padController; }
           )
         )
       } $out/share/gotg/pads.json

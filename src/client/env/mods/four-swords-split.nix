@@ -123,6 +123,9 @@
       # Every GBA is bound once, here, at launch -- so a player who pairs
       # mid-game needs their seat to exist already. See danstick_reserve.
       padReserve = players;
+      # What each player holds is a GBA, whatever the disc is for: the overlay
+      # draws and walks that pad, not the GameCube's.
+      padController = "gba";
       args = [
         "{state}/splitscreen/session.json"
         "--workdir"
