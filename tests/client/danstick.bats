@@ -611,6 +611,26 @@ pads_manifest() {
   [ "$output" = "n64" ]
 }
 
+@test "a port read as an Xbox pad keeps its walks under its own game" {
+  # Its buttons are the port's, not the console's: a walk filed under
+  # console:generic would reach every other port too.
+  source "$GOTG_LIB/killswitch.sh"
+  fake_env env-dk64
+  pads_manifest env-dk64 <<<'{"emulator":"ares","console":"Nintendo64","identity":"xbox360"}'
+  run killswitch_game env-dk64
+  [ "$output" = "env-dk64" ]
+  fake_env env-plain
+  pads_manifest env-plain <<<'{"emulator":"ares","console":"Nintendo64"}'
+  run killswitch_game env-plain
+  [ -z "$output" ]
+  fake_env env-fsa
+  pads_manifest env-fsa <<<'{"emulator":"dolphin","identity":"xbox360","controller":"gba"}'
+  run killswitch_game env-fsa
+  [ -z "$output" ]
+  run killswitch_game ""
+  [ -z "$output" ]
+}
+
 @test "an environment that names its controller is drawn with that one" {
   # Four Swords is a GameCube disc, and every player holds a Game Boy
   # Advance: the overlay showed a GameCube pad for a GBA's buttons.

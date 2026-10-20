@@ -76,7 +76,7 @@ extern "C" fn on_signal(_: libc::c_int) {
 }
 
 const USAGE: &str =
-    "usage: gotg-killswitch --pid <pid> [--platform P] [--hold-ms N] [--grace-ms N] [--poll-ms N]
+    "usage: gotg-killswitch --pid <pid> [--platform P] [--game KEY] [--hold-ms N] [--grace-ms N] [--poll-ms N]
                        [--quiet] [--no-overlay] [--overlay-only]
                        [--saves ENV --client PATH]
        gotg-killswitch --output    the size the overlay takes under gamescope, and why
@@ -120,6 +120,10 @@ struct Options {
     /// The game's platform, for which controller the rebind draws and which
     /// danstick layout it walks.
     platform: String,
+    /// The game's own key, for a port whose buttons are its own and not its
+    /// console's: its walks are filed under `game:<key>` rather than shared
+    /// with every game on the console.
+    game: String,
     /// The bar alone: no exit, no rebind. Beside the picker, which has its
     /// own way out and no console to rebind for.
     overlay_only: bool,
@@ -149,6 +153,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         quiet: false,
         draw: true,
         platform: String::new(),
+        game: String::new(),
         overlay_only: false,
         saves: String::new(),
         client: String::new(),
@@ -197,6 +202,21 @@ fn parse(args: &[String]) -> Result<Options, String> {
                         !p.is_empty()
                             && p.bytes()
                                 .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                    })
+                    .ok_or_else(|| format!("bad argument: {arg}"))?
+                    .clone();
+                continue;
+            }
+            "--game" => {
+                // A name to danstick: no control characters, and short.
+                options.game = args
+                    .next()
+                    .filter(|g| {
+                        !g.is_empty()
+                            && g.len() <= 200
+                            && !g.starts_with(['/', '.'])
+                            && g.bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b"-_./".contains(&b))
                     })
                     .ok_or_else(|| format!("bad argument: {arg}"))?
                     .clone();
@@ -593,6 +613,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
     let mut seat_icons: std::collections::HashMap<String, u8> = std::collections::HashMap::new();
     let console_index = consoles::for_platform(&options.platform);
     let console = &CONSOLES[console_index];
+    let scope = console.scope_for(&options.game);
     let mut next_alive_ms = 0;
     // Steam's overlay over the game: nothing is watched beside the picker,
     // whose pads Steam's overlay is not in the way of.
@@ -627,7 +648,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
         // danstick drives every clone from this console's walk. Leased to this
         // connection, so it is sent again whenever the connection is new.
         if !was_linked && link.fd().is_some() && !options.overlay_only && !options.platform.is_empty() {
-            link.send(&console.playing());
+            link.send(&console.playing(&options.game));
         }
         // And the watch on every seated pad's own controls, for the chords --
         // leased to this connection too.
@@ -696,6 +717,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
             ask_for_rebind(
                 Some(player),
                 console,
+                &scope,
                 &mut listeners.rebind,
                 &mut link,
                 clock,
@@ -779,6 +801,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                 ask_for_rebind(
                     Some(player),
                     console,
+                    &scope,
                     &mut listeners.rebind,
                     &mut link,
                     clock,
@@ -1027,6 +1050,7 @@ fn push_saves(options: &Options, painter: &mut Painter, bar: &Bar) {
 fn ask_for_rebind(
     player: Option<i32>,
     console: &consoles::Console,
+    scope: &str,
     rebind: &mut Rebind,
     link: &mut Link,
     clock: f64,
@@ -1040,7 +1064,7 @@ fn ask_for_rebind(
         }
         return;
     };
-    let Some(line) = rebind.start(player, console.layout, &console.scope(), clock) else {
+    let Some(line) = rebind.start(player, console.layout, scope, clock) else {
         return;
     };
     if link.send(&line) {
@@ -1127,6 +1151,21 @@ mod tests {
             parse(&args(&["--pid", "7"])).map(|o| o.platform).as_deref(),
             Ok("")
         );
+    }
+
+    #[test]
+    fn a_game_key_is_read_and_one_with_a_space_a_newline_or_nothing_is_refused() {
+        let game = |g: &str| parse(&args(&["--pid", "7", "--game", g])).map(|o| o.game);
+        assert_eq!(
+            game("env-n64-usa_donkey_kong_64").as_deref(),
+            Ok("env-n64-usa_donkey_kong_64")
+        );
+        assert!(game("").is_err());
+        assert!(game("a b").is_err());
+        assert!(game("a\nb").is_err());
+        assert!(game("../etc").is_err());
+        assert!(game("/etc").is_err());
+        assert_eq!(parse(&args(&["--pid", "7"])).map(|o| o.game).as_deref(), Ok(""));
     }
 
     #[test]

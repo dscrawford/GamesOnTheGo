@@ -57,6 +57,17 @@ killswitch_console() {
   printf '%s' "$platform"
 }
 
+# Where such a port's walks are filed: under the game, since its buttons are
+# its own and not its console's. Nothing for a game whose walk is the
+# console's, shared by every game on it.
+killswitch_game() {
+  local attr="$1"
+  [[ -n "$attr" ]] || return 0
+  [[ -z "$(danstick_controller "$attr")" ]] || return 0
+  [[ "$(danstick_identity "$attr")" == xbox360* ]] || return 0
+  printf '%s' "$attr"
+}
+
 # Put this launch, and everything it starts from here on, in a cgroup of its
 # own -- gotg-game-<pid>.scope under the user's systemd -- so the kill switch
 # stops the game by its scope (contain.rs) and nothing it forks outlives it.
@@ -115,6 +126,9 @@ killswitch_start() {
   # Which controller the rebind chord draws, and which danstick layout it walks.
   local -a console=()
   [[ ! "$platform" =~ ^[A-Za-z0-9_-]+$ ]] || console=(--platform "$platform")
+  local key
+  key="$(killswitch_game "$attr")"
+  [[ ! "$key" =~ ^[A-Za-z0-9_.-]+$ ]] || console+=(--game "$key")
 
   # Whose saves go up when the menu's Exit stops the game, and the client
   # that sends them -- this one, by the path it runs from.

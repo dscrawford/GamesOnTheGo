@@ -58,8 +58,23 @@ impl Console {
     /// clone is driven by its walk rather than the default's. Leased: it lasts
     /// as long as the connection that sent it -- the overlay's, which lasts as
     /// long as the game -- and danstick puts back what it found when that goes.
-    pub fn playing(&self) -> String {
-        serde_json::json!({"cmd": "scope", "console": self.layout, "lease": true}).to_string()
+    pub fn playing(&self, game: &str) -> String {
+        let mut line = serde_json::json!({"cmd": "scope", "console": self.layout, "lease": true});
+        if !game.is_empty() {
+            line["game"] = serde_json::Value::from(game);
+        }
+        line.to_string()
+    }
+
+    /// Where this game's walks are filed: under the game when it has a key
+    /// of its own (a port read as the generic pad, whose buttons are its
+    /// own), else under the console, shared by every game on it.
+    pub fn scope_for(&self, game: &str) -> String {
+        if game.is_empty() {
+            self.scope()
+        } else {
+            format!("game:{game}")
+        }
     }
 
     /// The control danstick is asking for, by its id.
@@ -117,7 +132,7 @@ mod tests {
 
     #[test]
     fn what_is_being_played_is_leased_for_the_consoles_layout() {
-        let sent: serde_json::Value = serde_json::from_str(&named("n64").playing()).expect("json");
+        let sent: serde_json::Value = serde_json::from_str(&named("n64").playing("")).expect("json");
         assert_eq!(
             sent,
             serde_json::json!({"cmd": "scope", "console": "n64", "lease": true})
@@ -125,8 +140,26 @@ mod tests {
     }
 
     #[test]
+    fn what_is_being_played_names_the_game_when_there_is_one() {
+        // Without it danstick drives the clone from the console's walk and a
+        // bind filed under the game is stored and never heard.
+        let sent: serde_json::Value =
+            serde_json::from_str(&named("generic").playing("env-n64-dk64")).expect("json");
+        assert_eq!(
+            sent,
+            serde_json::json!({"cmd": "scope", "console": "generic", "game": "env-n64-dk64", "lease": true})
+        );
+    }
+
+    #[test]
     fn the_scope_is_the_one_a_walk_is_stored_under() {
         assert_eq!(named("n64").scope(), "console:n64");
+        assert_eq!(named("n64").scope_for(""), "console:n64");
+    }
+
+    #[test]
+    fn a_port_files_its_walk_under_its_game_not_its_console() {
+        assert_eq!(named("generic").scope_for("env-n64-dk64"), "game:env-n64-dk64");
     }
 
     #[test]

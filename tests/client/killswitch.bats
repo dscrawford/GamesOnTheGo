@@ -80,6 +80,20 @@ wait_for_watcher() { wait_for 5 test -s "$WATCHER_LOG"; }
   [[ "$(cat "$WATCHER_LOG")" == *"--platform n64"* ]]
 }
 
+@test "the watcher is told the game's key only for a port played as the generic pad" {
+  fake_watcher
+  gotg play usa.zelda
+  wait_for_watcher
+  [[ "$(cat "$WATCHER_LOG")" != *"--game"* ]]
+  : >"$WATCHER_LOG"
+  mkdir -p "$GOTG_ROOTS_DIR/env-n64/share/gotg"
+  echo '{"emulator":"ares","console":"Nintendo64","identity":"xbox360"}' >"$GOTG_ROOTS_DIR/env-n64/share/gotg/pads.json"
+  gotg play usa.zelda
+  wait_for_watcher
+  [[ "$(cat "$WATCHER_LOG")" == *"--platform generic"* ]]
+  [[ "$(cat "$WATCHER_LOG")" == *"--game env-n64"* ]]
+}
+
 @test "it holds the combo for three seconds by default" {
   fake_watcher
   gotg play usa.zelda
