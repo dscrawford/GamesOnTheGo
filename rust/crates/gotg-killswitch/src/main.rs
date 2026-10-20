@@ -822,30 +822,25 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                 add,
             }) => {
                 send_focus(&mut link, &listeners.focused, owner, false);
-                let Some(control) = console.controls.get(control) else {
-                    eprintln!(
-                        "gotg-killswitch: no control {control} on the {} pad to bind",
-                        console.name
-                    );
-                    continue;
-                };
-                match listeners
-                    .rebind
-                    .bind(player, control.id, console.layout, &scope, add, clock)
-                {
-                    Some(line) if link.send(&line) => {
+                let asked = console.controls.get(control).and_then(|control| {
+                    listeners
+                        .rebind
+                        .bind(player, control.id, console.layout, &scope, add, clock)
+                        .map(|line| (control.id, line))
+                });
+                match asked {
+                    Some((id, line)) if link.send(&line) => {
                         if !options.quiet {
-                            eprintln!(
-                                "gotg-killswitch: binding player {player}'s {} (add: {add})",
-                                control.id
-                            );
+                            eprintln!("gotg-killswitch: binding player {player}'s {id} (add: {add})");
                         }
                     }
                     Some(_) => {
                         eprintln!("gotg-killswitch: danstick is not listening; cannot bind player {player}");
                         listeners.rebind.unsent(clock);
                     }
-                    None => {}
+                    // No such control, or a walk already on screen: the menu
+                    // has gone, so the bar goes up as a close would take it.
+                    None => bar.want_over(false, clock, MENU_CLOSE_SECONDS),
                 }
             }
             Some(Step::Forget { player, control }) => {

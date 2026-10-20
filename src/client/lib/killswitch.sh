@@ -128,7 +128,8 @@ killswitch_start() {
   [[ ! "$platform" =~ ^[A-Za-z0-9_-]+$ ]] || console=(--platform "$platform")
   local key
   key="$(killswitch_game "$attr")"
-  [[ ! "$key" =~ ^[A-Za-z0-9_.-]+$ ]] || console+=(--game "$key")
+  # The watcher's own rule for the key, or it refuses to start at all.
+  [[ ! "$key" =~ ^[A-Za-z0-9_-][A-Za-z0-9_.-]*$ ]] || console+=(--game "$key")
 
   # Whose saves go up when the menu's Exit stops the game, and the client
   # that sends them -- this one, by the path it runs from.

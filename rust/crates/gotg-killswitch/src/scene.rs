@@ -1180,7 +1180,7 @@ fn build_line(menu: &MenuFrame, at: (f32, f32), slot: f32, drawing: &mut Drawing
 /// middle. A group bound as a stick that is buttons in the hand (an N64's C
 /// buttons) is named and marked as buttons.
 /// The footer on the game's controller: what A, A held, Y and X do for what
-/// is hovered -- X only once danstick has shown it can reset.
+/// is hovered -- X unless danstick has refused a reset.
 fn tester_keys(hovered: Option<&str>, flags: u32) -> String {
     if flags & crate::frame::FLAG_NOTICE != 0 {
         return NEWER_DANSTICK.to_owned();
@@ -1857,7 +1857,7 @@ mod tests {
     }
 
     #[test]
-    fn reset_is_offered_only_once_danstick_has_answered_one() {
+    fn reset_is_offered_only_while_danstick_has_not_refused_one() {
         let keys = texts(&hovering(-1, 0)).pop().expect("a footer");
         assert!(!keys.contains("reset"), "{keys}");
         let keys = texts(&hovering(0, crate::frame::FLAG_RESET))

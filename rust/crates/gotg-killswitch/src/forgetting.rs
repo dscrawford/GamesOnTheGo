@@ -37,9 +37,10 @@ impl Forgetting {
         std::mem::take(&mut self.unsaid)
     }
 
-    /// danstick has answered a reset: the menu can offer one.
+    /// The menu can offer a reset: danstick has not refused one. Offered
+    /// before any is asked, or nobody would ever press the X that finds out.
     pub fn can(&self) -> bool {
-        self.known == Some(true)
+        self.known != Some(false)
     }
 }
 
@@ -52,7 +53,10 @@ impl crate::events::Listen for Forgetting {
         } else if self.asked {
             match event {
                 Event::State { .. } => {
-                    self.known = Some(true);
+                    // A refusal stands: a later state answers nothing.
+                    if self.known.is_none() {
+                        self.known = Some(true);
+                    }
                     self.asked = false;
                 }
                 // Some other error while one is out: not known to be the answer.
@@ -98,14 +102,19 @@ mod tests {
     }
 
     #[test]
-    fn reset_stays_dim_until_danstick_has_answered_one() {
+    fn reset_is_offered_until_danstick_refuses_one() {
         let mut forgetting = Forgetting::default();
-        assert!(!forgetting.can());
-        forgetting.apply(&state());
-        assert!(!forgetting.can(), "a state nobody asked for says nothing");
+        assert!(forgetting.can(), "nobody has said it cannot");
         forgetting.sent();
         forgetting.apply(&state());
         assert!(forgetting.can());
+        forgetting.apply(&Event::Error {
+            message: "unknown command \"forget\"".into(),
+        });
+        assert!(!forgetting.can());
+        forgetting.sent();
+        forgetting.apply(&state());
+        assert!(!forgetting.can(), "a refusal is not forgotten");
     }
 
     #[test]
@@ -130,6 +139,6 @@ mod tests {
             message: "unknown command \"hold\"".into(),
         });
         assert!(!forgetting.take_refused());
-        assert!(!forgetting.can());
+        assert!(forgetting.can(), "still offered: nothing said forget is unknown");
     }
 }
