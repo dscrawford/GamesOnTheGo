@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use crate::consoles::Console;
 use crate::events::Seat;
 use crate::frame::{self, EMPTY_SEAT, MenuFrame, ROWS_MAX, Rebinding};
+use crate::hover::Target;
 use crate::menu::{self, Row};
 use crate::pressing::Held;
 use crate::rebind::{Rebind, View};
@@ -55,11 +56,22 @@ pub fn rows_for(
         .collect()
 }
 
+/// The controls the cursor can stand on: every one the drawing places.
+pub fn targets(console: &Console) -> Vec<Target> {
+    console
+        .controls
+        .iter()
+        .enumerate()
+        .filter_map(|(control, c)| c.anchor.map(|at| Target { control, at }))
+        .collect()
+}
+
 pub fn menu_frame(
     view: &menu::View,
     console_index: usize,
     console: &Console,
     held: &[Held; ROWS_MAX],
+    reset: bool,
 ) -> MenuFrame {
     let mut icons = [EMPTY_SEAT; ROWS_MAX];
     let mut off = 0u32;
@@ -83,6 +95,8 @@ pub fn menu_frame(
         pressed: std::array::from_fn(|at| held[at].bits(console.controls.iter().map(|control| control.id))),
         sticks: std::array::from_fn(|at| held[at].sticks),
         testing: view.testing,
+        hover: view.hover.and_then(|at| i32::try_from(at).ok()).unwrap_or(-1),
+        flags: u32::from(reset) | u32::from(view.notice) << 1,
         saves: frame::Saves {
             row: view.saves_row,
             browse: view.saves,
@@ -136,7 +150,51 @@ mod tests {
             testing: false,
             saves_row: true,
             saves: None,
+            hover: None,
+            notice: false,
         }
+    }
+
+    #[test]
+    fn every_drawn_control_of_every_console_can_be_reached_by_the_cursor() {
+        use crate::hover::{self, Hover, Way};
+        for console in CONSOLES.iter() {
+            let targets = targets(console);
+            let mut reached = std::collections::BTreeSet::new();
+            let mut frontier = vec![Hover::Whole];
+            while let Some(from) = frontier.pop() {
+                for way in [Way::Up, Way::Down, Way::Left, Way::Right] {
+                    if let Hover::Control(c) = hover::step(&targets, from, way)
+                        && reached.insert(c)
+                    {
+                        frontier.push(Hover::Control(c));
+                    }
+                }
+            }
+            let missed: Vec<&str> = targets
+                .iter()
+                .filter(|t| !reached.contains(&t.control))
+                .map(|t| console.controls[t.control].id)
+                .collect();
+            assert!(
+                missed.is_empty(),
+                "{}: {missed:?} cannot be hovered",
+                console.name
+            );
+        }
+    }
+
+    #[test]
+    fn the_frame_carries_the_hover_and_whether_reset_is_offered() {
+        let console = &CONSOLES[for_platform("n64")];
+        let held = std::array::from_fn(|_| Held::default());
+        let mut hovered = view(vec![]);
+        hovered.hover = Some(3);
+        hovered.notice = true;
+        let frame = menu_frame(&hovered, 0, console, &held, true);
+        assert_eq!((frame.hover, frame.flags), (3, 0b11));
+        let frame = menu_frame(&view(vec![]), 0, console, &held, false);
+        assert_eq!((frame.hover, frame.flags), (-1, 0));
     }
 
     #[test]
@@ -212,7 +270,7 @@ mod tests {
             },
         ];
         let held: [Held; ROWS_MAX] = std::array::from_fn(|_| Held::default());
-        let frame = menu_frame(&view(rows), 3, console, &held);
+        let frame = menu_frame(&view(rows), 3, console, &held, false);
         assert_eq!(frame.icons[..4], [4, EMPTY_SEAT, EMPTY_SEAT - 1, EMPTY_SEAT]);
         assert_eq!((frame.rows, frame.off, frame.console), (3, 0b10, 3));
         assert_eq!((frame.owner, frame.focus, frame.carried), (2, 1, 0));
@@ -230,7 +288,7 @@ mod tests {
             ROWS_MAX + 3
         ];
         let held: [Held; ROWS_MAX] = std::array::from_fn(|_| Held::default());
-        let frame = menu_frame(&view(rows), 0, console, &held);
+        let frame = menu_frame(&view(rows), 0, console, &held, false);
         assert_eq!(
             (frame.rows as usize, frame.off),
             (ROWS_MAX, u32::MAX >> (32 - ROWS_MAX))
@@ -244,7 +302,7 @@ mod tests {
         let mut held: [Held; ROWS_MAX] = std::array::from_fn(|_| Held::default());
         held[2].controls.insert(first.to_string());
         held[2].sticks = [0.5, -0.5, 0.0, 1.0];
-        let frame = menu_frame(&view(vec![]), 0, console, &held);
+        let frame = menu_frame(&view(vec![]), 0, console, &held, false);
         assert_eq!(frame.pressed[2], 1, "the first control is the lowest bit");
         assert_eq!((frame.pressed[0], frame.pressed[3]), (0, 0));
         assert_eq!(frame.sticks[2], [0.5, -0.5, 0.0, 1.0]);

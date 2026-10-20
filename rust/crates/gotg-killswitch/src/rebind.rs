@@ -61,6 +61,9 @@ pub struct Rebind {
     /// Who is seated, as the last `state` said.
     seated: Vec<Seat>,
     ports_off: Vec<i32>,
+    /// One control rather than the walk: danstick counts its step as the
+    /// control's place in the whole layout, and the bar shows 1 of 1.
+    single: bool,
     /// Pads already walked unasked this session, by seat and node: one
     /// that was let go without saving is not asked again -- the chord is
     /// still there -- or the panel would come back for ever.
@@ -75,6 +78,7 @@ impl Default for Rebind {
             held: Held::default(),
             seated: Vec::new(),
             ports_off: Vec::new(),
+            single: false,
             offered: BTreeSet::new(),
         }
     }
@@ -89,10 +93,41 @@ impl Rebind {
         if self.phase != Phase::Idle || player < 1 {
             return None;
         }
+        self.begin(player, false, now);
+        Some(json!({"cmd": "map", "player": player, "layout": layout, "scope": scope}).to_string())
+    }
+
+    /// One control of `player`'s pad walked again (`bind`): the next press
+    /// replaces its binding, or with `add` joins it as a second input. The
+    /// layout is named as `map` names it; a danstick that reads it files the
+    /// bind where the console's walk is kept, whatever walk is in play.
+    pub fn bind(
+        &mut self,
+        player: i32,
+        control: &str,
+        layout: &str,
+        scope: &str,
+        add: bool,
+        now: f64,
+    ) -> Option<String> {
+        self.expire(now);
+        if self.phase != Phase::Idle || player < 1 {
+            return None;
+        }
+        self.begin(player, true, now);
+        let mut line =
+            json!({"cmd": "bind", "player": player, "control": control, "layout": layout, "scope": scope});
+        if add {
+            line["add"] = json!(true);
+        }
+        Some(line.to_string())
+    }
+
+    fn begin(&mut self, player: i32, single: bool, now: f64) {
         self.phase = Phase::Asked { player, since: now };
         self.captured.clear();
         self.held = Held::default();
-        Some(json!({"cmd": "map", "player": player, "layout": layout, "scope": scope}).to_string())
+        self.single = single;
     }
 
     /// The command never reached danstick: over at once, as a walk nothing was
@@ -164,10 +199,11 @@ impl Rebind {
                     self.end(current, *stored, now);
                 } else {
                     self.captured.clone_from(captured);
+                    let (index, total) = if self.single { (0, 1) } else { (*index, *total) };
                     self.phase = Phase::Walking(View {
                         control: control.clone(),
-                        index: *index,
-                        total: *total,
+                        index,
+                        total,
                         finish: 0.0,
                         ..current
                     });
@@ -193,7 +229,8 @@ impl Rebind {
             // danstick walked the pad it had grabbed, every button dead until
             // the game ended.
             Event::Error { message }
-                if matches!(self.phase, Phase::Asked { .. }) && !about_another_command(message) =>
+                if matches!(self.phase, Phase::Asked { .. })
+                    && !about_another_command(message, self.single) =>
             {
                 self.end(current, false, now);
             }
@@ -262,9 +299,11 @@ impl Rebind {
     }
 }
 
-/// An `unknown command` about anything but `map`: not a refusal of a rebind.
-fn about_another_command(message: &str) -> bool {
-    message.starts_with("unknown command") && !message.contains("\"map\"")
+/// An `unknown command` about anything but the one asked: not a refusal of
+/// this rebind.
+fn about_another_command(message: &str, single: bool) -> bool {
+    let asked = if single { "\"bind\"" } else { "\"map\"" };
+    message.starts_with("unknown command") && !message.contains(asked)
 }
 
 #[cfg(test)]
@@ -309,6 +348,78 @@ mod tests {
             Some(2),
             "the bar comes down at once"
         );
+    }
+
+    #[test]
+    fn a_single_bind_asks_danstick_for_that_control_in_the_scope_given() {
+        let mut rebind = Rebind::default();
+        let line = rebind
+            .bind(2, "righttrigger", "n64", "console:n64", false, 10.0)
+            .expect("a command");
+        let sent: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert_eq!(
+            sent,
+            json!({"cmd": "bind", "player": 2, "control": "righttrigger", "layout": "n64", "scope": "console:n64"})
+        );
+        assert_eq!(rebind.view(10.1).map(|v| v.player), Some(2));
+        assert!(
+            rebind.start(3, "n64", "console:n64", 10.2).is_none(),
+            "one at a time, a bind included"
+        );
+    }
+
+    #[test]
+    fn a_bind_with_add_asks_for_a_second_input() {
+        let mut rebind = Rebind::default();
+        let line = rebind
+            .bind(1, "a", "generic", "game:env-n64-dk64", true, 0.0)
+            .expect("a command");
+        let sent: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert_eq!(sent["add"], json!(true));
+        assert_eq!(sent["scope"], json!("game:env-n64-dk64"));
+    }
+
+    #[test]
+    fn a_single_bind_is_drawn_as_one_step_whatever_danstick_counts() {
+        // danstick walks the whole layout and keeps one step of it, so the
+        // step arrives numbered where the control sits in the layout.
+        let mut rebind = Rebind::default();
+        rebind.bind(1, "x", "n64", "console:n64", false, 0.0);
+        rebind.apply(&step(1, "x", 9, 26), 0.2);
+        let view = rebind.view(0.2).expect("walking");
+        assert_eq!((view.control.as_str(), view.index, view.total), ("x", 0, 1));
+        rebind.apply(&done(1, true), 1.0);
+        assert_eq!(rebind.view(1.1).and_then(|v| v.stored), Some(true));
+        // And the next walk counts as danstick does again.
+        rebind.start(1, "n64", "console:n64", 5.0);
+        rebind.apply(&step(1, "a", 0, 14), 5.2);
+        assert_eq!(rebind.view(5.2).map(|v| v.total), Some(14));
+    }
+
+    #[test]
+    fn an_old_daemon_refusing_bind_ends_the_panel_at_once() {
+        let mut rebind = Rebind::default();
+        rebind.bind(1, "x", "n64", "console:n64", false, 0.0);
+        rebind.apply(
+            &Event::Error {
+                message: "unknown command \"bind\"".into(),
+            },
+            0.1,
+        );
+        assert_eq!(rebind.view(0.2).and_then(|v| v.stored), Some(false));
+    }
+
+    #[test]
+    fn a_refused_forget_does_not_end_a_bind_being_asked_for() {
+        let mut rebind = Rebind::default();
+        rebind.bind(1, "x", "n64", "console:n64", false, 0.0);
+        rebind.apply(
+            &Event::Error {
+                message: "unknown command \"forget\"".into(),
+            },
+            0.1,
+        );
+        assert_eq!(rebind.view(0.2).and_then(|v| v.stored), None, "still asking");
     }
 
     #[test]

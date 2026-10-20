@@ -19,10 +19,14 @@
 //!   game hears nothing from that pad while its player keeps their seat and
 //!   can still open this menu.
 //! - **The game's controller**, below the line, where every seated player's
-//!   presses show as they happen, the owner's included. The owner's presses
-//!   also drive this menu; A on the controller starts a test, and from then
-//!   everything they press is only theirs to try, B included, until Select
-//!   held for half a second hands the menu back.
+//!   presses show as they happen, the owner's included. A cursor stands on
+//!   the whole drawing, or -- moved by the d-pad -- on one of its buttons.
+//!   On the whole drawing a tap of A walks every button of the owner's pad
+//!   again (`map`), A held for half a second starts a test, and X resets the
+//!   whole walk (`forget`). On a button a tap of A walks that button alone
+//!   (`bind`), Y adds a second input to it (`bind` with `add`), and X resets
+//!   it. In a test everything the owner presses is only theirs to try, B
+//!   included, until Select held for half a second hands the menu back.
 //! - **Load a save**, for a game that keeps its saves to itself: A lists them
 //!   (the client is asked, `gotg saves list --lines`), up and down choose, A
 //!   asks whether to load the one chosen, and A held for half a second loads
@@ -45,8 +49,14 @@
 
 use std::collections::BTreeSet;
 
+use crate::hover::{self, Hover, Target, Way};
+
 /// Held this long on a seated controller, A picks it up rather than rebinding.
 pub const GRAB_SECONDS: f64 = 0.5;
+/// Held this long on the game's controller, A starts a test rather than a walk.
+pub const TRY_SECONDS: f64 = 0.5;
+/// How long the bar says a reset needs a newer danstick.
+pub const NOTICE_SECONDS: f64 = 2.0;
 /// Held this long on Exit, A stops the game.
 pub const EXIT_SECONDS: f64 = 0.5;
 /// Held this long on the prompt, A loads the save chosen.
@@ -69,6 +79,18 @@ pub enum Action {
     Close,
     Exit,
     Rebind(i32),
+    /// One control of `player`'s pad walked again; `add` keeps what it had
+    /// and takes the press as a second input.
+    Bind {
+        player: i32,
+        control: usize,
+        add: bool,
+    },
+    /// `player`'s binding for this control, or the whole walk, dropped.
+    Forget {
+        player: i32,
+        control: Option<usize>,
+    },
     /// The controller in seat `player` goes to seat `to` (swapping).
     Move {
         player: i32,
@@ -154,6 +176,15 @@ pub struct Menu {
     /// The game keeps its saves to itself, so a save can be loaded.
     offer_saves: bool,
     browse: Option<Browse>,
+    /// The game's controller as drawn: which controls can be hovered, and
+    /// where the cursor is among them while the row is the tester.
+    targets: Vec<Target>,
+    hover: Hover,
+    /// Y went down on a hovered control; it fires when let go, so the press
+    /// is over before danstick listens for the one to add.
+    y_armed: bool,
+    /// Until when the bar says a reset needs a newer danstick.
+    notice_until: Option<f64>,
 }
 
 /// What the painter needs of the menu.
@@ -174,6 +205,11 @@ pub struct View {
     pub saves_row: bool,
     /// The saves list, while it is open.
     pub saves: Option<Browse>,
+    /// The control under the cursor on the game's controller; None is the
+    /// whole drawing.
+    pub hover: Option<usize>,
+    /// The bar is saying a reset needs a newer danstick.
+    pub notice: bool,
 }
 
 impl Menu {
@@ -199,6 +235,10 @@ impl Menu {
             done: false,
             offer_saves: false,
             browse: None,
+            targets: Vec::new(),
+            hover: Hover::Whole,
+            y_armed: false,
+            notice_until: None,
         }
         .with_owner_checked()
     }
@@ -207,6 +247,17 @@ impl Menu {
     pub fn with_saves(mut self) -> Self {
         self.offer_saves = true;
         self
+    }
+
+    /// With the controls the drawing places, for the cursor to walk.
+    pub fn with_targets(mut self, targets: Vec<Target>) -> Self {
+        self.targets = targets;
+        self
+    }
+
+    /// danstick does not know `forget`: said on the bar for a while.
+    pub fn refused_reset(&mut self, now: f64) {
+        self.notice_until = Some(now + NOTICE_SECONDS);
     }
 
     /// What the client said: how many saves, or None when it could not say.
@@ -339,13 +390,29 @@ impl Menu {
                 action = Some(Action::Move { player: seat, to });
             }
         } else if self.carried.is_none() {
-            let was = self.focus();
+            let was = (self.focus(), self.hover);
             if step != 0 && self.stop == Stop::Line && !self.rows.is_empty() {
                 let last = self.rows.len() as i32 - 1;
                 self.along = (self.focus() as i32 + step).clamp(0, last) as usize;
             }
+            // On the tester the cursor walks the drawing's controls; up and
+            // down leave the row only from the whole drawing.
+            let on_tester = self.stop == Stop::Tester;
+            let way = if on_tester && left {
+                Some(Way::Left)
+            } else if on_tester && right {
+                Some(Way::Right)
+            } else if on_tester && up && self.hover != Hover::Whole {
+                Some(Way::Up)
+            } else if on_tester && down_pressed && self.hover != Hover::Whole {
+                Some(Way::Down)
+            } else {
+                None
+            };
             let saves = self.offer_saves;
-            if down_pressed {
+            if let Some(way) = way {
+                self.hover = hover::step(&self.targets, self.hover, way);
+            } else if down_pressed {
                 self.stop = match self.stop {
                     Stop::Line => Stop::Tester,
                     Stop::Tester if saves => Stop::Saves,
@@ -358,9 +425,13 @@ impl Menu {
                     Stop::Tester | Stop::Line => Stop::Line,
                 };
             }
+            if self.stop != Stop::Tester {
+                self.hover = Hover::Whole;
+            }
             // A hold that was under the old place is not under the new one.
-            if self.focus() != was {
+            if (self.focus(), self.hover) != was {
                 self.a_since = self.a_since.map(|_| now);
+                self.y_armed = false;
             }
         }
         // Y: the seat's game port, off or on.
@@ -373,6 +444,29 @@ impl Menu {
         }
         if x_pressed && self.carried.is_none() && action.is_none() && self.seated(self.focus()) {
             action = Some(Action::Remove(self.focus() as i32 + 1));
+        }
+        // On the game's controller: X resets what is hovered, Y -- once let
+        // go -- adds an input to a hovered button.
+        let on_tester = self.stop == Stop::Tester && self.carried.is_none();
+        if on_tester && x_pressed && action.is_none() {
+            action = Some(Action::Forget {
+                player: self.owner,
+                control: self.hover.control(),
+            });
+        }
+        let y_down = live.iter().any(|c| *c == "y");
+        if on_tester && y_pressed && self.hover != Hover::Whole {
+            self.y_armed = true;
+        } else if self.y_armed && !y_down {
+            self.y_armed = false;
+            if let (true, Some(control)) = (on_tester && action.is_none(), self.hover.control()) {
+                self.done = true;
+                return Some(Action::Bind {
+                    player: self.owner,
+                    control,
+                    add: true,
+                });
+            }
         }
         // A: a tap rebinds, a hold picks up (on a seat) or exits (on Exit).
         match (a_down, self.a_since) {
@@ -391,12 +485,28 @@ impl Menu {
                     self.a_used = true;
                     self.carried = Some(self.focus() as i32 + 1);
                 }
-            }
-            (false, Some(_)) => {
-                if !self.a_used && self.focus() == self.tester_row() {
+                if self.stop == Stop::Tester && self.hover == Hover::Whole && held >= TRY_SECONDS {
+                    self.a_used = true;
                     self.a_since = None;
                     self.start_test(down);
                     return action;
+                }
+            }
+            (false, Some(_)) => {
+                if !self.a_used && self.stop == Stop::Tester {
+                    self.a_since = None;
+                    if action.is_some() {
+                        return action;
+                    }
+                    self.done = true;
+                    return Some(match self.hover {
+                        Hover::Whole => Action::Rebind(self.owner),
+                        Hover::Control(control) => Action::Bind {
+                            player: self.owner,
+                            control,
+                            add: false,
+                        },
+                    });
                 }
                 if !self.a_used && self.stop == Stop::Saves {
                     self.a_since = None;
@@ -518,6 +628,8 @@ impl Menu {
                     EXIT_SECONDS
                 } else if self.seated(self.focus()) {
                     GRAB_SECONDS
+                } else if self.stop == Stop::Tester && self.hover == Hover::Whole {
+                    TRY_SECONDS
                 } else {
                     return self.view_with(0.0, now);
                 };
@@ -547,6 +659,8 @@ impl Menu {
             testing: self.testing,
             saves_row: self.offer_saves,
             saves: self.browse,
+            hover: self.hover.control(),
+            notice: self.notice_until.is_some_and(|until| now < until),
         }
     }
 }
@@ -931,12 +1045,203 @@ mod tests {
         assert_eq!(menu.view(0.7).focus, 1, "back on player two");
     }
 
+    /// A face of four buttons and a d-pad, as a drawing places them.
+    fn face() -> Vec<Target> {
+        [
+            (0, 0.8, 0.6),
+            (1, 0.9, 0.5),
+            (2, 0.2, 0.4),
+            (3, 0.2, 0.6),
+            (4, 0.1, 0.5),
+            (5, 0.3, 0.5),
+        ]
+        .into_iter()
+        .map(|(control, x, y)| Target { control, at: (x, y) })
+        .collect()
+    }
+
+    fn on_tester(owner: i32) -> Menu {
+        let mut menu = opened(owner);
+        menu = menu.with_targets(face());
+        tap(&mut menu, "dpdown", 0.1);
+        menu
+    }
+
+    #[test]
+    fn the_controller_row_starts_with_the_whole_controller_hovered() {
+        let menu = on_tester(1);
+        let view = menu.view(0.2);
+        assert_eq!(view.focus, 2);
+        assert_eq!(view.hover, None);
+    }
+
+    #[test]
+    fn on_the_whole_controller_a_tap_walks_every_button_of_the_owners_pad() {
+        let mut menu = on_tester(2);
+        assert_eq!(menu.tick(&held(&["a"]), 0.2), None);
+        assert_eq!(menu.tick(&held(&[]), 0.3), Some(Action::Rebind(2)));
+        assert_eq!(menu.tick(&held(&["a"]), 0.4), None, "and the menu is done");
+    }
+
+    #[test]
+    fn on_the_whole_controller_a_held_half_a_second_starts_trying_buttons() {
+        let mut menu = on_tester(1);
+        assert!(hold(&mut menu, &["a"], 0.2, 0.75).is_empty());
+        assert!(menu.view(0.8).testing);
+        assert_eq!(menu.tick(&held(&[]), 0.9), None, "letting go of A is not a walk");
+        assert!(menu.view(1.0).testing);
+    }
+
+    #[test]
+    fn on_the_whole_controller_x_resets_the_whole_walk_and_the_menu_stays_down() {
+        let mut menu = on_tester(1);
+        assert_eq!(
+            menu.tick(&held(&["x"]), 0.2),
+            Some(Action::Forget {
+                player: 1,
+                control: None
+            })
+        );
+        menu.tick(&held(&[]), 0.3);
+        assert_eq!(menu.view(0.4).focus, 2, "still on the controller");
+        assert_eq!(menu.tick(&held(&["dpup"]), 0.5), None);
+        menu.tick(&held(&[]), 0.6);
+        assert_eq!(menu.view(0.7).focus, 0, "and still driven");
+    }
+
+    #[test]
+    fn a_button_hovered_takes_a_tap_of_a_as_a_rebind_of_that_button_only() {
+        let mut menu = on_tester(1);
+        tap(&mut menu, "dpright", 0.2);
+        assert_eq!(menu.view(0.3).hover, Some(0));
+        menu.tick(&held(&["a"]), 0.4);
+        assert_eq!(
+            menu.tick(&held(&[]), 0.5),
+            Some(Action::Bind {
+                player: 1,
+                control: 0,
+                add: false
+            })
+        );
+    }
+
+    #[test]
+    fn y_on_a_hovered_button_adds_an_input_to_it_once_let_go() {
+        let mut menu = on_tester(1);
+        tap(&mut menu, "dpleft", 0.2);
+        assert_eq!(menu.view(0.3).hover, Some(5));
+        assert_eq!(menu.tick(&held(&["y"]), 0.4), None, "not while Y is still down");
+        assert_eq!(
+            menu.tick(&held(&[]), 0.5),
+            Some(Action::Bind {
+                player: 1,
+                control: 5,
+                add: true
+            })
+        );
+        // On the whole controller Y is nothing.
+        let mut menu = on_tester(1);
+        assert_eq!(menu.tick(&held(&["y"]), 0.2), None);
+        assert_eq!(menu.tick(&held(&[]), 0.3), None);
+    }
+
+    #[test]
+    fn x_on_a_hovered_button_resets_that_control_only() {
+        let mut menu = on_tester(1);
+        tap(&mut menu, "dpright", 0.2);
+        assert_eq!(
+            menu.tick(&held(&["x"]), 0.3),
+            Some(Action::Forget {
+                player: 1,
+                control: Some(0)
+            })
+        );
+    }
+
+    #[test]
+    fn up_and_down_on_the_whole_controller_leave_the_row_as_before() {
+        let mut menu = on_tester(1);
+        tap(&mut menu, "dpdown", 0.2);
+        assert_eq!(menu.view(0.3).focus, 3, "Exit");
+        tap(&mut menu, "dpup", 0.4);
+        tap(&mut menu, "dpup", 0.5);
+        assert_eq!(menu.view(0.6).focus, 0, "the line");
+    }
+
+    #[test]
+    fn up_and_down_on_a_button_move_between_buttons_and_off_the_end_return_to_the_whole_controller() {
+        let mut menu = on_tester(1);
+        tap(&mut menu, "dpleft", 0.2);
+        assert_eq!(
+            menu.view(0.3).hover,
+            Some(5),
+            "dpright, nearest left of the middle"
+        );
+        tap(&mut menu, "dpup", 0.4);
+        assert_eq!(menu.view(0.5).hover, Some(2), "dpup, above it");
+        tap(&mut menu, "dpup", 0.6);
+        assert_eq!(menu.view(0.7).hover, None, "nothing above: the whole controller");
+        assert_eq!(menu.view(0.7).focus, 2, "and still on the row");
+        tap(&mut menu, "dpup", 0.8);
+        assert_eq!(menu.view(0.9).focus, 0, "a second press leaves it");
+    }
+
+    #[test]
+    fn coming_back_to_the_row_hovers_the_whole_controller_again() {
+        let mut menu = on_tester(1);
+        tap(&mut menu, "dpright", 0.2);
+        assert_eq!(menu.view(0.3).hover, Some(0));
+        tap(&mut menu, "dpright", 0.4);
+        tap(&mut menu, "dpright", 0.5);
+        assert_eq!(menu.view(0.6).hover, None, "off the right edge");
+        tap(&mut menu, "dpright", 0.7);
+        assert_eq!(menu.view(0.75).hover, Some(0), "and round again");
+        tap(&mut menu, "dpup", 0.8);
+        assert_eq!(menu.view(0.85).hover, Some(1), "B, up and to the right");
+        tap(&mut menu, "dpup", 0.9);
+        assert_eq!(menu.view(0.95).hover, None, "nothing above B");
+        tap(&mut menu, "dpup", 1.0);
+        assert_eq!(
+            menu.view(1.05).focus,
+            0,
+            "up from the whole controller is the line"
+        );
+        tap(&mut menu, "dpdown", 1.1);
+        assert_eq!(menu.view(1.2).focus, 2);
+        assert_eq!(menu.view(1.2).hover, None);
+    }
+
+    #[test]
+    fn a_hold_under_one_hover_is_not_carried_to_the_next() {
+        let mut menu = on_tester(1);
+        assert!(hold(&mut menu, &["a"], 0.2, 0.4).is_empty());
+        assert!(menu.view(0.4).a_fill > 0.3);
+        menu.tick(&held(&["a", "dpright"]), 0.45);
+        assert!(menu.view(0.46).a_fill < 0.1, "the hold starts over on the button");
+        assert!(!menu.view(0.46).testing);
+        assert!(
+            hold(&mut menu, &["a"], 0.5, 1.2).is_empty(),
+            "no test from a button"
+        );
+        assert!(!menu.view(1.2).testing);
+    }
+
+    #[test]
+    fn a_refused_reset_is_said_for_two_seconds() {
+        let mut menu = on_tester(1);
+        assert!(!menu.view(0.2).notice);
+        menu.refused_reset(0.3);
+        assert!(menu.view(0.4).notice);
+        assert!(menu.view(0.3 + NOTICE_SECONDS - 0.1).notice);
+        assert!(!menu.view(0.3 + NOTICE_SECONDS + 0.1).notice);
+    }
+
     #[test]
     fn a_on_the_controller_tests_it_until_select_is_held_half_a_second() {
         let mut menu = opened(1);
         tap(&mut menu, "dpdown", 0.1);
-        tap(&mut menu, "a", 0.2);
-        assert!(menu.view(0.3).testing);
+        hold(&mut menu, &["a"], 0.2, 0.75);
+        assert!(menu.view(0.8).testing);
         // Everything is the owner's to try: B held does not close, arrows do
         // not move, A does not rebind.
         assert!(hold(&mut menu, &["b"], 0.3, 1.5).is_empty());
@@ -1012,7 +1317,13 @@ mod tests {
         assert_eq!(menu.tick(&held(&["x"]), 0.1), Some(Action::Remove(1)));
         assert_eq!(menu.tick(&held(&["x"]), 0.15), None, "a press, not a repeat");
         tap(&mut menu, "dpdown", 0.2);
-        assert_eq!(menu.tick(&held(&["x"]), 0.3), None, "Exit is nobody's seat");
+        assert!(
+            matches!(menu.tick(&held(&["x"]), 0.3), Some(Action::Forget { .. })),
+            "on the game's controller X is a reset"
+        );
+        menu.tick(&held(&[]), 0.35);
+        tap(&mut menu, "dpdown", 0.4);
+        assert_eq!(menu.tick(&held(&["x"]), 0.5), None, "Exit is nobody's seat");
     }
 
     #[test]

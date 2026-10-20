@@ -7,6 +7,7 @@
 //! goes is here, taking the link as a closure so it is tested with none.
 
 use crate::departures::Departures;
+use crate::forgetting::Forgetting;
 use crate::hold::Hold;
 use crate::menu::Focused;
 use crate::native::Native;
@@ -24,6 +25,7 @@ pub struct Listeners {
     pub native: Native,
     pub departures: Departures,
     pub hold: Hold,
+    pub forgetting: Forgetting,
 }
 
 impl Listeners {
@@ -38,6 +40,7 @@ impl Listeners {
             native: Native::default(),
             departures: Departures::default(),
             hold: Hold::default(),
+            forgetting: Forgetting::default(),
         }
     }
 
@@ -52,6 +55,7 @@ impl Listeners {
                 &mut self.native,
                 &mut self.departures,
                 &mut self.hold,
+                &mut self.forgetting,
             ],
             now,
         );

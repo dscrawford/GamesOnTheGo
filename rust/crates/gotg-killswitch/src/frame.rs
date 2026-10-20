@@ -22,9 +22,9 @@ pub const MAGIC: u32 = 0x5653_4f47;
 pub const SIZE: usize = 4 * (7 + HOLDS_MAX * 3 + JOINED_MAX * 2 + REBIND_WORDS + MENU_WORDS + 1);
 
 /// Owner, rows, focus, carried, two fills, the icons, the off mask, the
-/// console, each seat's presses in two words and sticks in one, testing, and
-/// the saves list.
-const MENU_WORDS: usize = 9 + ROWS_MAX + 2 * ROWS_MAX + ROWS_MAX + SAVES_WORDS;
+/// console, each seat's presses in two words and sticks in one, testing, the
+/// hover and the flags, and the saves list.
+const MENU_WORDS: usize = 11 + ROWS_MAX + 2 * ROWS_MAX + ROWS_MAX + SAVES_WORDS;
 
 /// The saves row and list: whether there is a row, the list's state and the
 /// prompt in one word, how many saves, and which is under the cursor. Their
@@ -64,8 +64,19 @@ pub struct MenuFrame {
     pub sticks: [[f32; 4]; ROWS_MAX],
     /// The owner is trying their buttons rather than driving the menu.
     pub testing: bool,
+    /// The control under the cursor on the game's controller, -1 for the
+    /// whole drawing.
+    pub hover: i32,
+    /// Bit 0: a reset can be offered (danstick knows `forget`). Bit 1: the
+    /// bar is saying a reset needs a newer danstick.
+    pub flags: u32,
     pub saves: Saves,
 }
+
+/// `flags` bit: danstick answers `forget`, so the hint offers X.
+pub const FLAG_RESET: u32 = 1;
+/// `flags` bit: the hint says a reset needs a newer danstick.
+pub const FLAG_NOTICE: u32 = 2;
 
 /// The menu's saves: a row to open them, and the list while it is open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -333,6 +344,8 @@ impl MenuFrame {
         pressed: [0; ROWS_MAX],
         sticks: [[0.0; 4]; ROWS_MAX],
         testing: false,
+        hover: -1,
+        flags: 0,
         saves: Saves {
             row: false,
             browse: None,
@@ -354,6 +367,8 @@ impl MenuFrame {
             .iter()
             .for_each(|&axes| out.put_u32(pack_sticks(axes)));
         out.put_u32(u32::from(self.testing));
+        out.put_i32(self.hover);
+        out.put_u32(self.flags);
         self.saves.put(out);
     }
 
@@ -372,6 +387,10 @@ impl MenuFrame {
             pressed: std::array::from_fn(|_| from.get_u64()),
             sticks: std::array::from_fn(|_| unpack_sticks(from.get_u32())),
             testing: from.get_u32() != 0,
+            hover: Some(from.get_i32())
+                .filter(|h| (-1..64).contains(h))
+                .unwrap_or(-1),
+            flags: from.get_u32() & (FLAG_RESET | FLAG_NOTICE),
             saves: Saves::get(from),
         }
     }
@@ -581,6 +600,8 @@ mod tests {
             pressed: [u64::MAX; ROWS_MAX],
             sticks: [[-1.0, 1.0, -1.0, 1.0]; ROWS_MAX],
             testing: true,
+            hover: 63,
+            flags: FLAG_RESET | FLAG_NOTICE,
             saves: Saves {
                 row: true,
                 browse: Some(Browse {
@@ -672,6 +693,8 @@ mod tests {
             pressed: std::array::from_fn(|i| (1 << (33 + i)) | i as u64),
             sticks: std::array::from_fn(|i| [i as f32 / 8.0, -1.0, 0.5, 1.0]),
             testing: true,
+            hover: -1,
+            flags: 0b11,
             saves: Saves {
                 row: true,
                 browse: Some(Browse {
@@ -701,8 +724,8 @@ mod tests {
         0x000000ff, 0x000000ff, 0x00000002, 0x00000006, 0x00000000, 0x00000002, 0x00000001, 0x00000004,
         0x00000002, 0x00000008, 0x00000003, 0x00000010, 0x00000004, 0x00000020, 0x00000005, 0x00000040,
         0x00000006, 0x00000080, 0x00000007, 0x00000100, 0x7f408100, 0x7f408110, 0x7f408120, 0x7f408130,
-        0x7f408140, 0x7f40814f, 0x7f40815f, 0x7f40816f, 0x00000001, 0x00000303, 0x00000007, 0x00000003,
-        0x00000001,
+        0x7f408140, 0x7f40814f, 0x7f40815f, 0x7f40816f, 0x00000001, 0xffffffff, 0x00000003, 0x00000303,
+        0x00000007, 0x00000003, 0x00000001,
     ];
 
     #[test]
@@ -795,6 +818,8 @@ mod tests {
                 [0.0; 4],
             ],
             testing: true,
+            hover: 5,
+            flags: FLAG_RESET,
             saves: Saves {
                 row: true,
                 browse: Some(Browse {
@@ -903,8 +928,21 @@ mod tests {
             pressed: [0; ROWS_MAX],
             sticks: [[0.0; 4]; ROWS_MAX],
             testing: false,
+            hover: -1,
+            flags: 0,
             saves: Saves::default(),
         }
+    }
+
+    #[test]
+    fn a_hover_off_the_end_of_the_controls_decodes_as_the_whole_controller() {
+        let mut frame = MenuFrame::NONE;
+        frame.owner = 1;
+        frame.hover = 64;
+        frame.flags = u32::MAX;
+        let bytes = Frame::pack(1.0, 0.0, &[], &[]).with_menu(Some(frame)).encode();
+        let menu = Frame::decode(&bytes).and_then(|f| f.menu).expect("a menu");
+        assert_eq!((menu.hover, menu.flags), (-1, FLAG_RESET | FLAG_NOTICE));
     }
 
     #[test]

@@ -12,6 +12,7 @@
 use std::collections::BTreeSet;
 
 use crate::frame::Saying;
+use crate::hover::Target;
 use crate::loading::{self, Listing, SaveLine, Session};
 use crate::menu::{Action, Menu, Row, View};
 
@@ -28,6 +29,16 @@ pub enum Step {
     Exit { owner: i32 },
     /// Let go of `owner`'s pad and walk `player`'s buttons.
     Rebind { owner: i32, player: i32 },
+    /// Let go of `owner`'s pad and walk one control of `player`'s again.
+    Bind {
+        owner: i32,
+        player: i32,
+        control: usize,
+        add: bool,
+    },
+    /// Drop `player`'s binding for a control, or their whole walk. The menu
+    /// stays down.
+    Forget { player: i32, control: Option<usize> },
     /// A line for danstick. Seat changes are leased to this connection:
     /// whatever a port switched off comes back on if the overlay goes.
     Send(String),
@@ -57,6 +68,8 @@ pub struct MenuDriver {
     /// The game being started again on a save: since when, and the process
     /// it was. The bar says so until the wrapper has.
     reloading: Option<(f64, i32)>,
+    /// The controls the game's controller is drawn with, for the cursor.
+    targets: Vec<Target>,
 }
 
 impl MenuDriver {
@@ -67,8 +80,20 @@ impl MenuDriver {
         }
     }
 
+    pub fn with_targets(mut self, targets: Vec<Target>) -> Self {
+        self.targets = targets;
+        self
+    }
+
     pub fn is_open(&self) -> bool {
         self.menu.is_some()
+    }
+
+    /// danstick does not know `forget`: the open menu says so for a while.
+    pub fn refused_reset(&mut self, now: f64) {
+        if let Some(open) = self.menu.as_mut() {
+            open.refused_reset(now);
+        }
     }
 
     pub fn session(&self) -> Option<&Session> {
@@ -128,7 +153,7 @@ impl MenuDriver {
         let Some(owner) = who else {
             return Opening::Unseated;
         };
-        let opened = Menu::open(owner, rows(), down);
+        let opened = Menu::open(owner, rows(), down).with_targets(self.targets.clone());
         self.menu = Some(if self.can_load(client, saves) {
             opened.with_saves()
         } else {
@@ -184,6 +209,16 @@ impl MenuDriver {
                 self.menu = None;
                 Some(Step::Rebind { owner, player })
             }
+            Action::Bind { player, control, add } => {
+                self.menu = None;
+                Some(Step::Bind {
+                    owner,
+                    player,
+                    control,
+                    add,
+                })
+            }
+            Action::Forget { player, control } => Some(Step::Forget { player, control }),
             Action::Remove(player) => Some(Step::Send(
                 serde_json::json!({"cmd": "unseat", "player": player}).to_string(),
             )),
@@ -310,6 +345,53 @@ mod tests {
             Some(Step::Rebind { owner: 2, player: 1 })
         );
         assert!(!driver.is_open() && !driver.exiting());
+    }
+
+    #[test]
+    fn a_single_bind_puts_the_menu_away_and_says_whose_pad_to_let_go_of() {
+        let mut driver = opened(2);
+        assert_eq!(
+            driver.apply(
+                Action::Bind {
+                    player: 2,
+                    control: 4,
+                    add: true
+                },
+                2,
+                "",
+                "",
+                0.0
+            ),
+            Some(Step::Bind {
+                owner: 2,
+                player: 2,
+                control: 4,
+                add: true
+            })
+        );
+        assert!(!driver.is_open());
+    }
+
+    #[test]
+    fn a_reset_leaves_the_menu_open_and_names_the_control_for_the_loop() {
+        let mut driver = opened(1);
+        assert_eq!(
+            driver.apply(
+                Action::Forget {
+                    player: 1,
+                    control: Some(3)
+                },
+                1,
+                "",
+                "",
+                0.0
+            ),
+            Some(Step::Forget {
+                player: 1,
+                control: Some(3)
+            })
+        );
+        assert!(driver.is_open());
     }
 
     #[test]

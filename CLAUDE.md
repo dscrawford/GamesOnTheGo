@@ -209,9 +209,16 @@ controller icons, whose order is the player number; the game's controller
 under them with its buttons named, where each press puts the presser's own
 icon in their colour beside the button's name and each stick is a dot per
 player in its ring (an N64's C buttons stay buttons), so everybody can try
-their controls, the owner included (A on it stops the owner's presses from
-also moving the menu, until Select is held half a second); a rebind (A; the panel
-lights each control as it is pressed), a reorder (A held, then left/right --
+their controls, the owner included. A cursor stands on that drawing
+(`hover.rs`): on the whole of it, A walks every button of the owner's pad
+again (the panel lights each control as it is pressed), A held starts a test
+(the owner's presses stop moving the menu until Select is held half a
+second), X resets the walk; moved onto one button, A walks that button alone
+(danstick's `bind`), Y adds a second input to it (`bind` with `add`), X
+resets it (`forget`, `forgetting.rs` -- offered only once a daemon has
+answered one; `docs/requests/forget-one-control-or-one-scope.md`). Walks are
+filed per console, or per game for a port played as the generic pad
+(`--game`, `scope_for`). On a seat: a rebind (A), a reorder (A held, then left/right --
 danstick's `move`), a controller taken out of its seat (X -- `unseat`), a
 seat's game port off or on (Y -- `port`, leased), for a game with an environment of
 its own a save to load (`loading.rs`: the wrapper starts the game again on it as

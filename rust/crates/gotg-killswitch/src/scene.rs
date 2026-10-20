@@ -749,7 +749,13 @@ fn build_words(scene: &Scene, top: f32, first: &str, second: Option<&str>, drawi
 /// What the menu's footer says, by where the cursor is.
 pub const MENU_KEYS: &str =
     "A  rebind      hold A  move      X  remove      Y  game on/off      hold B  close";
-pub const TESTER_KEYS: &str = "A  try your buttons      hold B  close";
+/// On the game's controller: the whole drawing hovered, or one control.
+pub const WHOLE_KEYS: &str = "A  rebind all      hold A  try your buttons";
+pub const CONTROL_KEYS: &str = "A  rebind      Y  add an input";
+pub const RESET_ALL_KEY: &str = "      X  reset all";
+pub const RESET_KEY: &str = "      X  reset";
+pub const CLOSE_KEY: &str = "      hold B  close";
+pub const NEWER_DANSTICK: &str = "Reset needs a newer danstick";
 pub const TESTING_KEYS: &str = "hold Select  stop trying";
 pub const EXIT_KEYS: &str = "hold A  exit      hold B  close";
 pub const SAVES_ROW_KEYS: &str = "A  see your saves      hold B  close";
@@ -788,19 +794,29 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
     let saves_row = menu.saves.row.then_some(seats + 1);
     let exit_row = seats + 1 + usize::from(menu.saves.row);
     let browse = menu.saves.browse;
+    let on_tester = menu.focus as usize == tester_row && !menu.testing && browse.is_none();
+    let hovered = usize::try_from(menu.hover)
+        .ok()
+        .filter(|_| on_tester)
+        .and_then(|at| {
+            CONSOLES
+                .get(menu.console as usize)
+                .and_then(|c| c.controls.get(at))
+        });
     let keys = if menu.testing {
-        TESTING_KEYS
+        TESTING_KEYS.to_owned()
     } else if let Some(browse) = browse {
-        if browse.confirming { LOAD_KEYS } else { BROWSE_KEYS }
-    } else if menu.focus as usize == tester_row {
-        TESTER_KEYS
+        (if browse.confirming { LOAD_KEYS } else { BROWSE_KEYS }).to_owned()
+    } else if on_tester {
+        tester_keys(hovered.map(|c| c.label), menu.flags)
     } else if Some(menu.focus as usize) == saves_row {
-        SAVES_ROW_KEYS
+        SAVES_ROW_KEYS.to_owned()
     } else if menu.focus as usize == exit_row {
-        EXIT_KEYS
+        EXIT_KEYS.to_owned()
     } else {
-        MENU_KEYS
+        MENU_KEYS.to_owned()
     };
+    let keys = keys.as_str();
     let band = if menu.saves.row {
         TESTER_BAND_WITH_SAVES
     } else {
@@ -850,12 +866,39 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
             dim.with_alpha(0.1)
         };
         let (w, h) = (layout.card_width.min(card_w) - label_size, layout.height * 1.4);
-        drawing.under.rect(cx - w / 2.0, layout.cy - h / 2.0, w, h, lit);
+        let (x, y) = (cx - w / 2.0, layout.cy - h / 2.0);
+        drawing.under.rect(x, y, w, h, lit);
+        // The whole drawing hovered: outlined in the owner's colour, with the
+        // try-hold filling at its corner.
+        if on_tester && menu.hover < 0 {
+            let ink = player_colour(menu.owner);
+            let edge = 2.0;
+            for (x1, y1, x2, y2) in [
+                (x, y, x + w, y),
+                (x + w, y, x + w, y + h),
+                (x + w, y + h, x, y + h),
+                (x, y + h, x, y),
+            ] {
+                drawing
+                    .lines
+                    .line(x1, y1, x2, y2, edge, ink.with_alpha(0.9), FEATHER);
+            }
+            if menu.a_fill > 0.0 {
+                fill_ring(
+                    &mut drawing.over,
+                    x + w - label_size,
+                    y + label_size,
+                    label_size * 0.4,
+                    menu.a_fill,
+                    ink,
+                );
+            }
+        }
     }
     if browse.is_none()
         && let Some(console) = CONSOLES.get(menu.console as usize)
     {
-        build_tester(menu, console, &layout, marker, drawing);
+        build_tester(menu, console, &layout, marker, on_tester, drawing);
     }
     if saves_row.is_some() {
         let size = panel * 0.04;
@@ -1136,11 +1179,34 @@ fn build_line(menu: &MenuFrame, at: (f32, f32), slot: f32, drawing: &mut Drawing
 /// it off-centre, where they have it; nobody's, and a dim dot marks the
 /// middle. A group bound as a stick that is buttons in the hand (an N64's C
 /// buttons) is named and marked as buttons.
+/// The footer on the game's controller: what A, A held, Y and X do for what
+/// is hovered -- X only once danstick has shown it can reset.
+fn tester_keys(hovered: Option<&str>, flags: u32) -> String {
+    if flags & crate::frame::FLAG_NOTICE != 0 {
+        return NEWER_DANSTICK.to_owned();
+    }
+    let reset = flags & crate::frame::FLAG_RESET != 0;
+    let mut keys = match hovered {
+        None => WHOLE_KEYS.to_owned(),
+        Some(label) => CONTROL_KEYS.replacen("rebind", &format!("rebind {label}"), 1),
+    };
+    if reset {
+        keys.push_str(if hovered.is_none() {
+            RESET_ALL_KEY
+        } else {
+            RESET_KEY
+        });
+    }
+    keys.push_str(CLOSE_KEY);
+    keys
+}
+
 fn build_tester(
     menu: &MenuFrame,
     console: &crate::consoles::Console,
     layout: &RebindLayout,
     marker: f32,
+    on_tester: bool,
     drawing: &mut Drawing,
 ) {
     drawing
@@ -1156,8 +1222,41 @@ fn build_tester(
             .filter(|&at| id < 64 && menu.pressed[at] & 1 << id != 0)
             .collect()
     };
-    let lit = |id: usize| (!pressers(id).is_empty()).then_some(Colour::rgb(theme::TEXT, 1.0));
+    let hovered = usize::try_from(menu.hover).ok().filter(|_| on_tester);
+    let owner = player_colour(menu.owner);
+    let lit = |id: usize| {
+        if hovered == Some(id) {
+            Some(owner)
+        } else {
+            (!pressers(id).is_empty()).then_some(Colour::rgb(theme::TEXT, 1.0))
+        }
+    };
     let (placed, rings) = labelled(console, layout, &lit, drawing);
+    // The hovered control ringed on the drawing: at its label's leader, or
+    // for a stick direction on the gate, where that direction's dot would go.
+    let hover_ring = |drawing: &mut Drawing, x: f32, y: f32| {
+        let r = (layout.label_size * 0.45).max(5.0);
+        drawing.over.arc(x, y, r, r * 0.3, 0.0, 1.0, owner, FEATHER);
+    };
+    if let Some(id) = hovered {
+        if let Some(placed) = placed.iter().find(|p| p.anchor.id == id) {
+            hover_ring(drawing, placed.from.0, placed.from.1);
+        } else if let Some((ring, (dx, dy))) = rings.iter().find_map(|ring| {
+            let prefix = ["leftstick_", "rightstick_"][ring.stick];
+            let way = console.controls[id].id.strip_prefix(prefix)?;
+            let unit = match way {
+                "up" => (0.0, -1.0),
+                "down" => (0.0, 1.0),
+                "left" => (-1.0, 0.0),
+                "right" => (1.0, 0.0),
+                _ => return None,
+            };
+            Some((ring, unit))
+        }) {
+            let reach = ring.radius * 1.5;
+            hover_ring(drawing, ring.cx + dx * reach, ring.cy + dy * reach);
+        }
+    }
     for placed in &placed {
         let words = text::width(console.controls[placed.anchor.id].label, layout.label_size);
         let outward = if placed.side == leaders::Side::Left {
@@ -1653,10 +1752,126 @@ mod tests {
                 pressed: [0; crate::frame::ROWS_MAX],
                 sticks: [[0.0; 4]; crate::frame::ROWS_MAX],
                 testing: false,
+                hover: -1,
+                flags: 0,
                 saves: crate::frame::Saves::default(),
             }),
             ..down(0.0)
         }
+    }
+
+    fn hovering(hover: i32, flags: u32) -> Scene<'static> {
+        let mut scene = menu(3, 0.0);
+        if let Some(frame) = scene.menu.as_mut() {
+            frame.hover = hover;
+            frame.flags = flags;
+        }
+        scene
+    }
+
+    #[test]
+    fn the_whole_controller_hovered_is_outlined_and_says_rebind_all_try_and_reset() {
+        let said = texts(&hovering(-1, crate::frame::FLAG_RESET));
+        let keys = said.last().expect("a footer");
+        assert!(keys.starts_with(WHOLE_KEYS), "{keys}");
+        assert!(
+            keys.contains("X  reset all") && keys.ends_with(CLOSE_KEY),
+            "{keys}"
+        );
+        let mut drawing = Drawing::default();
+        build(&hovering(-1, 0), &mut drawing);
+        let owner = player_colour(1);
+        assert!(
+            drawing
+                .lines
+                .vertices
+                .iter()
+                .any(|v| v.colour == owner.with_alpha(0.9)),
+            "an outline in the owner's colour"
+        );
+    }
+
+    #[test]
+    fn a_hovered_button_is_ringed_and_its_label_lit_in_the_owners_colour() {
+        let console = &CONSOLES[0];
+        let a = console.control("a").expect("a");
+        let scene = hovering(a as i32, 0);
+        let mut drawing = Drawing::default();
+        build(&scene, &mut drawing);
+        let owner = player_colour(1);
+        let label = drawing
+            .labels
+            .iter()
+            .find(|l| l.text == console.controls[a].label)
+            .expect("A's label");
+        assert_eq!(label.colour, owner);
+        assert!(drawing.over.vertices.iter().any(|v| v.colour == owner), "a ring");
+        let keys = drawing.labels.last().expect("a footer");
+        assert_eq!(
+            keys.text,
+            format!(
+                "A  rebind {}      Y  add an input{CLOSE_KEY}",
+                console.controls[a].label
+            )
+        );
+    }
+
+    #[test]
+    fn a_hovered_stick_direction_is_ringed_on_its_gate() {
+        let n64 = crate::consoles::for_platform("n64");
+        let console = &CONSOLES[n64];
+        let up = console.control("leftstick_up").expect("stick up");
+        let mut scene = hovering(up as i32, 0);
+        if let Some(frame) = scene.menu.as_mut() {
+            frame.console = n64 as u32;
+        }
+        let mut drawing = Drawing::default();
+        build(&scene, &mut drawing);
+        let owner = player_colour(1);
+        let ringed: Vec<&crate::shapes::Vertex> = drawing
+            .over
+            .vertices
+            .iter()
+            .filter(|v| v.colour == owner)
+            .collect();
+        assert!(!ringed.is_empty(), "a ring in the owner's colour");
+        let plain = {
+            let mut drawing = Drawing::default();
+            build(
+                &{
+                    let mut s = hovering(-1, 0);
+                    if let Some(frame) = s.menu.as_mut() {
+                        frame.console = n64 as u32;
+                    }
+                    s
+                },
+                &mut drawing,
+            );
+            drawing
+        };
+        let gate_y = plain.lines.vertices.iter().map(|v| v.y).fold(0.0, f32::max);
+        assert!(
+            ringed.iter().all(|v| v.y < gate_y),
+            "the ring sits on the drawing, above the panel's foot"
+        );
+    }
+
+    #[test]
+    fn reset_is_offered_only_once_danstick_has_answered_one() {
+        let keys = texts(&hovering(-1, 0)).pop().expect("a footer");
+        assert!(!keys.contains("reset"), "{keys}");
+        let keys = texts(&hovering(0, crate::frame::FLAG_RESET))
+            .pop()
+            .expect("a footer");
+        assert!(keys.contains("X  reset") && !keys.contains("reset all"), "{keys}");
+    }
+
+    #[test]
+    fn a_reset_refused_says_it_needs_a_newer_danstick() {
+        let keys = texts(&hovering(0, crate::frame::FLAG_NOTICE))
+            .pop()
+            .expect("a footer");
+        assert_eq!(keys, NEWER_DANSTICK);
     }
 
     #[test]

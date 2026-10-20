@@ -27,6 +27,7 @@ use gotg_killswitch::clones;
 use gotg_killswitch::consoles::{self, CONSOLES};
 use gotg_killswitch::contain::{self, Scope};
 use gotg_killswitch::driver::{MenuDriver, Opening, Step};
+use gotg_killswitch::forgetting;
 use gotg_killswitch::frame::{Frame, ROWS_MAX, Saying};
 use gotg_killswitch::killswitch::Input;
 use gotg_killswitch::listeners::Listeners;
@@ -609,11 +610,11 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
     // Loading a save from the menu: this play's session, the client listing
     // the saves into it, and -- once one is picked -- the game being started
     // again on it, the bar saying so until the wrapper has. See loading.rs.
-    let mut menu = MenuDriver::new(loading::Session::from_env());
-    let mut seat_icons: std::collections::HashMap<String, u8> = std::collections::HashMap::new();
     let console_index = consoles::for_platform(&options.platform);
     let console = &CONSOLES[console_index];
     let scope = console.scope_for(&options.game);
+    let mut menu = MenuDriver::new(loading::Session::from_env()).with_targets(views::targets(console));
+    let mut seat_icons: std::collections::HashMap<String, u8> = std::collections::HashMap::new();
     let mut next_alive_ms = 0;
     // Steam's overlay over the game: nothing is watched beside the picker,
     // whose pads Steam's overlay is not in the way of.
@@ -698,6 +699,12 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
             eprintln!(
                 "gotg-killswitch: danstick cannot hold every seat; Steam's overlay presses reach the game"
             );
+        }
+        if listeners.forgetting.take_refused() {
+            eprintln!(
+                "gotg-killswitch: danstick cannot forget a binding; the menu's reset needs a newer one"
+            );
+            menu.refused_reset(clock);
         }
         // A pad that went away takes its seat with it, in the picker too.
         while let Some(line) = listeners.departures.wanted() {
@@ -808,6 +815,45 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                     options.quiet,
                 );
             }
+            Some(Step::Bind {
+                owner,
+                player,
+                control,
+                add,
+            }) => {
+                send_focus(&mut link, &listeners.focused, owner, false);
+                let Some(control) = console.controls.get(control) else {
+                    eprintln!(
+                        "gotg-killswitch: no control {control} on the {} pad to bind",
+                        console.name
+                    );
+                    continue;
+                };
+                match listeners
+                    .rebind
+                    .bind(player, control.id, console.layout, &scope, add, clock)
+                {
+                    Some(line) if link.send(&line) => {
+                        if !options.quiet {
+                            eprintln!(
+                                "gotg-killswitch: binding player {player}'s {} (add: {add})",
+                                control.id
+                            );
+                        }
+                    }
+                    Some(_) => {
+                        eprintln!("gotg-killswitch: danstick is not listening; cannot bind player {player}");
+                        listeners.rebind.unsent(clock);
+                    }
+                    None => {}
+                }
+            }
+            Some(Step::Forget { player, control }) => {
+                let control = control.and_then(|at| console.controls.get(at)).map(|c| c.id);
+                if link.send(&forgetting::line(player, &scope, control)) {
+                    listeners.forgetting.sent();
+                }
+            }
             Some(Step::Send(line)) => {
                 link.send(&line);
             }
@@ -872,7 +918,7 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                                 .unwrap_or_default()
                         }
                     });
-                    views::menu_frame(&view, console_index, console, &held)
+                    views::menu_frame(&view, console_index, console, &held, listeners.forgetting.can())
                 }))
                 .with_saying(menu.saying())
                 .with_rebind(rebinding.map(|view| {
