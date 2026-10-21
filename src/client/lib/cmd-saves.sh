@@ -31,6 +31,13 @@ usage: gotg saves <command> [args]
                          put one back (what is here is archived first)
   adopt  [<id>|--all]    copy in saves from before the emulators were
                          told where to put them          [--yes]
+  sync   [<id>|--all]    push what is new here, pull what is new on the
+                         service, leave a conflict alone  [--push-only]
+  states <id> [variant]  the emulator's save-state slots, and when each
+                         was written                      [--lines|--json]
+  watch  <env> --follow <pid>
+                         beside a running game: push each time its saves
+                         change and settle, and once more when it ends
 
 An id is resolved the same way `play` resolves it, but saves belong to the
 *environment*, which several games can share — env-snes holds every SNES memory
@@ -58,6 +65,9 @@ cmd_saves() {
     list) saves_cmd_list "$@" ;;
     restore) saves_cmd_restore "$@" ;;
     adopt) saves_cmd_adopt "$@" ;;
+    sync) saves_cmd_sync "$@" ;;
+    watch) saves_cmd_watch "$@" ;;
+    states) saves_cmd_states "$@" ;;
     help | --help | -h | "") saves_usage ;;
     *)
       printf 'error: unknown saves command: %s\n\n' "$verb" >&2
@@ -246,45 +256,16 @@ saves_cmd_push() {
 }
 
 saves_push_one() {
-  local attr="$1" force="$2" tmp bundle hash
-  tmp="$(saves_tmp)"
-  bundle="$tmp/push-$attr.tar.zst"
-
-  if ! saves_bundle "$attr" "$bundle"; then
-    log "$attr: no saves here to push"
-    return 0
-  fi
-  hash="$(saves_hash "$bundle")"
-
-  # An unchanged save set bundles to identical bytes, so a machine that has
-  # already pushed does nothing at all — which is what makes it cheap enough to
-  # run after every session.
-  if [[ "$hash" == "$(saves_journal_get "$attr" pushed_hash)" ]]; then
-    log "$attr: already up to date"
-    return 0
-  fi
-
-  log "$attr: pushing $(saves_member_count "$attr") file(s), $(human_size "$(stat -c '%s' "$bundle")")"
-
-  # One request: the parent hash rides along, and the service either advances
-  # the head atomically or answers with what is actually there. There is no
-  # read-compare-write window for another machine to slip through.
-  local meta rc=0
-  meta="$(store_save "$attr" "$bundle" "$(saves_journal_get "$attr" base_hash)" "$force")" || rc=$?
-  if ((rc == 2)); then
-    saves_divergence "$attr" "$meta" "$bundle"
-  elif ((rc != 0)); then
+  local attr="$1" force="$2" rc=0
+  saves_push_try "$attr" "$force" || rc=$?
+  case "$rc" in
+    0) log "$attr: pushed generation $SAVES_PUSH_GENERATION" ;;
     # store_save already said what went wrong, from inside the substitution.
-    exit 1
-  fi
-
-  local gen at
-  gen="$(jq -r '.generation' <<<"$meta")"
-  at="$(jq -r '.written_at // empty' <<<"$meta")"
-  saves_journal_set "$attr" "$(jq -nc \
-    --argjson generation "$gen" --arg hash "$hash" --arg at "$at" \
-    '{base_generation: $generation, base_hash: $hash, pushed_hash: $hash, base_written_at: $at}')"
-  log "$attr: pushed generation $gen"
+    1) exit 1 ;;
+    2) saves_divergence "$attr" "$SAVES_PUSH_HEAD" "$(saves_tmp)/push-$attr.tar.zst" ;;
+    3) log "$attr: no saves here to push" ;;
+    4) log "$attr: already up to date" ;;
+  esac
 }
 
 # The 409 body is the head this push lost to, which is everything a person
@@ -549,37 +530,4 @@ saves_cmd_keep() {
       saves_pull_one "$attr"
     fi
   done
-}
-
-# Take the remote's save on the way into a game, but only when doing so cannot
-# lose anything: the remote must have moved on, and the local tree must be
-# unchanged since the last sync. Divergence is a decision for a person, made
-# with `gotg saves status` — a launch is the wrong place to make it, so it is
-# named and left alone. Never fatal: the game starting matters more.
-saves_pull_auto() {
-  local attr="$1"
-  saves_have_remote || return 0
-  [[ -f "$(env_saves_manifest "$attr")" ]] || return 0
-
-  local latest rgen base_gen
-  latest="$(store_meta "$attr" 2>/dev/null)" || return 0
-  rgen="$(jq -r '.generation' <<<"$latest")"
-  base_gen="$(saves_journal_get "$attr" base_generation)"
-  : "${base_gen:=0}"
-  ((rgen > base_gen)) || return 0
-
-  local tmp current="" base_hash pushed
-  tmp="$(saves_tmp)"
-  if saves_bundle "$attr" "$tmp/auto.tar.zst" 2>/dev/null; then
-    current="$(saves_hash "$tmp/auto.tar.zst")"
-  fi
-  base_hash="$(saves_journal_get "$attr" base_hash)"
-  pushed="$(saves_journal_get "$attr" pushed_hash)"
-  if [[ -n "$current" && "$current" != "$base_hash" && "$current" != "$pushed" ]]; then
-    warn "$attr: this machine and the remote both have new saves. Launching with
-     what is here; reconcile with: gotg saves status"
-    return 0
-  fi
-
-  saves_pull_one "$attr"
 }

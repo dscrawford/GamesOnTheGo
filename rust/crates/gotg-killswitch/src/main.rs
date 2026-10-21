@@ -18,6 +18,7 @@
 //! for a pad holding to join danstick.
 
 use std::ffi::CStr;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -29,6 +30,7 @@ use gotg_killswitch::contain::{self, Scope};
 use gotg_killswitch::driver::{MenuDriver, Opening, Step};
 use gotg_killswitch::forgetting;
 use gotg_killswitch::frame::{Frame, ROWS_MAX, Saying};
+use gotg_killswitch::keyboard::Keyboard;
 use gotg_killswitch::killswitch::Input;
 use gotg_killswitch::listeners::Listeners;
 use gotg_killswitch::loading;
@@ -38,6 +40,7 @@ use gotg_killswitch::painter::{self, Painter};
 use gotg_killswitch::pressing::Held;
 use gotg_killswitch::procstat;
 use gotg_killswitch::rebind::Rebind;
+use gotg_killswitch::states::Spec;
 use gotg_killswitch::steam_overlay::{Seen, Transition};
 use gotg_killswitch::steam_overlay_x11::Watcher;
 use gotg_killswitch::views;
@@ -79,7 +82,7 @@ extern "C" fn on_signal(_: libc::c_int) {
 const USAGE: &str =
     "usage: gotg-killswitch --pid <pid> [--platform P] [--game KEY] [--hold-ms N] [--grace-ms N] [--poll-ms N]
                        [--quiet] [--no-overlay] [--overlay-only]
-                       [--saves ENV --client PATH]
+                       [--saves ENV --client PATH] [--states SPEC]
        gotg-killswitch --output    the size the overlay takes under gamescope, and why
 
 Watches every controller SDL can see. When both shoulders (or both
@@ -132,6 +135,9 @@ struct Options {
     /// and the client that pushes them.
     saves: String,
     client: String,
+    /// The emulator's save states: slots and hotkeys (states.rs), for the
+    /// menu to offer. None without.
+    states: Option<Spec>,
 }
 
 /// Digits only. A leading minus is refused rather than wrapped: "--hold-ms
@@ -158,6 +164,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         overlay_only: false,
         saves: String::new(),
         client: String::new(),
+        states: None,
     };
     let mut target = 0u64;
     let mut args = args.iter();
@@ -186,6 +193,16 @@ fn parse(args: &[String]) -> Result<Options, String> {
                     })
                     .ok_or_else(|| format!("bad argument: {arg}"))?
                     .clone();
+                continue;
+            }
+            "--states" => {
+                // Not fatal: one typo in an environment's save-state keys must
+                // not cost the game its kill switch, only the states row.
+                let text = args.next().ok_or_else(|| format!("bad argument: {arg}"))?;
+                options.states = Spec::parse(text);
+                if options.states.is_none() {
+                    eprintln!("gotg-killswitch: save states not understood ({text}); the menu offers none");
+                }
                 continue;
             }
             "--client" => {
@@ -613,7 +630,21 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
     let console_index = consoles::for_platform(&options.platform);
     let console = &CONSOLES[console_index];
     let scope = console.scope_for(&options.game);
-    let mut menu = MenuDriver::new(loading::Session::from_env()).with_targets(views::targets(console));
+    // No /dev/uinput for this user: the menu then has no states row.
+    let keyboard = options
+        .states
+        .as_ref()
+        .filter(|_| !options.overlay_only)
+        .and_then(|spec| match Keyboard::create(&spec.codes()) {
+            Ok(keyboard) => Some(Arc::new(keyboard)),
+            Err(error) => {
+                eprintln!("gotg-killswitch: no keyboard for save states ({error}); the menu offers none");
+                None
+            }
+        });
+    let mut menu = MenuDriver::new(loading::Session::from_env())
+        .with_targets(views::targets(console))
+        .with_states(keyboard.is_some());
     let mut seat_icons: std::collections::HashMap<String, u8> = std::collections::HashMap::new();
     let mut next_alive_ms = 0;
     // Steam's overlay over the game: nothing is watched beside the picker,
@@ -859,7 +890,24 @@ fn watch(options: &Options, game: &Game, pads: &mut Pads) {
                     bar.want_over(false, clock, MENU_CLOSE_SECONDS);
                 }
             }
+            Some(Step::State { save, line, .. }) => {
+                press_state(options, keyboard.clone(), save, line.as_ref());
+                bar.want_over(false, clock, MENU_CLOSE_SECONDS);
+            }
             None => {}
+        }
+        if let Some(owner) = menu.release_due(
+            |owner| {
+                let mut down = listeners.focused.of(owner);
+                if let Some(watched) = pads.0.iter().find(|w| w.player == Some(owner)) {
+                    // SAFETY: every watched pad is open.
+                    down.extend(unsafe { read_held(watched.pad) }.controls);
+                }
+                down
+            },
+            clock,
+        ) {
+            send_focus(&mut link, &listeners.focused, owner, false);
         }
         menu.poll_listing(clock);
         menu.poll_reload(clock, procstat::alive);
@@ -1042,6 +1090,37 @@ fn load_save(
     Some((now, game))
 }
 
+/// A slot picked from the menu: the emulator's own hotkey, pressed on the
+/// overlay's keyboard -- on a thread, since a press is held for a frame and
+/// the chord's loop must not wait on it.
+fn press_state(
+    options: &Options,
+    keyboard: Option<Arc<Keyboard>>,
+    save: bool,
+    line: Option<&gotg_killswitch::states::StateLine>,
+) {
+    let (Some(spec), Some(keyboard), Some(line)) = (options.states.as_ref(), keyboard, line) else {
+        return;
+    };
+    let chord = spec.chord(save, line.slot);
+    if chord.is_empty() {
+        return;
+    }
+    if !options.quiet {
+        let what = if save {
+            "saving a state into"
+        } else {
+            "loading the state in"
+        };
+        eprintln!("gotg-killswitch: {what} slot {}", line.slot);
+    }
+    std::thread::spawn(move || {
+        if let Err(error) = keyboard.press(&chord) {
+            eprintln!("gotg-killswitch: could not press the emulator's hotkey: {error}");
+        }
+    });
+}
+
 /// After the menu's Exit: `CLIENT saves push ENV`, waited on (up to a minute)
 /// with the bar down saying so. Nothing to push with, nothing is waited on.
 fn push_saves(options: &Options, painter: &mut Painter, bar: &Bar) {
@@ -1221,6 +1300,24 @@ mod tests {
         ]));
         assert!(parsed.is_ok_and(|o| o.saves == "env-n64-usa_donkey_kong_64" && o.client.ends_with("/gotg")));
         assert!(parse(&args(&["--pid", "7", "--saves", "env;rm -rf"])).is_err());
+        let states = parse(&args(&[
+            "--pid",
+            "7",
+            "--states",
+            "slots=8;save=LEFTSHIFT+F{slot};load=F{slot}",
+        ]));
+        assert!(states.is_ok_and(|o| o.states.is_some_and(|s| s.slots == 8)));
+        // A spec that cannot be pressed costs the states row, never the kill switch.
+        for bad in ["", "slots=8;save=rm -rf;load=F1", "slots=1;save=F13;load=F7"] {
+            assert!(
+                parse(&args(&["--pid", "7", "--states", bad])).is_ok_and(|o| o.states.is_none()),
+                "{bad:?}"
+            );
+        }
+        assert!(
+            parse(&args(&["--pid", "7", "--states"])).is_err(),
+            "a flag with no value"
+        );
         assert!(
             parse(&args(&["--pid", "7", "--client", "gotg"])).is_err(),
             "a path, not a name"

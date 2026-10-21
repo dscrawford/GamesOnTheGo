@@ -58,6 +58,10 @@ source "$GOTG_LIB/saves.sh"
 source "$GOTG_LIB/cmd-saves.sh"
 # shellcheck source=lib/saves-history.sh
 source "$GOTG_LIB/saves-history.sh"
+# shellcheck source=lib/saves-sync.sh
+source "$GOTG_LIB/saves-sync.sh"
+# shellcheck source=lib/saves-states.sh
+source "$GOTG_LIB/saves-states.sh"
 # shellcheck source=lib/foreign-gl.sh
 source "$GOTG_LIB/foreign-gl.sh"
 # shellcheck source=lib/cmd-launch.sh

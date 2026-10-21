@@ -33,6 +33,8 @@
 //!   it -- the game stops, what was played is pushed, the save is put back and
 //!   the game starts again with everybody still in their seats. B steps back
 //!   out, one level at a time.
+//! - **Save states**, for an emulator that has them: A lists the slots, A
+//!   held saves into the one chosen, Y held loads it; the menu closes after.
 //! - **Exit**, below that, which takes A held for half a second: the game is
 //!   stopped, and its saves pushed on the way out.
 //!
@@ -61,6 +63,8 @@ pub const NOTICE_SECONDS: f64 = 2.0;
 pub const EXIT_SECONDS: f64 = 0.5;
 /// Held this long on the prompt, A loads the save chosen.
 pub const LOAD_SECONDS: f64 = 0.5;
+/// Held this long on a slot, A saves a state into it and Y loads it.
+pub const STATE_SECONDS: f64 = 0.5;
 /// Held this long anywhere, B closes the menu.
 pub const CLOSE_SECONDS: f64 = 0.5;
 /// Held this long while testing, Select gives the menu back.
@@ -108,15 +112,25 @@ pub enum Action {
     ListSaves,
     /// Load the save at this place in the list.
     Load(usize),
+    /// The slots are wanted: the loop asks the client and answers with
+    /// `states_listed`.
+    ListStates,
+    /// A state saved into, or loaded from, the slot at this place in the list.
+    State {
+        at: usize,
+        save: bool,
+    },
 }
 
-/// The saves list, while it is open.
+/// The saves list -- or the save-state slots -- while it is open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Browse {
     pub listed: Listed,
     pub selected: usize,
     /// The prompt is up: A held loads, B steps back to the list.
     pub confirming: bool,
+    /// The slots rather than the saves.
+    pub states: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +147,7 @@ enum Stop {
     Line,
     Tester,
     Saves,
+    States,
     Exit,
 }
 
@@ -162,6 +177,8 @@ pub struct Menu {
     last: BTreeSet<String>,
     a_since: Option<f64>,
     b_since: Option<f64>,
+    /// Y held on a slot, to load it.
+    y_since: Option<f64>,
     /// The seat (1-based) of the controller being carried.
     carried: Option<i32>,
     /// A said what it was for this press: a pick-up or an exit fired.
@@ -175,6 +192,9 @@ pub struct Menu {
     done: bool,
     /// The game keeps its saves to itself, so a save can be loaded.
     offer_saves: bool,
+    offer_states: bool,
+    /// A bit per listed slot that holds a state: what Y can load.
+    loadable_slots: u64,
     browse: Option<Browse>,
     /// The game's controller as drawn: which controls can be hovered, and
     /// where the cursor is among them while the row is the tester.
@@ -203,7 +223,9 @@ pub struct View {
     pub testing: bool,
     /// There is a saves row, between the tester and Exit.
     pub saves_row: bool,
-    /// The saves list, while it is open.
+    /// And a save-states row, after it.
+    pub states_row: bool,
+    /// The saves list or the slots, while one is open.
     pub saves: Option<Browse>,
     /// The control under the cursor on the game's controller; None is the
     /// whole drawing.
@@ -228,12 +250,15 @@ impl Menu {
             last: down.clone(),
             a_since: None,
             b_since: None,
+            y_since: None,
             carried: None,
             a_used: false,
             owner_seen: false,
             owner_gone: false,
             done: false,
             offer_saves: false,
+            offer_states: false,
+            loadable_slots: 0,
             browse: None,
             targets: Vec::new(),
             hover: Hover::Whole,
@@ -246,6 +271,11 @@ impl Menu {
     /// With a saves row: for a game whose saves are its own.
     pub fn with_saves(mut self) -> Self {
         self.offer_saves = true;
+        self
+    }
+
+    pub fn with_states(mut self) -> Self {
+        self.offer_states = true;
         self
     }
 
@@ -262,10 +292,20 @@ impl Menu {
 
     /// What the client said: how many saves, or None when it could not say.
     pub fn saves_listed(&mut self, count: Option<usize>) {
-        if let Some(browse) = &mut self.browse {
+        if let Some(browse) = self.browse.as_mut().filter(|b| !b.states) {
             browse.listed = count.map_or(Listed::Failed, Listed::Ready);
             browse.selected = 0;
             browse.confirming = false;
+        }
+    }
+
+    /// What the client said of the slots: how many, and a bit per slot that
+    /// holds a state; None when it could not say.
+    pub fn states_listed(&mut self, listed: Option<(usize, u64)>) {
+        if let Some(browse) = self.browse.as_mut().filter(|b| b.states) {
+            browse.listed = listed.map_or(Listed::Failed, |(count, _)| Listed::Ready(count));
+            browse.selected = 0;
+            self.loadable_slots = listed.map_or(0, |(_, loadable)| loadable);
         }
     }
 
@@ -301,12 +341,38 @@ impl Menu {
             Stop::Line if !self.rows.is_empty() => self.along.min(self.rows.len() - 1),
             Stop::Line | Stop::Tester => self.tester_row(),
             Stop::Saves => self.saves_row(),
+            Stop::States => self.states_row(),
             Stop::Exit => self.exit_row(),
         }
     }
 
     fn saves_row(&self) -> usize {
         self.rows.len() + 1
+    }
+
+    fn states_row(&self) -> usize {
+        self.rows.len() + 1 + usize::from(self.offer_saves)
+    }
+
+    /// The stops from the line down, as offered.
+    fn stops(&self) -> Vec<Stop> {
+        let mut stops = vec![Stop::Line, Stop::Tester];
+        if self.offer_saves {
+            stops.push(Stop::Saves);
+        }
+        if self.offer_states {
+            stops.push(Stop::States);
+        }
+        stops.push(Stop::Exit);
+        stops
+    }
+
+    /// The stop `by` steps down (up, negative) from this one, no further
+    /// than the ends.
+    fn step_stop(&self, from: Stop, by: isize) -> Stop {
+        let stops = self.stops();
+        let at = stops.iter().position(|&s| s == from).unwrap_or(0);
+        stops[at.saturating_add_signed(by).min(stops.len() - 1)]
     }
 
     fn tester_row(&self) -> usize {
@@ -322,7 +388,7 @@ impl Menu {
     }
 
     fn exit_row(&self) -> usize {
-        self.rows.len() + 1 + usize::from(self.offer_saves)
+        self.rows.len() + 1 + usize::from(self.offer_saves) + usize::from(self.offer_states)
     }
 
     fn seated(&self, at: usize) -> bool {
@@ -409,21 +475,12 @@ impl Menu {
             } else {
                 None
             };
-            let saves = self.offer_saves;
             if let Some(way) = way {
                 self.hover = hover::step(&self.targets, self.hover, way);
             } else if down_pressed {
-                self.stop = match self.stop {
-                    Stop::Line => Stop::Tester,
-                    Stop::Tester if saves => Stop::Saves,
-                    Stop::Tester | Stop::Saves | Stop::Exit => Stop::Exit,
-                };
+                self.stop = self.step_stop(self.stop, 1);
             } else if up {
-                self.stop = match self.stop {
-                    Stop::Exit if saves => Stop::Saves,
-                    Stop::Exit | Stop::Saves => Stop::Tester,
-                    Stop::Tester | Stop::Line => Stop::Line,
-                };
+                self.stop = self.step_stop(self.stop, -1);
             }
             if self.stop != Stop::Tester {
                 self.hover = Hover::Whole;
@@ -508,15 +565,21 @@ impl Menu {
                         },
                     });
                 }
-                if !self.a_used && self.stop == Stop::Saves {
+                if !self.a_used && matches!(self.stop, Stop::Saves | Stop::States) {
                     self.a_since = None;
                     self.b_since = None;
+                    let states = self.stop == Stop::States;
                     self.browse = Some(Browse {
                         listed: Listed::Loading,
                         selected: 0,
                         confirming: false,
+                        states,
                     });
-                    return Some(Action::ListSaves);
+                    return Some(if states {
+                        Action::ListStates
+                    } else {
+                        Action::ListSaves
+                    });
                 }
                 let tapped = !self.a_used && self.carried.is_none() && self.seated(self.focus());
                 self.a_since = None;
@@ -546,11 +609,14 @@ impl Menu {
         let b = pressed(&["b"], &self.last);
         let a_pressed = pressed(&["a"], &self.last);
         let a_down = live.iter().any(|c| *c == "a");
+        let y_down = live.iter().any(|c| *c == "y");
         self.last = down.clone();
+        let loadable_slots = self.loadable_slots;
         let browse = self.browse.as_mut()?;
 
         if b {
             self.a_since = None;
+            self.y_since = None;
             if browse.confirming {
                 browse.confirming = false;
             } else {
@@ -560,9 +626,35 @@ impl Menu {
         }
         let Listed::Ready(count) = browse.listed else {
             self.a_since = None;
+            self.y_since = None;
             return None;
         };
         if count == 0 {
+            return None;
+        }
+        if browse.states {
+            // No prompt: the hold is the asking, as it is on Exit. A hold
+            // carried onto another slot starts over there.
+            let was = browse.selected;
+            if down_pressed {
+                browse.selected = (browse.selected + 1).min(count - 1);
+            } else if up {
+                browse.selected = browse.selected.saturating_sub(1);
+            }
+            if browse.selected != was {
+                self.a_since = None;
+                self.y_since = None;
+            }
+            let at = browse.selected;
+            let loadable = loadable_slots & (1 << at.min(63)) != 0;
+            if held_for(a_down, &mut self.a_since, now, STATE_SECONDS) {
+                self.done = true;
+                return Some(Action::State { at, save: true });
+            }
+            if held_for(y_down && loadable, &mut self.y_since, now, STATE_SECONDS) {
+                self.done = true;
+                return Some(Action::State { at, save: false });
+            }
             return None;
         }
         if !browse.confirming {
@@ -577,14 +669,9 @@ impl Menu {
             }
             return None;
         }
-        match (a_down, self.a_since) {
-            (true, None) => self.a_since = Some(now),
-            (true, Some(since)) if now - since >= LOAD_SECONDS => {
-                self.done = true;
-                return Some(Action::Load(browse.selected));
-            }
-            (false, _) => self.a_since = None,
-            _ => {}
+        if held_for(a_down, &mut self.a_since, now, LOAD_SECONDS) {
+            self.done = true;
+            return Some(Action::Load(browse.selected));
         }
         None
     }
@@ -616,8 +703,15 @@ impl Menu {
 
     pub fn view(&self, now: f64) -> View {
         if let Some(browse) = self.browse {
-            let a_fill = match self.a_since {
-                Some(since) if browse.confirming => ((now - since) / LOAD_SECONDS).clamp(0.0, 1.0) as f32,
+            let seconds = if browse.states {
+                Some(STATE_SECONDS)
+            } else if browse.confirming {
+                Some(LOAD_SECONDS)
+            } else {
+                None
+            };
+            let a_fill = match (self.a_since.or(self.y_since), seconds) {
+                (Some(since), Some(seconds)) => ((now - since) / seconds).clamp(0.0, 1.0) as f32,
                 _ => 0.0,
             };
             return self.view_with(a_fill, now);
@@ -658,9 +752,25 @@ impl Menu {
             },
             testing: self.testing,
             saves_row: self.offer_saves,
+            states_row: self.offer_states,
             saves: self.browse,
             hover: self.hover.control(),
             notice: self.notice_until.is_some_and(|until| now < until),
+        }
+    }
+}
+
+/// A hold timed on `since`: true once it has lasted `seconds`.
+fn held_for(held: bool, since: &mut Option<f64>, now: f64, seconds: f64) -> bool {
+    match (held, *since) {
+        (true, None) => {
+            *since = Some(now);
+            false
+        }
+        (true, Some(from)) => now - from >= seconds,
+        (false, _) => {
+            *since = None;
+            false
         }
     }
 }
@@ -855,7 +965,8 @@ mod tests {
             Some(Browse {
                 listed: Listed::Loading,
                 selected: 0,
-                confirming: false
+                confirming: false,
+                states: false,
             })
         );
     }
@@ -909,6 +1020,165 @@ mod tests {
             hold(&mut menu, &["b"], 1.0, 1.2).is_empty(),
             "a tap to step back is not a hold to close"
         );
+    }
+
+    fn with_states(owner: i32) -> Menu {
+        let mut menu = Menu::open(owner, room(2, 4), &held(&["a", "leftshoulder", "rightshoulder"]))
+            .with_saves()
+            .with_states();
+        assert_eq!(menu.tick(&held(&[]), 0.0), None);
+        menu
+    }
+
+    fn to_states(menu: &mut Menu) {
+        tap(menu, "dpdown", 0.1);
+        tap(menu, "dpdown", 0.2);
+        tap(menu, "dpdown", 0.3);
+    }
+
+    fn slots_listed(menu: &mut Menu, count: usize, present: u64) {
+        to_states(menu);
+        assert_eq!(menu.tick(&held(&["a"]), 0.4), None);
+        assert_eq!(menu.tick(&held(&[]), 0.42), Some(Action::ListStates));
+        menu.states_listed(Some((count, present)));
+    }
+
+    #[test]
+    fn the_states_row_follows_the_saves_row_and_comes_before_exit() {
+        let mut menu = with_states(1);
+        to_states(&mut menu);
+        let view = menu.view(0.4);
+        assert!(view.saves_row && view.states_row);
+        assert_eq!(view.focus, 4, "two seats, the tester, the saves, then the slots");
+        tap(&mut menu, "dpdown", 0.5);
+        assert_eq!(menu.view(0.6).focus, 5, "Exit");
+        tap(&mut menu, "dpup", 0.7);
+        assert_eq!(menu.view(0.8).focus, 4);
+
+        let mut alone =
+            Menu::open(1, room(2, 4), &held(&["a", "leftshoulder", "rightshoulder"])).with_states();
+        alone.tick(&held(&[]), 0.0);
+        to_saves(&mut alone);
+        let view = alone.view(0.3);
+        assert!(view.states_row && !view.saves_row);
+        assert_eq!(view.focus, 3);
+        tap(&mut alone, "dpdown", 0.4);
+        assert_eq!(alone.view(0.5).focus, 4, "Exit");
+    }
+
+    #[test]
+    fn a_on_the_states_row_asks_for_the_slots() {
+        let mut menu = with_states(1);
+        to_states(&mut menu);
+        assert_eq!(menu.tick(&held(&["a"]), 0.4), None);
+        assert_eq!(menu.tick(&held(&[]), 0.42), Some(Action::ListStates));
+        let browse = menu.view(0.5).saves.expect("the slots are open");
+        assert!(browse.states && browse.listed == Listed::Loading);
+        menu.states_listed(Some((3, 0b101)));
+        assert_eq!(menu.view(0.6).saves.map(|b| b.listed), Some(Listed::Ready(3)));
+    }
+
+    #[test]
+    fn a_held_on_a_slot_saves_into_it_and_closes_the_menu() {
+        let mut menu = with_states(1);
+        slots_listed(&mut menu, 3, 0);
+        tap(&mut menu, "dpdown", 0.5);
+        let fired = hold(&mut menu, &["a"], 0.6, 0.6 + STATE_SECONDS + 0.1);
+        assert_eq!(fired, [Action::State { at: 1, save: true }]);
+        assert_eq!(menu.tick(&held(&[]), 1.5), None, "the menu is done");
+    }
+
+    #[test]
+    fn y_held_loads_a_slot_that_holds_a_state_and_nothing_from_an_empty_one() {
+        let mut menu = with_states(1);
+        slots_listed(&mut menu, 2, 0b10);
+        assert!(hold(&mut menu, &["y"], 0.5, 1.5).is_empty(), "slot 1 is empty");
+        tap(&mut menu, "dpdown", 1.6);
+        let fired = hold(&mut menu, &["y"], 1.7, 1.7 + STATE_SECONDS + 0.1);
+        assert_eq!(fired, [Action::State { at: 1, save: false }]);
+    }
+
+    #[test]
+    fn a_hold_carried_onto_another_slot_starts_over_there() {
+        for key in ["a", "y"] {
+            let mut menu = with_states(1);
+            slots_listed(&mut menu, 3, 0b111);
+            assert!(hold(&mut menu, &[key], 0.5, 0.8).is_empty());
+            menu.tick(&held(&[key, "dpdown"]), 0.85);
+            assert!(
+                hold(&mut menu, &[key], 0.9, 1.3).is_empty(),
+                "{key}: a hold begun on slot 1 must not fire on slot 2"
+            );
+            assert_eq!(
+                hold(&mut menu, &[key], 1.35, 1.45),
+                [Action::State {
+                    at: 1,
+                    save: key == "a"
+                }],
+                "{key}: half a second on slot 2 does"
+            );
+        }
+    }
+
+    #[test]
+    fn a_and_y_together_are_one_save_and_the_cursor_stops_at_the_ends() {
+        let mut menu = with_states(1);
+        slots_listed(&mut menu, 3, 0b111);
+        tap(&mut menu, "dpup", 0.5);
+        for at in [0.6, 0.7, 0.8, 0.9] {
+            tap(&mut menu, "dpdown", at);
+        }
+        assert_eq!(menu.view(1.0).saves.map(|b| b.selected), Some(2));
+        let fired = hold(&mut menu, &["a", "y"], 1.1, 1.1 + STATE_SECONDS + 0.1);
+        assert_eq!(fired, [Action::State { at: 2, save: true }]);
+    }
+
+    #[test]
+    fn up_from_exit_walks_back_through_the_slots_the_saves_and_the_tester_to_the_line() {
+        let mut menu = with_states(1);
+        for at in [0.1, 0.2, 0.3, 0.4, 0.5] {
+            tap(&mut menu, "dpdown", at);
+        }
+        assert_eq!(menu.view(0.6).focus, 5, "Exit, and no further");
+        let mut seen = Vec::new();
+        for at in [0.7, 0.8, 0.9, 1.0, 1.1] {
+            tap(&mut menu, "dpup", at);
+            seen.push(menu.view(at + 0.05).focus);
+        }
+        assert_eq!(
+            seen,
+            [4, 3, 2, 0, 0],
+            "the slots, the saves, the tester, the line"
+        );
+    }
+
+    #[test]
+    fn an_answer_for_the_other_list_is_ignored() {
+        let mut menu = with_states(1);
+        to_states(&mut menu);
+        assert_eq!(menu.tick(&held(&["a"]), 0.4), None);
+        assert_eq!(menu.tick(&held(&[]), 0.42), Some(Action::ListStates));
+        menu.saves_listed(Some(5));
+        assert_eq!(menu.view(0.5).saves.map(|b| b.listed), Some(Listed::Loading));
+        menu.states_listed(Some((2, 0b01)));
+        assert_eq!(menu.view(0.6).saves.map(|b| b.listed), Some(Listed::Ready(2)));
+    }
+
+    #[test]
+    fn the_hold_on_a_slot_fills_the_ring_and_b_steps_back_out() {
+        let mut menu = with_states(1);
+        slots_listed(&mut menu, 2, 0b11);
+        menu.tick(&held(&["y"]), 0.5);
+        menu.tick(&held(&["y"]), 0.75);
+        let fill = menu.view(0.75).a_fill;
+        assert!((0.4..=0.6).contains(&fill), "{fill}");
+        tap(&mut menu, "b", 0.8);
+        assert_eq!(
+            menu.view(0.9).saves,
+            None,
+            "out of the slots, the menu still down"
+        );
+        assert_eq!(menu.view(0.9).focus, 4, "on the states row it was opened from");
     }
 
     #[test]

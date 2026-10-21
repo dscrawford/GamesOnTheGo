@@ -143,6 +143,7 @@ play_launch() {
 
   # Before the watcher, which reads it from the environment it inherits.
   play_session "$$"
+  saves_watch_start "$$" "$PLAY_ATTR" || warn "could not start the saves watcher"
 
   # The launcher goes fullscreen when stdout is not a terminal, and the
   # session log below puts a tee in front of it: with logs on, every launch
@@ -236,15 +237,15 @@ play_prepare() {
   # be started from, so it goes to the log and play continues either way.
   saves_adopt_once "$attr" || warn "could not adopt older saves for $attr"
 
-  # Take the latest save from the remote before the emulator opens it. Only
-  # when nothing can be lost — the local set must be unchanged since the last
-  # sync — and never at the cost of the launch. In a subshell so its scratch
-  # directory and trap belong to a process that will actually exit: the exec
-  # below replaces this one, and an EXIT trap does not survive that.
+  # Never at the cost of the launch. In a subshell so its scratch directory
+  # and trap belong to a process that will actually exit: the exec below
+  # replaces this one, and an EXIT trap does not survive that.
   (
     saves_tmp_init
-    saves_pull_auto "$attr"
-  ) || warn "could not take the latest save for $attr — launching with what is here"
+    saves_sync_auto "$attr"
+  ) || warn "could not sync the saves for $attr — launching with what is here"
+
+  states_prepare "$attr" || warn "could not set save-state hotkeys for $attr"
 
   # Point the emulator at whatever controller is actually plugged in, every
   # launch, so a new pad needs no visit to a settings screen. Never fatal: a
@@ -279,6 +280,9 @@ play_prepare() {
   [[ -z "$version" ]] || log "version: $version"
 
   export GOTG_TARGET="$PLAY_TARGET" GOTG_INSTALL="$install" GOTG_ENV_STATE="$env_state"
+  # The overlay's `saves states` needs it to pick one game's slots in a
+  # shared environment.
+  export GOTG_PLAY_TARGET="$PLAY_TARGET"
   export GOTG_GAME_VERSION="$version"
 }
 

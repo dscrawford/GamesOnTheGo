@@ -29,7 +29,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 
 import pygame
 
-from . import beside, config, display, filters, intents, keys, meter, pads, plans, remembered, trace, updates
+from . import beside, config, display, filters, intents, keys, meter, pads, plans, remembered, syncing, trace, updates
 from .art import ArtStore
 from .badges import Asker, Badges, land
 from .browser import INSTALLED, SHELF, Browser
@@ -186,6 +186,8 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
     asker = Asker()
     asker.refresh()
     update_check: updates.Check | None = None
+    saves_sync: syncing.Sync | None = None
+    sync_cadence = syncing.Cadence.start(time.monotonic())
     # The chip: what the report says, or the loop's own word for a while
     # after a press (chip.py). It also remembers where it was drawn, for a click.
     chip = ChipState()
@@ -916,6 +918,12 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
             if update_check is not None and update_check.done():
                 update_check = None
                 asker.refresh()
+            now = time.monotonic()
+            if saves_sync is not None and saves_sync.done():
+                saves_sync = None
+            elif saves_sync is None and syncing.enabled() and sync_cadence.due(now):
+                saves_sync = syncing.Sync()
+                sync_cadence = sync_cadence.ran(now)
             apply_badges()
             # The saves answer: a conflict is a choice, anything else starts
             # the game. No answer at all (no client, no service, too slow)
@@ -1028,6 +1036,8 @@ def run(library: Library, installed_only: bool = False) -> tuple | Restart | Non
             preparer.cancel()
         if update_check is not None:
             update_check.stop()
+        if saves_sync is not None:
+            saves_sync.stop(syncing.LAUNCH_WAITS_FOR_SYNC_SECONDS if chosen is not None else 0.0)
         asker.shutdown()
         # danstick goes on listening for a hold. It used to be told to stop
         # here, on the theory that a game has its own idea of what a button

@@ -120,6 +120,14 @@
       ++ [ "{target}" ];
       recipes = lib.optionalAttrs (recipe != null) recipe;
       saves = [ "saves/**" ];
+      # Nothing is bound in ares' Hotkey block until the launch writes it.
+      saveStates = {
+        files = "saves/*/{game}.bs{slot}";
+        slots = 1;
+        save = [ "F5" ];
+        load = [ "F7" ];
+        hotkeys = "ares";
+      };
       # Save states are tied to the ares that wrote them, so one carried from
       # another machine may simply refuse to load. Memory saves always travel.
       saveExcludes = [ "saves/*.bs[0-9]" ];

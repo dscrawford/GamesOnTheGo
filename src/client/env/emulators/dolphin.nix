@@ -49,6 +49,17 @@
         }
       ];
 
+      # Dolphin's own default hotkeys: Shift+F<n> saves slot n, F<n> loads it.
+      saveStates = {
+        files = "data/dolphin-emu/StateSaves/*.s{slot2}";
+        slots = 8;
+        save = [
+          "LEFTSHIFT"
+          "F{slot}"
+        ];
+        load = [ "F{slot}" ];
+      };
+
       # GameCube pads only. A Wii game played with a GameCube controller is
       # covered; Wii remotes live in a different file with a different shape,
       # and nothing here pretends to write them.

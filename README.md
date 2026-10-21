@@ -243,12 +243,17 @@ gotg saves push   [<id>|--all] [--force]
 gotg saves pull   [<id>|--all]
 gotg saves check  <id> [variant] [--json]       # conflict? which machine, and when
 gotg saves keep   <id> [variant] here|remote    # settle one
+gotg saves sync   [<id>|--all] [--push-only]    # push what is new here, pull what is new there
+gotg saves states <id> [variant]                # the emulator's save-state slots
 ```
 
-A launch pulls when the server is ahead and nothing local changed; the
-overlay's **Exit** pushes (so does loading another save from it), and a
-plain quit keeps saves here until the next `gotg saves push`. **Both sides
-changed since they last matched** is a conflict: the picker shows both
+A launch syncs first: it pulls when the server is ahead and nothing local
+changed, pushes when only this machine moved on. A watcher runs beside every
+game and pushes each time the save files change and settle, again every ten
+minutes, and once more when the game ends -- however it ends. The picker
+syncs everything built here a minute after it opens and every ten minutes
+after (`GOTG_UI_SAVES_SYNC=0` stops that; `GOTG_SAVES_WATCH=0` the watcher).
+**Both sides changed since they last matched** is a conflict: the picker shows both
 saves, machine and time, and keeps the one you pick, the other set aside. A
 push against a newer server copy is refused (409) unless `--force`. Local
 history: `~/.local/state/gotg/saves/local/`, last 3 (`GOTG_SAVES_KEEP`).

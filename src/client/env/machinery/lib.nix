@@ -79,10 +79,12 @@
   # Where this emulator kept its saves before it was told to write them under
   # {state}. Read by `gotg saves adopt`, which copies them forward.
   legacyPaths ? [ ],
-  # Save states are excluded by default: they run to tens of megabytes and are
-  # not portable across emulator versions, so a state pulled from another
-  # machine may simply refuse to load.
-  saveStates ? false,
+  # The emulator's save states, for the overlay to press its hotkeys for
+  # (saves-states.sh reads it). Never synced: a state is tied to the emulator
+  # that wrote it.
+  #
+  #   { files = "saves/*/{game}.bs{slot}"; slots = 1; save = [ "F5" ]; load = [ "F7" ]; hotkeys = "ares"; }
+  saveStates ? null,
   # The newest version of the game this environment was built against, for an
   # environment that is a mod rather than an emulator. A Switch exefs mod is
   # machine code written against one executable: on a newer update it patches
@@ -282,8 +284,8 @@ let
     inherit
       name
       saves
-      saveStates
       ;
+    states = saveStates;
     excludes = saveExcludes;
     legacy = legacyPaths;
   }

@@ -15,6 +15,7 @@ use crate::frame::Saying;
 use crate::hover::Target;
 use crate::loading::{self, Listing, SaveLine, Session};
 use crate::menu::{Action, Menu, Row, View};
+use crate::states::{self, StateLine};
 
 /// The longest the bar says a save is loading: the wrapper pushes, restores
 /// and starts the game again, and a game slow to start is not waited on.
@@ -45,7 +46,18 @@ pub enum Step {
     /// Let go of `owner`'s pad and start the game again on this save (None:
     /// the list had no such place, and the bar comes up).
     Load { owner: i32, line: Option<SaveLine> },
+    /// Press the emulator's hotkey that saves into, or loads from, this slot
+    /// (None: the list had no such place). The A or Y that asked would land
+    /// in the game, so `owner`'s pad is let go of by `release_due` instead.
+    State {
+        owner: i32,
+        save: bool,
+        line: Option<StateLine>,
+    },
 }
+
+/// The longest a pad is held back after a state for its owner to let go.
+pub const RELEASE_SECONDS: f64 = 2.0;
 
 /// What asking for the menu came to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +77,11 @@ pub struct MenuDriver {
     /// The client listing the saves into the session.
     listing: Option<Listing>,
     save_lines: Vec<SaveLine>,
+    states_listing: Option<Listing>,
+    state_lines: Vec<StateLine>,
+    offer_states: bool,
+    /// Whose pad is held back after a state, and since when.
+    releasing: Option<(i32, f64)>,
     /// The game being started again on a save: since when, and the process
     /// it was. The bar says so until the wrapper has.
     reloading: Option<(f64, i32)>,
@@ -82,6 +99,11 @@ impl MenuDriver {
 
     pub fn with_targets(mut self, targets: Vec<Target>) -> Self {
         self.targets = targets;
+        self
+    }
+
+    pub fn with_states(mut self, offer: bool) -> Self {
+        self.offer_states = offer;
         self
     }
 
@@ -140,6 +162,10 @@ impl MenuDriver {
             && self.session.as_ref().and_then(Session::game_pid).is_some()
     }
 
+    fn can_state(&self, client: &str, saves: &str) -> bool {
+        self.offer_states && !client.is_empty() && !saves.is_empty() && self.session.is_some()
+    }
+
     /// `who` held the menu chord with `down` pressed. `rows` is asked for
     /// only when there is a seat to open for.
     pub fn open(
@@ -153,12 +179,14 @@ impl MenuDriver {
         let Some(owner) = who else {
             return Opening::Unseated;
         };
-        let opened = Menu::open(owner, rows(), down).with_targets(self.targets.clone());
-        self.menu = Some(if self.can_load(client, saves) {
-            opened.with_saves()
-        } else {
-            opened
-        });
+        let mut opened = Menu::open(owner, rows(), down).with_targets(self.targets.clone());
+        if self.can_load(client, saves) {
+            opened = opened.with_saves();
+        }
+        if self.can_state(client, saves) {
+            opened = opened.with_states();
+        }
+        self.menu = Some(opened);
         Opening::Opened(owner)
     }
 
@@ -229,7 +257,9 @@ impl MenuDriver {
                 serde_json::json!({"cmd": "port", "player": player, "open": open}).to_string(),
             )),
             Action::ListSaves => {
-                if let Some(session) = &self.session {
+                // One listing at a time: a second would truncate the file
+                // under the first.
+                if let (Some(session), None) = (&self.session, &self.listing) {
                     self.listing = Some(Listing::start(client, saves, session, now));
                 }
                 None
@@ -242,7 +272,35 @@ impl MenuDriver {
                     line: self.save_lines.get(at).cloned(),
                 })
             }
+            Action::ListStates => {
+                if let (Some(session), None) = (&self.session, &self.states_listing) {
+                    self.states_listing = Some(Listing::start_states(client, saves, session, now));
+                }
+                None
+            }
+            Action::State { at, save } => {
+                self.menu = None;
+                self.states_listing = None;
+                self.releasing = Some((owner, now));
+                Some(Step::State {
+                    owner,
+                    save,
+                    line: self.state_lines.get(at).cloned(),
+                })
+            }
         }
+    }
+
+    /// Whose pad to let go of, once its owner's A and Y are up or the wait
+    /// is over.
+    pub fn release_due(&mut self, down: impl FnOnce(i32) -> BTreeSet<String>, now: f64) -> Option<i32> {
+        let (owner, since) = self.releasing?;
+        let held = down(owner);
+        if now - since < RELEASE_SECONDS && (held.contains("a") || held.contains("y")) {
+            return None;
+        }
+        self.releasing = None;
+        Some(owner)
     }
 
     /// What `load_save` came to: the game being stopped (since when, which
@@ -253,19 +311,24 @@ impl MenuDriver {
         started.is_some()
     }
 
-    /// The client's listing, once it has said.
+    /// The client's listings, once they have said.
     pub fn poll_listing(&mut self, now: f64) {
-        let (Some(running), Some(session)) = (self.listing.as_mut(), self.session.as_ref()) else {
+        let Some(session) = self.session.as_ref() else {
             return;
         };
-        let Some(listed) = running.poll(session, now) else {
-            return;
-        };
-        self.listing = None;
-        self.save_lines = session.lines();
-        let count = self.save_lines.len();
-        if let Some(open) = self.menu.as_mut() {
-            open.saves_listed(listed.map(|_| count));
+        if let Some(managed) = finished(&mut self.listing, now) {
+            self.save_lines = session.lines();
+            let count = self.save_lines.len();
+            if let Some(open) = self.menu.as_mut() {
+                open.saves_listed(managed.then_some(count));
+            }
+        }
+        if let Some(managed) = finished(&mut self.states_listing, now) {
+            self.state_lines = session.state_lines();
+            let listed = (self.state_lines.len(), states::present_bits(&self.state_lines));
+            if let Some(open) = self.menu.as_mut() {
+                open.states_listed(managed.then_some(listed));
+            }
         }
     }
 
@@ -285,6 +348,13 @@ impl MenuDriver {
             self.reloading = None;
         }
     }
+}
+
+/// Whether a listing managed, once it has finished; it is then gone.
+fn finished(listing: &mut Option<Listing>, now: f64) -> Option<bool> {
+    let managed = listing.as_mut()?.poll(now)?;
+    *listing = None;
+    Some(managed)
 }
 
 #[cfg(test)]
@@ -428,6 +498,86 @@ mod tests {
             }),
             serde_json::json!({"cmd": "port", "player": 2, "open": false})
         );
+        assert!(driver.is_open());
+    }
+
+    #[test]
+    fn there_is_no_states_row_without_a_keyboard_a_session_and_a_client() {
+        let mut driver = MenuDriver::new(None).with_states(true);
+        driver.open(Some(1), &BTreeSet::new(), || seated(1), "/bin/gotg", "env-n64");
+        assert!(driver.view(0.0).is_some_and(|v| !v.states_row), "no session");
+        let dir = std::env::temp_dir().join(format!("gotg-driver-states-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("set up by this test");
+        let session = Session::at(&dir).expect("an absolute directory");
+        let mut driver = MenuDriver::new(Some(session.clone())).with_states(false);
+        driver.open(Some(1), &BTreeSet::new(), || seated(1), "/bin/gotg", "env-n64");
+        assert!(driver.view(0.0).is_some_and(|v| !v.states_row), "no keyboard");
+        let mut driver = MenuDriver::new(Some(session)).with_states(true);
+        driver.open(Some(1), &BTreeSet::new(), || seated(1), "/bin/gotg", "env-n64");
+        assert!(driver.view(0.0).is_some_and(|v| v.states_row && !v.saves_row));
+        std::fs::remove_dir_all(dir).expect("set up by this test");
+    }
+
+    #[test]
+    fn a_state_closes_the_menu_and_holds_the_pad_back_until_the_hold_is_over() {
+        let mut driver = opened(2);
+        assert_eq!(
+            driver.apply(Action::State { at: 0, save: true }, 2, "", "", 1.0),
+            Some(Step::State {
+                owner: 2,
+                save: true,
+                line: None
+            })
+        );
+        assert!(!driver.is_open());
+        let a: BTreeSet<String> = ["a".to_owned()].into();
+        assert_eq!(driver.release_due(|_| a.clone(), 1.2), None, "A is still down");
+        assert_eq!(driver.release_due(|_| BTreeSet::new(), 1.3), Some(2));
+        assert_eq!(driver.release_due(|_| BTreeSet::new(), 1.4), None, "once");
+        driver.apply(Action::State { at: 0, save: false }, 2, "", "", 5.0);
+        assert_eq!(
+            driver.release_due(|_| a.clone(), 5.0 + RELEASE_SECONDS + 0.1),
+            Some(2),
+            "or when the wait is over"
+        );
+    }
+
+    #[test]
+    fn release_due_waits_for_a_and_y_and_no_longer_than_the_limit() {
+        let a: BTreeSet<String> = ["a".to_owned()].into();
+        let y: BTreeSet<String> = ["y".to_owned()].into();
+        let b: BTreeSet<String> = ["b".to_owned()].into();
+        let rows: &[(&BTreeSet<String>, f64, bool)] = &[
+            (&a, 0.0, false),
+            (&y, 0.5, false),
+            (&b, 0.0, true),
+            (&a, RELEASE_SECONDS - 0.001, false),
+            (&a, RELEASE_SECONDS, true),
+        ];
+        for &(held, after, released) in rows {
+            let mut driver = opened(3);
+            driver.apply(Action::State { at: 0, save: false }, 3, "", "", 10.0);
+            let got = driver.release_due(
+                |owner| {
+                    assert_eq!(owner, 3);
+                    held.clone()
+                },
+                10.0 + after,
+            );
+            assert_eq!(got, released.then_some(3), "{held:?} after {after}");
+        }
+        let mut idle = opened(1);
+        assert_eq!(idle.release_due(|_| panic!("nobody to ask about"), 99.0), None);
+    }
+
+    #[test]
+    fn listing_states_without_a_session_does_nothing() {
+        let mut driver = opened(1);
+        assert_eq!(
+            driver.apply(Action::ListStates, 1, "/bin/gotg", "env-n64", 0.0),
+            None
+        );
+        driver.poll_listing(1.0);
         assert!(driver.is_open());
     }
 

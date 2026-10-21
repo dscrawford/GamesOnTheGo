@@ -29,6 +29,7 @@ Comes down for that player alone. Every hold in it is half a second.
 | X | take it out of its seat |
 | Y | its game port off or on |
 | a save (games with saves of their own) | A lists them, A on one asks, A held loads it: the game restarts on it with every seat kept |
+| **Save states** (ares, Dolphin) | A lists the emulator's slots and when each was written; A held saves into the one chosen, Y held loads it. The overlay presses the emulator's own hotkey on a keyboard it makes through `/dev/uinput` (ares: F5/F7, bound at launch; Dolphin: Shift+F*n* / F*n*, its defaults). States never sync: they are tied to the emulator that wrote them |
 | **Exit**, A held | stop the game and push its saves |
 | B held | close the menu |
 

@@ -26,11 +26,8 @@ pub const SIZE: usize = 4 * (7 + HOLDS_MAX * 3 + JOINED_MAX * 2 + REBIND_WORDS +
 /// hover and the flags, and the saves list.
 const MENU_WORDS: usize = 11 + ROWS_MAX + 2 * ROWS_MAX + ROWS_MAX + SAVES_WORDS;
 
-/// The saves row and list: whether there is a row, the list's state and the
-/// prompt in one word, how many saves, and which is under the cursor. Their
-/// words are not in the frame -- the painter reads them from the session the
-/// client wrote them to (`gotg saves list --lines`), since a frame has room
-/// for numbers and not for a dozen machine names and dates.
+/// The lists' words are not in the frame: it has room for numbers, not for a
+/// dozen machine names and dates, so the painter reads them from the session.
 const SAVES_WORDS: usize = 3;
 
 /// Seats a menu frame lists.
@@ -78,12 +75,17 @@ pub const FLAG_RESET: u32 = 1;
 /// `flags` bit: the hint says a reset needs a newer danstick.
 pub const FLAG_NOTICE: u32 = 2;
 
-/// The menu's saves: a row to open them, and the list while it is open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Saves {
     pub row: bool,
+    pub states_row: bool,
     pub browse: Option<Browse>,
 }
+
+const SAVES_ROW: u32 = 1;
+const SAVES_CONFIRMING: u32 = 2;
+const SAVES_LISTING_STATES: u32 = 4;
+const SAVES_STATES_ROW: u32 = 8;
 
 impl Saves {
     fn put(self, out: &mut Writer) {
@@ -95,16 +97,22 @@ impl Saves {
     }
 
     fn words(self) -> [u32; SAVES_WORDS] {
-        let (state, count, selected, confirming) = match self.browse {
-            None => (0, 0, 0, false),
+        let (state, count, selected) = match self.browse {
+            None => (0, 0, 0),
             Some(b) => match b.listed {
-                Listed::Loading => (1, 0, 0, b.confirming),
-                Listed::Failed => (2, 0, 0, b.confirming),
-                Listed::Ready(n) => (3, n as u32, b.selected as u32, b.confirming),
+                Listed::Loading => (1, 0, 0),
+                Listed::Failed => (2, 0, 0),
+                Listed::Ready(n) => (3, n as u32, b.selected as u32),
             },
         };
+        let (confirming, states) = self.browse.map_or((false, false), |b| (b.confirming, b.states));
+        let bit = |on: bool, mask: u32| if on { mask } else { 0 };
         [
-            u32::from(self.row) | u32::from(confirming) << 1 | state << 8,
+            bit(self.row, SAVES_ROW)
+                | bit(confirming, SAVES_CONFIRMING)
+                | bit(states, SAVES_LISTING_STATES)
+                | bit(self.states_row, SAVES_STATES_ROW)
+                | state << 8,
             count,
             selected,
         ]
@@ -121,11 +129,13 @@ impl Saves {
             _ => None,
         };
         Self {
-            row: flags & 1 != 0,
+            row: flags & SAVES_ROW != 0,
+            states_row: flags & SAVES_STATES_ROW != 0,
             browse: listed.map(|listed| Browse {
                 listed,
                 selected: (selected as usize).min((count as usize).saturating_sub(1)),
-                confirming: flags & 2 != 0,
+                confirming: flags & SAVES_CONFIRMING != 0,
+                states: flags & SAVES_LISTING_STATES != 0,
             }),
         }
     }
@@ -348,6 +358,7 @@ impl MenuFrame {
         flags: 0,
         saves: Saves {
             row: false,
+            states_row: false,
             browse: None,
         },
     };
@@ -376,8 +387,8 @@ impl MenuFrame {
         Self {
             owner: from.get_i32(),
             rows: from.get_u32().min(ROWS_MAX as u32),
-            // A seat, the tester, the saves row, or Exit.
-            focus: from.get_u32().min(ROWS_MAX as u32 + 2),
+            // A seat, the tester, the saves row, the states row, or Exit.
+            focus: from.get_u32().min(ROWS_MAX as u32 + 3),
             carried: from.get_i32(),
             a_fill: from.get_f32_within(0.0, 1.0),
             b_fill: from.get_f32_within(0.0, 1.0),
@@ -604,10 +615,12 @@ mod tests {
             flags: FLAG_RESET | FLAG_NOTICE,
             saves: Saves {
                 row: true,
+                states_row: false,
                 browse: Some(Browse {
                     listed: Listed::Ready(usize::from(u8::MAX)),
                     selected: usize::from(u8::MAX) - 1,
                     confirming: true,
+                    states: false,
                 }),
             },
         };
@@ -657,7 +670,7 @@ mod tests {
             Frame::decode(&past.encode())
                 .and_then(|f| f.menu)
                 .map(|m| m.focus),
-            Some(ROWS_MAX as u32 + 2),
+            Some(ROWS_MAX as u32 + 3),
             "a cursor past Exit is drawn on Exit"
         );
     }
@@ -697,10 +710,12 @@ mod tests {
             flags: 0b11,
             saves: Saves {
                 row: true,
+                states_row: false,
                 browse: Some(Browse {
                     listed: Listed::Ready(7),
                     selected: 3,
                     confirming: true,
+                    states: false,
                 }),
             },
         }))
@@ -822,10 +837,12 @@ mod tests {
             flags: FLAG_RESET,
             saves: Saves {
                 row: true,
+                states_row: false,
                 browse: Some(Browse {
                     listed: Listed::Ready(7),
                     selected: 3,
                     confirming: true,
+                    states: false,
                 }),
             },
         };
@@ -860,24 +877,32 @@ mod tests {
                 listed: Listed::Loading,
                 selected: 0,
                 confirming: false,
+                states: false,
             }),
             Some(Browse {
                 listed: Listed::Failed,
                 selected: 0,
                 confirming: false,
+                states: false,
             }),
             Some(Browse {
                 listed: Listed::Ready(0),
                 selected: 0,
                 confirming: false,
+                states: false,
             }),
             Some(Browse {
                 listed: Listed::Ready(12),
                 selected: 11,
                 confirming: false,
+                states: false,
             }),
         ] {
-            let saves = Saves { row: true, browse };
+            let saves = Saves {
+                row: true,
+                states_row: true,
+                browse,
+            };
             let frame = base.with_menu(Some(MenuFrame {
                 saves,
                 ..menu_frame()
@@ -892,6 +917,45 @@ mod tests {
             Frame::decode(&loading.encode()).map(|f| f.saying),
             Some(Saying::Loading)
         );
+    }
+
+    #[test]
+    fn the_states_bits_cross_the_pipe_in_every_combination() {
+        let base = Frame::pack(1.0, 0.0, &[], &[]);
+        let listings = [
+            None,
+            Some(Listed::Loading),
+            Some(Listed::Failed),
+            Some(Listed::Ready(0)),
+            Some(Listed::Ready(9)),
+        ];
+        for row in [false, true] {
+            for states_row in [false, true] {
+                for listed in listings {
+                    for (states, confirming) in [(false, false), (true, false), (false, true), (true, true)] {
+                        let saves = Saves {
+                            row,
+                            states_row,
+                            browse: listed.map(|listed| Browse {
+                                listed,
+                                selected: if listed == Listed::Ready(9) { 8 } else { 0 },
+                                confirming,
+                                states,
+                            }),
+                        };
+                        let frame = base.with_menu(Some(MenuFrame {
+                            owner: 1,
+                            saves,
+                            ..MenuFrame::NONE
+                        }));
+                        let back = Frame::decode(&frame.encode())
+                            .and_then(|f| f.menu)
+                            .map(|m| m.saves);
+                        assert_eq!(back, Some(saves), "{saves:?}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]

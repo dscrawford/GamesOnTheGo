@@ -86,17 +86,13 @@ device_name() {
 # not count, and a save that has not changed since the last sync is as old as
 # the generation it is: the journal keeps that generation's time.
 saves_local_updated() {
-  local attr="$1" manifest state globs=() newest=0 file mtime
-  manifest="$(saves_manifest "$attr")"
+  local attr="$1" state newest=0 file mtime
   state="$(env_state_dir "$attr")"
-  mapfile -t globs < <(jq -r '.saves[]?' <<<"$manifest")
-  if [[ ${#globs[@]} -gt 0 && -d "$state" ]]; then
-    while IFS= read -r file; do
-      [[ -n "$file" ]] || continue
-      mtime="$(stat -c '%Y' "$state/$file" 2>/dev/null)" || continue
-      ((mtime > newest)) && newest="$mtime"
-    done < <(saves_member_list "$state" "${globs[@]}")
-  fi
+  while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    mtime="$(stat -c '%Y' "$state/$file" 2>/dev/null)" || continue
+    ((mtime > newest)) && newest="$mtime"
+  done < <(saves_members "$attr")
   if ((newest > 86400)); then
     date -u -d "@$newest" +%Y-%m-%dT%H:%M:%SZ
   else
@@ -157,6 +153,30 @@ saves_member_list() {
   ) | LC_ALL=C sort -u
 }
 
+# The files a bundle holds: the manifest's globs less its excludes. An
+# exclude is matched as tar matches one -- on any trailing run of path
+# components -- so the two never disagree about what is a save; a state file
+# that only tar dropped once made an empty bundle a generation.
+saves_members() {
+  local attr="$1" manifest state globs=() excludes=() member pattern keep
+  manifest="$(saves_manifest "$attr")"
+  state="$(env_state_dir "$attr")"
+  mapfile -t globs < <(jq -r '.saves[]?' <<<"$manifest")
+  mapfile -t excludes < <(jq -r '.excludes[]?' <<<"$manifest")
+  [[ ${#globs[@]} -gt 0 && -d "$state" ]] || return 0
+  while IFS= read -r member; do
+    keep=1
+    for pattern in "${excludes[@]}"; do
+      # shellcheck disable=SC2053 # glob comparison is the point
+      if [[ "$member" == $pattern || "$member" == */$pattern ]]; then
+        keep=0
+        break
+      fi
+    done
+    ((keep)) && printf '%s\n' "$member"
+  done < <(saves_member_list "$state" "${globs[@]}")
+}
+
 # Refuse to bundle something enormous, naming what made it enormous. This is
 # the guard that catches a glob which has quietly started matching a .o2r or a
 # disc image, and it is worth more than the exclude list because it does not
@@ -199,12 +219,9 @@ saves_bundle() {
   state="$(env_state_dir "$attr")"
   [[ -d "$state" ]] || return 1
 
-  local globs=() excludes=() members=()
-  mapfile -t globs < <(jq -r '.saves[]?' <<<"$manifest")
+  local excludes=() members=()
   mapfile -t excludes < <(jq -r '.excludes[]?' <<<"$manifest")
-  [[ ${#globs[@]} -gt 0 ]] || return 1
-
-  mapfile -t members < <(saves_member_list "$state" "${globs[@]}")
+  mapfile -t members < <(saves_members "$attr")
   [[ ${#members[@]} -gt 0 ]] || return 1
 
   saves_check_size "$state" "${members[@]}"
@@ -224,15 +241,7 @@ saves_bundle() {
 }
 
 saves_member_count() {
-  local attr="$1" manifest state globs=()
-  manifest="$(saves_manifest "$attr")"
-  state="$(env_state_dir "$attr")"
-  mapfile -t globs < <(jq -r '.saves[]?' <<<"$manifest")
-  [[ ${#globs[@]} -gt 0 ]] || {
-    printf '0'
-    return 0
-  }
-  saves_member_list "$state" "${globs[@]}" | grep -c . || true
+  saves_members "$1" | grep -c . || true
 }
 
 # ------------------------------------------------------------------- receiving
@@ -373,12 +382,8 @@ saves_adopt_once() {
 
   # Only into an environment that has nothing yet: once a save exists here, this
   # machine is the authority and older files must not be laid on top of it.
-  local manifest state globs=()
-  manifest="$(saves_manifest "$attr")"
-  state="$(env_state_dir "$attr")"
-  mapfile -t globs < <(jq -r '.saves[]?' <<<"$manifest")
-  [[ ${#globs[@]} -gt 0 ]] || return 0
-  [[ -z "$(saves_member_list "$state" "${globs[@]}")" ]] || {
+  [[ -n "$(jq -r '.saves[]?' <<<"$(saves_manifest "$attr")")" ]] || return 0
+  [[ -z "$(saves_members "$attr")" ]] || {
     saves_journal_set "$attr" '{"adopted": true}'
     return 0
   }

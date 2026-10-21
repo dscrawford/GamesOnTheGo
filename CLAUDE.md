@@ -115,8 +115,11 @@ nix build .#checks.x86_64-linux.rust --max-jobs 2 --cores 4        # rust/: test
 ```
 
 All must pass before a change is done. In a checkout, `cargo test` in `rust/`
-needs SDL3 and libwayland on `PKG_CONFIG_PATH` (`nix shell nixpkgs#cargo
-nixpkgs#rustc nixpkgs#pkg-config nixpkgs#sdl3.dev nixpkgs#wayland.dev`). `ruff format` is enforced only on
+needs SDL3 and libwayland on `PKG_CONFIG_PATH` and `GOTG_FONT` set to a TTF
+(`nix shell nixpkgs#cargo nixpkgs#rustc nixpkgs#pkg-config nixpkgs#sdl3.dev
+nixpkgs#wayland.dev`, then `PKG_CONFIG_PATH=$(nix eval --raw
+nixpkgs#wayland.dev)/lib/pkgconfig:$(nix eval --raw nixpkgs#sdl3.dev)/lib/pkgconfig
+GOTG_FONT=$(nix eval --raw nixpkgs#freefont_ttf)/share/fonts/truetype/FreeSansBold.ttf`). `ruff format` is enforced only on
 `src/gotg`; the picker is `ruff check` (E, F, I, W, B, UP, line length 120).
 
 ## Code Style & Conventions
@@ -222,7 +225,10 @@ filed per console, or per game for a port played as the generic pad
 danstick's `move`), a controller taken out of its seat (X -- `unseat`), a
 seat's game port off or on (Y -- `port`, leased), for a game with an environment of
 its own a save to load (`loading.rs`: the wrapper starts the game again on it as
-the same process, so the danstick session and every seat survive), and a held Exit that pushes the saves on the way out; B
+the same process, so the danstick session and every seat survive), for an
+emulator with save states its slots (`states.rs`: A held saves, Y held
+loads -- the emulator's own hotkey, pressed on a uinput keyboard of the
+overlay's, `keyboard.rs`), and a held Exit that pushes the saves on the way out; B
 held closes it. Every hold in the menu is half a second. While it is open danstick is asked to hold that pad back from
 the game (`focus`). A pad that goes away (switched off, a flat battery) gives
 up its seat: danstick keeps it for the pad's return, so the overlay asks for

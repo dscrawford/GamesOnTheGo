@@ -136,7 +136,12 @@ killswitch_start() {
   local -a saves=()
   [[ -z "$attr" || -z "${GOTG_ROOT:-}" ]] || saves=(--saves "$attr" --client "$GOTG_ROOT/bin/gotg")
 
+  local -a states=()
+  local spec=""
+  [[ -z "$attr" ]] || spec="$(saves_states_spec "$attr")"
+  [[ -z "$spec" ]] || states=(--states "$spec")
+
   "$bin" --pid "$pid" --hold-ms "$hold" ${console[@]+"${console[@]}"} ${picture[@]+"${picture[@]}"} \
-    ${saves[@]+"${saves[@]}"} &
+    ${saves[@]+"${saves[@]}"} ${states[@]+"${states[@]}"} &
   log "${C_DIM}hold L + R and Select for half a second for the menu; L + R and Start for $((hold / 1000))s stops the game${C_RESET}"
 }

@@ -114,6 +114,16 @@ impl Session {
         self.dir.join("saves.tsv")
     }
 
+    pub fn states_path(&self) -> PathBuf {
+        crate::states::lines_path(&self.dir)
+    }
+
+    pub fn state_lines(&self) -> Vec<crate::states::StateLine> {
+        fs::read_to_string(self.states_path())
+            .map(|text| crate::states::parse_lines(&text))
+            .unwrap_or_default()
+    }
+
     /// The game, as the wrapper said when it started it. None from a wrapper
     /// that has no restart loop -- whose game cannot be started again.
     pub fn game_pid(&self) -> Option<i32> {
@@ -140,7 +150,7 @@ impl Session {
     }
 }
 
-/// `CLIENT saves list ENV --lines`, running into the session.
+/// `CLIENT saves list|states ENV --lines`, running into the session.
 #[derive(Debug)]
 pub struct Listing {
     child: Option<Child>,
@@ -149,9 +159,27 @@ pub struct Listing {
 
 impl Listing {
     pub fn start(client: &str, attr: &str, session: &Session, now: f64) -> Self {
-        let child = fs::File::create(session.lines_path()).ok().and_then(|out| {
+        Self::start_into(
+            client,
+            &["saves", "list", attr, "--lines"],
+            &session.lines_path(),
+            now,
+        )
+    }
+
+    pub fn start_states(client: &str, attr: &str, session: &Session, now: f64) -> Self {
+        Self::start_into(
+            client,
+            &["saves", "states", attr, "--lines"],
+            &session.states_path(),
+            now,
+        )
+    }
+
+    fn start_into(client: &str, args: &[&str], into: &Path, now: f64) -> Self {
+        let child = fs::File::create(into).ok().and_then(|out| {
             Command::new(client)
-                .args(["saves", "list", attr, "--lines"])
+                .args(args)
                 .stdin(Stdio::null())
                 .stdout(out)
                 .stderr(Stdio::null())
@@ -161,19 +189,18 @@ impl Listing {
         Self { child, started: now }
     }
 
-    /// None while the client is still at it; then how many saves it listed,
-    /// or None inside when it failed or took too long.
-    pub fn poll(&mut self, session: &Session, now: f64) -> Option<Option<usize>> {
+    /// None while the client is still at it; then whether it managed.
+    pub fn poll(&mut self, now: f64) -> Option<bool> {
         let Some(child) = self.child.as_mut() else {
-            return Some(None);
+            return Some(false);
         };
         match child.try_wait() {
-            Ok(Some(status)) if status.success() => Some(Some(session.lines().len())),
-            Ok(Some(_)) | Err(_) => Some(None),
+            Ok(Some(status)) if status.success() => Some(true),
+            Ok(Some(_)) | Err(_) => Some(false),
             Ok(None) if now - self.started > LIST_SECONDS => {
                 let _ = child.kill();
                 let _ = child.wait();
-                Some(None)
+                Some(false)
             }
             Ok(None) => None,
         }
@@ -339,6 +366,41 @@ mod tests {
         );
         assert!(session.request("remote:3; rm -rf ~").is_err());
         assert!(Session::at(Path::new("relative/dir")).is_none());
+        fs::remove_dir_all(dir).expect("set up by this test");
+    }
+
+    #[test]
+    fn the_slots_are_listed_into_the_session_by_the_client() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("gotg-states-list-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("set up by this test");
+        let session = Session::at(&dir).expect("an absolute directory");
+        assert!(session.state_lines().is_empty(), "no file yet is no slots");
+        let client = dir.join("client");
+        fs::write(
+            &client,
+            "#!/bin/sh\nprintf 'slot:1\\ttoday\\tg\\nslot:2\\t\\t\\n'\n",
+        )
+        .expect("a script");
+        fs::set_permissions(&client, fs::Permissions::from_mode(0o755)).expect("chmod");
+        let finish = |listing: &mut Listing| {
+            for _ in 0..500 {
+                if let Some(managed) = listing.poll(0.1) {
+                    return managed;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            panic!("the client never finished");
+        };
+        let mut listing = Listing::start_states(client.to_str().expect("utf-8"), "env-n64", &session, 0.0);
+        assert!(finish(&mut listing));
+        let lines = session.state_lines();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].present() && !lines[1].present());
+        let mut failing = Listing::start_states("/bin/false", "env-n64", &session, 0.0);
+        assert!(!finish(&mut failing), "a client that fails is not a list");
+        let mut missing = Listing::start_states("/nonexistent/gotg", "env-n64", &session, 0.0);
+        assert_eq!(missing.poll(0.0), Some(false), "a client that cannot start");
         fs::remove_dir_all(dir).expect("set up by this test");
     }
 

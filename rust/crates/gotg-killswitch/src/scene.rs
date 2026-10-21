@@ -23,6 +23,7 @@ use crate::leaders;
 use crate::loading::SaveLine;
 use crate::menu::{Browse, Listed};
 use crate::shapes::{Colour, Mesh};
+use crate::states::StateLine;
 use crate::text;
 use crate::theme;
 
@@ -72,6 +73,7 @@ pub struct Scene<'a> {
     /// The saves the menu lists, as the client said them: read by the
     /// painter from the session, never carried in a frame.
     pub saves: &'a [SaveLine],
+    pub states: &'a [StateLine],
 }
 
 /// A controller's drawing, centred at (`cx`, `cy`) and `height` tall: shown
@@ -761,6 +763,15 @@ pub const EXIT_KEYS: &str = "hold A  exit      hold B  close";
 pub const SAVES_ROW_KEYS: &str = "A  see your saves      hold B  close";
 pub const BROWSE_KEYS: &str = "up / down  choose      A  load this one      B  back";
 pub const LOAD_KEYS: &str = "hold A  load      B  back";
+pub const STATES_ROW_KEYS: &str = "A  see the slots      hold B  close";
+pub const SLOTS_KEYS: &str = "up / down  choose      hold A  save here      hold Y  load      B  back";
+
+/// The save-states row, and what its list says.
+pub const STATES_ROW: &str = "Save states";
+pub const SLOTS_LOADING: &str = "Looking at the slots…";
+pub const SLOTS_FAILED: &str = "The slots could not be listed.";
+pub const SLOTS_EMPTY: &str = "This emulator has no save states.";
+pub const SLOT_EMPTY: &str = "empty";
 
 /// The saves row, and what its list says when it has no saves to show.
 pub const LOAD_ROW: &str = "Load a save";
@@ -774,12 +785,21 @@ const SAVES_VISIBLE: usize = 5;
 
 /// Where the menu's parts sit, as fractions of the panel.
 const LINE_AT: f32 = 0.08;
-const TESTER_BAND: (f32, f32) = (0.15, 0.82);
+const TESTER_TOP: f32 = 0.15;
+const TESTER_BOTTOM: f32 = 0.82;
 const EXIT_AT: f32 = 0.86;
-/// With a saves row: the tester gives up the room for it, above Exit.
-const TESTER_BAND_WITH_SAVES: (f32, f32) = (0.15, 0.74);
-const SAVES_AT: f32 = 0.79;
+/// Each row between the tester and Exit takes this much of the tester's room.
+const ROW_TAKES: f32 = 0.08;
+const ROW_BELOW: f32 = 0.05;
+const ROW_APART: f32 = 0.07;
 const KEYS_AT: f32 = 0.94;
+
+fn rows_layout(rows: usize) -> ((f32, f32), impl Fn(usize) -> f32) {
+    let bottom = TESTER_BOTTOM - ROW_TAKES * rows as f32;
+    ((TESTER_TOP, bottom), move |at| {
+        bottom + ROW_BELOW + ROW_APART * at as f32
+    })
+}
 
 /// The menu: the controllers in a line along the top -- where one stands is
 /// its player number, and its colour says the same -- the game's controller
@@ -792,7 +812,12 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
     let keys_size = panel * 0.034;
     let tester_row = seats;
     let saves_row = menu.saves.row.then_some(seats + 1);
-    let exit_row = seats + 1 + usize::from(menu.saves.row);
+    let states_row = menu
+        .saves
+        .states_row
+        .then_some(seats + 1 + usize::from(menu.saves.row));
+    let extra_rows = usize::from(menu.saves.row) + usize::from(menu.saves.states_row);
+    let exit_row = seats + 1 + extra_rows;
     let browse = menu.saves.browse;
     let on_tester = menu.focus as usize == tester_row && !menu.testing && browse.is_none();
     let hovered = usize::try_from(menu.hover)
@@ -806,22 +831,27 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
     let keys = if menu.testing {
         TESTING_KEYS.to_owned()
     } else if let Some(browse) = browse {
-        (if browse.confirming { LOAD_KEYS } else { BROWSE_KEYS }).to_owned()
+        (if browse.states {
+            SLOTS_KEYS
+        } else if browse.confirming {
+            LOAD_KEYS
+        } else {
+            BROWSE_KEYS
+        })
+        .to_owned()
     } else if on_tester {
         tester_keys(hovered.map(|c| c.label), menu.flags)
     } else if Some(menu.focus as usize) == saves_row {
         SAVES_ROW_KEYS.to_owned()
+    } else if Some(menu.focus as usize) == states_row {
+        STATES_ROW_KEYS.to_owned()
     } else if menu.focus as usize == exit_row {
         EXIT_KEYS.to_owned()
     } else {
         MENU_KEYS.to_owned()
     };
     let keys = keys.as_str();
-    let band = if menu.saves.row {
-        TESTER_BAND_WITH_SAVES
-    } else {
-        TESTER_BAND
-    };
+    let (band, row_at) = rows_layout(extra_rows);
     let label_size = panel * 0.04;
     let marker = label_size * 1.3;
     let layout = labelled_layout(
@@ -838,26 +868,17 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
         .min(width * 0.96);
     card(&mut drawing.under, cx, top, card_w, panel);
     let dim = Colour::rgb(theme::TEXT_DIM, 1.0);
-    let fill_ring = |over: &mut Mesh, x: f32, y: f32, radius: f32, fill: f32, ink: Colour| {
-        over.arc(
-            x,
-            y,
-            radius,
-            radius * 0.3,
-            0.0,
-            1.0,
-            ink.with_alpha(0.25),
-            FEATHER,
-        );
-        over.arc(x, y, radius, radius * 0.3, 0.0, fill, ink, FEATHER);
-    };
     build_line(menu, (cx, top + panel * LINE_AT), slot, drawing);
     if let Some(browse) = browse.filter(|b| !b.confirming) {
         // The list stands where the tester was, over the same band. Not under
         // the prompt: words are drawn over every card, so they would show
         // through it.
         let area = (top + panel * band.0, top + panel * band.1);
-        build_saves_list(scene, menu, &browse, area, (cx, card_w), drawing);
+        if browse.states {
+            build_states_list(scene, menu, &browse, area, (cx, card_w), drawing);
+        } else {
+            build_saves_list(scene, menu, &browse, area, (cx, card_w), drawing);
+        }
     } else if menu.focus as usize == tester_row || menu.testing {
         // The test is the owner's while it runs: lit in their colour.
         let lit = if menu.testing {
@@ -900,18 +921,22 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
     {
         build_tester(menu, console, &layout, marker, on_tester, drawing);
     }
-    if saves_row.is_some() {
+    for (at, (row, label)) in [(saves_row, LOAD_ROW), (states_row, STATES_ROW)]
+        .into_iter()
+        .filter(|(row, _)| row.is_some())
+        .enumerate()
+    {
         let size = panel * 0.04;
-        let y = top + panel * SAVES_AT;
-        let on = Some(menu.focus as usize) == saves_row && !menu.testing && browse.is_none();
+        let y = top + panel * row_at(at);
+        let on = Some(menu.focus as usize) == row && !menu.testing && browse.is_none();
         if on {
-            let (w, h) = (text::width(LOAD_ROW, size) + size * 4.0, size * 1.8);
+            let (w, h) = (text::width(label, size) + size * 4.0, size * 1.8);
             drawing
                 .under
                 .rect(cx - w / 2.0, y - h / 2.0, w, h, dim.with_alpha(0.18));
         }
         drawing.labels.push(Label {
-            text: LOAD_ROW.to_owned(),
+            text: label.to_owned(),
             x: cx,
             y,
             size,
@@ -959,6 +984,129 @@ fn build_menu(scene: &Scene, menu: &MenuFrame, top: f32, drawing: &mut Drawing) 
     }
 }
 
+/// A hold's ring: faint all the way round, and `fill` of a turn in `ink`.
+fn fill_ring(over: &mut Mesh, x: f32, y: f32, radius: f32, fill: f32, ink: Colour) {
+    over.arc(
+        x,
+        y,
+        radius,
+        radius * 0.3,
+        0.0,
+        1.0,
+        ink.with_alpha(0.25),
+        FEATHER,
+    );
+    over.arc(x, y, radius, radius * 0.3, 0.0, fill, ink, FEATHER);
+}
+
+/// Where a list's rows go, once there is something to list.
+struct ListRows {
+    first: usize,
+    selected: usize,
+    top: f32,
+    row_h: f32,
+    big: f32,
+    small: f32,
+    row_w: f32,
+    left: f32,
+}
+
+/// The first entry shown and the one chosen, `visible` at a time around it.
+fn list_window(selected: usize, count: usize, visible: usize) -> (usize, usize) {
+    let selected = selected.min(count.saturating_sub(1));
+    let first = selected
+        .saturating_sub(visible / 2)
+        .min(count.saturating_sub(visible));
+    (first, selected)
+}
+
+/// A list's words: its heading, and the line for loading, failed and empty.
+struct ListWords {
+    title: &'static str,
+    loading: &'static str,
+    failed: &'static str,
+    empty: &'static str,
+}
+
+const SAVES_WORDS: ListWords = ListWords {
+    title: LOAD_ROW,
+    loading: LIST_LOADING,
+    failed: LIST_FAILED,
+    empty: LIST_EMPTY,
+};
+
+const STATES_WORDS: ListWords = ListWords {
+    title: STATES_ROW,
+    loading: SLOTS_LOADING,
+    failed: SLOTS_FAILED,
+    empty: SLOTS_EMPTY,
+};
+
+/// A list's heading over `area`, and either a line on why there is nothing
+/// to show (None) or where its `count` rows go.
+fn build_list_frame(
+    scene: &Scene,
+    browse: &Browse,
+    area: (f32, f32),
+    (cx, card_w): (f32, f32),
+    words: &ListWords,
+    count: usize,
+    drawing: &mut Drawing,
+) -> Option<ListRows> {
+    let panel = scene.panel_height;
+    let heading = panel * 0.045;
+    drawing.labels.push(Label {
+        text: words.title.to_owned(),
+        x: cx,
+        y: area.0 + heading * 0.6,
+        size: heading,
+        colour: Colour::rgb(theme::TEXT, 1.0),
+        align: Align::Centre,
+    });
+    let line = match browse.listed {
+        Listed::Loading => Some(words.loading),
+        Listed::Failed => Some(words.failed),
+        Listed::Ready(0) => Some(words.empty),
+        Listed::Ready(_) if count == 0 => Some(words.loading),
+        Listed::Ready(_) => None,
+    };
+    if let Some(line) = line {
+        drawing.labels.push(Label {
+            text: line.to_owned(),
+            x: cx,
+            y: (area.0 + area.1) / 2.0,
+            size: panel * 0.035,
+            colour: Colour::rgb(theme::TEXT_DIM, 1.0),
+            align: Align::Centre,
+        });
+        return None;
+    }
+    let (first, selected) = list_window(browse.selected, count, SAVES_VISIBLE);
+    let top = area.0 + heading * 1.6;
+    let row_h = (area.1 - top) / SAVES_VISIBLE as f32;
+    let row_w = (card_w * 0.8).min(scene.width as f32 * 0.9);
+    Some(ListRows {
+        first,
+        selected,
+        top,
+        row_h,
+        big: row_h * 0.36,
+        small: row_h * 0.24,
+        row_w,
+        left: cx - row_w / 2.0,
+    })
+}
+
+fn lit_row(drawing: &mut Drawing, rows: &ListRows, y: f32, tint: Colour) {
+    drawing.under.rect(
+        rows.left,
+        y + rows.row_h * 0.06,
+        rows.row_w,
+        rows.row_h * 0.88,
+        tint.with_alpha(0.22),
+    );
+}
+
 /// The saves, newest first, over `area` (top and bottom): a date as the
 /// picker says it and a line on where it was made, the chosen one lit. Or a
 /// line on why there are none to show.
@@ -967,74 +1115,115 @@ fn build_saves_list(
     menu: &MenuFrame,
     browse: &Browse,
     area: (f32, f32),
-    (cx, card_w): (f32, f32),
+    at: (f32, f32),
     drawing: &mut Drawing,
 ) {
-    let panel = scene.panel_height;
+    let Some(rows) = build_list_frame(scene, browse, area, at, &SAVES_WORDS, scene.saves.len(), drawing)
+    else {
+        return;
+    };
     let dim = Colour::rgb(theme::TEXT_DIM, 1.0);
     let ink = Colour::rgb(theme::TEXT, 1.0);
-    let heading = panel * 0.045;
-    drawing.labels.push(Label {
-        text: LOAD_ROW.to_owned(),
-        x: cx,
-        y: area.0 + heading * 0.6,
-        size: heading,
-        colour: ink,
-        align: Align::Centre,
-    });
-    let said = match browse.listed {
-        Listed::Loading => Some(LIST_LOADING),
-        Listed::Failed => Some(LIST_FAILED),
-        Listed::Ready(0) => Some(LIST_EMPTY),
-        Listed::Ready(_) if scene.saves.is_empty() => Some(LIST_LOADING),
-        Listed::Ready(_) => None,
-    };
-    if let Some(said) = said {
-        drawing.labels.push(Label {
-            text: said.to_owned(),
-            x: cx,
-            y: (area.0 + area.1) / 2.0,
-            size: panel * 0.035,
-            colour: dim,
-            align: Align::Centre,
-        });
-        return;
-    }
-    let count = scene.saves.len();
-    let selected = browse.selected.min(count - 1);
-    let first = selected
-        .saturating_sub(SAVES_VISIBLE / 2)
-        .min(count.saturating_sub(SAVES_VISIBLE));
-    let rows_top = area.0 + heading * 1.6;
-    let row_h = (area.1 - rows_top) / SAVES_VISIBLE as f32;
-    let (big, small) = (row_h * 0.36, row_h * 0.24);
-    let row_w = (card_w * 0.8).min(scene.width as f32 * 0.9);
-    let left = cx - row_w / 2.0;
-    for (slot, line) in scene.saves.iter().enumerate().skip(first).take(SAVES_VISIBLE) {
-        let y = rows_top + (slot - first) as f32 * row_h;
-        let lit = slot == selected;
+    for (slot, line) in scene
+        .saves
+        .iter()
+        .enumerate()
+        .skip(rows.first)
+        .take(SAVES_VISIBLE)
+    {
+        let y = rows.top + (slot - rows.first) as f32 * rows.row_h;
+        let lit = slot == rows.selected;
         if lit {
-            let colour = player_colour(menu.owner).with_alpha(0.22);
-            drawing
-                .under
-                .rect(left, y + row_h * 0.06, row_w, row_h * 0.88, colour);
+            lit_row(drawing, &rows, y, player_colour(menu.owner));
         }
         drawing.labels.push(Label {
             text: line.when.clone(),
-            x: left + big * 0.6,
-            y: y + row_h * 0.36,
-            size: big,
+            x: rows.left + rows.big * 0.6,
+            y: y + rows.row_h * 0.36,
+            size: rows.big,
             colour: ink,
             align: Align::Left,
         });
         drawing.labels.push(Label {
             text: line.detail.clone(),
-            x: left + big * 0.6,
-            y: y + row_h * 0.72,
-            size: small,
+            x: rows.left + rows.big * 0.6,
+            y: y + rows.row_h * 0.72,
+            size: rows.small,
             colour: if lit { ink } else { dim },
             align: Align::Left,
         });
+    }
+}
+
+/// The save-state slots over `area`: empty ones say so, and the chosen one
+/// carries the ring of the hold that saves into or loads it.
+fn build_states_list(
+    scene: &Scene,
+    menu: &MenuFrame,
+    browse: &Browse,
+    area: (f32, f32),
+    at: (f32, f32),
+    drawing: &mut Drawing,
+) {
+    let Some(rows) = build_list_frame(
+        scene,
+        browse,
+        area,
+        at,
+        &STATES_WORDS,
+        scene.states.len(),
+        drawing,
+    ) else {
+        return;
+    };
+    let dim = Colour::rgb(theme::TEXT_DIM, 1.0);
+    let ink = Colour::rgb(theme::TEXT, 1.0);
+    let tint = player_colour(menu.owner);
+    for (at, line) in scene
+        .states
+        .iter()
+        .enumerate()
+        .skip(rows.first)
+        .take(SAVES_VISIBLE)
+    {
+        let y = rows.top + (at - rows.first) as f32 * rows.row_h;
+        let lit = at == rows.selected;
+        if lit {
+            lit_row(drawing, &rows, y, tint);
+        }
+        let when = if line.present() {
+            line.when.as_str()
+        } else {
+            SLOT_EMPTY
+        };
+        drawing.labels.push(Label {
+            text: format!("Slot {}   {when}", line.slot),
+            x: rows.left + rows.big * 0.6,
+            y: y + rows.row_h * 0.36,
+            size: rows.big,
+            colour: if line.present() { ink } else { dim },
+            align: Align::Left,
+        });
+        if line.present() {
+            drawing.labels.push(Label {
+                text: line.detail.clone(),
+                x: rows.left + rows.big * 0.6,
+                y: y + rows.row_h * 0.72,
+                size: rows.small,
+                colour: if lit { ink } else { dim },
+                align: Align::Left,
+            });
+        }
+        if lit && menu.a_fill > 0.0 {
+            fill_ring(
+                &mut drawing.over,
+                rows.left + rows.row_w - rows.big,
+                y + rows.row_h * 0.5,
+                rows.big * 0.4,
+                menu.a_fill,
+                tint,
+            );
+        }
     }
 }
 
@@ -1921,9 +2110,92 @@ mod tests {
         let mut scene = menu(focus, 0.0);
         scene.saves = lines;
         if let Some(frame) = scene.menu.as_mut() {
-            frame.saves = crate::frame::Saves { row: true, browse };
+            frame.saves = crate::frame::Saves {
+                row: true,
+                states_row: false,
+                browse,
+            };
         }
         scene
+    }
+
+    fn slots() -> Vec<StateLine> {
+        vec![
+            StateLine {
+                slot: 1,
+                when: "today, 21:10".to_owned(),
+                detail: "usa.zelda".to_owned(),
+            },
+            StateLine {
+                slot: 2,
+                when: String::new(),
+                detail: String::new(),
+            },
+        ]
+    }
+
+    fn with_states(focus: u32, browse: Option<Browse>, lines: &[StateLine]) -> Scene<'_> {
+        let mut scene = menu(focus, 0.0);
+        scene.states = lines;
+        if let Some(frame) = scene.menu.as_mut() {
+            frame.saves = crate::frame::Saves {
+                row: true,
+                states_row: true,
+                browse,
+            };
+        }
+        scene
+    }
+
+    #[test]
+    fn the_list_window_keeps_the_chosen_entry_among_the_visible() {
+        assert_eq!(list_window(0, 3, 5), (0, 0));
+        assert_eq!(list_window(2, 3, 5), (0, 2));
+        assert_eq!(list_window(0, 20, 5), (0, 0));
+        assert_eq!(list_window(10, 20, 5), (8, 10));
+        assert_eq!(list_window(19, 20, 5), (15, 19));
+        assert_eq!(list_window(99, 20, 5), (15, 19), "past the end is the end");
+        assert_eq!(list_window(3, 0, 5), (0, 0), "nothing to show");
+    }
+
+    #[test]
+    fn an_emulator_with_save_states_has_a_row_after_the_saves_and_before_exit() {
+        let said = texts(&with_states(5, None, &[]));
+        assert!(said.iter().any(|t| t == STATES_ROW), "{said:?}");
+        assert!(said.iter().any(|t| t == LOAD_ROW));
+        assert!(said.iter().any(|t| t == STATES_ROW_KEYS), "{said:?}");
+        assert!(texts(&with_states(6, None, &[])).iter().any(|t| t == EXIT_KEYS));
+        assert!(!texts(&with_saves(5, None, &[])).iter().any(|t| t == STATES_ROW));
+    }
+
+    #[test]
+    fn the_slots_say_their_number_when_each_was_written_or_that_it_is_empty() {
+        let lines = slots();
+        let browse = Browse {
+            listed: Listed::Ready(2),
+            selected: 0,
+            confirming: false,
+            states: true,
+        };
+        let mut scene = with_states(5, Some(browse), &lines);
+        scene.menu.as_mut().expect("a menu").a_fill = 0.5;
+        let mut drawing = Drawing::default();
+        build(&scene, &mut drawing);
+        let said: Vec<&str> = drawing.labels.iter().map(|l| l.text.as_str()).collect();
+        assert!(said.contains(&"Slot 1   today, 21:10"), "{said:?}");
+        assert!(said.contains(&"usa.zelda"));
+        assert!(said.contains(&"Slot 2   empty"));
+        assert!(said.contains(&SLOTS_KEYS));
+        assert!(!drawing.over.vertices.is_empty(), "the hold's ring fills");
+        for (listed, want) in [
+            (Listed::Loading, SLOTS_LOADING),
+            (Listed::Failed, SLOTS_FAILED),
+            (Listed::Ready(0), SLOTS_EMPTY),
+        ] {
+            let browse = Browse { listed, ..browse };
+            let said = texts(&with_states(5, Some(browse), &[]));
+            assert!(said.iter().any(|t| t == want), "{want} missing from {said:?}");
+        }
     }
 
     fn texts(scene: &Scene) -> Vec<String> {
@@ -1952,6 +2224,7 @@ mod tests {
             listed: Listed::Ready(3),
             selected: 1,
             confirming: false,
+            states: false,
         };
         let said = texts(&with_saves(4, Some(browse), &lines));
         for line in &lines {
@@ -1972,6 +2245,7 @@ mod tests {
             listed: Listed::Ready(3),
             selected: 2,
             confirming: true,
+            states: false,
         };
         let mut scene = with_saves(4, Some(browse), &lines);
         scene.menu.as_mut().expect("a menu").a_fill = 0.5;
@@ -1995,6 +2269,7 @@ mod tests {
                 listed,
                 selected: 0,
                 confirming: false,
+                states: false,
             };
             let said = texts(&with_saves(4, Some(browse), &[]));
             assert!(said.iter().any(|t| t == want), "{want} missing from {said:?}");

@@ -99,6 +99,7 @@ pub fn menu_frame(
         flags: u32::from(reset) | u32::from(view.notice) << 1,
         saves: frame::Saves {
             row: view.saves_row,
+            states_row: view.states_row,
             browse: view.saves,
         },
     }
@@ -149,6 +150,7 @@ mod tests {
             b_fill: 0.25,
             testing: false,
             saves_row: true,
+            states_row: false,
             saves: None,
             hover: None,
             notice: false,

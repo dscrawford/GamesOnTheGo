@@ -17,6 +17,7 @@ use crate::loading::{SaveLine, Session};
 use crate::menu::Listed;
 use crate::overlay::Overlay;
 use crate::scene::{self, Drawing, Scene};
+use crate::states::StateLine;
 
 /// After a painter that would not start or went by itself: two seconds, then
 /// four, up to half a minute. A machine with no display would otherwise start
@@ -218,6 +219,8 @@ pub fn paint() -> i32 {
     let session = Session::from_env();
     let mut saves: Vec<SaveLine> = Vec::new();
     let mut saves_for: Option<usize> = None;
+    let mut states: Vec<StateLine> = Vec::new();
+    let mut states_for: Option<usize> = None;
     loop {
         // Asleep until the kill switch sends something new: it sends only
         // when the picture changed, so an unchanged bar costs no redraws.
@@ -235,17 +238,23 @@ pub fn paint() -> i32 {
         let Some(frame) = latest else { continue };
         // The saves' words, from the session the client listed them into:
         // read once a list is ready, again only when another one is.
-        match frame.menu.and_then(|menu| menu.saves.browse).map(|b| b.listed) {
-            Some(Listed::Ready(count)) if saves_for != Some(count) => {
-                saves = session.as_ref().map(Session::lines).unwrap_or_default();
-                saves_for = Some(count);
-            }
-            Some(Listed::Ready(_)) => {}
-            _ => saves_for = None,
-        }
+        let browse = frame.menu.and_then(|menu| menu.saves.browse);
+        refresh(
+            browse.filter(|b| !b.states).map(|b| b.listed),
+            &mut saves_for,
+            &mut saves,
+            || session.as_ref().map(Session::lines).unwrap_or_default(),
+        );
+        refresh(
+            browse.filter(|b| b.states).map(|b| b.listed),
+            &mut states_for,
+            &mut states,
+            || session.as_ref().map(Session::state_lines).unwrap_or_default(),
+        );
         let (width, bar_height, panel_height) = overlay.size();
         let scene = Scene {
             saves: &saves,
+            states: &states,
             panel_height,
             rebind: frame.rebind,
             menu: frame.menu,
@@ -271,6 +280,23 @@ pub fn paint() -> i32 {
         }
     }
     0
+}
+
+/// A list's words, read once it is ready and again only when another one is.
+fn refresh<T>(
+    listed: Option<Listed>,
+    read_for: &mut Option<usize>,
+    lines: &mut Vec<T>,
+    read: impl FnOnce() -> Vec<T>,
+) {
+    match listed {
+        Some(Listed::Ready(count)) if *read_for != Some(count) => {
+            *lines = read();
+            *read_for = Some(count);
+        }
+        Some(Listed::Ready(_)) => {}
+        _ => *read_for = None,
+    }
 }
 
 #[cfg(test)]

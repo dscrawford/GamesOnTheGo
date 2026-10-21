@@ -211,14 +211,14 @@ invite_code() {
   [[ "$stderr" == *"revoked or expired"* ]]
 }
 
-@test "a refused token cannot stop a launch: the pre-play pull shrugs" {
+@test "a refused token cannot stop a launch: the pre-play sync shrugs" {
   load_client_libs
   # shellcheck source=/dev/null
   source "$GOTG_LIB/cmd-saves.sh"
   saves_tmp_init
   fake_env env-snes '["saves/**"]'
   write_api_config "gotg_bogus"
-  run saves_pull_auto env-snes
+  run saves_sync_auto env-snes
   [ "$status" -eq 0 ]
 }
 
