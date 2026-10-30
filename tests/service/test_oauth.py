@@ -355,7 +355,9 @@ def test_unverified_github_email_does_not_count(tmp_path, github):
     base, profile, _ = github
     profile["userinfo"] = {"login": "someone", "id": 3}
     profile["emails"] = [{"email": "a@corp.test", "primary": True, "verified": False}]
-    with serve(config_for(base, oidc_allowlist=("a@corp.test",)), token_store=TokenStore(db=tmp_path / "t.db")) as server:
+    with serve(
+        config_for(base, oidc_allowlist=("a@corp.test",)), token_store=TokenStore(db=tmp_path / "t.db")
+    ) as server:
         assert sign_in(server.url)[1][0] == 403
 
 

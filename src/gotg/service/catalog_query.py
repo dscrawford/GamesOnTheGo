@@ -13,7 +13,9 @@ DEFAULT_LIMIT = 50
 MAX_LIMIT = 500
 SORTS = {"title": "title", "id": "id", "size": "size_bytes", "platform": "platform"}
 # Parameters that switch /catalog into its paged form.
-PAGED_PARAMS = frozenset({"limit", "offset", "q", "platform", "region", "handler", "sort", "order", "min_size", "max_size", "facets"})
+PAGED_PARAMS = frozenset(
+    {"limit", "offset", "q", "platform", "region", "handler", "sort", "order", "min_size", "max_size", "facets"}
+)
 
 
 def region_of(game_id: str) -> str:
@@ -97,8 +99,17 @@ def select(games: list[dict], params: dict[str, list[str]]) -> dict:
 
     matched = [g for g in rows if keep(g)]
     key = SORTS[sort]
-    matched.sort(key=lambda g: (str(g[key]).lower() if key != "size_bytes" else g[key], g["platform"], g["id"]), reverse=order == "desc")
-    reply = {"version": 2, "total": len(matched), "offset": offset, "limit": limit, "games": matched[offset : offset + limit]}
+    matched.sort(
+        key=lambda g: (str(g[key]).lower() if key != "size_bytes" else g[key], g["platform"], g["id"]),
+        reverse=order == "desc",
+    )
+    reply = {
+        "version": 2,
+        "total": len(matched),
+        "offset": offset,
+        "limit": limit,
+        "games": matched[offset : offset + limit],
+    }
     if params.get("facets", ["0"])[-1] in ("1", "true"):
         reply["facets"] = facets
     return reply

@@ -33,7 +33,15 @@ def service(tmp_path):
             {
                 "handler": handler,
                 "title": title,
-                "files": [{"name": f"{game_id}.bin", "path": str(root / f"{game_id}.bin"), "size_bytes": size, "mtime": 1, "sha256": "a" * 64}],
+                "files": [
+                    {
+                        "name": f"{game_id}.bin",
+                        "path": str(root / f"{game_id}.bin"),
+                        "size_bytes": size,
+                        "mtime": 1,
+                        "sha256": "a" * 64,
+                    }
+                ],
             },
         )
     with serve(Config(token=CLIENT), None, catalog) as server:
@@ -98,7 +106,9 @@ def test_facets_count_everything_not_just_the_page(service):
     assert reply["facets"]["region"]["usa"] == 3
 
 
-@pytest.mark.parametrize("query", ["limit=0", "limit=100000", "limit=x", "offset=-1", "sort=nope", "order=up", "min_size=a"])
+@pytest.mark.parametrize(
+    "query", ["limit=0", "limit=100000", "limit=x", "offset=-1", "sort=nope", "order=up", "min_size=a"]
+)
 def test_bad_parameters_are_400(service, query):
     status, reply = get(service, f"/catalog?{query}")
     assert status == 400 and "error" in reply

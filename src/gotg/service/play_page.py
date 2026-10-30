@@ -158,7 +158,6 @@ button, input { font: inherit; padding: .4rem .7rem; }
 """
 
 
-
 def _load_script() -> str:
     from importlib import resources
 

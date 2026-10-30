@@ -58,7 +58,9 @@ def test_plan_for_a_launcher_system():
     }
 
 
-@pytest.mark.parametrize("platform,game_id", [("../x", "usa.a"), ("snes", "nodot"), ("SNES", "usa.a"), ("snes", "usa.a/b")])
+@pytest.mark.parametrize(
+    "platform,game_id", [("../x", "usa.a"), ("snes", "nodot"), ("SNES", "usa.a"), ("snes", "usa.a/b")]
+)
 def test_plan_refuses_names_that_are_not_catalog_shaped(platform, game_id):
     assert play_page.play_plan(platform, game_id) is None
 
@@ -89,7 +91,9 @@ def test_plan_route_answers(served):
 
 def test_page_is_served_without_a_token_with_a_strict_policy(served):
     for path in ("/play/", "/play", "/play/app.js", "/play/app.css"):
-        status, headers, body = served.call("GET", path + ("?platform=nes&id=usa.x" if path == "/play/" else ""), token=None)
+        status, headers, body = served.call(
+            "GET", path + ("?platform=nes&id=usa.x" if path == "/play/" else ""), token=None
+        )
         assert status == 200 and body
         assert "script-src 'self'" in headers["Content-Security-Policy"]
         assert "http" not in headers["Content-Security-Policy"]

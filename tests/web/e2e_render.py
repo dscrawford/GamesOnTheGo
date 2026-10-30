@@ -1,6 +1,6 @@
 """Headless-browser check of the SPA against the mock server (not collected by pytest: needs playwright).
 
-    PLAYWRIGHT_BROWSERS_PATH=<browsers> PYTHONPATH=src:tests/web python tests/web/e2e_render.py [outdir]
+PLAYWRIGHT_BROWSERS_PATH=<browsers> PYTHONPATH=src:tests/web python tests/web/e2e_render.py [outdir]
 """
 
 from __future__ import annotations
@@ -21,7 +21,9 @@ with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page(viewport={"width": 1100, "height": 800})
     page.on("pageerror", lambda e: errors.append(str(e)))
-    page.on("console", lambda m: m.type == "error" and "Failed to load resource" not in m.text and errors.append(m.text))
+    page.on(
+        "console", lambda m: m.type == "error" and "Failed to load resource" not in m.text and errors.append(m.text)
+    )
 
     page.goto(f"{base}/ui/")
     expect(page.locator("#login")).to_be_visible()  # 401 -> sign-in prompt
@@ -55,7 +57,10 @@ with sync_playwright() as p:
     page.screenshot(path=out / "3-saves.png")
 
     # Conflict: upload based on the stale head? The page's head is h2; make the mock's head move first.
-    page.set_input_files("[data-attr=env-n64-usa_game_00] input[type=file]", {"name": "b.tar.zst", "mimeType": "application/zstd", "buffer": b"zz"})
+    page.set_input_files(
+        "[data-attr=env-n64-usa_game_00] input[type=file]",
+        {"name": "b.tar.zst", "mimeType": "application/zstd", "buffer": b"zz"},
+    )
     page.evaluate("fetch('/saves/env-n64-usa_game_00', {method:'PUT', body:'other', headers:{'X-Gotg-Parent':'h2'}})")
     page.get_by_text("Upload as new head").first.click()
     expect(page.get_by_role("alert")).to_contain_text("Conflict")
