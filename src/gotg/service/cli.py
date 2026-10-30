@@ -215,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     files_dir = Path(os.environ["GOTG_FILES_DIR"]) if os.environ.get("GOTG_FILES_DIR") else None
+    ejs_dir = Path(os.environ["GOTG_EJS_DIR"]) if os.environ.get("GOTG_EJS_DIR") else None
     try:
         stream_slots = int(os.environ.get("GOTG_STREAM_SLOTS", "4"))
         if stream_slots < 1:
@@ -227,6 +228,7 @@ def main(argv: list[str] | None = None) -> int:
         "logs": logs,
         "catalog": catalog,
         "files_dir": files_dir,
+        "ejs_dir": ejs_dir,
         "stream_slots": stream_slots,
         "token_store": token_store,
         "art": art,

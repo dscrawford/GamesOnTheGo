@@ -1,0 +1,118 @@
+"""The browser player: the platform mapping, the plan route, the static page."""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+
+import pytest
+from harness import CLIENT_TOKEN, serve
+
+from gotg.saves import ATTR_RE
+from gotg.service import play_page
+from gotg.service.app import Config
+
+RULES = Path(__file__).parents[2] / "src/gotg/indexer/rules.yaml"
+CONFIG = Path(__file__).parents[2] / "config/controllers"
+
+
+def test_every_mapped_platform_is_a_real_platform_shape():
+    for slug, core in play_page.CORES.items():
+        assert re.match(r"^[a-z0-9][a-z0-9_-]{0,15}$", slug)
+        assert core.system and core.core and core.exts
+
+
+def test_the_mapped_systems_that_the_indexer_knows_are_the_wasm_ones():
+    rules = RULES.read_text()
+    known = set(re.findall(r"platform: (\w+)", rules))
+    # Everything the indexer emits is either mapped or sent to the launcher; the
+    # heavy ones are deliberately not mapped.
+    for slug in ("gamecube",):
+        assert slug in known and slug not in play_page.CORES
+    for slug in ("nes", "snes", "gb", "gba", "genesis", "n64"):
+        assert slug in known and slug in play_page.CORES
+    assert play_page.CORES["gb"].system == play_page.CORES["gbc"].system
+
+
+def test_gbc_is_a_platform_the_controller_config_names():
+    assert "gbc" in (CONFIG / "gameboy.yaml").read_text()
+
+
+def test_plan_for_a_browser_system():
+    plan = play_page.play_plan("snes", "usa.super_metroid")
+    assert plan["mode"] == "browser"
+    assert plan["system"] == "snes"
+    assert plan["nix"] == "nix run gotg#snes.usa.super_metroid"
+    assert ATTR_RE.match(plan["save_attr"])
+    assert plan["save_attr"] == "env-web-snes-usa_super_metroid"
+
+
+def test_plan_for_a_launcher_system():
+    plan = play_page.play_plan("gamecube", "usa.luigis_mansion")
+    assert plan == {
+        "platform": "gamecube",
+        "id": "usa.luigis_mansion",
+        "nix": "nix run gotg#gamecube.usa.luigis_mansion",
+        "mode": "nix",
+    }
+
+
+@pytest.mark.parametrize("platform,game_id", [("../x", "usa.a"), ("snes", "nodot"), ("SNES", "usa.a"), ("snes", "usa.a/b")])
+def test_plan_refuses_names_that_are_not_catalog_shaped(platform, game_id):
+    assert play_page.play_plan(platform, game_id) is None
+
+
+@pytest.fixture
+def served(tmp_path):
+    ejs = tmp_path / "ejs"
+    (ejs / "data").mkdir(parents=True)
+    (ejs / "data" / "loader.js").write_text("// loader")
+    (tmp_path / "secret.txt").write_text("nope")
+    with serve(Config(token=CLIENT_TOKEN), ejs_dir=ejs) as s:
+        yield s
+
+
+def test_plan_route_needs_a_token(served):
+    assert served.call("GET", "/play/plan/snes/usa.x", token=None)[0] == 401
+
+
+def test_plan_route_answers(served):
+    status, _, body = served.call("GET", "/play/plan/n64/usa.x")
+    assert status == 200
+    plan = json.loads(body)
+    assert plan["mode"] == "browser" and plan["experimental"] is True
+    assert json.loads(served.call("GET", "/play/plan/switch/usa.x")[2])["mode"] == "nix"
+    assert served.call("GET", "/play/plan/n64/bad")[0] == 404
+    assert served.call("POST", "/play/plan/n64/usa.x")[0] == 404
+
+
+def test_page_is_served_without_a_token_with_a_strict_policy(served):
+    for path in ("/play/", "/play", "/play/app.js", "/play/app.css"):
+        status, headers, body = served.call("GET", path + ("?platform=nes&id=usa.x" if path == "/play/" else ""), token=None)
+        assert status == 200 and body
+        assert "script-src 'self'" in headers["Content-Security-Policy"]
+        assert "http" not in headers["Content-Security-Policy"]
+
+
+def test_script_uses_the_saves_api_with_parent_and_pull_first():
+    script = play_page.routes()["play/app.js"][0].decode()
+    assert "X-Gotg-Parent" in script and "/saves/" in script and "/games/" in script
+    assert script.index("lastFiles = await pull()") < script.index("start(await download")
+
+
+def test_ejs_assets_are_served_from_the_directory_only(served):
+    assert served.call("GET", "/play/ejs/data/loader.js", token=None)[2] == b"// loader"
+    for bad in ("/play/ejs/../secret.txt", "/play/ejs/%2e%2e/secret.txt", "/play/ejs/data", "/play/ejs/nothing.js"):
+        assert served.call("GET", bad, token=None)[0] == 404
+
+
+def test_without_an_ejs_directory_the_assets_say_so():
+    with serve(Config(token=CLIENT_TOKEN)) as s:
+        status, _, body = s.call("GET", "/play/ejs/data/loader.js", token=None)
+        assert status == 404 and b"browser-play" in body
+
+
+def test_admin_listener_has_no_player():
+    with serve(Config(token=CLIENT_TOKEN, admin_token="a" * 20), listener="admin") as s:
+        assert s.call("GET", "/play/", token=None)[0] == 404

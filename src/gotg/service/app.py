@@ -64,6 +64,7 @@ from .routes_files import FileRoutes
 from .routes_logs import LogsRoutes
 from .routes_oauth import ROUTES as OAUTH_ROUTES
 from .routes_oauth import SESSION_COOKIE, OAuthRoutes
+from .routes_play import PlayRoutes
 from .routes_saves import SavesRoutes
 from .routes_static import StaticRoutes, static_file
 from .token_cache import TokenCache
@@ -195,6 +196,7 @@ def body_cap(prefix: str, command: str, store: SavesStore | None, logs: LogsStor
 
 
 class Handler(
+    PlayRoutes,
     StaticRoutes,
     ArtRoutes,
     SavesRoutes,
@@ -211,6 +213,7 @@ class Handler(
     logs: LogsStore | None
     catalog: CatalogStore | None
     files_dir: Path | None
+    ejs_dir: Path | None = None
     streams: threading.BoundedSemaphore
     scans: threading.BoundedSemaphore
     token_store: TokenStore | None
@@ -660,6 +663,8 @@ class Handler(
         if clean in OAUTH_ROUTES:
             self._oauth_route(clean)
             return True
+        if self._serve_play_page(clean):
+            return True
 
         if clean == "healthz":
             self.close_connection = True
@@ -715,6 +720,8 @@ class Handler(
             self._games(rest)
         elif prefix == "files":
             self._files(rest)
+        elif prefix == "play":
+            self._play(rest)
         elif prefix == "auth":
             self._auth(rest, principal)
         elif prefix == "admin":
@@ -752,6 +759,7 @@ def make_server(
     auth_neg_ttl: float = 5.0,
     listener: str = "both",
     logs: LogsStore | None = None,
+    ejs_dir: Path | None = None,
 ) -> ThreadingHTTPServer:
     """Threading, because one slow upstream must not block every other client.
 
@@ -770,6 +778,7 @@ def make_server(
             "logs": logs,
             "catalog": catalog,
             "files_dir": files_dir,
+            "ejs_dir": ejs_dir,
             "streams": threading.BoundedSemaphore(stream_slots),
             "scans": threading.BoundedSemaphore(1),
             "token_store": token_store,
