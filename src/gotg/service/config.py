@@ -88,20 +88,9 @@ class Config:
     # How hard anybody may lean on an upstream through this proxy, in requests
     # per second, with a burst for the ordinary case of one client opening a
     # grid. Cache hits are not counted: they cost the upstream nothing.
-    # Sign-in (oauth.py). Off unless oauth_client_id is set. "github" or "oidc";
-    # for oidc give the issuer (discovery) or the three endpoint urls.
-    oauth_provider: str = "github"
-    oauth_client_id: str = ""
-    oauth_client_secret: str = ""
-    oauth_issuer: str = ""
-    oauth_authorize_url: str = ""
-    oauth_token_url: str = ""
-    oauth_userinfo_url: str = ""
-    oauth_scopes: str = ""
-    oauth_redirect_uri: str = ""
-    # Usernames, verified emails or "@domain"s that may sign in; empty admits nobody.
-    oauth_allow: tuple[str, ...] = ()
-    oauth_session_days: float = 30.0
+    # How hard anybody may lean on an upstream through this proxy, in requests
+    # per second, with a burst for the ordinary case of one client opening a
+    # grid. Cache hits are not counted: they cost the upstream nothing.
     upstream_rate: float = 2.0
     upstream_burst: float = 10.0
     # The longest a paced request will sit on a thread before being told 429
@@ -131,6 +120,11 @@ class Config:
     cookie_secure: bool = True
     cookie_samesite: str = "Lax"
     session_ttl: int = 604800
+    # Explicit endpoints (override discovery / the GitHub defaults) and scopes.
+    oidc_authorize_url: str = ""
+    oidc_token_url: str = ""
+    oidc_userinfo_url: str = ""
+    oidc_scopes: str = ""
 
     @property
     def oidc_enabled(self) -> bool:
@@ -166,17 +160,6 @@ class Config:
                 "seeing server paths must not come with any other power."
             )
         self._validate_oidc()
-        if self.oauth_client_id:
-            if self.oauth_provider not in ("github", "oidc"):
-                raise ValueError(f"GOTG_OAUTH_PROVIDER is github or oidc, not {self.oauth_provider!r}")
-            if not (self.oauth_redirect_uri or self.public_url):
-                raise ValueError("sign-in needs GOTG_PUBLIC_URL (or GOTG_OAUTH_REDIRECT_URI) for its callback")
-            if self.oauth_provider == "oidc" and not (
-                self.oauth_issuer or (self.oauth_authorize_url and self.oauth_token_url and self.oauth_userinfo_url)
-            ):
-                raise ValueError("an oidc provider needs GOTG_OAUTH_ISSUER or all three endpoint urls")
-            if not 0 < self.oauth_session_days <= 3650:
-                raise ValueError("GOTG_OAUTH_SESSION_DAYS must be between 0 and 3650")
         return self
 
     def _validate_oidc(self) -> None:
@@ -193,8 +176,9 @@ class Config:
             "GOTG_SESSION_SECRET[_FILE]": self.session_secret,
             "GOTG_OIDC_ALLOWLIST": self.oidc_allowlist,
         }
-        if self.oidc_provider == "oidc":
-            needed["GOTG_OIDC_ISSUER_URL"] = self.oidc_issuer_url
+        explicit = self.oidc_authorize_url and self.oidc_token_url and self.oidc_userinfo_url
+        if self.oidc_provider == "oidc" and not explicit:
+            needed["GOTG_OIDC_ISSUER_URL (or all three endpoint urls)"] = self.oidc_issuer_url
         missing = [k for k, v in needed.items() if not v]
         if missing:
             raise ValueError(f"web sign-in is half configured; missing {', '.join(missing)}")

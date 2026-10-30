@@ -156,30 +156,30 @@ class OAuth:
     # --- configuration ------------------------------------------------------
 
     def redirect_uri(self) -> str:
-        return self.config.oauth_redirect_uri or f"{self.config.public_url}/auth/callback"
+        return self.config.oidc_redirect_url or f"{self.config.public_url}/auth/callback"
 
     def endpoints(self) -> Endpoints:
         with self._lock:
             if self._endpoints is not None:
                 return self._endpoints
         config = self.config
-        if config.oauth_provider == "github":
+        if config.oidc_provider == "github":
             found = Endpoints(
-                config.oauth_authorize_url or GITHUB_AUTHORIZE,
-                config.oauth_token_url or GITHUB_TOKEN,
-                config.oauth_userinfo_url or GITHUB_USERINFO,
-                config.oauth_scopes or GITHUB_SCOPES,
+                config.oidc_authorize_url or GITHUB_AUTHORIZE,
+                config.oidc_token_url or GITHUB_TOKEN,
+                config.oidc_userinfo_url or GITHUB_USERINFO,
+                config.oidc_scopes or GITHUB_SCOPES,
             )
         else:
-            authorize, token, userinfo = config.oauth_authorize_url, config.oauth_token_url, config.oauth_userinfo_url
-            if config.oauth_issuer and not (authorize and token and userinfo):
-                doc = self._json(f"{config.oauth_issuer}/.well-known/openid-configuration")
+            authorize, token, userinfo = config.oidc_authorize_url, config.oidc_token_url, config.oidc_userinfo_url
+            if config.oidc_issuer_url and not (authorize and token and userinfo):
+                doc = self._json(f"{config.oidc_issuer_url}/.well-known/openid-configuration")
                 authorize = authorize or doc.get("authorization_endpoint", "")
                 token = token or doc.get("token_endpoint", "")
                 userinfo = userinfo or doc.get("userinfo_endpoint", "")
             if not (authorize and token and userinfo):
                 raise ProviderError("the OIDC provider's endpoints are unknown")
-            found = Endpoints(authorize, token, userinfo, config.oauth_scopes or OIDC_SCOPES)
+            found = Endpoints(authorize, token, userinfo, config.oidc_scopes or OIDC_SCOPES)
         with self._lock:
             self._endpoints = found
         return found
@@ -191,7 +191,7 @@ class OAuth:
         query = urllib.parse.urlencode(
             {
                 "response_type": "code",
-                "client_id": self.config.oauth_client_id,
+                "client_id": self.config.oidc_client_id,
                 "redirect_uri": self.redirect_uri(),
                 "scope": endpoints.scopes,
                 "state": state,
@@ -209,18 +209,18 @@ class OAuth:
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": self.redirect_uri(),
-            "client_id": self.config.oauth_client_id,
+            "client_id": self.config.oidc_client_id,
             "code_verifier": verifier,
         }
-        if self.config.oauth_client_secret:
-            form["client_secret"] = self.config.oauth_client_secret
+        if self.config.oidc_client_secret:
+            form["client_secret"] = self.config.oidc_client_secret
         answer = self._json(endpoints.token, data=urllib.parse.urlencode(form).encode())
         access = answer.get("access_token")
         if not isinstance(access, str) or not access:
             raise ProviderError(f"the provider gave no access token ({answer.get('error', 'unknown')})")
         auth = {"Authorization": f"Bearer {access}"}
         info = self._json(endpoints.userinfo, headers=auth)
-        if self.config.oauth_provider == "github":
+        if self.config.oidc_provider == "github":
             return self._github_identity(info, endpoints.userinfo, auth)
         email = info.get("email") if info.get("email_verified") is True else ""
         login = info.get("preferred_username") or ""

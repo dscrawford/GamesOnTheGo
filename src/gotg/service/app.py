@@ -63,7 +63,7 @@ from .routes_catalog import CatalogRoutes
 from .routes_files import FileRoutes
 from .routes_logs import LogsRoutes
 from .routes_oauth import ROUTES as OAUTH_ROUTES
-from .routes_oauth import SESSION_COOKIE, OAuthRoutes
+from .routes_oauth import OAuthRoutes
 from .routes_play import PlayRoutes
 from .routes_saves import SavesRoutes
 from .routes_static import StaticRoutes, static_file
@@ -403,7 +403,7 @@ class Handler(
     def _cookie_principal(self) -> str | None:
         """The session cookie as a principal: a personal token and nothing else,
         so a cookie can never be one of the shared secrets."""
-        value = self._cookie(SESSION_COOKIE)
+        value = self._cookie(self.config.cookie_name)
         if not TOKEN_RE.match(value):
             return None
         if self.token_store is not None:
@@ -782,7 +782,7 @@ def make_server(
             "streams": threading.BoundedSemaphore(stream_slots),
             "scans": threading.BoundedSemaphore(1),
             "token_store": token_store,
-            "oauth": OAuth(config) if config.oauth_client_id else None,
+            "oauth": OAuth(config) if config.oidc_enabled else None,
             "art": art,
             # One bucket per upstream: they are different quotas, and a warm
             # run against SteamGridDB must not throttle an IGDB lookup.

@@ -90,12 +90,15 @@ def config_for(base, **extra):
         token=LEGACY,
         admin_token=ADMIN,
         public_url="https://gotg.example",
-        oauth_client_id="cid",
-        oauth_client_secret="sec",
-        oauth_authorize_url=f"{base}/authorize",
-        oauth_token_url=f"{base}/token",
-        oauth_userinfo_url=f"{base}/user",
-        oauth_allow=("alice",),
+        oidc_provider="github",
+        oidc_client_id="cid",
+        oidc_client_secret="sec",
+        oidc_redirect_url="https://gotg.example/auth/callback",
+        session_secret="s" * 40,
+        oidc_authorize_url=f"{base}/authorize",
+        oidc_token_url=f"{base}/token",
+        oidc_userinfo_url=f"{base}/user",
+        oidc_allowlist=("alice",),
     )
     fields.update(extra)
     return Config(**fields)
@@ -343,7 +346,7 @@ def test_github_verified_primary_email_matches_the_allowlist(tmp_path, github):
     base, profile, _ = github
     profile["userinfo"] = {"login": "someone", "id": 3}
     profile["emails"] = [{"email": "a@corp.test", "primary": True, "verified": True}]
-    config = config_for(base, oauth_allow=("@corp.test",))
+    config = config_for(base, oidc_allowlist=("@corp.test",))
     with serve(config, token_store=TokenStore(db=tmp_path / "t.db")) as server:
         assert sign_in(server.url)[1][0] == 302
 
@@ -352,7 +355,7 @@ def test_unverified_github_email_does_not_count(tmp_path, github):
     base, profile, _ = github
     profile["userinfo"] = {"login": "someone", "id": 3}
     profile["emails"] = [{"email": "a@corp.test", "primary": True, "verified": False}]
-    with serve(config_for(base, oauth_allow=("a@corp.test",)), token_store=TokenStore(db=tmp_path / "t.db")) as server:
+    with serve(config_for(base, oidc_allowlist=("a@corp.test",)), token_store=TokenStore(db=tmp_path / "t.db")) as server:
         assert sign_in(server.url)[1][0] == 403
 
 
@@ -362,10 +365,11 @@ def test_oidc_by_issuer_discovery(tmp_path):
         config = Config(
             token=LEGACY,
             public_url="http://gotg.test",
-            oauth_provider="oidc",
-            oauth_client_id="cid",
-            oauth_issuer=provider.url,
-            oauth_allow=("bob@x.test",),
+            cookie_secure=False,
+            oidc_provider="oidc",
+            oidc_client_id="cid",
+            oidc_issuer_url=provider.url,
+            oidc_allowlist=("bob@x.test",),
         )
         with serve(config, token_store=TokenStore(db=tmp_path / "t.db")) as server:
             query, (status, headers, _) = sign_in(server.url)
@@ -381,10 +385,11 @@ def test_oidc_unverified_email_is_not_identity(tmp_path):
         config = Config(
             token=LEGACY,
             public_url="http://gotg.test",
-            oauth_provider="oidc",
-            oauth_client_id="cid",
-            oauth_issuer=provider.url,
-            oauth_allow=("bob@x.test",),
+            cookie_secure=False,
+            oidc_provider="oidc",
+            oidc_client_id="cid",
+            oidc_issuer_url=provider.url,
+            oidc_allowlist=("bob@x.test",),
         )
         with serve(config, token_store=TokenStore(db=tmp_path / "t.db")) as server:
             assert sign_in(server.url)[1][0] == 403
@@ -413,16 +418,69 @@ def test_safe_next():
     assert safe_next(None) == "/" and safe_next("http://x") == "/" and safe_next("/a\r\nb") == "/"
 
 
-def test_config_from_env_and_validation():
+SECRET = "x" * 40
+
+
+def test_config_reads_the_deploy_names():
+    config = config_from_env(
+        {
+            "GOTG_PROXY_TOKEN": "t",
+            "GOTG_OIDC_PROVIDER": "github",
+            "GOTG_OIDC_CLIENT_ID": "cid",
+            "GOTG_OIDC_CLIENT_SECRET": "sec",
+            "GOTG_OIDC_REDIRECT_URL": "https://g.test/auth/callback",
+            "GOTG_OIDC_ALLOWLIST": "Alice, @corp.test",
+            "GOTG_SESSION_SECRET": SECRET,
+        }
+    )
+    assert config.oidc_enabled and config.oidc_allowlist == ("@corp.test", "alice")
+
+
+def test_oauth_names_are_accepted_aliases():
     env = {
         "GOTG_PROXY_TOKEN": "t",
         "GOTG_PUBLIC_URL": "https://g.test/",
         "GOTG_OAUTH_CLIENT_ID": "cid",
+        "GOTG_OAUTH_CLIENT_SECRET": "sec",
         "GOTG_OAUTH_ALLOW": "Alice, @corp.test",
+        "GOTG_OAUTH_SESSION_DAYS": "2",
+        "GOTG_OAUTH_AUTHORIZE_URL": "https://p.test/a",
+        "GOTG_SESSION_SECRET": SECRET,
     }
     config = config_from_env(env)
-    assert config.oauth_provider == "github" and config.oauth_allow == ("Alice", "@corp.test")
-    with pytest.raises(ValueError, match="PUBLIC_URL"):
-        config_from_env({"GOTG_PROXY_TOKEN": "t", "GOTG_OAUTH_CLIENT_ID": "cid"})
+    assert config.oidc_provider == "github" and config.oidc_client_id == "cid"
+    assert config.oidc_client_secret == "sec" and config.oidc_authorize_url == "https://p.test/a"
+    assert config.oidc_allowlist == ("@corp.test", "alice")
+    assert config.oidc_redirect_url == "https://g.test/auth/callback"
+    assert config.session_ttl == 2 * 86400
+    # The deploy name wins when both are set.
+    both = config_from_env({**env, "GOTG_OIDC_CLIENT_ID": "new", "GOTG_SESSION_TTL": "60"})
+    assert both.oidc_client_id == "new" and both.session_ttl == 60
+
+
+def test_validation_still_applies_through_aliases():
+    base = {"GOTG_PROXY_TOKEN": "t", "GOTG_OAUTH_CLIENT_ID": "cid", "GOTG_OAUTH_PROVIDER": "oidc"}
+    with pytest.raises(ValueError, match="half configured"):
+        config_from_env(base)
     with pytest.raises(ValueError, match="ISSUER"):
-        config_from_env({**env, "GOTG_OAUTH_PROVIDER": "oidc"})
+        config_from_env(
+            {
+                **base,
+                "GOTG_OAUTH_CLIENT_SECRET": "s",
+                "GOTG_OAUTH_ALLOW": "a",
+                "GOTG_OAUTH_REDIRECT_URI": "https://g.test/auth/callback",
+                "GOTG_SESSION_SECRET": SECRET,
+            }
+        )
+
+
+def test_session_cookie_uses_configured_name_and_flags(tmp_path, github):
+    base, _, _ = github
+    config = config_for(base, cookie_name="my_sess", cookie_samesite="Strict")
+    with serve(config, token_store=TokenStore(db=tmp_path / "t.db")) as server:
+        _, (status, headers, _) = sign_in(server.url)
+        assert status == 302
+        cookie = cookies(headers)["my_sess"]
+        assert "SameSite=Strict" in cookie and "Secure" in cookie and "Max-Age=604800" in cookie
+        who = raw(f"{server.url}/auth/whoami", headers={"Cookie": "my_sess=" + cookie.split(";")[0]})
+        assert who[0] == 200

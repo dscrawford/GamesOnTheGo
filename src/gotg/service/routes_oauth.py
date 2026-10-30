@@ -17,7 +17,6 @@ import urllib.parse
 
 from .oauth import ProviderError, allowed, pkce_pair, safe_next, user_slug
 
-SESSION_COOKIE = "gotg_session"
 STATE_COOKIE = "gotg_oauth_state"
 MAX_FORM = 4096
 
@@ -75,8 +74,11 @@ class OAuthRoutes:
         return ""
 
     def _set_cookie(self, name: str, value: str, max_age: int) -> str:
-        secure = "; Secure" if self.config.public_url.startswith("https://") else ""
-        return f"{name}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}"
+        # The state cookie must ride the provider's cross-site redirect back, so it is Lax even
+        # when the session cookie is Strict.
+        samesite = "Lax" if name == STATE_COOKIE else self.config.cookie_samesite
+        secure = "; Secure" if self.config.cookie_secure else ""
+        return f"{name}={value}; Path=/; HttpOnly; SameSite={samesite}; Max-Age={max_age}{secure}"
 
     def _redirect(self, location: str, cookies: list[str] = ()) -> None:  # noqa: B006
         self.send_response(302)
@@ -192,13 +194,13 @@ class OAuthRoutes:
             print(f"sign-in failed: {error}", file=sys.stderr)
             self._problem(502, "the identity provider failed; try again")
             return
-        if not allowed(identity, self.config.oauth_allow):
+        if not allowed(identity, self.config.oidc_allowlist):
             print(f"sign-in refused: {identity.login or identity.subject}", file=sys.stderr)
             self._problem(403, "this account is not on the allowlist")
             return
-        ttl = self.config.oauth_session_days * 86400
+        ttl = self.config.session_ttl
         _, token = self._mint(user_slug(identity), "web", ttl)
-        self._redirect(pending["next"], [self._set_cookie(SESSION_COOKIE, token, int(ttl)), clear])
+        self._redirect(pending["next"], [self._set_cookie(self.config.cookie_name, token, int(ttl)), clear])
 
     def _oauth_logout(self) -> None:
         if self._csrf_refused():
@@ -207,7 +209,7 @@ class OAuthRoutes:
         name = self._cookie_principal()
         if name:
             self.token_store.revoke(name)
-        self._json(200, {"ok": True}, {"Set-Cookie": self._set_cookie(SESSION_COOKIE, "", 0)})
+        self._json(200, {"ok": True}, {"Set-Cookie": self._set_cookie(self.config.cookie_name, "", 0)})
 
     # --- device flow ---------------------------------------------------------
 
@@ -239,7 +241,7 @@ class OAuthRoutes:
         status, user = self.oauth.poll_device(fields.get("device_code", ""))
         if status == "approved":
             # Named per device, so revoking the CLI leaves the browser signed in.
-            name, token = self._mint(user, "cli", self.config.oauth_session_days * 86400)
+            name, token = self._mint(user, "cli", self.config.session_ttl)
             self._json(200, {"name": name, "user": user, "token": token})
             return
         error = {"pending": "authorization_pending", "slow_down": "slow_down", "expired": "expired_token"}[status]

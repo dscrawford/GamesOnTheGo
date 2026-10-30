@@ -66,6 +66,33 @@ def _flag(env: Mapping[str, str], name: str, fallback: bool) -> bool:
     raise ValueError(f"{name} is not a boolean: {raw!r}")
 
 
+def _alias(env: Mapping[str, str], name: str, legacy: str) -> str:
+    """NAME, or its earlier GOTG_OAUTH_* spelling. The new name wins."""
+    return env.get(name, "") or env.get(legacy, "")
+
+
+def _oidc_provider(env: Mapping[str, str]) -> str:
+    provider = _alias(env, "GOTG_OIDC_PROVIDER", "GOTG_OAUTH_PROVIDER").strip().lower()
+    # The OAUTH spelling defaulted to github once a client id was given.
+    if not provider and _alias(env, "GOTG_OIDC_CLIENT_ID", "GOTG_OAUTH_CLIENT_ID"):
+        return "github"
+    return provider
+
+
+def _oidc_redirect(env: Mapping[str, str]) -> str:
+    explicit = _alias(env, "GOTG_OIDC_REDIRECT_URL", "GOTG_OAUTH_REDIRECT_URI")
+    public = env.get("GOTG_PUBLIC_URL", "").rstrip("/")
+    if explicit or not public or not _alias(env, "GOTG_OIDC_CLIENT_ID", "GOTG_OAUTH_CLIENT_ID"):
+        return explicit
+    return f"{public}/auth/callback"
+
+
+def _session_ttl(env: Mapping[str, str]) -> int:
+    if env.get("GOTG_SESSION_TTL") or not env.get("GOTG_OAUTH_SESSION_DAYS"):
+        return int(_number(env, "GOTG_SESSION_TTL", 604800))
+    return int(_number(env, "GOTG_OAUTH_SESSION_DAYS", 7) * 86400)
+
+
 def config_from_env(env: Mapping[str, str] | None = None) -> Config:
     env = os.environ if env is None else env
     return Config(
@@ -88,36 +115,29 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
         legacy_user=env.get("GOTG_LEGACY_USER", "legacy"),
         admin_url=env.get("GOTG_ADMIN_URL", "").rstrip("/"),
         public_url=env.get("GOTG_PUBLIC_URL", "").rstrip("/"),
-        oidc_provider=env.get("GOTG_OIDC_PROVIDER", "").strip().lower(),
-        oidc_issuer_url=env.get("GOTG_OIDC_ISSUER_URL", "").rstrip("/"),
-        oidc_client_id=env.get("GOTG_OIDC_CLIENT_ID", ""),
-        oidc_client_secret=_secret(env, "GOTG_OIDC_CLIENT_SECRET"),
-        oidc_redirect_url=env.get("GOTG_OIDC_REDIRECT_URL", ""),
+        oidc_provider=_oidc_provider(env),
+        oidc_issuer_url=_alias(env, "GOTG_OIDC_ISSUER_URL", "GOTG_OAUTH_ISSUER").rstrip("/"),
+        oidc_client_id=_alias(env, "GOTG_OIDC_CLIENT_ID", "GOTG_OAUTH_CLIENT_ID"),
+        oidc_client_secret=_secret(env, "GOTG_OIDC_CLIENT_SECRET") or env.get("GOTG_OAUTH_CLIENT_SECRET", ""),
+        oidc_redirect_url=_oidc_redirect(env),
         oidc_allowlist=tuple(
             sorted(
                 {
                     p.strip().lower()
-                    for p in env.get("GOTG_OIDC_ALLOWLIST", "").replace("\n", ",").split(",")
+                    for p in _alias(env, "GOTG_OIDC_ALLOWLIST", "GOTG_OAUTH_ALLOW").replace("\n", ",").split(",")
                     if p.strip()
                 }
             )
         ),
+        oidc_authorize_url=_alias(env, "GOTG_OIDC_AUTHORIZE_URL", "GOTG_OAUTH_AUTHORIZE_URL"),
+        oidc_token_url=_alias(env, "GOTG_OIDC_TOKEN_URL", "GOTG_OAUTH_TOKEN_URL"),
+        oidc_userinfo_url=_alias(env, "GOTG_OIDC_USERINFO_URL", "GOTG_OAUTH_USERINFO_URL"),
+        oidc_scopes=_alias(env, "GOTG_OIDC_SCOPES", "GOTG_OAUTH_SCOPES"),
         session_secret=_secret(env, "GOTG_SESSION_SECRET"),
         cookie_name=env.get("GOTG_COOKIE_NAME", "gotg_session"),
         cookie_secure=_flag(env, "GOTG_COOKIE_SECURE", True),
         cookie_samesite=env.get("GOTG_COOKIE_SAMESITE", "Lax").strip().capitalize(),
-        session_ttl=int(_number(env, "GOTG_SESSION_TTL", 604800)),
-        oauth_provider=env.get("GOTG_OAUTH_PROVIDER", "github").lower(),
-        oauth_client_id=env.get("GOTG_OAUTH_CLIENT_ID", ""),
-        oauth_client_secret=env.get("GOTG_OAUTH_CLIENT_SECRET", ""),
-        oauth_issuer=env.get("GOTG_OAUTH_ISSUER", "").rstrip("/"),
-        oauth_authorize_url=env.get("GOTG_OAUTH_AUTHORIZE_URL", ""),
-        oauth_token_url=env.get("GOTG_OAUTH_TOKEN_URL", ""),
-        oauth_userinfo_url=env.get("GOTG_OAUTH_USERINFO_URL", ""),
-        oauth_scopes=env.get("GOTG_OAUTH_SCOPES", ""),
-        oauth_redirect_uri=env.get("GOTG_OAUTH_REDIRECT_URI", ""),
-        oauth_allow=tuple(a.strip() for a in env.get("GOTG_OAUTH_ALLOW", "").split(",") if a.strip()),
-        oauth_session_days=_number(env, "GOTG_OAUTH_SESSION_DAYS", 30.0),
+        session_ttl=_session_ttl(env),
         cors_origins=tuple(o.strip() for o in env.get("GOTG_CORS_ORIGINS", "").split(",") if o.strip()),
     ).validate()
 

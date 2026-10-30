@@ -43,10 +43,16 @@ start unless the required ones are all present.
 | `GOTG_OIDC_REDIRECT_URL` | yes | the registered callback url |
 | `GOTG_OIDC_ALLOWLIST` | yes | comma/newline separated logins (GitHub usernames; emails for `oidc`), case-insensitive. Empty is refused, never "everyone" |
 | `GOTG_SESSION_SECRET_FILE` / `GOTG_SESSION_SECRET` | yes | signs the session cookie; ≥32 chars, distinct from every token |
+| `GOTG_OIDC_AUTHORIZE_URL`, `_TOKEN_URL`, `_USERINFO_URL`, `GOTG_OIDC_SCOPES` | no | explicit provider endpoints / scopes (`docs/web-auth.md`) |
 | `GOTG_COOKIE_NAME` | no | default `gotg_session` |
 | `GOTG_COOKIE_SECURE` | no | default `1`; `0` only for http localhost |
 | `GOTG_COOKIE_SAMESITE` | no | `Lax` (default), `Strict`, `None` (needs Secure) |
 | `GOTG_SESSION_TTL` | no | seconds, default 604800 |
+
+The sign-in code (`docs/web-auth.md`) reads exactly these names from `Config`. The older
+`GOTG_OAUTH_*` spellings (`_PROVIDER`, `_CLIENT_ID`, `_CLIENT_SECRET`, `_ISSUER`, `_ALLOW`,
+`_REDIRECT_URI`, `_SESSION_DAYS`, `_AUTHORIZE_URL`, `_TOKEN_URL`, `_USERINFO_URL`, `_SCOPES`)
+still work as aliases; the `GOTG_OIDC_*` one wins when both are set.
 
 Unreadable secret files, non-boolean flags, non-http(s) urls, an `http`
 redirect with Secure cookies, and a session secret equal to another credential

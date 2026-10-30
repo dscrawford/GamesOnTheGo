@@ -12,18 +12,25 @@ Identity comes from the provider's **userinfo** endpoint; no JWT is verified.
 
 ## Configuration (environment)
 
-| Variable | Meaning |
+One set of names, shared with the deployment (`docs/web-app.md` has the full
+table and the Kubernetes wiring). Sign-in is on when any `GOTG_OIDC_*` is set;
+`validate` then demands the rest. The earlier `GOTG_OAUTH_*` spellings are still
+accepted as aliases; the `GOTG_OIDC_*` name wins when both are set.
+
+| Variable (alias) | Meaning |
 | --- | --- |
-| `GOTG_OAUTH_CLIENT_ID` | Turns sign-in on. Unset: `/auth/*` sign-in routes answer 503. |
-| `GOTG_OAUTH_CLIENT_SECRET` | Optional for public clients. |
-| `GOTG_OAUTH_PROVIDER` | `github` (default) or `oidc`. |
-| `GOTG_OAUTH_ISSUER` | oidc: endpoints found at `<issuer>/.well-known/openid-configuration`. |
-| `GOTG_OAUTH_AUTHORIZE_URL`, `_TOKEN_URL`, `_USERINFO_URL` | Explicit endpoints (override discovery / GitHub defaults). |
-| `GOTG_OAUTH_SCOPES` | Default `read:user user:email` (github), `openid profile email` (oidc). |
-| `GOTG_OAUTH_ALLOW` | Comma list: usernames, verified emails, or `@domain`. **Empty admits nobody.** |
-| `GOTG_OAUTH_REDIRECT_URI` | Default `$GOTG_PUBLIC_URL/auth/callback`; register this at the provider. |
-| `GOTG_OAUTH_SESSION_DAYS` | Session / device token lifetime, default 30. |
-| `GOTG_PUBLIC_URL` | Required; an `https://` url also sets `Secure` on cookies. |
+| `GOTG_OIDC_PROVIDER` (`GOTG_OAUTH_PROVIDER`) | `github` or `oidc`. Via the alias, a client id alone implies `github`. |
+| `GOTG_OIDC_CLIENT_ID` (`GOTG_OAUTH_CLIENT_ID`) | The OAuth client id. |
+| `GOTG_OIDC_CLIENT_SECRET[_FILE]` (`GOTG_OAUTH_CLIENT_SECRET`) | The `_FILE` form wins. |
+| `GOTG_OIDC_ISSUER_URL` (`GOTG_OAUTH_ISSUER`) | oidc: endpoints found at `<issuer>/.well-known/openid-configuration`. |
+| `GOTG_OIDC_AUTHORIZE_URL`, `_TOKEN_URL`, `_USERINFO_URL` (`GOTG_OAUTH_*`) | Explicit endpoints (override discovery / GitHub defaults); all three replace the issuer. |
+| `GOTG_OIDC_SCOPES` (`GOTG_OAUTH_SCOPES`) | Default `read:user user:email` (github), `openid profile email` (oidc). |
+| `GOTG_OIDC_ALLOWLIST` (`GOTG_OAUTH_ALLOW`) | Comma/newline list: usernames, verified emails, or `@domain`, case-insensitive. **Empty is refused.** |
+| `GOTG_OIDC_REDIRECT_URL` (`GOTG_OAUTH_REDIRECT_URI`) | Register this at the provider. Through the aliases it defaults to `$GOTG_PUBLIC_URL/auth/callback`. |
+| `GOTG_SESSION_TTL` (`GOTG_OAUTH_SESSION_DAYS`, days) | Session / device token lifetime in seconds, default 604800. |
+| `GOTG_COOKIE_NAME`, `GOTG_COOKIE_SECURE`, `GOTG_COOKIE_SAMESITE` | The session cookie's name and flags (defaults `gotg_session`, Secure, Lax). The short-lived state cookie is always Lax. |
+| `GOTG_SESSION_SECRET[_FILE]` | Required by the deployment's validation (>= 32 chars, distinct from every token). The cookie holds a `gotg_` token, which the token store checks, so nothing is signed with it yet. |
+| `GOTG_PUBLIC_URL` | Origin the CSRF check compares `Origin` against. |
 
 Only a *verified* email counts (GitHub: primary and verified; oidc:
 `email_verified: true`). The OIDC username is `preferred_username`.
@@ -34,7 +41,7 @@ Providers are called with urllib only, redirects not followed.
 - `GET /auth/login[?next=/path]` -> 302 to the provider; sets `gotg_oauth_state`.
   `next` must be a same-site path, else `/`.
 - `GET /auth/callback` -> on success 302 to `next`, setting `gotg_session`
-  (`HttpOnly; SameSite=Lax; Path=/; Secure` on https; Max-Age = session days).
+  (`HttpOnly; Path=/`, plus `Secure` and `SameSite` per config; Max-Age = session TTL).
   Errors are `{"error": ...}`: 400 bad/expired state, 403 refused or not on the
   allowlist, 502 provider failure.
 - `POST /auth/logout` -> `{"ok": true}`, revokes the session token, clears the cookie.
