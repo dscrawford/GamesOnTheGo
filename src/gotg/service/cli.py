@@ -115,6 +115,7 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
         legacy_user=env.get("GOTG_LEGACY_USER", "legacy"),
         admin_url=env.get("GOTG_ADMIN_URL", "").rstrip("/"),
         public_url=env.get("GOTG_PUBLIC_URL", "").rstrip("/"),
+        admin_users=tuple(sorted({u.strip().lower() for u in env.get("GOTG_ADMIN_USERS", "").split(",") if u.strip()})),
         oidc_provider=_oidc_provider(env),
         oidc_issuer_url=_alias(env, "GOTG_OIDC_ISSUER_URL", "GOTG_OAUTH_ISSUER").rstrip("/"),
         oidc_client_id=_alias(env, "GOTG_OIDC_CLIENT_ID", "GOTG_OAUTH_CLIENT_ID"),

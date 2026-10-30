@@ -3,7 +3,7 @@
 The web app is the static frontend plus the existing GOTG service. Sign-in is
 **optional configuration of the service**: with none of the variables below set
 the service behaves exactly as it did before, and `Config.oidc_enabled` is
-false. The sign-in flow itself is implemented elsewhere (the oauth module);
+false. The sign-in flow is `docs/web-auth.md`;
 this page covers packaging and configuration.
 
 ## What the flake provides
@@ -44,6 +44,7 @@ start unless the required ones are all present.
 | `GOTG_OIDC_ALLOWLIST` | yes | comma/newline separated logins (GitHub usernames; emails for `oidc`), case-insensitive. Empty is refused, never "everyone" |
 | `GOTG_SESSION_SECRET_FILE` / `GOTG_SESSION_SECRET` | yes | signs the session cookie; ≥32 chars, distinct from every token |
 | `GOTG_OIDC_AUTHORIZE_URL`, `_TOKEN_URL`, `_USERINFO_URL`, `GOTG_OIDC_SCOPES` | no | explicit provider endpoints / scopes (`docs/web-auth.md`) |
+| `GOTG_ADMIN_USERS` | no | users whose signed-in session may use `/admin` (`docs/web-auth.md`) |
 | `GOTG_COOKIE_NAME` | no | default `gotg_session` |
 | `GOTG_COOKIE_SECURE` | no | default `1`; `0` only for http localhost |
 | `GOTG_COOKIE_SAMESITE` | no | `Lax` (default), `Strict`, `None` (needs Secure) |

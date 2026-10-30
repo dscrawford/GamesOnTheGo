@@ -45,7 +45,8 @@ Providers are called with urllib only, redirects not followed.
   Errors are `{"error": ...}`: 400 bad/expired state, 403 refused or not on the
   allowlist, 502 provider failure.
 - `POST /auth/logout` -> `{"ok": true}`, revokes the session token, clears the cookie.
-- `GET /auth/whoami` (cookie or bearer) -> `{"name": "alice-web-1a2b3c", "user": "alice"}`.
+- `GET /auth/whoami` (cookie or bearer) -> `{"name": "alice-web-1a2b3c", "user": "alice", "admin": false}`.
+  `admin` is true only for a cookie session whose user is in `GOTG_ADMIN_USERS`.
 - Cookie-authenticated writes whose `Origin` is not `GOTG_PUBLIC_URL` get 403.
 
 ### Device flow (CLI / Deck)
@@ -60,3 +61,18 @@ Providers are called with urllib only, redirects not followed.
 Tokens are named `<user>-web-<hex>` / `<user>-cli-<hex>`, one per login, so
 signing in elsewhere never logs anyone out. The user is the login lowercased
 (sanitized, with a hash suffix when it had to change).
+
+## Admin by session
+
+`GOTG_ADMIN_USERS` (comma list of token-store users, i.e. the slugs `whoami`
+shows as `user`) lets a **signed-in cookie session** of one of those users call
+`/admin/*`, beside the admin bearer token. Needs sign-in on, else the service
+refuses to start. Only the cookie counts: any bearer other than the admin token,
+including the same person's CLI token, is not admin. A write (`POST`/`DELETE`)
+from a session must carry an `Origin` equal to `GOTG_PUBLIC_URL` (a missing
+Origin is refused), on top of `SameSite`. Revoking the session token ends it.
+
+`/admin` is still 404 on a `public` listener and `/auth` is still 404 on the
+`admin` one (a split deployment keeps admin on the tailnet, with the token), so
+session admin applies to a deployment whose single listener serves both. Setting
+it is the decision to expose `/admin` to allowlisted sign-ins there.

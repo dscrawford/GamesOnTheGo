@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..tokens import NAME_RE
+
 USER_AGENT = "gotg-proxy/0.5.5"
 
 # Bounded, because a request that never returns holds a thread open and enough
@@ -121,6 +123,9 @@ class Config:
     cookie_samesite: str = "Lax"
     session_ttl: int = 604800
     # Explicit endpoints (override discovery / the GitHub defaults) and scopes.
+    # Token-store users whose signed-in cookie session may use /admin (never a
+    # bearer, which is what the admin token is for). Needs sign-in on.
+    admin_users: tuple[str, ...] = ()
     oidc_authorize_url: str = ""
     oidc_token_url: str = ""
     oidc_userinfo_url: str = ""
@@ -160,6 +165,12 @@ class Config:
                 "seeing server paths must not come with any other power."
             )
         self._validate_oidc()
+        if self.admin_users:
+            if not self.oidc_enabled:
+                raise ValueError("GOTG_ADMIN_USERS needs web sign-in; without it nobody has a session")
+            bad = [u for u in self.admin_users if not NAME_RE.match(u)]
+            if bad:
+                raise ValueError(f"GOTG_ADMIN_USERS has names no user can have: {', '.join(bad)}")
         return self
 
     def _validate_oidc(self) -> None:

@@ -484,3 +484,102 @@ def test_session_cookie_uses_configured_name_and_flags(tmp_path, github):
         assert "SameSite=Strict" in cookie and "Secure" in cookie and "Max-Age=604800" in cookie
         who = raw(f"{server.url}/auth/whoami", headers={"Cookie": "my_sess=" + cookie.split(";")[0]})
         assert who[0] == 200
+
+
+# --- admin by session ---------------------------------------------------------
+
+
+def admin_app(tmp_path, github, **extra):
+    base, _, _ = github
+    return serve(config_for(base, admin_users=("alice",), **extra), token_store=TokenStore(db=tmp_path / "t.db"))
+
+
+def test_whoami_says_whether_the_session_is_admin(tmp_path, github):
+    with admin_app(tmp_path, github) as server:
+        _, (_, headers, _) = sign_in(server.url)
+        who = json.loads(raw(f"{server.url}/auth/whoami", headers={"Cookie": session_of(headers)})[2])
+        assert who["user"] == "alice" and who["admin"] is True
+        bearer = raw(f"{server.url}/auth/whoami", headers={"Authorization": f"Bearer {LEGACY}"})
+        assert json.loads(bearer[2])["admin"] is False
+        token = raw(f"{server.url}/auth/whoami", headers={"Authorization": f"Bearer {ADMIN}"})
+        assert token[0] == 401  # the admin token still opens /admin and nothing else
+
+
+def test_an_allowlisted_session_reaches_admin(tmp_path, github):
+    with admin_app(tmp_path, github) as server:
+        _, (_, headers, _) = sign_in(server.url)
+        cookie = {"Cookie": session_of(headers)}
+        assert raw(f"{server.url}/admin/info", headers=cookie)[0] == 200
+        assert raw(f"{server.url}/admin/tokens", headers=cookie)[0] == 200
+
+
+def test_a_session_not_on_the_admin_list_is_refused(tmp_path, github):
+    base, profile, _ = github
+    with serve(config_for(base, admin_users=("carol",)), token_store=TokenStore(db=tmp_path / "t.db")) as server:
+        _, (_, headers, _) = sign_in(server.url)
+        assert raw(f"{server.url}/admin/info", headers={"Cookie": session_of(headers)})[0] == 403
+
+
+def test_no_admin_list_means_no_session_admin(app):
+    url, _ = app
+    _, (_, headers, _) = sign_in(url)
+    assert raw(f"{url}/admin/info", headers={"Cookie": session_of(headers)})[0] == 403
+
+
+def test_the_admin_users_bearer_token_is_not_admin(tmp_path, github):
+    # Only the cookie session counts: a CLI token for the same user must not.
+    with admin_app(tmp_path, github) as server:
+        _, (_, headers, _) = sign_in(server.url)
+        token = session_of(headers).split("=", 1)[1]
+        assert raw(f"{server.url}/admin/info", headers={"Authorization": f"Bearer {token}"})[0] == 403
+
+
+def test_session_admin_writes_need_this_sites_origin(tmp_path, github):
+    with admin_app(tmp_path, github) as server:
+        _, (_, headers, _) = sign_in(server.url)
+        cookie = session_of(headers)
+        body = json.dumps({"name": "inv1"}).encode()
+
+        def mint(extra):
+            return raw(
+                f"{server.url}/admin/invites",
+                method="POST",
+                body=body,
+                headers={"Cookie": cookie, "Content-Type": "application/json", **extra},
+            )[0]
+
+        assert mint({}) == 403
+        assert mint({"Origin": "https://evil.example"}) == 403
+        assert mint({"Origin": "https://gotg.example"}) == 200
+
+
+def test_a_revoked_admin_session_stops_being_admin(tmp_path, github):
+    with admin_app(tmp_path, github) as server:
+        _, (_, headers, _) = sign_in(server.url)
+        cookie = {"Cookie": session_of(headers)}
+        name = json.loads(raw(f"{server.url}/auth/whoami", headers=cookie)[2])["name"]
+        assert raw(f"{server.url}/admin/info", headers=cookie)[0] == 200
+        revoke = raw(
+            f"{server.url}/admin/tokens/{name}",
+            method="DELETE",
+            headers={"Authorization": f"Bearer {ADMIN}"},
+        )
+        assert revoke[0] == 200
+        assert raw(f"{server.url}/admin/info", headers=cookie)[0] == 401
+
+
+def test_admin_users_validation():
+    env = {"GOTG_PROXY_TOKEN": "t", "GOTG_ADMIN_USERS": "Alice"}
+    with pytest.raises(ValueError, match="needs web sign-in"):
+        config_from_env(env)
+    signin = {
+        "GOTG_OIDC_PROVIDER": "github",
+        "GOTG_OIDC_CLIENT_ID": "c",
+        "GOTG_OIDC_CLIENT_SECRET": "s",
+        "GOTG_OIDC_REDIRECT_URL": "https://g.test/auth/callback",
+        "GOTG_OIDC_ALLOWLIST": "alice",
+        "GOTG_SESSION_SECRET": SECRET,
+    }
+    assert config_from_env({**env, **signin}).admin_users == ("alice",)
+    with pytest.raises(ValueError, match="no user can have"):
+        config_from_env({**env, **signin, "GOTG_ADMIN_USERS": "bad name!"})
