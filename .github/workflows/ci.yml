@@ -38,7 +38,6 @@ jobs:
           - resolver
           - recipes
           - platforms
-          - environments
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
@@ -46,6 +45,32 @@ jobs:
         with:
           use-flakehub: false
       - run: nix build .#checks.x86_64-linux.${{ matrix.check }} $NIX_FLAGS
+
+  # checks.environments builds all ~50 launchers; a change touches a few. Build
+  # the ones whose derivation differs from the base. A manual run builds all.
+  environments:
+    name: environments (changed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          use-flakehub: false
+      - name: Pick the environments that changed
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          .github/scripts/changed-envs.sh "$BASE" > changed.txt
+          echo "$(wc -l < changed.txt) environment(s) to build:"; cat changed.txt
+      - name: Build them
+        run: |
+          mapfile -t envs < changed.txt
+          [ ${#envs[@]} -gt 0 ] || { echo "no environment changed"; exit 0; }
+          nix build --no-link $NIX_FLAGS "${envs[@]/#/.#packages.x86_64-linux.}"
 
   picker-lint:
     name: ruff (picker + e2e)
