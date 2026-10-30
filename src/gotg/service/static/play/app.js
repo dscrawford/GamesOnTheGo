@@ -5,6 +5,11 @@
 (() => {
   "use strict";
   const $ = (id) => document.getElementById(id);
+  // "" at a site's root, or the prefix a reverse proxy mounts the service under
+  // (e.g. "/c/<id>/gotg"): the page is <BASE>/play/, and every service path is
+  // relative to BASE.
+  const BASE = location.pathname.replace(/\/play(\/.*)?$/, "");
+  const at = (path) => BASE + path;
   const query = new URLSearchParams(location.search);
   const platform = query.get("platform") || "";
   const gameId = query.get("id") || "";
@@ -44,7 +49,7 @@
 
   // --- saves: pull before start, push on save / exit ---------------------------
   async function pull() {
-    const response = await fetch("/saves/" + plan.save_attr, { headers: auth() });
+    const response = await fetch(at("/saves/" + plan.save_attr), { headers: auth() });
     if (response.status === 404) return {}; // nothing pushed yet
     if (!response.ok) throw new Error("pulling the save: HTTP " + response.status);
     parent = response.headers.get("X-Gotg-Hash") || "";
@@ -54,7 +59,7 @@
   async function push(files, { force = false, keepalive = false } = {}) {
     if (conflicted && !force) return "conflict";
     const body = pack(files);
-    const response = await fetch("/saves/" + plan.save_attr + (force ? "?force=1" : ""), {
+    const response = await fetch(at("/saves/" + plan.save_attr + (force ? "?force=1" : "")), {
       method: "PUT",
       headers: { ...auth(), "X-Gotg-Parent": parent, "X-Gotg-Device": DEVICE, "Content-Type": "application/json" },
       body,
@@ -94,7 +99,7 @@
 
   // --- the ROM -----------------------------------------------------------------
   async function findRom() {
-    const response = await fetch("/catalog", { headers: auth() });
+    const response = await fetch(at("/catalog"), { headers: auth() });
     if (!response.ok) throw new Error("reading the catalog: HTTP " + response.status);
     const catalog = await response.json();
     byteHosts = catalog.files_urls || (catalog.files_url ? [catalog.files_url] : []);
@@ -123,7 +128,7 @@
   async function bearerForByteHosts() {
     if (token) return token;
     if (byteToken) return byteToken;
-    const response = await fetch("/auth/bearer", { method: "POST", credentials: "same-origin" });
+    const response = await fetch(at("/auth/bearer"), { method: "POST", credentials: "same-origin" });
     if (!response.ok) return "";
     byteToken = (await response.json()).token || "";
     return byteToken;
@@ -142,7 +147,7 @@
           if (!bearer) { tried.push(base + ": no bearer for a cross-origin byte host"); continue; }
           headers = { Authorization: "Bearer " + bearer };
         }
-        const response = await fetch(base + path, { headers, credentials: base ? "omit" : "same-origin" });
+        const response = await fetch(base ? base + path : at(path), { headers, credentials: base ? "omit" : "same-origin" });
         if (response.ok) return response;
         tried.push((base || location.origin) + ": HTTP " + response.status);
       } catch (e) {
@@ -176,7 +181,7 @@
     const named = (blob, name) => URL.createObjectURL(new File([blob], name));
     window.EJS_player = "#game";
     window.EJS_core = plan.core || plan.system; // the exact core the plan (and the licence table) names
-    window.EJS_pathtodata = "/play/ejs/data/";
+    window.EJS_pathtodata = at("/play/ejs/data/");
     window.EJS_gameUrl = named(romBlob, gameId + (plan.rom_ext || ""));
     window.EJS_gameName = gameId;
     window.EJS_startOnLoaded = true;
@@ -213,7 +218,7 @@
     };
 
     const script = document.createElement("script");
-    script.src = "/play/ejs/data/loader.js";
+    script.src = at("/play/ejs/data/loader.js");
     script.onerror = () => fail("EmulatorJS is not installed on this service (docs/browser-play.md).");
     document.body.appendChild(script);
   }
@@ -234,11 +239,11 @@
     $("error").hidden = true;
     status("checking");
     // No token: try the session cookie. A 401 then just means "not signed in".
-    const response = await fetch("/play/plan/" + platform + "/" + gameId, { headers: auth() });
+    const response = await fetch(at("/play/plan/" + platform + "/" + gameId), { headers: auth() });
     if (response.status === 401) {
       const refused = !!token;
       sessionStorage.removeItem("gotg-token"); sessionStorage.removeItem("gotg.bearer"); token = "";
-      $("sso").href = "/auth/login?next=" + encodeURIComponent(location.pathname + location.search);
+      $("sso").href = at("/auth/login?next=") + encodeURIComponent(location.pathname + location.search);
       $("login").hidden = false;
       status("");
       return refused ? fail("that token was refused") : undefined;

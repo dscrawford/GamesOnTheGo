@@ -24,6 +24,13 @@ class PlayRoutes:
         top = clean.split("/")[0]
         if top != "play":
             return False
+        if clean == "play":
+            # The page's links are relative (app.js, app.css), so it must be
+            # loaded as play/. A relative Location keeps a path prefix intact.
+            self.close_connection = True
+            query = self.path.partition("?")[2]
+            self._redirect("play/" + (f"?{query}" if query else ""))
+            return True
         if clean.startswith("play/ejs/"):
             self.close_connection = True
             self._play_asset(clean[len("play/ejs/") :])

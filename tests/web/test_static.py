@@ -109,8 +109,9 @@ def test_bare_ui_redirects_to_the_slash_form(svc):
         reply.read()
         return reply.status, reply.getheader("Location")
 
-    assert get("/ui") == (302, "/ui/")
-    assert get("/ui?x=1") == (302, "/ui/?x=1")
+    # Relative, so it resolves under whatever prefix a reverse proxy mounts us at.
+    assert get("/ui") == (302, "ui/")
+    assert get("/ui?x=1") == (302, "ui/?x=1")
     assert get("/uix")[0] == 401
 
 
@@ -138,3 +139,20 @@ def test_detail_offers_play_only_when_the_service_says_so():
     assert "api.playPlan(platform, id)" in detail
     assert 'plan.mode === "browser"' in detail and "api.playUrl(platform, id)" in detail
     assert "plan.nix" in detail
+
+
+def test_the_ui_reaches_the_service_through_its_base_only():
+    # Under a path prefix (a reverse proxy at /c/<id>/gotg/) a root-absolute
+    # URL would leave the service. Every request goes through raw(), which
+    # prepends BASE; a string literal starting with a service route anywhere
+    # else is a URL that skips it.
+    api = (STATIC_DIR / "js" / "api.js").read_text()
+    assert "const url = BASE + " in api and "export const BASE = location.pathname" in api
+    for js in STATIC_DIR.joinpath("js").rglob("*.js"):
+        text = js.read_text()
+        for match in re.finditer(
+            r"""(?<![\w}])["'`](/(?:catalog|games|saves|art|auth|admin|play|ui|files)\b[^"'`]*)""", text
+        ):
+            line = text[: match.start()].count("\n") + 1
+            context = text.splitlines()[line - 1]
+            assert "call(" in context or "raw(" in context or "BASE" in context, f"{js.name}:{line}: {context.strip()}"

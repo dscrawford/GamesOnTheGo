@@ -137,15 +137,15 @@ PAGE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>GOTG play</title>
-<link rel="stylesheet" href="/play/app.css">
-<script src="/play/app.js" defer></script>
+<link rel="stylesheet" href="app.css">
+<script src="app.js" defer></script>
 </head>
 <body>
 <header><h1>GOTG <span class="dim">play</span></h1><span id="status" class="dim"></span></header>
 <main>
   <section id="login" hidden>
     <h2>Sign in</h2>
-    <p><a id="sso" href="/auth/login">Sign in with your account</a></p>
+    <p><a id="sso" href="../auth/login">Sign in with your account</a></p>
     <p class="dim">Or paste a GOTG token. It is kept for this tab only.</p>
     <form id="login-form">
       <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="token" required>
@@ -193,7 +193,6 @@ def routes() -> dict[str, tuple[bytes, str]]:
     """`path -> (body, content type)` for the page's three static parts."""
     html = "text/html; charset=utf-8"
     return {
-        "play": (PAGE.encode(), html),
         "play/": (PAGE.encode(), html),
         "play/app.js": (_load_script().encode(), "text/javascript; charset=utf-8"),
         "play/app.css": (STYLE.encode(), "text/css; charset=utf-8"),

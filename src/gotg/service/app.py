@@ -645,10 +645,11 @@ class Handler(
             return True
 
         # Relative URLs in the page resolve against /ui/, so bare /ui goes there.
+        # A relative Location ("ui/"), so it lands right under a path prefix too.
         if self.command in ("GET", "HEAD") and clean == "ui":
             self.close_connection = True
             query = self.path.partition("?")[2]
-            self._redirect("/ui/" + (f"?{query}" if query else ""))
+            self._redirect("ui/" + (f"?{query}" if query else ""))
             return True
 
         # The web UI's files: static, and the session (not these) is the credential.

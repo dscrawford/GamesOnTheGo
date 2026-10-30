@@ -48,7 +48,13 @@ export class ApiError extends Error {
 export const setBearer = (token) =>
   token ? sessionStorage.setItem(BEARER_KEY, token) : sessionStorage.removeItem(BEARER_KEY);
 
-export const loginUrl = () => `/auth/login?next=${encodeURIComponent(location.pathname + location.hash)}`;
+// Where the service is mounted: "" at a site's root, or a path prefix such as
+// "/c/<id>/gotg" behind a reverse proxy that strips it. The UI lives at
+// <BASE>/ui/, so everything before that is the base. Every path below starts
+// with "/" and is relative to it.
+export const BASE = location.pathname.replace(/\/ui(\/.*)?$/, "");
+
+export const loginUrl = () => `${BASE}/auth/login?next=${encodeURIComponent(location.pathname + location.hash)}`;
 
 async function raw(path, { method = "GET", body, headers = {}, query } = {}) {
   const h = { ...headers };
@@ -62,7 +68,7 @@ async function raw(path, { method = "GET", body, headers = {}, query } = {}) {
       h["Content-Type"] = "application/json";
     }
   }
-  const url = query ? `${path}?${new URLSearchParams(query)}` : path;
+  const url = BASE + (query ? `${path}?${new URLSearchParams(query)}` : path);
   return fetch(url, init);
 }
 
@@ -89,7 +95,7 @@ export const playPlan = (platform, id) =>
     if (e.status === 404) return null;
     throw e;
   });
-export const playUrl = (platform, id) => `/play/?${new URLSearchParams({ platform, id })}`;
+export const playUrl = (platform, id) => `${BASE}/play/?${new URLSearchParams({ platform, id })}`;
 
 export async function isAdmin(who) {
   if (who && typeof who.admin === "boolean") return who.admin;

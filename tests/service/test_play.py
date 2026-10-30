@@ -121,7 +121,15 @@ def test_plan_route_answers(served):
 
 
 def test_page_is_served_without_a_token_with_a_strict_policy(served):
-    for path in ("/play/", "/play", "/play/app.js", "/play/app.css"):
+    import http.client
+
+    conn = http.client.HTTPConnection(served.url.removeprefix("http://"), timeout=10)
+    conn.request("GET", "/play?platform=nes&id=usa.x")
+    reply = conn.getresponse()
+    reply.read()
+    # Relative, so a path prefix in front of the service survives the redirect.
+    assert (reply.status, reply.getheader("Location")) == (302, "play/?platform=nes&id=usa.x")
+    for path in ("/play/", "/play/app.js", "/play/app.css"):
         status, headers, body = served.call(
             "GET", path + ("?platform=nes&id=usa.x" if path == "/play/" else ""), token=None
         )
@@ -155,7 +163,7 @@ def test_player_runs_on_the_session_cookie_and_offers_sign_in():
     page = play_page.routes()["play/"][0].decode()
     assert "if (!token)" not in script
     assert '(token ? { Authorization: "Bearer " + token } : {})' in script
-    assert '"/auth/login?next=" + encodeURIComponent(location.pathname + location.search)' in script
+    assert 'at("/auth/login?next=") + encodeURIComponent(location.pathname + location.search)' in script
     assert 'sessionStorage.getItem("gotg.bearer")' in script  # a token pasted in the web UI carries over
     assert 'id="sso"' in page
 
@@ -181,6 +189,17 @@ def test_script_fetches_the_rom_from_the_catalogs_byte_hosts():
     assert "catalog.files_urls" in script
     assert '"/auth/bearer"' in script  # a cookie session's bearer for a cross-origin host
     assert 'credentials: base ? "omit"' in script  # this site's cookie never goes to a byte host
+
+
+def test_player_reaches_the_service_through_its_base_only():
+    script = play_page.routes()["play/app.js"][0].decode()
+    page = play_page.routes()["play/"][0].decode()
+    assert "const BASE = location.pathname.replace(" in script
+    for match in re.finditer(r"""["'`](/(?:catalog|games|saves|art|auth|play)\b[^"'`]*)""", script):
+        context = script.splitlines()[script[: match.start()].count("\n")]
+        # "/games/..." is built into `path` first, then fetched as at(path) or base + path.
+        assert "at(" in context or "const path = " in context, context.strip()
+    assert 'src="app.js"' in page and 'href="app.css"' in page and 'href="/' not in page
 
 
 def test_script_uses_the_saves_api_with_parent_and_pull_first():
