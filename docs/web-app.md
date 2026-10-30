@@ -97,6 +97,10 @@ the manifest). Build and push the image with `nix build .#web-image` then
   (`GOTG_ADMIN_PORT`, `GOTG_ADMIN_URL`).
 - Raise the body-size limit (nginx `proxy-body-size`) for save and log uploads,
   and don't buffer file streams if `GOTG_FILES_URL` routes bytes elsewhere.
+- When `GOTG_FILES_URL` points at a separate files service (the API pod holds
+  no game files), the browser player fetches ROMs from it cross-origin. Set
+  `GOTG_CORS_ORIGINS=https://<site>` on that files service, and let its
+  reverse proxy pass `OPTIONS` preflights through (`docs/browser-play.md`).
 - Run one replica unless the token/saves stores are on shared storage.
 - Rotating `GOTG_SESSION_SECRET` signs everyone out; changing the allowlist
   takes effect on restart.
