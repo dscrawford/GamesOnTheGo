@@ -1,9 +1,16 @@
 # Playing in the browser
 
 `/play/?platform=<slug>&id=<id>` on the service plays a game in a tab with
-[EmulatorJS](https://emulatorjs.org). The page asks for a GOTG token (kept in
-`sessionStorage`, gone with the tab), streams the ROM from `/games/<platform>/<id>/<file>`
-with it, and keeps the save in step with `/saves`.
+[EmulatorJS](https://emulatorjs.org). It streams the ROM from
+`/games/<platform>/<id>/<file>` and keeps the save in step with `/saves`.
+
+Who you are comes from the session cookie when the browser is signed in
+(`docs/web-auth.md`); the web UI's game page links here with "Play in browser".
+Signed out, the page offers "Sign in with your account" (`/auth/login`, which
+brings you back to the same game) or a pasted GOTG token. The token is kept in
+`sessionStorage` and is gone with the tab; one pasted into the web UI in the
+same tab is used too. A token, when present, is sent as a bearer and wins over
+the cookie.
 
 Only systems that run at a useful speed in WASM are mapped (`CORES` in
 `src/gotg/service/play_page.py`):

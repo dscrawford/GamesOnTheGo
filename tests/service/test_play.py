@@ -117,6 +117,18 @@ def test_script_saves_through_emulatorjs_events_that_exist():
     assert "plan.core" in script
 
 
+def test_player_runs_on_the_session_cookie_and_offers_sign_in():
+    # No token is required up front: same-origin fetches carry a signed-in
+    # browser's cookie, and only a 401 asks for sign-in (link) or a token.
+    script = play_page.routes()["play/app.js"][0].decode()
+    page = play_page.routes()["play/"][0].decode()
+    assert "if (!token)" not in script
+    assert '(token ? { Authorization: "Bearer " + token } : {})' in script
+    assert '"/auth/login?next=" + encodeURIComponent(location.pathname + location.search)' in script
+    assert 'sessionStorage.getItem("gotg.bearer")' in script  # a token pasted in the web UI carries over
+    assert 'id="sso"' in page
+
+
 def test_script_uses_the_saves_api_with_parent_and_pull_first():
     script = play_page.routes()["play/app.js"][0].decode()
     assert "X-Gotg-Parent" in script and "/saves/" in script and "/games/" in script

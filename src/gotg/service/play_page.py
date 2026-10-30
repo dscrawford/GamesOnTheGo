@@ -126,7 +126,8 @@ PAGE = """<!doctype html>
 <main>
   <section id="login" hidden>
     <h2>Sign in</h2>
-    <p class="dim">Your GOTG token. Kept for this tab only.</p>
+    <p><a id="sso" href="/auth/login">Sign in with your account</a></p>
+    <p class="dim">Or paste a GOTG token. It is kept for this tab only.</p>
     <form id="login-form">
       <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="token" required>
       <button type="submit">Sign in</button>
