@@ -328,6 +328,9 @@ command they run), lists tokens with their last use, and revokes. The
 terminal finds it through `admin_url` in `~/.config/gotg/api.json` or
 `GOTG_ADMIN_URL`.
 
+Browser and device sign-in through GitHub or any OIDC provider, minting the
+same revocable tokens: [docs/web-auth.md](docs/web-auth.md).
+
 ## home-manager
 
 ```nix

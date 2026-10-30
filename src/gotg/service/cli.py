@@ -107,6 +107,17 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
         cookie_secure=_flag(env, "GOTG_COOKIE_SECURE", True),
         cookie_samesite=env.get("GOTG_COOKIE_SAMESITE", "Lax").strip().capitalize(),
         session_ttl=int(_number(env, "GOTG_SESSION_TTL", 604800)),
+        oauth_provider=env.get("GOTG_OAUTH_PROVIDER", "github").lower(),
+        oauth_client_id=env.get("GOTG_OAUTH_CLIENT_ID", ""),
+        oauth_client_secret=env.get("GOTG_OAUTH_CLIENT_SECRET", ""),
+        oauth_issuer=env.get("GOTG_OAUTH_ISSUER", "").rstrip("/"),
+        oauth_authorize_url=env.get("GOTG_OAUTH_AUTHORIZE_URL", ""),
+        oauth_token_url=env.get("GOTG_OAUTH_TOKEN_URL", ""),
+        oauth_userinfo_url=env.get("GOTG_OAUTH_USERINFO_URL", ""),
+        oauth_scopes=env.get("GOTG_OAUTH_SCOPES", ""),
+        oauth_redirect_uri=env.get("GOTG_OAUTH_REDIRECT_URI", ""),
+        oauth_allow=tuple(a.strip() for a in env.get("GOTG_OAUTH_ALLOW", "").split(",") if a.strip()),
+        oauth_session_days=_number(env, "GOTG_OAUTH_SESSION_DAYS", 30.0),
     ).validate()
 
 
