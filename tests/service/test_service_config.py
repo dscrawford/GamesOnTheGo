@@ -199,7 +199,14 @@ def test_an_unreadable_secret_file_is_refused(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "drop", ["GOTG_OIDC_CLIENT_ID", "GOTG_OIDC_CLIENT_SECRET", "GOTG_OIDC_REDIRECT_URL", "GOTG_OIDC_ALLOWLIST", "GOTG_SESSION_SECRET"]
+    "drop",
+    [
+        "GOTG_OIDC_CLIENT_ID",
+        "GOTG_OIDC_CLIENT_SECRET",
+        "GOTG_OIDC_REDIRECT_URL",
+        "GOTG_OIDC_ALLOWLIST",
+        "GOTG_SESSION_SECRET",
+    ],
 )
 def test_half_configured_sign_in_is_refused(drop):
     env = {k: v for k, v in WEB.items() if k != drop}

@@ -165,7 +165,10 @@ class Config:
         missing = [k for k, v in needed.items() if not v]
         if missing:
             raise ValueError(f"web sign-in is half configured; missing {', '.join(missing)}")
-        for name, url in (("GOTG_OIDC_REDIRECT_URL", self.oidc_redirect_url), ("GOTG_OIDC_ISSUER_URL", self.oidc_issuer_url)):
+        for name, url in (
+            ("GOTG_OIDC_REDIRECT_URL", self.oidc_redirect_url),
+            ("GOTG_OIDC_ISSUER_URL", self.oidc_issuer_url),
+        ):
             if url and not url.startswith(("http://", "https://")):
                 raise ValueError(f"{name} is not an http(s) url: {url!r}")
         if self.cookie_secure and self.oidc_redirect_url.startswith("http://"):

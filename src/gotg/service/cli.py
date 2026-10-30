@@ -94,7 +94,13 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
         oidc_client_secret=_secret(env, "GOTG_OIDC_CLIENT_SECRET"),
         oidc_redirect_url=env.get("GOTG_OIDC_REDIRECT_URL", ""),
         oidc_allowlist=tuple(
-            sorted({p.strip().lower() for p in env.get("GOTG_OIDC_ALLOWLIST", "").replace("\n", ",").split(",") if p.strip()})
+            sorted(
+                {
+                    p.strip().lower()
+                    for p in env.get("GOTG_OIDC_ALLOWLIST", "").replace("\n", ",").split(",")
+                    if p.strip()
+                }
+            )
         ),
         session_secret=_secret(env, "GOTG_SESSION_SECRET"),
         cookie_name=env.get("GOTG_COOKIE_NAME", "gotg_session"),
