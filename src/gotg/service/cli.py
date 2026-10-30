@@ -118,6 +118,7 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
         oauth_redirect_uri=env.get("GOTG_OAUTH_REDIRECT_URI", ""),
         oauth_allow=tuple(a.strip() for a in env.get("GOTG_OAUTH_ALLOW", "").split(",") if a.strip()),
         oauth_session_days=_number(env, "GOTG_OAUTH_SESSION_DAYS", 30.0),
+        cors_origins=tuple(o.strip() for o in env.get("GOTG_CORS_ORIGINS", "").split(",") if o.strip()),
     ).validate()
 
 

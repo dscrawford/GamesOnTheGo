@@ -121,6 +121,66 @@ class SavesStore:
         names = sorted((p.name for p in gen_dir.iterdir() if GEN_RE.match(p.name)), reverse=True)
         return [{**self._record(user, attr, name), "current": int(name[:6]) == head} for name in names]
 
+    def listing(self, user: str, known: dict[str, str] | None = None) -> list[dict]:
+        """Every environment this user has pushed, with what a browser needs to
+        show conflicts: the head, who has written, forced overwrites, and --
+        when the caller says which hash it holds per environment (`known`) --
+        where that copy stands against the head.
+
+        `sync` is "in_sync" (the caller holds the head), "behind" (it holds an
+        older kept generation, so a pull fast-forwards), "diverged" (it holds
+        something the server does not keep as an ancestor: pushing needs a
+        decision) or None (the caller did not say).
+        """
+        known = known or {}
+        user_dir = self.root / user
+        if not USER_RE.match(user):
+            raise ValueError(f"invalid user name: {user}")
+        if not user_dir.is_dir():
+            return []
+        out = []
+        for attr_dir in sorted(p for p in user_dir.iterdir() if ATTR_RE.match(p.name) and p.is_dir()):
+            attr = attr_dir.name
+            head = self.meta(user, attr)
+            if head is None:
+                continue
+            kept = self.history(user, attr)
+            hashes = {r["generation"]: r["hash"] for r in kept}
+            overwritten = self._forced_over(user, attr)
+            mine = known.get(attr)
+            if mine is None:
+                sync = None
+            elif mine == head["hash"]:
+                sync = "in_sync"
+            elif mine in hashes.values():
+                sync = "behind"
+            else:
+                sync = "diverged"
+            out.append(
+                {
+                    "attr": attr,
+                    "head": {k: head.get(k, "") for k in ("generation", "hash", "size", "device", "written_at")},
+                    "generations": len(kept),
+                    "devices": sorted({r["device"] for r in kept if r["device"]}),
+                    "overwritten_generations": overwritten,
+                    "has_conflict": bool(overwritten) or sync == "diverged",
+                    "sync": sync,
+                }
+            )
+        return out
+
+    def _forced_over(self, user: str, attr: str) -> list[int]:
+        """Generations that a forced push replaced, from the kept records."""
+        replaced = set()
+        for path in (self._attr_dir(user, attr) / "history").glob("*.json"):
+            try:
+                over = json.loads(path.read_text()).get("forced_over")
+            except (OSError, ValueError, AttributeError):
+                continue
+            if isinstance(over, int):
+                replaced.add(over)
+        return sorted(replaced)
+
     def generation_path(self, user: str, attr: str, generation: int) -> tuple[Path, dict] | None:
         """A kept generation's bytes and record, or None when retention has
         dropped it or it never was."""
@@ -197,6 +257,11 @@ class SavesStore:
                 "device": device,
                 "written_at": utc_now(),
             }
+            if current is not None and parent != current["hash"]:
+                # Only reachable forced: the caller did not descend from the
+                # head, and the generation it replaced is marked so a listing
+                # can show that a fork was overwritten.
+                meta["forced_over"] = current["generation"]
             history_dir = self._attr_dir(user, attr) / "history"
             history_dir.mkdir(exist_ok=True)
             record = history_dir / f"{name.removesuffix('.tar.zst')}.json"

@@ -21,6 +21,10 @@ from pathlib import Path
 # range should fall through to a plain 200, not a traceback.
 RANGE_RE = re.compile(r"^bytes=([0-9]{1,18})-([0-9]{0,18})$")
 
+# bytes=-N: the last N bytes, which zip readers in a browser use to find the
+# central directory without fetching the file.
+SUFFIX_RANGE_RE = re.compile(r"^bytes=-([0-9]{1,18})$")
+
 # What may be served from the files directory: keys and firmware names.
 # No leading dot by construction (the first class excludes it), no slash by
 # split, and the directory a person curates is the real allowlist.
@@ -55,6 +59,12 @@ def range_window(range_header: str, if_range: str, etag: str | None, size: int) 
     whole file: an invalid Range is ignored, not refused (RFC 9110 §14.1.1).
     """
     start, end, status = 0, size - 1, 200
+    suffix = SUFFIX_RANGE_RE.match(range_header.strip())
+    if suffix and (not if_range or (etag is not None and if_range == etag)):
+        length = int(suffix.group(1))
+        if length == 0 or size == 0:
+            return 0, size - 1, 416
+        return max(0, size - length), size - 1, 206
     wanted = RANGE_RE.match(range_header)
     # If-Range with a stale validator means the bytes changed since
     # the client's partial: send the whole file rather than splice.

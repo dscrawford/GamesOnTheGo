@@ -238,6 +238,47 @@ class Handler(
 
     # --- replies ------------------------------------------------------------
 
+    CORS_METHODS = "GET, HEAD, PUT, POST, DELETE, OPTIONS"
+    CORS_HEADERS = "Authorization, Content-Type, Range, If-Range, X-Gotg-Parent, X-Gotg-Device"
+    CORS_EXPOSE = "Content-Length, Content-Range, Accept-Ranges, ETag, Retry-After, X-Gotg-Generation, X-Gotg-Hash"
+
+    def _cors_origin(self) -> str | None:
+        """The Access-Control-Allow-Origin value for this request, or None.
+
+        Same-origin is the default and needs nothing: a browser sends no
+        cross-origin Origin for it, and none of this is ever added. Only an
+        Origin the operator listed is echoed, and never on /admin."""
+        origin = self.headers.get("Origin")
+        allowed = self.config.cors_origins
+        if not origin or not allowed or self.path.lstrip("/").startswith("admin"):
+            return None
+        if "*" in allowed:
+            return "*"
+        return origin if origin in allowed else None
+
+    def end_headers(self) -> None:
+        self.send_header("X-Content-Type-Options", "nosniff")
+        origin = self._cors_origin()
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Expose-Headers", self.CORS_EXPOSE)
+            if origin != "*":
+                self.send_header("Vary", "Origin")
+        super().end_headers()
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        """A CORS preflight, answered before authentication: it carries no
+        credentials by design. Without a listed Origin it is a bare 204 with no
+        Allow-* headers, which the browser reads as a refusal."""
+        self.close_connection = True
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        if self._cors_origin():
+            self.send_header("Access-Control-Allow-Methods", self.CORS_METHODS)
+            self.send_header("Access-Control-Allow-Headers", self.CORS_HEADERS)
+            self.send_header("Access-Control-Max-Age", "600")
+        self.end_headers()
+
     def _send(self, code: int, body: bytes, content_type: str, extra: dict[str, str] | None = None) -> None:
         self.send_response(code)
         self.send_header("Content-Type", content_type)

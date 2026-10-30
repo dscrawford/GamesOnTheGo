@@ -9,6 +9,7 @@ head's metadata, the head's bytes, a PUT -- is a method a test can aim at.
 
 from __future__ import annotations
 
+import urllib.parse
 from pathlib import Path
 
 from ..tokens import default_user
@@ -81,6 +82,9 @@ class SavesRoutes:
         parts = self._split(rest)
         if parts is None:
             return
+        if parts.path.strip("/") == "":
+            self._saves_list(user, parts.query)
+            return
         target = saves_target(parts.path)
         if target is None:
             self._problem(404, f"nothing lives at /saves/{parts.path.strip('/')}")
@@ -110,6 +114,22 @@ class SavesRoutes:
             self._problem(400, str(error))
         except OSError as error:
             self._problem(500, str(error))
+
+    def _saves_list(self, user: str, query: str) -> None:
+        """`GET /saves[?known=<attr>:<hash>,...]`: the user's environments and
+        where each stands. Read-only; the path never names another user."""
+        if self.command not in ("GET", "HEAD"):
+            self._problem(405, f"{self.command} is not something the saves listing answers")
+            return
+        known = {}
+        for value in urllib.parse.parse_qs(query).get("known", []):
+            for pair in filter(None, value.split(",")):
+                attr, _, digest = pair.partition(":")
+                known[attr] = digest
+        try:
+            self._json(200, {"version": 1, "saves": self.store.listing(user, known)})
+        except ValueError as error:
+            self._problem(400, str(error))
 
     def _saves_history(self, user: str, attr: str) -> None:
         self._json(200, {"generations": self.store.history(user, attr)})
