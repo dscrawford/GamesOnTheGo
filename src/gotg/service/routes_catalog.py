@@ -14,6 +14,7 @@ from pathlib import Path
 
 from ..catalog import Conflict, SweepRefused
 from ..contract import ENTRY_ID_RE, PLATFORM_RE
+from . import catalog_query
 
 
 def touch_keys(payload: object) -> list[tuple[str, str]]:
@@ -79,8 +80,10 @@ class CatalogRoutes:
         query = parts.query.split("&")
 
         try:
-            if self.command == "GET" and not segments:
+            if self.command in ("GET", "HEAD") and not segments:
                 self._catalog_list(query)
+            elif self.command in ("GET", "HEAD") and len(segments) == 2:
+                self._catalog_game(segments[0], segments[1])
             elif self.command == "PUT" and len(segments) == 2:
                 self._catalog_put(segments[0], segments[1], body, query)
             elif self.command == "POST" and segments == ["seen"]:
@@ -132,6 +135,10 @@ class CatalogRoutes:
             self._problem(403, "server paths need the library token")
             return
         view = self.catalog.view(full=full, paths=paths)
+        params = catalog_query.parse_query("&".join(query))
+        if catalog_query.is_paged(params):
+            page = catalog_query.select(view["games"], params)
+            view = {**view, **page}
         # The catalog names its own byte host, so clients need no
         # files configuration — and a moving host (a VPN-fronted one
         # changes address on reconnect) costs a re-read, not a rewrite.
@@ -142,6 +149,14 @@ class CatalogRoutes:
         if hosts:
             view["files_urls"] = hosts
         self._json(200, view)
+
+    def _catalog_game(self, platform: str, game_id: str) -> None:
+        """`GET /catalog/<platform>/<id>`: one game, as the list shows it."""
+        for game in self.catalog.view()["games"]:
+            if game["platform"] == platform and game["id"] == game_id:
+                self._json(200, catalog_query.summarize(game))
+                return
+        self._problem(404, f"no entry {platform}/{game_id}")
 
     def _catalog_put(self, platform: str, game_id: str, body: bytes | None, query: list[str]) -> None:
         if not self._catalog_needs_index():
