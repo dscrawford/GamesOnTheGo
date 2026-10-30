@@ -123,6 +123,11 @@ envs
   gotg-proxy = pkgs.callPackage ./gotg-proxy.nix {
     venv = py.set.mkVirtualEnv "gotg-service-env" py.workspace.deps.default;
   };
+  # The web app: the static frontend and the service that backs it. The service
+  # is the same gotg-proxy (sign-in is configuration, docs/web-app.md), named
+  # for what a web deployment calls it.
+  gotg-web = pkgs.callPackage ./gotg-web.nix { };
+  gotg-service = gotg-proxy;
   default = gotg;
   inherit gotg-pads gotg-killswitch;
   inherit (tools)
@@ -218,6 +223,30 @@ envs
   #
   #   nix build .#proxy-image
   #   skopeo copy docker-archive:result docker://localhost:30500/gotg-proxy:0.1.0
+  # The service image, with the static frontend alongside at /share/gotg-web
+  # for a pod that serves it itself rather than from a reverse proxy.
+  #   nix build .#web-image
+  web-image = pkgs.dockerTools.buildLayeredImage {
+    name = "gotg-web";
+    tag = gotg-web.passthru.version;
+    contents = [
+      gotg-proxy
+      pkgs.cacert
+      (pkgs.runCommand "gotg-web-share" { } "mkdir -p $out/share; ln -s ${gotg-web} $out/share/gotg-web")
+    ];
+    config = {
+      Entrypoint = [ (pkgs.lib.getExe gotg-proxy) ];
+      Env = [
+        "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+        "GOTG_WEB_DIR=/share/gotg-web"
+      ];
+      ExposedPorts = {
+        "8080/tcp" = { };
+      };
+      User = "65534:65534";
+    };
+  };
+
   proxy-image = pkgs.dockerTools.buildLayeredImage {
     name = "gotg-proxy";
     tag = gotg-proxy.passthru.version;

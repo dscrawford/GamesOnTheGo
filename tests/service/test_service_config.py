@@ -151,3 +151,99 @@ def test_validate_accepts_four_distinct_credentials_and_returns_the_config():
 def test_an_unset_credential_never_collides_with_another_unset_one():
     # Two empty strings are equal; the rules must not read that as a clash.
     assert Config(token="a").validate().token == "a"
+
+
+# --- web sign-in: optional, and a no-op until set -------------------------
+
+SECRET = "s" * 40
+WEB = {
+    "GOTG_PROXY_TOKEN": "client",
+    "GOTG_OIDC_PROVIDER": "GitHub",
+    "GOTG_OIDC_CLIENT_ID": "Iv1.abc",
+    "GOTG_OIDC_CLIENT_SECRET": "shh",
+    "GOTG_OIDC_REDIRECT_URL": "https://gotg.example/auth/callback",
+    "GOTG_OIDC_ALLOWLIST": "Alice, bob\ncarol,,",
+    "GOTG_SESSION_SECRET": SECRET,
+}
+
+
+def test_web_sign_in_is_off_when_unset():
+    config = cli.config_from_env({"GOTG_PROXY_TOKEN": "client"})
+    assert not config.oidc_enabled
+    assert config.oidc_allowlist == ()
+    assert config.cookie_secure is True
+
+
+def test_web_sign_in_fields_land():
+    config = cli.config_from_env(WEB)
+    assert config.oidc_enabled
+    assert config.oidc_provider == "github"
+    assert config.oidc_allowlist == ("alice", "bob", "carol")
+    assert (config.cookie_name, config.cookie_samesite, config.session_ttl) == ("gotg_session", "Lax", 604800)
+
+
+def test_secrets_come_from_files_and_files_win(tmp_path):
+    (tmp_path / "cs").write_text("from-file\n")
+    (tmp_path / "ss").write_text(SECRET + "\n")
+    env = {**WEB, "GOTG_OIDC_CLIENT_SECRET_FILE": str(tmp_path / "cs")}
+    del env["GOTG_SESSION_SECRET"]
+    env["GOTG_SESSION_SECRET_FILE"] = str(tmp_path / "ss")
+    config = cli.config_from_env(env)
+    assert config.oidc_client_secret == "from-file"
+    assert config.session_secret == SECRET
+
+
+def test_an_unreadable_secret_file_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="GOTG_OIDC_CLIENT_SECRET_FILE"):
+        cli.config_from_env({**WEB, "GOTG_OIDC_CLIENT_SECRET_FILE": str(tmp_path / "nope")})
+
+
+@pytest.mark.parametrize(
+    "drop",
+    [
+        "GOTG_OIDC_CLIENT_ID",
+        "GOTG_OIDC_CLIENT_SECRET",
+        "GOTG_OIDC_REDIRECT_URL",
+        "GOTG_OIDC_ALLOWLIST",
+        "GOTG_SESSION_SECRET",
+    ],
+)
+def test_half_configured_sign_in_is_refused(drop):
+    env = {k: v for k, v in WEB.items() if k != drop}
+    with pytest.raises(ValueError, match="half configured"):
+        cli.config_from_env(env)
+
+
+def test_one_stray_field_is_half_configured():
+    with pytest.raises(ValueError, match="half configured|PROVIDER"):
+        cli.config_from_env({"GOTG_PROXY_TOKEN": "t", "GOTG_OIDC_CLIENT_ID": "x"})
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"GOTG_OIDC_PROVIDER": "myspace"}, "github or oidc"),
+        ({"GOTG_OIDC_PROVIDER": "oidc"}, "ISSUER_URL"),
+        ({"GOTG_OIDC_REDIRECT_URL": "http://gotg.example/cb"}, "Secure"),
+        ({"GOTG_OIDC_REDIRECT_URL": "gotg.example/cb"}, "not an http"),
+        ({"GOTG_SESSION_SECRET": "short"}, "shorter than 32"),
+        ({"GOTG_SESSION_SECRET": "client" * 8}, "shorter" if False else "equals"),
+        ({"GOTG_COOKIE_SAMESITE": "sometimes"}, "SAMESITE"),
+        ({"GOTG_COOKIE_SAMESITE": "none", "GOTG_COOKIE_SECURE": "0"}, "needs Secure"),
+        ({"GOTG_COOKIE_SECURE": "maybe"}, "not a boolean"),
+        ({"GOTG_SESSION_TTL": "0"}, "positive"),
+    ],
+)
+def test_bad_web_settings_are_refused(change, message):
+    env = {**WEB, **change}
+    if "GOTG_SESSION_SECRET" in change and change["GOTG_SESSION_SECRET"].startswith("client"):
+        env["GOTG_PROXY_TOKEN"] = change["GOTG_SESSION_SECRET"]
+    with pytest.raises(ValueError, match=message):
+        cli.config_from_env(env)
+
+
+def test_local_http_development_is_allowed_with_insecure_cookies():
+    config = cli.config_from_env(
+        {**WEB, "GOTG_OIDC_REDIRECT_URL": "http://localhost:8080/auth/callback", "GOTG_COOKIE_SECURE": "0"}
+    )
+    assert config.cookie_secure is False

@@ -40,6 +40,32 @@ def _number(env: Mapping[str, str], name: str, fallback: float) -> float:
     return value
 
 
+def _secret(env: Mapping[str, str], name: str) -> str:
+    """A credential from NAME_FILE (a mounted Secret; wins) or NAME itself.
+
+    A file that cannot be read is a refusal, not an empty secret: sign-in
+    would otherwise look configured and fail on the first login.
+    """
+    path = env.get(name + "_FILE", "")
+    if path:
+        try:
+            return Path(path).read_text().strip()
+        except OSError as e:
+            raise ValueError(f"{name}_FILE is unreadable: {e}") from None
+    return env.get(name, "")
+
+
+def _flag(env: Mapping[str, str], name: str, fallback: bool) -> bool:
+    raw = env.get(name, "").strip().lower()
+    if not raw:
+        return fallback
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(f"{name} is not a boolean: {raw!r}")
+
+
 def config_from_env(env: Mapping[str, str] | None = None) -> Config:
     env = os.environ if env is None else env
     return Config(
@@ -62,6 +88,25 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
         legacy_user=env.get("GOTG_LEGACY_USER", "legacy"),
         admin_url=env.get("GOTG_ADMIN_URL", "").rstrip("/"),
         public_url=env.get("GOTG_PUBLIC_URL", "").rstrip("/"),
+        oidc_provider=env.get("GOTG_OIDC_PROVIDER", "").strip().lower(),
+        oidc_issuer_url=env.get("GOTG_OIDC_ISSUER_URL", "").rstrip("/"),
+        oidc_client_id=env.get("GOTG_OIDC_CLIENT_ID", ""),
+        oidc_client_secret=_secret(env, "GOTG_OIDC_CLIENT_SECRET"),
+        oidc_redirect_url=env.get("GOTG_OIDC_REDIRECT_URL", ""),
+        oidc_allowlist=tuple(
+            sorted(
+                {
+                    p.strip().lower()
+                    for p in env.get("GOTG_OIDC_ALLOWLIST", "").replace("\n", ",").split(",")
+                    if p.strip()
+                }
+            )
+        ),
+        session_secret=_secret(env, "GOTG_SESSION_SECRET"),
+        cookie_name=env.get("GOTG_COOKIE_NAME", "gotg_session"),
+        cookie_secure=_flag(env, "GOTG_COOKIE_SECURE", True),
+        cookie_samesite=env.get("GOTG_COOKIE_SAMESITE", "Lax").strip().capitalize(),
+        session_ttl=int(_number(env, "GOTG_SESSION_TTL", 604800)),
     ).validate()
 
 
