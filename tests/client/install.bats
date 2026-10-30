@@ -224,6 +224,18 @@ stub_side_effects() {
   [[ "$output" == *"would run:"* ]]
 }
 
+@test "a dry run on a machine without Nix goes on to the next step" {
+  # Nothing was installed, so there is no Nix for it to find.
+  other_linux
+  load_installer
+  stub_side_effects
+  have_nix() { return 1; }
+  use_nix() { return 1; }
+  DRY_RUN=1 run ensure_nix
+  [ "$status" -eq 0 ]
+  [ ! -s "$SIDE" ]
+}
+
 @test "a dry run hands over no /nix on a Deck" {
   steamos
   load_installer
