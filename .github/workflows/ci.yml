@@ -43,6 +43,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          use-flakehub: false
       - run: nix build .#checks.x86_64-linux.${{ matrix.check }} $NIX_FLAGS
 
   picker-lint:
@@ -62,7 +64,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
-      - run: nix flake check --no-build --all-systems
+        with:
+          use-flakehub: false
+      # `flake check --no-build` refuses to realize the sources uv2nix reads at
+      # eval time, and several outputs are x86_64-only; so force every drvPath.
+      - run: |
+          for out in checks packages devShells; do
+            nix eval --raw ".#$out.x86_64-linux" --apply \
+              's: builtins.concatStringsSep "\n" (map (d: d.drvPath) (builtins.attrValues s))' >/dev/null
+          done
 
   k8s-manifests:
     name: k8s manifests
