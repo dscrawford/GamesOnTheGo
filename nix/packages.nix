@@ -128,6 +128,8 @@ envs
   # for what a web deployment calls it.
   gotg-web = pkgs.callPackage ./gotg-web.nix { frontend = ../src/gotg/service/static; };
   gotg-service = gotg-proxy;
+  # The browser player's emulators, trimmed to the cores play_systems.json maps.
+  emulatorjs = pkgs.callPackage ./emulatorjs.nix { };
   default = gotg;
   inherit gotg-pads gotg-killswitch;
   inherit (tools)
@@ -224,7 +226,8 @@ envs
   #   nix build .#proxy-image
   #   skopeo copy docker-archive:result docker://localhost:30500/gotg-proxy:0.1.0
   # The service image, with the static frontend alongside at /share/gotg-web
-  # for a pod that serves it itself rather than from a reverse proxy.
+  # for a pod that serves it itself rather than from a reverse proxy, and the
+  # browser player's EmulatorJS at /share/emulatorjs (GOTG_EJS_DIR).
   #   nix build .#web-image
   web-image = pkgs.dockerTools.buildLayeredImage {
     name = "gotg-web";
@@ -232,13 +235,18 @@ envs
     contents = [
       gotg-proxy
       pkgs.cacert
-      (pkgs.runCommand "gotg-web-share" { } "mkdir -p $out/share; ln -s ${gotg-web} $out/share/gotg-web")
+      (pkgs.runCommand "gotg-web-share" { } ''
+        mkdir -p $out/share
+        ln -s ${gotg-web} $out/share/gotg-web
+        ln -s ${emulatorjs} $out/share/emulatorjs
+      '')
     ];
     config = {
       Entrypoint = [ (pkgs.lib.getExe gotg-proxy) ];
       Env = [
         "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
         "GOTG_WEB_DIR=/share/gotg-web"
+        "GOTG_EJS_DIR=/share/emulatorjs"
       ];
       ExposedPorts = {
         "8080/tcp" = { };

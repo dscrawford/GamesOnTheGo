@@ -12,8 +12,10 @@ brings you back to the same game) or a pasted GOTG token. The token is kept in
 same tab is used too. A token, when present, is sent as a bearer and wins over
 the cookie.
 
-Only systems that run at a useful speed in WASM are mapped (`CORES` in
-`src/gotg/service/play_page.py`):
+Only systems that run at a useful speed in WASM are mapped. The list is
+`src/gotg/service/play_systems.json`, read both by the service (`/play/plan`)
+and by Nix (`nix/emulatorjs.nix` packages exactly those cores). Add a system
+there and both follow.
 
 | GOTG slug | EmulatorJS system | libretro core |
 |---|---|---|
@@ -25,7 +27,7 @@ Only systems that run at a useful speed in WASM are mapped (`CORES` in
 | n64 (experimental) | n64 | mupen64plus_next |
 | ps1 (experimental) | psx | pcsx_rearmed |
 
-Every other platform (gamecube, switch, ...) shows the launcher instead:
+Every other platform shows the launcher instead (see "Not in the browser" below):
 `nix run gotg#<platform>.<id>`. `GET /play/plan/<platform>/<id>` (authenticated)
 returns that decision as JSON.
 
@@ -51,21 +53,38 @@ It is **not** the tar.zst native clients push; the separate `env-web-` prefix ke
 the two from ever being read as each other, so a browser save does **not** carry
 over to a native emulator (the formats differ per emulator anyway).
 
-## EmulatorJS assets: fetched, not vendored
+## EmulatorJS: built by Nix
 
-The release is ~300 MB (every core, several builds each). It is not committed.
-`scripts/fetch-emulatorjs.sh <dir>` downloads the pinned version (4.2.3) and
-checks its sha256; start the service with `GOTG_EJS_DIR=<dir>` and `/play/ejs/`
-serves it (same origin, so the page's CSP allows no third-party host). Without
-it the page says EmulatorJS is not installed. A Nix derivation (`fetchurl` with the same hash plus
-`p7zip`) is the natural deployment form; it is not written here.
+`nix build .#emulatorjs` fetches the pinned upstream release (4.2.3, fixed by
+hash) and keeps only the mapped cores, in their plain and WebGL 1 ("legacy")
+builds. That is about 18 MB instead of the release's ~300 MB. It is a prebuilt
+release, not a from-source build of the cores. The build fails if a core in
+`play_systems.json` is missing from the release. The web image
+(`.#web-image`) carries it at `/share/emulatorjs` and sets `GOTG_EJS_DIR`.
+Elsewhere, point the service at it:
+
+```bash
+GOTG_EJS_DIR=$(nix build --print-out-paths .#emulatorjs) nix run .#service
+```
+
+`/play/ejs/` serves it from the same origin. Without it, the page says
+EmulatorJS is not installed.
+
+## Not in the browser
+
+GameCube, Wii U and Switch are unsupported here for good (`"unsupported"` in
+`play_systems.json`). They need a native emulator, a real GPU and, for Switch,
+keys and firmware. Their plan is `{"mode": "nix", "unsupported": true,
+"reason": …}`. The game page and the player show the reason and the
+`nix run gotg#<platform>.<id>` command. Any other unmapped platform gets the
+same, with a generic reason.
 
 Licensing: EmulatorJS is GPL-3.0. The cores keep their own licences (nestopia
 GPL-2.0, snes9x non-commercial custom, gambatte GPL-2.0, mgba MPL-2.0,
 genesis_plus_gx non-commercial custom, mupen64plus_next GPL-2.0, pcsx_rearmed
-GPL-2.0). We do not redistribute them: the operator downloads them from upstream
-for their own deployment, which is why this is a script and not a vendor
-directory. The snes9x and genesis_plus_gx terms forbid commercial use; check
+GPL-2.0). They are not committed: Nix downloads them from upstream when the
+package is built. The web image does contain them, so keep that image in your
+own registry rather than publishing it. The snes9x and genesis_plus_gx terms forbid commercial use; check
 them before serving anyone but your own household. ROMs and BIOS files are not part
 of any of this.
 

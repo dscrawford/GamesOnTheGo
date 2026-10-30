@@ -10,9 +10,10 @@ this page covers packaging and configuration.
 
 | Output | What |
 | --- | --- |
-| `packages.gotg-web` | the static frontend directory (a placeholder page until the frontend lands) |
+| `packages.gotg-web` | the static frontend directory (the SPA in `src/gotg/service/static`) |
 | `packages.gotg-service` | the service (same binary as `gotg-proxy`) |
-| `packages.web-image` | container image: service + frontend at `/share/gotg-web` (`GOTG_WEB_DIR`) |
+| `packages.emulatorjs` | the browser player's EmulatorJS, trimmed to the cores in `play_systems.json` (`docs/browser-play.md`) |
+| `packages.web-image` | container image: service + frontend at `/share/gotg-web` (`GOTG_WEB_DIR`) + EmulatorJS at `/share/emulatorjs` (`GOTG_EJS_DIR`) |
 | `apps.service` | `nix run .#service`, for local runs |
 
 ## 1. Register a GitHub OAuth app

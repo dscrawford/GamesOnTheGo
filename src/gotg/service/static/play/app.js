@@ -249,6 +249,7 @@
     if (plan.mode !== "browser") {
       $("nix-title").textContent = gameId;
       $("nix-command").textContent = plan.nix;
+      if (plan.reason) $("nix-reason").textContent = plan.reason;
       $("nix").hidden = false;
       return status("");
     }

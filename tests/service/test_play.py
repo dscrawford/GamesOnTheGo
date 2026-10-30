@@ -35,6 +35,35 @@ def test_the_mapped_systems_that_the_indexer_knows_are_the_wasm_ones():
     assert play_page.CORES["gb"].system == play_page.CORES["gbc"].system
 
 
+def test_every_platform_the_indexer_emits_is_browser_played_or_unsupported():
+    from gotg.indexer.plan import DAT_DIR_PLATFORM, EXT_PLATFORM
+
+    emitted = set(re.findall(r"platform: (\w+)", RULES.read_text()))
+    emitted |= {platform for platform, _ in DAT_DIR_PLATFORM.values()} | set(EXT_PLATFORM.values())
+    unplaced = emitted - set(play_page.CORES) - set(play_page.UNSUPPORTED)
+    assert not unplaced, f"decide browser or unsupported for: {sorted(unplaced)}"
+    assert {"gamecube", "wiiu", "switch"} <= set(play_page.UNSUPPORTED)
+    assert not set(play_page.CORES) & set(play_page.UNSUPPORTED)
+
+
+def test_unsupported_systems_get_the_launcher_and_a_reason():
+    plan = play_page.play_plan("switch", "usa.x")
+    assert plan["mode"] == "nix" and plan["unsupported"] is True
+    assert "browser" in plan["reason"] and plan["nix"] == "nix run gotg#switch.usa.x"
+    other = play_page.play_plan("ps2", "usa.x")
+    assert other["mode"] == "nix" and other["unsupported"] is False and other["reason"]
+
+
+def test_nix_packages_the_cores_from_the_same_file():
+    systems = json.loads(play_page.SYSTEMS_FILE.read_text())
+    assert set(systems) >= {"browser", "unsupported"}
+    for slug, entry in systems["browser"].items():
+        assert set(entry) <= {"system", "core", "exts", "note", "experimental"}, slug
+        assert entry["core"] == play_page.CORES[slug].core
+    nix = (Path(__file__).parents[2] / "nix/emulatorjs.nix").read_text()
+    assert "../src/gotg/service/play_systems.json" in nix and "systems.browser" in nix
+
+
 def test_gbc_is_a_platform_the_controller_config_names():
     assert "gbc" in (CONFIG / "gameboy.yaml").read_text()
 
@@ -55,6 +84,8 @@ def test_plan_for_a_launcher_system():
         "id": "usa.luigis_mansion",
         "nix": "nix run gotg#gamecube.usa.luigis_mansion",
         "mode": "nix",
+        "unsupported": True,
+        "reason": play_page.UNSUPPORTED["gamecube"],
     }
 
 

@@ -54,7 +54,7 @@ class PlayRoutes:
 
     def _play_asset(self, name: str) -> None:
         """One file of the vendored EmulatorJS, from the directory the operator
-        fetched it into (scripts/fetch-emulatorjs.sh). Served whole: the cores are
+        fetched it into (nix/emulatorjs.nix: `nix build .#emulatorjs`). Served whole: the cores are
         ~1 MB compressed, and the browser caches them."""
         if self.ejs_dir is None:
             self._problem(404, "this service holds no EmulatorJS; see docs/browser-play.md")

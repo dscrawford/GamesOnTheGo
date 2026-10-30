@@ -20,7 +20,9 @@ export async function detail(root, ctx) {
         h("a", { class: "button primary", href: api.playUrl(platform, id), id: "play" }, "▶ Play in browser"),
         ...(plan.experimental ? [h("span", { class: "dim" }, " experimental: may stutter on slower devices")] : []));
     } else if (plan && plan.nix) {
-      play.replaceChildren(h("p", { class: "dim" }, "Not playable in a browser. With the Nix launcher: ", h("code", {}, plan.nix)));
+      play.replaceChildren(
+        h("p", { class: "dim", id: "no-play" }, plan.reason || "Not playable in a browser."),
+        h("p", {}, "With the Nix launcher: ", h("code", {}, plan.nix)));
     }
   }).catch(() => { /* the page still works without a play button */ });
   root.replaceChildren(

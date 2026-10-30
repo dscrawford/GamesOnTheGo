@@ -9,13 +9,15 @@ whether this platform runs in the browser at all, with which EmulatorJS system, 
 
 The mapping is the point of this module and is plain data (`CORES`), so a test can
 hold it against `config/` and the indexer's platform list. EmulatorJS itself is not
-in the repository: see docs/browser-play.md and scripts/fetch-emulatorjs.sh.
+in the repository: see docs/browser-play.md and nix/emulatorjs.nix.
 """
 
 from __future__ import annotations
 
+import json
 import re
 import urllib.parse
+from pathlib import Path
 
 from ..contract import ENTRY_ID_RE, PLATFORM_RE
 
@@ -84,32 +86,25 @@ class Core:
 
 ARCHIVES = (".zip", ".7z")
 
-# GOTG platform slug -> EmulatorJS. Only what realistically runs in WASM at full
-# speed on an ordinary laptop. Everything else -- gamecube, switch, wiiu, ps2... --
-# is the Nix launcher's. n64 and ps1 are in, flagged: they run, on good hardware,
-# and are the first thing to stutter on a phone.
+# The one list of browser-playable systems, shared with Nix: nix/emulatorjs.nix
+# packages exactly the cores named here, so the two cannot drift. Only what
+# runs in WASM at a useful speed is under "browser" (n64 and ps1 flagged: they
+# run on good hardware and are the first thing to stutter on a phone).
+# "unsupported" are the systems that stay with the Nix launcher for good.
+SYSTEMS_FILE = Path(__file__).with_name("play_systems.json")
+_SYSTEMS = json.loads(SYSTEMS_FILE.read_text())
+
 CORES: dict[str, Core] = {
-    "nes": Core("nes", "nestopia", (".nes", ".fds", ".unf") + ARCHIVES),
-    "snes": Core("snes", "snes9x", (".sfc", ".smc", ".fig", ".swc") + ARCHIVES),
-    "gb": Core("gb", "gambatte", (".gb",) + ARCHIVES),
-    "gbc": Core("gb", "gambatte", (".gbc", ".gb") + ARCHIVES),
-    "gba": Core("gba", "mgba", (".gba",) + ARCHIVES),
-    "genesis": Core("segaMD", "genesis_plus_gx", (".md", ".gen", ".bin", ".smd") + ARCHIVES),
-    "n64": Core(
-        "n64",
-        "mupen64plus_next",
-        (".z64", ".n64", ".v64") + ARCHIVES,
-        "heavy: wants a desktop-class CPU/GPU",
-        True,
-    ),
-    "ps1": Core(
-        "psx",
-        "pcsx_rearmed",
-        (".cue", ".chd", ".pbp", ".iso", ".bin") + ARCHIVES,
-        "disc images are large; some games want a BIOS the page cannot supply",
-        True,
-    ),
+    slug: Core(
+        entry["system"],
+        entry["core"],
+        tuple(entry["exts"]) + ARCHIVES,
+        entry.get("note", ""),
+        entry.get("experimental", False),
+    )
+    for slug, entry in _SYSTEMS["browser"].items()
 }
+UNSUPPORTED: dict[str, str] = dict(_SYSTEMS["unsupported"])
 
 
 def save_attr(platform: str, game_id: str) -> str:
@@ -130,7 +125,8 @@ def play_plan(platform: str, game_id: str) -> dict | None:
     plan = {"platform": platform, "id": game_id, "nix": nix_command(platform, game_id)}
     core = CORES.get(platform)
     if core is None:
-        return {**plan, "mode": "nix"}
+        reason = UNSUPPORTED.get(platform, "This system is not set up for browser play.")
+        return {**plan, "mode": "nix", "unsupported": platform in UNSUPPORTED, "reason": reason}
     return {**plan, "mode": "browser", "save_attr": save_attr(platform, game_id), **core.view()}
 
 
@@ -158,7 +154,8 @@ PAGE = """<!doctype html>
   </section>
   <section id="nix" hidden>
     <h2 id="nix-title"></h2>
-    <p>This system does not run well in a browser. Play it with the Nix launcher:</p>
+    <p id="nix-reason">This system does not run in a browser.</p>
+    <p>Play it with the Nix launcher:</p>
     <pre id="nix-command"></pre>
   </section>
   <section id="conflict" hidden>
