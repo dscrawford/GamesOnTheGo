@@ -15,6 +15,7 @@ in the repository: see docs/browser-play.md and scripts/fetch-emulatorjs.sh.
 from __future__ import annotations
 
 import re
+import urllib.parse
 
 from ..contract import ENTRY_ID_RE, PLATFORM_RE
 
@@ -30,6 +31,28 @@ POLICY = (
     "style-src 'self' 'unsafe-inline'; connect-src 'self' blob: data:; img-src 'self' blob: data:; "
     "media-src 'self' blob:; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 )
+
+
+def policy(byte_hosts: list[str] | tuple[str, ...] = ()) -> str:
+    """POLICY, plus the byte hosts the catalog advertises in connect-src.
+
+    Where the service holds no game files itself (a split deployment), the ROM
+    comes from the catalog's files_urls, cross-origin. Only scheme://host[:port]
+    of an http(s) URL is added; anything else is dropped, never pasted in.
+    """
+    origins = []
+    for host in byte_hosts:
+        parts = urllib.parse.urlsplit(host)
+        if parts.scheme in ("http", "https") and parts.hostname and _ORIGIN_SAFE.fullmatch(parts.netloc):
+            origins.append(f"{parts.scheme}://{parts.netloc}")
+    if not origins:
+        return POLICY
+    return POLICY.replace(
+        "connect-src 'self' blob: data:;", "connect-src 'self' " + " ".join(dict.fromkeys(origins)) + " blob: data:;"
+    )
+
+
+_ORIGIN_SAFE = re.compile(r"[A-Za-z0-9.\-\[\]:]+")
 
 # The bundle a browser pushes is a tiny JSON container, not the tar.zst a native
 # client pushes, so the two can never be mistaken for one another: its attr has
