@@ -66,4 +66,4 @@ jobs:
         run: |
           sed -e "s/@NAME@/$NAME/" -e "s/@GAME@/$GAME/" k8s/qa/job.yaml | kubectl apply -f -
           trap 'kubectl -n default logs job/gotg-qa-$NAME || true' EXIT
-          kubectl -n default wait --for=condition=complete --timeout=50m job/gotg-qa-$NAME
+          kubectl -n default wait --for=condition=complete --timeout=50m "job/gotg-qa-$NAME"
