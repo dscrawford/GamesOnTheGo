@@ -83,6 +83,20 @@ class Config:
     # How hard anybody may lean on an upstream through this proxy, in requests
     # per second, with a burst for the ordinary case of one client opening a
     # grid. Cache hits are not counted: they cost the upstream nothing.
+    # Sign-in (oauth.py). Off unless oauth_client_id is set. "github" or "oidc";
+    # for oidc give the issuer (discovery) or the three endpoint urls.
+    oauth_provider: str = "github"
+    oauth_client_id: str = ""
+    oauth_client_secret: str = ""
+    oauth_issuer: str = ""
+    oauth_authorize_url: str = ""
+    oauth_token_url: str = ""
+    oauth_userinfo_url: str = ""
+    oauth_scopes: str = ""
+    oauth_redirect_uri: str = ""
+    # Usernames, verified emails or "@domain"s that may sign in; empty admits nobody.
+    oauth_allow: tuple[str, ...] = ()
+    oauth_session_days: float = 30.0
     upstream_rate: float = 2.0
     upstream_burst: float = 10.0
     # The longest a paced request will sit on a thread before being told 429
@@ -116,4 +130,15 @@ class Config:
                 "the library token equals another credential. Refusing to start: "
                 "seeing server paths must not come with any other power."
             )
+        if self.oauth_client_id:
+            if self.oauth_provider not in ("github", "oidc"):
+                raise ValueError(f"GOTG_OAUTH_PROVIDER is github or oidc, not {self.oauth_provider!r}")
+            if not (self.oauth_redirect_uri or self.public_url):
+                raise ValueError("sign-in needs GOTG_PUBLIC_URL (or GOTG_OAUTH_REDIRECT_URI) for its callback")
+            if self.oauth_provider == "oidc" and not (
+                self.oauth_issuer or (self.oauth_authorize_url and self.oauth_token_url and self.oauth_userinfo_url)
+            ):
+                raise ValueError("an oidc provider needs GOTG_OAUTH_ISSUER or all three endpoint urls")
+            if not 0 < self.oauth_session_days <= 3650:
+                raise ValueError("GOTG_OAUTH_SESSION_DAYS must be between 0 and 3650")
         return self

@@ -55,12 +55,15 @@ from ..tokens import TOKEN_RE, TokenStore
 from . import admin_page
 from .artcache import ArtCache
 from .config import TIMEOUT, USER_AGENT, Config
+from .oauth import OAuth
 from .ratelimit import RateLimiter
 from .routes_admin import AdminRoutes
 from .routes_art import ArtRoutes
 from .routes_catalog import CatalogRoutes
 from .routes_files import FileRoutes
 from .routes_logs import LogsRoutes
+from .routes_oauth import ROUTES as OAUTH_ROUTES
+from .routes_oauth import SESSION_COOKIE, OAuthRoutes
 from .routes_saves import SavesRoutes
 from .token_cache import TokenCache
 
@@ -190,7 +193,9 @@ def body_cap(prefix: str, command: str, store: SavesStore | None, logs: LogsStor
     return MAX_BODY
 
 
-class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, AdminRoutes, BaseHTTPRequestHandler):
+class Handler(
+    ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, AdminRoutes, OAuthRoutes, BaseHTTPRequestHandler
+):
     config: Config
     tokens: TokenCache
     store: SavesStore | None
@@ -200,6 +205,7 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
     streams: threading.BoundedSemaphore
     scans: threading.BoundedSemaphore
     token_store: TokenStore | None
+    oauth: OAuth | None
     art: ArtCache | None
     limits: dict[str, RateLimiter]
     auth_cache: dict
@@ -321,7 +327,7 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
         # first wrong byte, which leaks the secret a character at a time.
         bearer = self._bearer()
         if not bearer:
-            return None
+            return self._cookie_principal()
         if hmac.compare_digest(bearer, self.config.token.encode()):
             return "legacy"
         if self.config.index_token and hmac.compare_digest(bearer, self.config.index_token.encode()):
@@ -339,6 +345,18 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
         # junk bearer would be a library-thread famine.
         if self.config.auth_url and TOKEN_RE.match(bearer.decode("latin-1")):
             return self._introspect(bearer)
+        return None
+
+    def _cookie_principal(self) -> str | None:
+        """The session cookie as a principal: a personal token and nothing else,
+        so a cookie can never be one of the shared secrets."""
+        value = self._cookie(SESSION_COOKIE)
+        if not TOKEN_RE.match(value):
+            return None
+        if self.token_store is not None:
+            return self.token_store.verify(value)
+        if self.config.auth_url:
+            return self._introspect(value.encode())
         return None
 
     def _introspect(self, bearer: bytes) -> str | None:
@@ -515,6 +533,12 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
             self._problem(401, "a bearer token is required", close=True)
             return
 
+        # A browser session rides on ambient credentials, so its writes are
+        # held to the page that made them being ours.
+        if not self._bearer() and self.command not in ("GET", "HEAD") and self._csrf_refused():
+            self._problem(403, "cross-origin request", close=True)
+            return
+
         prefix, rest = split_route(path)
 
         # The admin token opens /admin and the read side of /logs, nothing else:
@@ -573,6 +597,10 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
         # connection: on kept-alive HTTP/1.1 the unread body would frame the
         # next request — behind an ingress that shares upstream connections,
         # that is request smuggling, not just the caller's own confusion.
+        if clean in OAUTH_ROUTES:
+            self._oauth_route(clean)
+            return True
+
         if clean == "healthz":
             self.close_connection = True
             self._send(200, b'{"ok":true}', "application/json")
@@ -685,6 +713,7 @@ def make_server(
             "streams": threading.BoundedSemaphore(stream_slots),
             "scans": threading.BoundedSemaphore(1),
             "token_store": token_store,
+            "oauth": OAuth(config) if config.oauth_client_id else None,
             "art": art,
             # One bucket per upstream: they are different quotas, and a warm
             # run against SteamGridDB must not throttle an IGDB lookup.
