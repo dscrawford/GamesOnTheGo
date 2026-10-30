@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # AGENTS.md: builds share a machine; a hosted runner has 4 cores, so cap alike.
+  NIX_FLAGS: --max-jobs 2 --cores 2 --print-build-logs
+
+jobs:
+  # Each gate is a flake check (nix/checks/*), so CI runs exactly what AGENTS.md
+  # says "must pass before a change is done".
+  nix-check:
+    name: ${{ matrix.check }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        check:
+          - ruff          # lint + format of src/gotg and tests
+          - shellcheck    # the bash client
+          - rust          # cargo test, clippy -D warnings, fmt
+          - python-tests  # service, indexer, ui unit tests
+          - client-tests  # bats suite
+          - catalog
+          - library
+          - resolver
+          - recipes
+          - platforms
+          - environments
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - run: nix build .#checks.x86_64-linux.${{ matrix.check }} $NIX_FLAGS
+
+  picker-lint:
+    name: ruff (picker + e2e)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uvx ruff check src/ui tests/ui tests/e2e
+
+  flake-eval:
+    name: flake evaluates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - run: nix flake check --no-build --all-systems
+
+  k8s-manifests:
+    name: k8s manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fill the templates' placeholders
+        run: |
+          mkdir -p /tmp/k8s
+          sed -e 's/@NAME@/ci/' -e 's/@GAME@/usa.ci/' k8s/qa/job.yaml > /tmp/k8s/qa-job.yaml
+          sed -e 's/@TAG@/ci/' -e 's/@SHARDS@/3/' k8s/controllers/job.yaml > /tmp/k8s/controllers-job.yaml
+          cp k8s/qa/state.yaml /tmp/k8s/qa-state.yaml
+      - name: kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /tmp kubeconform
+          /tmp/kubeconform -strict -summary -kubernetes-version 1.30.0 /tmp/k8s
+      - name: run.py compiles
+        run: python3 -m py_compile k8s/controllers/run.py
+
+  install-script:
+    name: install.sh
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck install.sh uninstall.sh
+      - run: bash -n install.sh && bash -n uninstall.sh
+      - run: bash install.sh --server https://gotg.example.org --dry-run

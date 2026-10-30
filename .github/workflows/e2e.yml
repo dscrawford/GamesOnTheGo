@@ -1,0 +1,69 @@
+name: E2E
+
+# The controller suite makes real pads through /dev/uinput and needs the
+# private cluster (k8s/controllers), so it runs on a self-hosted runner.
+# The repo is public: never trigger this on pull_request, a fork's code would
+# run on that runner. Maintainers dispatch it against a branch they have read.
+on:
+  push:
+    branches: [master]
+    paths:
+      - src/ui/**
+      - src/client/**
+      - tests/e2e/**
+      - rust/**
+      - config/**
+      - k8s/controllers/**
+      - flake.lock
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      pytest_args:
+        description: "Arguments for pytest in every pod, e.g. -k full_room"
+        required: false
+        default: ""
+
+# One run at a time: the pods own each node's /dev/uinput.
+concurrency:
+  group: e2e-cluster
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  controllers:
+    name: controller e2e (cluster)
+    runs-on: [self-hosted, gotg-cluster]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests/e2e, a pod per node
+        run: nix run .#controllers-cluster --max-jobs 2 --cores 4 -- ${{ inputs.pytest_args }}
+      - name: Keep the per-share logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: controllers-runs
+          path: ~/.cache/gotg/controllers-runs/
+          if-no-files-found: ignore
+
+  # `gotg qa` grades a real game on a pod; GPU tier on node3. Manual only:
+  # it needs the library's games on the state volume and costs a GPU slice.
+  qa:
+    name: game QA (cluster)
+    if: github.event_name == 'workflow_dispatch'
+    needs: controllers   # k8s/qa and k8s/controllers must not share a node
+    runs-on: [self-hosted, gotg-cluster]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run a QA Job
+        env:
+          GAME: usa.diddy_kong_racing_rev1
+          NAME: ci-${{ github.run_id }}
+        run: |
+          sed -e "s/@NAME@/$NAME/" -e "s/@GAME@/$GAME/" k8s/qa/job.yaml | kubectl apply -f -
+          trap 'kubectl -n default logs job/gotg-qa-$NAME || true' EXIT
+          kubectl -n default wait --for=condition=complete --timeout=50m job/gotg-qa-$NAME
