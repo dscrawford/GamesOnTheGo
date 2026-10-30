@@ -28,7 +28,7 @@
   platforms = import ./platforms.nix { inherit pkgs py; };
   environments = import ./environments.nix { inherit pkgs packages; };
   catalog = import ./catalog.nix { inherit pkgs; };
-  resolver = import ./resolver.nix { inherit pkgs packages; };
+  resolver = import ./resolver.nix { inherit pkgs; };
   library = import ./library.nix { inherit pkgs flake; };
   hmModule = import ./hm-module.nix { inherit pkgs flake; };
   fullscreen = import ./fullscreen.nix { inherit pkgs; };
