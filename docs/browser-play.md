@@ -24,9 +24,17 @@ returns that decision as JSON.
 
 ## Saves
 
-Pull before start (`GET /saves/<attr>`), push after the battery file or a state
-changes (debounced), on the player's Save State, and on tab hide/close
-(`fetch` keepalive, which caps at 64 KiB; larger bundles go on the debounce).
+Pull before start (`GET /saves/<attr>`) and write the battery file into the
+core once it starts. Push:
+- when EmulatorJS writes the battery file: its "System Save interval" (set to
+  30 s by default here) emits `saveSaveFiles`, and an unchanged file is not
+  re-pushed;
+- on the player's Save State;
+- on tab hide (the page asks the core to write the file first) and on close.
+  On close, EmulatorJS's own `beforeunload` handler writes the file one last
+  time and then unmounts it. The page catches that final `saveSaveFiles` and
+  pushes it straight away with `fetch` keepalive (64 KiB cap; larger bundles go
+  on the timer). By `pagehide` the file is already gone.
 The push carries `X-Gotg-Parent`; a 409 stops pushing and asks which side wins,
 it never overwrites silently.
 
@@ -58,8 +66,19 @@ of any of this.
 
 - Same-origin only: the ROM comes from this service's `/games`, not a separate
   `files_url` host (that host would need CORS).
-- The EmulatorJS callbacks (`EJS_onSaveUpdate`, `EJS_onSaveState`,
-  `gameManager.getSaveFile/getSaveFilePath/loadSaveFiles`) are the 4.2 API as
-  documented; they have not been exercised in a real browser.
-- The CSP omits `unsafe-eval`; if a core needs it, it will fail in the console.
+- Checked in headless Chromium against EmulatorJS 4.2.3, with homebrew NES and
+  SNES test ROMs that keep a boot counter in battery SRAM:
+  - The page loads the exact core the plan names (`EJS_core` is `plan.core`;
+    passing just the system would give fceumm for NES).
+  - Both games run and their saves round-trip: the counter goes up on each
+    reload.
+  - A second tab gets the 409 dialog, and "overwrite" force-pushes.
+  The other systems have not been run.
+- The CSP allows `'unsafe-eval'` on `/play` only. Every core ships as a 7z, and
+  EmulatorJS's extractor (`compression/extract7z.js`) calls `eval()` in a blob
+  worker, which inherits the page's policy. Without it the player hangs at
+  "Decompress Game Core".
+- When the page is served from `localhost`/`127.0.0.1`, EmulatorJS also tries an
+  update check against `cdn.emulatorjs.org`. The CSP blocks it, and the result
+  is a harmless console error.
 - Multi-disc PS1 sets and BIOS provisioning are not handled.

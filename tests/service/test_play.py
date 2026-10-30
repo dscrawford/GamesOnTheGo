@@ -95,6 +95,24 @@ def test_page_is_served_without_a_token_with_a_strict_policy(served):
         assert "http" not in headers["Content-Security-Policy"]
 
 
+def test_policy_allows_the_eval_that_emulatorjs_core_extraction_needs():
+    # Every EmulatorJS core is a 7z; its extractor (compression/extract7z.js)
+    # calls eval() in a blob worker that inherits this policy. Without
+    # 'unsafe-eval' Chromium hangs at "Decompress Game Core" (seen in a browser).
+    script_src = next(d for d in play_page.POLICY.split(";") if d.strip().startswith("script-src"))
+    assert "'unsafe-eval'" in script_src and "'wasm-unsafe-eval'" in script_src
+    assert "http" not in play_page.POLICY
+
+
+def test_script_saves_through_emulatorjs_events_that_exist():
+    # EmulatorJS 4.2.3 has no EJS_onSaveUpdate; battery saves arrive on the
+    # emulator's "saveSaveFiles" event, the only one still firing on unload.
+    script = play_page.routes()["play/app.js"][0].decode()
+    assert "EJS_onSaveUpdate" not in script
+    assert 'on("saveSaveFiles"' in script
+    assert "plan.core" in script
+
+
 def test_script_uses_the_saves_api_with_parent_and_pull_first():
     script = play_page.routes()["play/app.js"][0].decode()
     assert "X-Gotg-Parent" in script and "/saves/" in script and "/games/" in script
