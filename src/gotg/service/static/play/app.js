@@ -1,6 +1,7 @@
 // GOTG browser player. No framework, no third-party origin: EmulatorJS is served
-// from /play/ejs/ (see docs/browser-play.md). The token is typed in and kept for
-// the tab; every request carries it as a bearer, the same as the CLI.
+// from /play/ejs/ (see docs/browser-play.md). A signed-in browser's session cookie
+// is enough: same-origin fetches carry it. Without one, a pasted token (kept for
+// the tab) goes as a bearer, the same as the CLI; a bearer always wins over the cookie.
 (() => {
   "use strict";
   const $ = (id) => document.getElementById(id);
@@ -10,7 +11,8 @@
   const DEVICE = "web";
   const PUSH_DELAY_MS = 5000;
 
-  let token = sessionStorage.getItem("gotg-token") || "";
+  // "gotg.bearer" is the web UI's key: a token pasted there carries over to here.
+  let token = sessionStorage.getItem("gotg-token") || sessionStorage.getItem("gotg.bearer") || "";
   let plan = null;
   let parent = ""; // X-Gotg-Hash of the generation this tab descends from
   let dirty = null; // files waiting to be pushed: {name: Uint8Array}
@@ -19,7 +21,7 @@
 
   const status = (text) => { $("status").textContent = text; };
   const fail = (text) => { $("error").textContent = text; $("error").hidden = false; status(""); };
-  const auth = () => ({ Authorization: "Bearer " + token });
+  const auth = () => (token ? { Authorization: "Bearer " + token } : {});
 
   // --- the save bundle: {"version":1,"files":{name: base64}} ------------------
   // The store never opens a bundle. A browser's is JSON, under its own attr
@@ -188,11 +190,19 @@
     if (!/^[a-z0-9][a-z0-9_-]*$/.test(platform) || !/^[a-z]{3,5}\.[a-z0-9_]+$/.test(gameId)) {
       return fail("open this page as /play/?platform=<slug>&id=<id>");
     }
-    if (!token) { $("login").hidden = false; return; }
     $("login").hidden = true;
+    $("error").hidden = true;
     status("checking");
+    // No token: try the session cookie. A 401 then just means "not signed in".
     const response = await fetch("/play/plan/" + platform + "/" + gameId, { headers: auth() });
-    if (response.status === 401) { sessionStorage.removeItem("gotg-token"); token = ""; $("login").hidden = false; return fail("that token was refused"); }
+    if (response.status === 401) {
+      const refused = !!token;
+      sessionStorage.removeItem("gotg-token"); sessionStorage.removeItem("gotg.bearer"); token = "";
+      $("sso").href = "/auth/login?next=" + encodeURIComponent(location.pathname + location.search);
+      $("login").hidden = false;
+      status("");
+      return refused ? fail("that token was refused") : undefined;
+    }
     if (!response.ok) return fail("HTTP " + response.status);
     plan = await response.json();
 
