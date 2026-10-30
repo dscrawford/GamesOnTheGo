@@ -28,7 +28,12 @@ ROUTES = {
     "auth/device/token",
     "auth/device/verify",
     "auth/device/approve",
+    "auth/bearer",
 }
+
+# A bearer minted for a signed-in browser, for byte hosts on another origin
+# (they never see this site's cookie). Short: a page load mints one.
+BEARER_TTL = 6 * 3600
 
 
 class OAuthRoutes:
@@ -49,6 +54,7 @@ class OAuthRoutes:
             "auth/device/token": ("POST",),
             "auth/device/verify": ("GET",),
             "auth/device/approve": ("POST",),
+            "auth/bearer": ("POST",),
         }[clean]
         if self.command not in verbs and not (self.command == "HEAD" and "GET" in verbs):
             self._problem(405, f"{clean} takes {' or '.join(verbs)}", close=True)
@@ -61,6 +67,7 @@ class OAuthRoutes:
             "auth/device/token": self._device_poll,
             "auth/device/verify": lambda: self._device_verify(query),
             "auth/device/approve": self._device_approve,
+            "auth/bearer": self._session_bearer,
         }[clean]
         handler()
 
@@ -210,6 +217,27 @@ class OAuthRoutes:
         if name:
             self.token_store.revoke(name)
         self._json(200, {"ok": True}, {"Set-Cookie": self._set_cookie(self.config.cookie_name, "", 0)})
+
+    def _session_bearer(self) -> None:
+        """`POST /auth/bearer`: a short-lived personal token for the signed-in
+        browser, so the player can fetch a ROM from a byte host on another
+        origin (the catalog's files_urls). Only for a cookie session, and only
+        from this site's own pages: the Origin must be present and match.
+        It is an ordinary token: listed under /admin, revocable, expiring."""
+        if self.headers.get("Origin") != self._origin():
+            self._problem(403, "mint a bearer from this site's own pages")
+            return
+        if self._read_small() is None:
+            return
+        if self._bearer():
+            self._problem(400, "this request already carries a bearer")
+            return
+        user = self._session_user()
+        if not user:
+            self._problem(401, "sign in first at /auth/login")
+            return
+        name, token = self._mint(user, "play", BEARER_TTL)
+        self._json(200, {"token": token, "name": name, "expires_in": BEARER_TTL}, {"Cache-Control": "no-store"})
 
     # --- device flow ---------------------------------------------------------
 
