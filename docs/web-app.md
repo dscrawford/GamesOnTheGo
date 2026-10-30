@@ -70,7 +70,7 @@ GOTG_COOKIE_SECURE=0 \
 nix run .#service
 ```
 
-(Check `src/gotg/service/cli.py` for the port variable the service listens on.)
+The service listens on `$PORT` (default 8080).
 
 ## 4. Kubernetes
 
