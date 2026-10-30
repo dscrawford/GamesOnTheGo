@@ -62,6 +62,7 @@ from .routes_catalog import CatalogRoutes
 from .routes_files import FileRoutes
 from .routes_logs import LogsRoutes
 from .routes_saves import SavesRoutes
+from .routes_static import StaticRoutes, static_file
 from .token_cache import TokenCache
 
 # Introspection is an in-cluster hop on every cache miss; a wedged api pod
@@ -190,7 +191,9 @@ def body_cap(prefix: str, command: str, store: SavesStore | None, logs: LogsStor
     return MAX_BODY
 
 
-class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, AdminRoutes, BaseHTTPRequestHandler):
+class Handler(
+    StaticRoutes, ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, AdminRoutes, BaseHTTPRequestHandler
+):
     config: Config
     tokens: TokenCache
     store: SavesStore | None
@@ -544,7 +547,7 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
             where = f": it is at {self.config.admin_url}/admin/" if self.config.admin_url else ""
             self._problem(404, f"administration is not on this listener{where}", close=True)
             return True
-        if self.listener == "admin" and top not in ("admin", "healthz", "logs"):
+        if self.listener == "admin" and top not in ("admin", "healthz", "logs", "ui"):
             self._problem(404, "this listener serves administration only", close=True)
             return True
         return False
@@ -565,6 +568,16 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
             self.close_connection = True
             body, content_type = admin_page.ROUTES[clean]
             self._send_page(body, content_type)
+            return True
+
+        # The web UI's files: static, and the session (not these) is the credential.
+        if self.command in ("GET", "HEAD") and clean.startswith("ui/"):
+            found = static_file(clean)
+            self.close_connection = True
+            if found is None:
+                self._problem(404, "no such file under /ui/", close=True)
+            else:
+                self._send_static(*found)
             return True
 
         # Before authentication, and the only thing that is: kubelet has no
