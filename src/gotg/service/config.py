@@ -89,6 +89,33 @@ class Config:
     # instead. Long enough that a warmer simply runs slower, short enough that
     # a burst cannot pin every thread in the pool.
     upstream_wait: float = 5.0
+    # --- Web sign-in. All optional; every one unset is a service with no web
+    # login, exactly as before. Set any and `validate` demands the rest. The
+    # flow itself lives in the oauth module; this is only what it is told.
+    # "github" (OAuth app) or "oidc" (needs oidc_issuer_url).
+    oidc_provider: str = ""
+    oidc_issuer_url: str = ""
+    oidc_client_id: str = ""
+    # Read from GOTG_OIDC_CLIENT_SECRET_FILE in a deployment, so it is a
+    # mounted Secret and never in the environment, the store or the manifest.
+    oidc_client_secret: str = ""
+    # The callback registered with the provider: {public}/auth/callback.
+    oidc_redirect_url: str = ""
+    # Who may sign in: provider logins (GitHub usernames, or emails for oidc),
+    # lower-cased. Empty with sign-in on is refused, not "everybody".
+    oidc_allowlist: tuple[str, ...] = ()
+    # Signs the session cookie. Also from a file (GOTG_SESSION_SECRET_FILE).
+    session_secret: str = ""
+    cookie_name: str = "gotg_session"
+    # Secure by default: the cookie is for https behind a TLS-terminating
+    # proxy. Turn it off only for http://localhost development.
+    cookie_secure: bool = True
+    cookie_samesite: str = "Lax"
+    session_ttl: int = 604800
+
+    @property
+    def oidc_enabled(self) -> bool:
+        return bool(self.oidc_provider)
 
     def validate(self) -> Config:
         if self.files_url and not self.files_url.startswith(("http://", "https://")):
@@ -116,4 +143,54 @@ class Config:
                 "the library token equals another credential. Refusing to start: "
                 "seeing server paths must not come with any other power."
             )
+        self._validate_oidc()
         return self
+
+    def _validate_oidc(self) -> None:
+        untouched = Config(token=self.token)
+        names = [f for f in _OIDC_FIELDS if getattr(self, f) != getattr(untouched, f)]
+        if not names:
+            return
+        if self.oidc_provider not in ("github", "oidc"):
+            raise ValueError(f"GOTG_OIDC_PROVIDER must be github or oidc, not {self.oidc_provider!r}")
+        needed = {
+            "GOTG_OIDC_CLIENT_ID": self.oidc_client_id,
+            "GOTG_OIDC_CLIENT_SECRET[_FILE]": self.oidc_client_secret,
+            "GOTG_OIDC_REDIRECT_URL": self.oidc_redirect_url,
+            "GOTG_SESSION_SECRET[_FILE]": self.session_secret,
+            "GOTG_OIDC_ALLOWLIST": self.oidc_allowlist,
+        }
+        if self.oidc_provider == "oidc":
+            needed["GOTG_OIDC_ISSUER_URL"] = self.oidc_issuer_url
+        missing = [k for k, v in needed.items() if not v]
+        if missing:
+            raise ValueError(f"web sign-in is half configured; missing {', '.join(missing)}")
+        for name, url in (("GOTG_OIDC_REDIRECT_URL", self.oidc_redirect_url), ("GOTG_OIDC_ISSUER_URL", self.oidc_issuer_url)):
+            if url and not url.startswith(("http://", "https://")):
+                raise ValueError(f"{name} is not an http(s) url: {url!r}")
+        if self.cookie_secure and self.oidc_redirect_url.startswith("http://"):
+            raise ValueError(
+                "GOTG_OIDC_REDIRECT_URL is http but cookies are Secure, so a browser would drop the "
+                "session. Use https, or set GOTG_COOKIE_SECURE=0 for local development."
+            )
+        if len(self.session_secret) < 32:
+            raise ValueError("the session secret is shorter than 32 characters")
+        if self.session_secret in (self.token, self.index_token, self.admin_token, self.library_token):
+            raise ValueError("the session secret equals another credential. Refusing to start.")
+        if self.cookie_samesite not in ("Lax", "Strict", "None"):
+            raise ValueError(f"GOTG_COOKIE_SAMESITE must be Lax, Strict or None, not {self.cookie_samesite!r}")
+        if self.cookie_samesite == "None" and not self.cookie_secure:
+            raise ValueError("SameSite=None needs Secure cookies")
+        if self.session_ttl <= 0:
+            raise ValueError("GOTG_SESSION_TTL must be positive")
+
+
+_OIDC_FIELDS = (
+    "oidc_provider",
+    "oidc_issuer_url",
+    "oidc_client_id",
+    "oidc_client_secret",
+    "oidc_redirect_url",
+    "oidc_allowlist",
+    "session_secret",
+)
