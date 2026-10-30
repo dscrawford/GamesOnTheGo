@@ -7,6 +7,12 @@ screen. All network access is `static/js/api.js`, whose header states the
 contract it assumes (cookie session, `/auth/login`, `/auth/me`, and the
 existing `/catalog`, `/art`, `/saves`, `/admin` routes).
 
+A game's page asks `/play/plan/<platform>/<id>` how the game plays:
+- a browser system gets "Play in browser", which opens `/play/` signed in with
+  the same cookie (`docs/browser-play.md`);
+- anything else shows its `nix run gotg#…` command;
+- a service without the player (404) shows neither.
+
 Develop without the real service:
 
 ```bash

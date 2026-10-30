@@ -12,11 +12,23 @@ export async function detail(root, ctx) {
   const art = h("div", { class: "art" });
   api.art(platform, id).then((url) => art.replaceChildren(url ? h("img", { src: url, alt: game.title }) : h("p", { class: "dim" }, "No art")));
   const total = game.files.reduce((n, f) => n + f.size_bytes, 0);
+  // Filled in once the service says how this system plays; empty if it has no player.
+  const play = h("div", { class: "play" });
+  api.playPlan(platform, id).then((plan) => {
+    if (plan && plan.mode === "browser") {
+      play.replaceChildren(
+        h("a", { class: "button primary", href: api.playUrl(platform, id), id: "play" }, "▶ Play in browser"),
+        ...(plan.experimental ? [h("span", { class: "dim" }, " experimental: may stutter on slower devices")] : []));
+    } else if (plan && plan.nix) {
+      play.replaceChildren(h("p", { class: "dim" }, "Not playable in a browser. With the Nix launcher: ", h("code", {}, plan.nix)));
+    }
+  }).catch(() => { /* the page still works without a play button */ });
   root.replaceChildren(
     h("p", {}, h("a", { href: "#/" }, "← All games")),
     h("div", { class: "detail" }, art, h("div", {},
       h("h1", {}, game.title),
       h("p", { class: "dim" }, `${game.platform} · ${regionOf(game)} · ${game.handler}`),
+      play,
       h("p", {}, h("code", {}, `gotg play ${game.id}`)),
       h("p", {}, h("a", { href: `#/saves/${encodeURIComponent(platform)}/${encodeURIComponent(id)}` }, "Saves for this game")),
       h("h2", {}, `Files (${bytes(total)})`),

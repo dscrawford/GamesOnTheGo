@@ -93,6 +93,15 @@ export async function me() {
   }
 }
 
+/** How a game plays: {mode: "browser", experimental, note, ...} or
+ * {mode: "launcher", nix}. Null when the service has no player (/play/plan 404). */
+export const playPlan = (platform, id) =>
+  call(`/play/plan/${encodeURIComponent(platform)}/${encodeURIComponent(id)}`).catch((e) => {
+    if (e.status === 404) return null;
+    throw e;
+  });
+export const playUrl = (platform, id) => `/play/?${new URLSearchParams({ platform, id })}`;
+
 export async function isAdmin(who) {
   if (who && typeof who.admin === "boolean") return who.admin;
   try { await call("/admin/info"); return true; } catch { return false; }

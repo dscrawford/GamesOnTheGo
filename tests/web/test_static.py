@@ -94,3 +94,12 @@ def test_the_mock_serves_the_contract_the_ui_assumes():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_detail_offers_play_only_when_the_service_says_so():
+    api = (STATIC_DIR / "js" / "api.js").read_text()
+    detail = (STATIC_DIR / "js" / "views" / "detail.js").read_text()
+    assert "/play/plan/" in api and "e.status === 404" in api  # no player on this service: no button
+    assert "api.playPlan(platform, id)" in detail
+    assert 'plan.mode === "browser"' in detail and "api.playUrl(platform, id)" in detail
+    assert "plan.nix" in detail
