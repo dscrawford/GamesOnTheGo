@@ -71,8 +71,15 @@ of any of this.
 
 ## Limits and what is unverified
 
-- Same-origin only: the ROM comes from this service's `/games`, not a separate
-  `files_url` host (that host would need CORS).
+- The page tries the ROM from the catalog's byte hosts first (`files_urls`, in
+  order), then from this service's own `/games`. On an https page it skips
+  http hosts, which would be mixed content. In a split deployment, the API
+  holds no files and answers `/games` with 503. The byte host therefore has to
+  allow the site: set `GOTG_CORS_ORIGINS=<the site's public URL>` on the files
+  service. The page's CSP `connect-src` lists the same hosts that `/catalog`
+  advertises. A byte host gets a bearer and never this site's cookie: a pasted
+  token, or, for a signed-in browser, a 6-hour token from `POST /auth/bearer`
+  (cookie session, same `Origin`; it is listed and revocable like any token).
 - Checked in headless Chromium against EmulatorJS 4.2.3, with homebrew NES and
   SNES test ROMs that keep a boot counter in battery SRAM:
   - The page loads the exact core the plan names (`EJS_core` is `plan.core`;

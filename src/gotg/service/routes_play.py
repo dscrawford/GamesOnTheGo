@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 
 from . import play_page
+from .routes_catalog import advertised_hosts
 from .routes_files import open_contained
 
 
@@ -39,7 +40,10 @@ class PlayRoutes:
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Content-Security-Policy", play_page.POLICY)
+        # The ROM may come from the catalog's byte hosts (a split deployment):
+        # the same list, worked out the same way, as /catalog's files_urls.
+        hosts = advertised_hosts(self.config.files_preferred_url, self._files_url())
+        self.send_header("Content-Security-Policy", play_page.policy(hosts))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Referrer-Policy", "no-referrer")

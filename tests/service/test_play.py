@@ -129,6 +129,29 @@ def test_player_runs_on_the_session_cookie_and_offers_sign_in():
     assert 'id="sso"' in page
 
 
+def test_policy_adds_only_the_origins_of_http_byte_hosts():
+    connect = lambda hosts: next(d for d in play_page.policy(hosts).split(";") if "connect-src" in d)  # noqa: E731
+    assert play_page.policy([]) == play_page.POLICY
+    assert "https://files.example:45581 " in connect(["https://files.example:45581/some/path"])
+    assert "http://100.70.0.1:30780 " in connect(["http://100.70.0.1:30780"])
+    for junk in ("javascript:alert(1)", "https://evil.test; script-src *", "ftp://x.test", "https://"):
+        assert play_page.policy([junk]) == play_page.POLICY, junk
+
+
+def test_page_policy_allows_the_advertised_byte_host(tmp_path):
+    config = Config(token=CLIENT_TOKEN, files_url="https://files.example:45581")
+    with serve(config) as s:
+        _, headers, _ = s.call("GET", "/play/?platform=nes&id=usa.x", token=None)
+    assert "connect-src 'self' https://files.example:45581 " in headers["Content-Security-Policy"]
+
+
+def test_script_fetches_the_rom_from_the_catalogs_byte_hosts():
+    script = play_page.routes()["play/app.js"][0].decode()
+    assert "catalog.files_urls" in script
+    assert '"/auth/bearer"' in script  # a cookie session's bearer for a cross-origin host
+    assert 'credentials: base ? "omit"' in script  # this site's cookie never goes to a byte host
+
+
 def test_script_uses_the_saves_api_with_parent_and_pull_first():
     script = play_page.routes()["play/app.js"][0].decode()
     assert "X-Gotg-Parent" in script and "/saves/" in script and "/games/" in script

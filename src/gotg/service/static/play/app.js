@@ -97,6 +97,7 @@
     const response = await fetch("/catalog", { headers: auth() });
     if (!response.ok) throw new Error("reading the catalog: HTTP " + response.status);
     const catalog = await response.json();
+    byteHosts = catalog.files_urls || (catalog.files_url ? [catalog.files_url] : []);
     const game = catalog.games.find((g) => g.platform === platform && g.id === gameId);
     if (!game) throw new Error("no such game: " + platform + "/" + gameId);
     const ext = (n) => (n.lastIndexOf(".") < 0 ? "" : n.slice(n.lastIndexOf(".")).toLowerCase());
@@ -110,10 +111,49 @@
     throw new Error("none of " + files.length + " files looks like a " + plan.system + " ROM");
   }
 
+  // Where the bytes are: the catalog's byte hosts in its order of preference,
+  // then this service. A split deployment's API answers /games with 503 (it
+  // holds no files), and a byte host must allow this origin (GOTG_CORS_ORIGINS).
+  // An https page cannot fetch http (mixed content), so those are skipped.
+  let byteHosts = [];
+  // A signed-in browser has no bearer of its own, and a byte host on another
+  // origin never sees this site's cookie: ask for a short-lived one (POST
+  // /auth/bearer, cookie + same Origin), kept in memory for this page only.
+  let byteToken = "";
+  async function bearerForByteHosts() {
+    if (token) return token;
+    if (byteToken) return byteToken;
+    const response = await fetch("/auth/bearer", { method: "POST", credentials: "same-origin" });
+    if (!response.ok) return "";
+    byteToken = (await response.json()).token || "";
+    return byteToken;
+  }
+  async function fetchRom(path) {
+    const bases = byteHosts
+      .map((b) => b.replace(/\/+$/, ""))
+      .filter((b) => location.protocol !== "https:" || b.startsWith("https:"));
+    const tried = [];
+    for (const base of [...bases, ""]) {
+      try {
+        // A cross-origin byte host gets a bearer only; the session cookie is this site's.
+        let headers = auth();
+        if (base) {
+          const bearer = await bearerForByteHosts();
+          if (!bearer) { tried.push(base + ": no bearer for a cross-origin byte host"); continue; }
+          headers = { Authorization: "Bearer " + bearer };
+        }
+        const response = await fetch(base + path, { headers, credentials: base ? "omit" : "same-origin" });
+        if (response.ok) return response;
+        tried.push((base || location.origin) + ": HTTP " + response.status);
+      } catch (e) {
+        tried.push(base + ": " + e.message); // CORS refusal or unreachable host
+      }
+    }
+    throw new Error("fetching the ROM: " + tried.join("; "));
+  }
   async function download(file) {
-    const url = "/games/" + [platform, gameId, ...file.name.split("/")].map(encodeURIComponent).join("/");
-    const response = await fetch(url, { headers: auth() });
-    if (!response.ok) throw new Error("fetching the ROM: HTTP " + response.status);
+    const path = "/games/" + [platform, gameId, ...file.name.split("/")].map(encodeURIComponent).join("/");
+    const response = await fetchRom(path);
     const total = Number(response.headers.get("Content-Length")) || file.size_bytes || 0;
     const reader = response.body.getReader();
     const chunks = [];
