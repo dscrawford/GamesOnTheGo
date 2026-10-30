@@ -426,3 +426,34 @@ def test_config_from_env_and_validation():
         config_from_env({"GOTG_PROXY_TOKEN": "t", "GOTG_OAUTH_CLIENT_ID": "cid"})
     with pytest.raises(ValueError, match="ISSUER"):
         config_from_env({**env, "GOTG_OAUTH_PROVIDER": "oidc"})
+
+
+def test_a_session_mints_a_short_lived_bearer_for_byte_hosts(app):
+    url, store = app
+    session = session_of(sign_in(url)[1][1])
+    status, headers, body = raw(
+        f"{url}/auth/bearer", method="POST", headers={"Cookie": session, "Origin": "https://gotg.example"}
+    )
+    assert status == 200 and headers["Cache-Control"] == "no-store"
+    minted = json.loads(body)
+    assert minted["name"].startswith("alice-play-") and minted["expires_in"] == 6 * 3600
+    # An ordinary personal token: it authenticates as a bearer and is revocable.
+    assert raw(f"{url}/auth/whoami", headers={"Authorization": "Bearer " + minted["token"]})[0] == 200
+    assert store.revoke(minted["name"])
+    assert raw(f"{url}/auth/whoami", headers={"Authorization": "Bearer " + minted["token"]})[0] == 401
+
+
+@pytest.mark.parametrize("origin", [None, "https://evil.test"])
+def test_bearer_minting_needs_this_sites_origin(app, origin):
+    url, _ = app
+    session = session_of(sign_in(url)[1][1])
+    headers = {"Cookie": session} | ({"Origin": origin} if origin else {})
+    assert raw(f"{url}/auth/bearer", method="POST", headers=headers)[0] == 403
+
+
+def test_bearer_minting_needs_a_session_and_no_bearer(app):
+    url, _ = app
+    assert raw(f"{url}/auth/bearer", method="POST", headers={"Origin": "https://gotg.example"})[0] == 401
+    session = session_of(sign_in(url)[1][1])
+    headers = {"Cookie": session, "Origin": "https://gotg.example", "Authorization": "Bearer " + LEGACY}
+    assert raw(f"{url}/auth/bearer", method="POST", headers=headers)[0] == 400

@@ -39,6 +39,12 @@ Providers are called with urllib only, redirects not followed.
   allowlist, 502 provider failure.
 - `POST /auth/logout` -> `{"ok": true}`, revokes the session token, clears the cookie.
 - `GET /auth/whoami` (cookie or bearer) -> `{"name": "alice-web-1a2b3c", "user": "alice"}`.
+- `POST /auth/bearer` (cookie session only, `Origin` must be this site) ->
+  `{"token": "gotg_…", "name": "alice-play-1a2b3c", "expires_in": 21600}`.
+  The token is for byte hosts on another origin, which never see the cookie.
+  The browser player asks for one and keeps it in memory. It is an ordinary
+  personal token: listed under `/admin`, revocable, and expiring after 6 h.
+  A request that already carries a bearer gets 400.
 - Cookie-authenticated writes whose `Origin` is not `GOTG_PUBLIC_URL` get 403.
 
 ### Device flow (CLI / Deck)
