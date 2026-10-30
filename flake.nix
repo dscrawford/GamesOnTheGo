@@ -173,6 +173,8 @@
               ${builtins.readFile ./src/client/play-anywhere.sh}
             '';
           };
+          # The web service, for running the web app locally (docs/web-app.md).
+          service = binApp "gotg-service" "gotg-proxy";
           admin = verb "admin";
           qa = verb "qa";
           controllers = verb "controllers";
