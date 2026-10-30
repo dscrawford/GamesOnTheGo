@@ -5,6 +5,7 @@ header { display:flex; gap:1.5rem; align-items:center; padding:.6rem 1rem; borde
 header .brand { font-weight:700; color:var(--fg); text-decoration:none; }
 header nav { display:flex; gap:1rem; flex:1; }
 a { color:var(--accent); }
+nav a { text-decoration:none; }
 nav a.active { color:var(--fg); border-bottom:2px solid var(--accent); text-decoration:none; }
 #who { color:var(--dim); }
 main { padding:1rem; max-width:1200px; margin:0 auto; }
