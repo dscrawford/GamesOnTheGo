@@ -93,11 +93,13 @@ jobs:
           use-flakehub: false
       # `flake check --no-build` refuses to realize the sources uv2nix reads at
       # eval time, and several outputs are x86_64-only; so force every drvPath.
+      # One eval, not one per output: each separate one re-evaluated nixpkgs.
       - run: |
-          for out in checks packages devShells; do
-            nix eval --raw ".#$out.x86_64-linux" --apply \
-              's: builtins.concatStringsSep "\n" (map (d: d.drvPath) (builtins.attrValues s))' >/dev/null
-          done
+          nix eval --raw --impure --expr '
+            let f = builtins.getFlake "git+file://${{ github.workspace }}"; in
+            builtins.concatStringsSep "\n" (builtins.concatMap
+              (o: map (d: d.drvPath) (builtins.attrValues f.${o}.x86_64-linux))
+              [ "checks" "packages" "devShells" ])' >/dev/null
 
   k8s-manifests:
     name: k8s manifests
