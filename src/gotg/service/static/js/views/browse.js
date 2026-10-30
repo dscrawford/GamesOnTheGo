@@ -33,10 +33,11 @@ export async function browse(root, ctx) {
     results.replaceChildren(
       h("p", { class: "dim", id: "count" }, `${found.length} game${found.length === 1 ? "" : "s"}`),
       h("div", { class: "grid" }, model.page(found, pageNo).map(tile)),
-      found.length > model.PER_PAGE && h("div", { class: "pager" },
+      // Native replaceChildren would print a bare `false`; h() skips it.
+      ...(found.length > model.PER_PAGE ? [h("div", { class: "pager" },
         h("button", { disabled: pageNo === 0, onclick: go(pageNo - 1) }, "Previous"),
         `Page ${pageNo + 1} of ${last + 1}`,
-        h("button", { disabled: pageNo >= last, onclick: go(pageNo + 1) }, "Next")));
+        h("button", { disabled: pageNo >= last, onclick: go(pageNo + 1) }, "Next"))] : []));
   }
   draw();
 }
