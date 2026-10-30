@@ -61,6 +61,7 @@ from .routes_art import ArtRoutes
 from .routes_catalog import CatalogRoutes
 from .routes_files import FileRoutes
 from .routes_logs import LogsRoutes
+from .routes_play import PlayRoutes
 from .routes_saves import SavesRoutes
 from .token_cache import TokenCache
 
@@ -190,13 +191,14 @@ def body_cap(prefix: str, command: str, store: SavesStore | None, logs: LogsStor
     return MAX_BODY
 
 
-class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, AdminRoutes, BaseHTTPRequestHandler):
+class Handler(PlayRoutes, ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, AdminRoutes, BaseHTTPRequestHandler):
     config: Config
     tokens: TokenCache
     store: SavesStore | None
     logs: LogsStore | None
     catalog: CatalogStore | None
     files_dir: Path | None
+    ejs_dir: Path | None = None
     streams: threading.BoundedSemaphore
     scans: threading.BoundedSemaphore
     token_store: TokenStore | None
@@ -573,6 +575,9 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
         # connection: on kept-alive HTTP/1.1 the unread body would frame the
         # next request — behind an ingress that shares upstream connections,
         # that is request smuggling, not just the caller's own confusion.
+        if self._serve_play_page(clean):
+            return True
+
         if clean == "healthz":
             self.close_connection = True
             self._send(200, b'{"ok":true}', "application/json")
@@ -627,6 +632,8 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
             self._games(rest)
         elif prefix == "files":
             self._files(rest)
+        elif prefix == "play":
+            self._play(rest)
         elif prefix == "auth":
             self._auth(rest, principal)
         elif prefix == "admin":
@@ -664,6 +671,7 @@ def make_server(
     auth_neg_ttl: float = 5.0,
     listener: str = "both",
     logs: LogsStore | None = None,
+    ejs_dir: Path | None = None,
 ) -> ThreadingHTTPServer:
     """Threading, because one slow upstream must not block every other client.
 
@@ -682,6 +690,7 @@ def make_server(
             "logs": logs,
             "catalog": catalog,
             "files_dir": files_dir,
+            "ejs_dir": ejs_dir,
             "streams": threading.BoundedSemaphore(stream_slots),
             "scans": threading.BoundedSemaphore(1),
             "token_store": token_store,
