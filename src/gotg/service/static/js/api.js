@@ -1,19 +1,15 @@
 /*
  * The one place the SPA talks to the network.
  *
- * ASSUMED CONTRACT (wt-oauth and wt-api are being built in parallel; change
- * only this file when they land):
+ * CONTRACT (docs/web-auth.md, docs/web-api.md):
  *
  *  Auth: a cookie session on the same origin. Every request is sent with
  *    credentials "same-origin". A 401 means "no session": the page navigates to
  *    GET /auth/login?next=<current /ui/ url>, which redirects to the provider
- *    and back. GET /auth/me answers {"name": str, "user"?: str, "admin"?: bool}.
- *    TODAY /auth/whoami is the only identity route ({"name","user"?}) and takes a
- *    bearer, so me() falls back to it, and a developer may paste a bearer token
- *    (setBearer) that is kept in sessionStorage and sent as Authorization.
- *    `admin` is absent on whoami; admin is then inferred when GET /admin/info
- *    answers 200.
- *    /admin/* is assumed to accept an admin cookie session as well as the admin bearer.
+ *    and back. GET /auth/whoami answers {"name": str, "user"?: str, "admin"?: bool};
+ *    `admin` is true for a session whose user is in GOTG_ADMIN_USERS, and /admin/*
+ *    accepts that session. A developer may paste a bearer token (setBearer), kept
+ *    in sessionStorage and sent as Authorization.
  *
  *  GET /catalog -> {"version":2,"games":[{id,platform,handler,title,
  *    files:[{name,size_bytes,sha256}]}], files_url?, files_urls?}.
@@ -21,9 +17,9 @@
  *  GET /art/<platform>/<id> -> image bytes, or 404 (X-Gotg-Art: miss|absent).
  *    Fetched as a blob so it works with a cookie or a bearer.
  *
- *  Saves are per environment attr (^env-[a-z0-9][a-z0-9_-]*$): "env-<platform>"
- *    or "env-<platform>-<id with . as _>". There is NO list-my-saves route, so
- *    the UI derives candidate attrs from the catalog and probes them.
+ *  Saves are per environment attr (^env-[a-z0-9][a-z0-9_-]*$).
+ *  GET /saves -> {version:1, saves:[{attr, head:{generation,hash,size,device,written_at},
+ *    generations, devices, overwritten_generations, has_conflict, sync}]}
  *  GET /saves/<attr>/meta -> {generation, hash, size, device, written_at, bundle}|404
  *  GET /saves/<attr>/history -> {"generations":[{generation,hash,size,device,written_at,current}]}
  *  GET /saves/<attr>/gen/<n> and GET /saves/<attr> -> zstd bundle bytes,
@@ -84,14 +80,7 @@ async function call(path, opts) {
   return data;
 }
 
-export async function me() {
-  try {
-    return await call("/auth/me");
-  } catch (e) {
-    if (e.status !== 404) throw e;
-    return call("/auth/whoami");
-  }
-}
+export const me = () => call("/auth/whoami");
 
 export async function isAdmin(who) {
   if (who && typeof who.admin === "boolean") return who.admin;
@@ -113,6 +102,7 @@ export function art(platform, id) {
   return artCache.get(key);
 }
 
+export const saveList = () => call("/saves").then((r) => r.saves);
 export const saveMeta = (attr) => call(`/saves/${attr}/meta`).catch((e) => { if (e.status === 404) return null; throw e; });
 export const saveHistory = (attr) => call(`/saves/${attr}/history`).then((r) => r.generations);
 

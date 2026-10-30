@@ -44,6 +44,7 @@ start unless the required ones are all present.
 | `GOTG_OIDC_ALLOWLIST` | yes | comma/newline separated logins (GitHub usernames; emails for `oidc`), case-insensitive. Empty is refused, never "everyone" |
 | `GOTG_SESSION_SECRET_FILE` / `GOTG_SESSION_SECRET` | yes | signs the session cookie; ≥32 chars, distinct from every token |
 | `GOTG_OIDC_AUTHORIZE_URL`, `_TOKEN_URL`, `_USERINFO_URL`, `GOTG_OIDC_SCOPES` | no | explicit provider endpoints / scopes (`docs/web-auth.md`) |
+| `GOTG_WEB_DIR` | no | directory served at `/ui/` instead of the packaged files (set by the web image) |
 | `GOTG_ADMIN_USERS` | no | users whose signed-in session may use `/admin` (`docs/web-auth.md`) |
 | `GOTG_COOKIE_NAME` | no | default `gotg_session` |
 | `GOTG_COOKIE_SECURE` | no | default `1`; `0` only for http localhost |

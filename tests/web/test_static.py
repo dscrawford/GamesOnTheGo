@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -86,11 +87,45 @@ def test_the_mock_serves_the_contract_the_ui_assumes():
         base = f"http://127.0.0.1:{server.server_port}"
         assert send(f"{base}/catalog", token=None)[0] == 401
         cookie = {"Cookie": "gotg_session=admin"}
-        status, _, body = send(f"{base}/auth/me", token=None, headers=cookie)
+        status, _, body = send(f"{base}/auth/whoami", token=None, headers=cookie)
         assert status == 200 and b'"admin": true' in body
         assert send(f"{base}/saves/env-n64-usa_game_00/meta", token=None, headers=cookie)[0] == 200
+        listed = json.loads(send(f"{base}/saves", token=None, headers=cookie)[2])
+        assert listed["saves"][0]["attr"] == "env-n64-usa_game_00" and listed["saves"][0]["generations"] == 2
         stale = {**cookie, "X-Gotg-Parent": "h1"}
         assert send(f"{base}/saves/env-n64-usa_game_00", "PUT", token=None, body=b"x", headers=stale)[0] == 409
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_bare_ui_redirects_to_the_slash_form(svc):
+    import http.client
+
+    def get(path):
+        conn = http.client.HTTPConnection(svc.url.removeprefix("http://"), timeout=10)
+        conn.request("GET", path)
+        reply = conn.getresponse()
+        reply.read()
+        return reply.status, reply.getheader("Location")
+
+    assert get("/ui") == (302, "/ui/")
+    assert get("/ui?x=1") == (302, "/ui/?x=1")
+    assert get("/uix")[0] == 401
+
+
+def test_ui_is_served_from_web_dir_when_set(tmp_path):
+    (tmp_path / "index.html").write_text("<p>from the web dir</p>")
+    with serve(Config(token=LEGACY, web_dir=str(tmp_path))) as served:
+        status, _, body = served.call("GET", "/ui/", token=None)
+        assert status == 200 and b"from the web dir" in body
+        assert served.call("GET", "/ui/js/main.js", token=None)[0] == 404  # the packaged copy is not mixed in
+        assert served.call("GET", "/ui/../secret.html", token=None)[0] in (400, 404)
+
+
+def test_web_dir_must_exist(tmp_path):
+    from gotg.service.cli import config_from_env
+
+    with pytest.raises(ValueError, match="GOTG_WEB_DIR"):
+        config_from_env({"GOTG_PROXY_TOKEN": "t", "GOTG_WEB_DIR": str(tmp_path / "missing")})
+    assert config_from_env({"GOTG_PROXY_TOKEN": "t", "GOTG_WEB_DIR": str(tmp_path)}).web_dir == str(tmp_path)

@@ -121,8 +121,10 @@ class Handler(BaseHTTPRequestHandler):
         if who is None:
             return self._json(401, {"error": "sign in"})
         admin = who == "admin"
-        if path == "/auth/me":
+        if path == "/auth/whoami":
             return self._json(200, {"name": who, "user": who, "admin": admin})
+        if path == "/saves":
+            return self._json(200, {"version": 1, "saves": self._save_list()})
         if path == "/catalog":
             return self._json(200, {"version": 2, "games": games()})
         if path.startswith("/art/"):
@@ -135,6 +137,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(403, {"error": "admin only"})
             return self._admin(path, body)
         self._json(404, {"error": "nothing here"})
+
+    def _save_list(self):
+        out = []
+        for attr, gens in sorted(self.state.gens.items()):
+            head = gens[-1]
+            out.append(
+                {
+                    "attr": attr,
+                    "head": head,
+                    "generations": len(gens),
+                    "devices": sorted({g["device"] for g in gens}),
+                    "overwritten_generations": [],
+                    "has_conflict": False,
+                    "sync": None,
+                }
+            )
+        return out
 
     def _saves(self, m, query, body):
         attr, what, gen = m.groups()

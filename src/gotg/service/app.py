@@ -66,7 +66,7 @@ from .routes_oauth import ROUTES as OAUTH_ROUTES
 from .routes_oauth import OAuthRoutes
 from .routes_play import PlayRoutes
 from .routes_saves import SavesRoutes
-from .routes_static import StaticRoutes, static_file
+from .routes_static import STATIC_DIR, StaticRoutes, static_file
 from .token_cache import TokenCache
 
 # Introspection is an in-cluster hop on every cache miss; a wedged api pod
@@ -644,9 +644,16 @@ class Handler(
             self._send_page(body, content_type)
             return True
 
+        # Relative URLs in the page resolve against /ui/, so bare /ui goes there.
+        if self.command in ("GET", "HEAD") and clean == "ui":
+            self.close_connection = True
+            query = self.path.partition("?")[2]
+            self._redirect("/ui/" + (f"?{query}" if query else ""))
+            return True
+
         # The web UI's files: static, and the session (not these) is the credential.
         if self.command in ("GET", "HEAD") and clean.startswith("ui/"):
-            found = static_file(clean)
+            found = static_file(clean, Path(self.config.web_dir) if self.config.web_dir else STATIC_DIR)
             self.close_connection = True
             if found is None:
                 self._problem(404, "no such file under /ui/", close=True)

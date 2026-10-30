@@ -11,25 +11,39 @@ function download(blob, name) {
 }
 
 export async function saves(root, ctx) {
-  const [platform, id] = ctx.segs;
-  const games = (await api.catalog()).games;
-  const game = platform && games.find((g) => g.platform === platform && g.id === id);
-  const picker = h("input", { list: "games", placeholder: "Pick a game or type an env-… name", "aria-label": "game" });
+  const [first, id] = ctx.segs;
+  const [games, list] = await Promise.all([api.catalog().then((c) => c.games), api.saveList()]);
+  const game = id && games.find((g) => g.platform === first && g.id === id);
+  const picker = h("input", { list: "games", placeholder: "Pick a game to see its saves", "aria-label": "game" });
   const options = h("datalist", { id: "games" }, games.slice(0, 2000).map((g) => h("option", { value: `${g.platform}/${g.id}` }, g.title)));
   const body = h("div");
   picker.addEventListener("change", () => {
-    const v = picker.value.trim();
-    if (ATTR.test(v)) return showAttr(body, v, "this environment");
-    location.hash = "#/saves/" + v.split("/").map(encodeURIComponent).join("/");
+    location.hash = "#/saves/" + picker.value.trim().split("/").map(encodeURIComponent).join("/");
   });
-  root.replaceChildren(h("h1", {}, game ? `Saves: ${game.title}` : "Saves"), h("div", { class: "bar" }, picker, options), body);
-  if (!game) { body.replaceChildren(h("p", { class: "dim" }, "Choose a game to see its saves.")); return; }
-  body.replaceChildren();
-  for (const { attr, scope } of saveAttrs(game)) {
+  const title = game ? `Saves: ${game.title}` : "Saves";
+  root.replaceChildren(h("h1", {}, title), h("div", { class: "bar" }, picker, options), body);
+  if (first && !id && ATTR.test(first)) return showAttr(body, first, "this environment");
+  if (!game) { body.replaceChildren(overview(list)); return; }
+  // The server says which environments exist; the game's own is offered for a first upload.
+  const have = new Set(list.map((e) => e.attr));
+  const wanted = saveAttrs(game).filter((c, i) => i === 0 || have.has(c.attr));
+  const shown = wanted.filter((c) => have.has(c.attr));
+  for (const { attr, scope } of shown.length ? shown : wanted.slice(0, 1)) {
     const section = h("div");
     body.append(section);
     await showAttr(section, attr, scope);
   }
+}
+
+function overview(list) {
+  if (!list.length) return h("p", { class: "dim" }, "Nothing has been pushed yet.");
+  return h("table", {}, h("tr", {}, ["Environment", "Head", "Devices", "Written", "Size", ""].map((t) => h("th", {}, t))),
+    list.map((e) => h("tr", { "data-attr": e.attr },
+      h("td", {}, h("a", { href: `#/saves/${encodeURIComponent(e.attr)}` }, h("code", {}, e.attr))),
+      h("td", {}, `gen ${e.head.generation} of ${e.generations}`),
+      h("td", {}, (e.devices || []).join(", ") || "—"),
+      h("td", {}, iso(e.head.written_at)), h("td", {}, bytes(e.head.size)),
+      h("td", {}, e.has_conflict && h("span", { class: "bad" }, "conflict")))));
 }
 
 async function showAttr(into, attr, scope) {

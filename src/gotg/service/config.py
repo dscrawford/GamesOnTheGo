@@ -8,6 +8,7 @@ the token cache need not import the handler it serves.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..tokens import NAME_RE
 
@@ -123,6 +124,9 @@ class Config:
     cookie_samesite: str = "Lax"
     session_ttl: int = 604800
     # Explicit endpoints (override discovery / the GitHub defaults) and scopes.
+    # A directory served at /ui/ instead of the files packaged with the service
+    # (the deployment image's GOTG_WEB_DIR). Same layout as service/static.
+    web_dir: str = ""
     # Token-store users whose signed-in cookie session may use /admin (never a
     # bearer, which is what the admin token is for). Needs sign-in on.
     admin_users: tuple[str, ...] = ()
@@ -164,6 +168,8 @@ class Config:
                 "the library token equals another credential. Refusing to start: "
                 "seeing server paths must not come with any other power."
             )
+        if self.web_dir and not Path(self.web_dir).is_dir():
+            raise ValueError(f"GOTG_WEB_DIR is not a directory: {self.web_dir!r}")
         self._validate_oidc()
         if self.admin_users:
             if not self.oidc_enabled:

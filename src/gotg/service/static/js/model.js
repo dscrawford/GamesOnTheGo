@@ -19,7 +19,7 @@ export function filter(games, { platform = "", region = "", search = "" } = {}) 
 export const page = (items, n) => items.slice(n * PER_PAGE, (n + 1) * PER_PAGE);
 export const pageCount = (items) => Math.max(1, Math.ceil(items.length / PER_PAGE));
 
-/** Candidate save environments for a game: its own, then its platform's. */
+/** Environment names a game's saves can live in (its own, then its platform's); GET /saves says which exist. */
 export const saveAttrs = (game) => [
   { attr: `env-${game.platform}-${game.id.replace(/\./g, "_")}`, scope: "this game" },
   { attr: `env-${game.platform}`, scope: `all ${game.platform} games without their own` },

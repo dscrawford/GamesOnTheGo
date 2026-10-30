@@ -126,7 +126,7 @@ envs
   # The web app: the static frontend and the service that backs it. The service
   # is the same gotg-proxy (sign-in is configuration, docs/web-app.md), named
   # for what a web deployment calls it.
-  gotg-web = pkgs.callPackage ./gotg-web.nix { };
+  gotg-web = pkgs.callPackage ./gotg-web.nix { frontend = ../src/gotg/service/static; };
   gotg-service = gotg-proxy;
   default = gotg;
   inherit gotg-pads gotg-killswitch;
