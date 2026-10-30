@@ -129,3 +129,12 @@ def test_web_dir_must_exist(tmp_path):
     with pytest.raises(ValueError, match="GOTG_WEB_DIR"):
         config_from_env({"GOTG_PROXY_TOKEN": "t", "GOTG_WEB_DIR": str(tmp_path / "missing")})
     assert config_from_env({"GOTG_PROXY_TOKEN": "t", "GOTG_WEB_DIR": str(tmp_path)}).web_dir == str(tmp_path)
+
+
+def test_detail_offers_play_only_when_the_service_says_so():
+    api = (STATIC_DIR / "js" / "api.js").read_text()
+    detail = (STATIC_DIR / "js" / "views" / "detail.js").read_text()
+    assert "/play/plan/" in api and "e.status === 404" in api  # no player on this service: no button
+    assert "api.playPlan(platform, id)" in detail
+    assert 'plan.mode === "browser"' in detail and "api.playUrl(platform, id)" in detail
+    assert "plan.nix" in detail

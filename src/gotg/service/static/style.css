@@ -16,6 +16,9 @@ button { cursor:pointer; }
 button:hover:not(:disabled) { border-color:var(--accent); }
 button.danger { color:var(--bad); }
 button.primary { background:var(--accent); color:#06101c; border-color:var(--accent); }
+a.button { display:inline-block; border:1px solid var(--line); border-radius:6px; padding:.4rem .8rem; text-decoration:none; }
+a.button.primary { background:var(--accent); color:#06101c; border-color:var(--accent); font-weight:600; }
+.play { margin:.6rem 0; }
 .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:.8rem; }
 .tile { background:var(--card); border:1px solid var(--line); border-radius:8px; overflow:hidden; text-decoration:none; color:var(--fg); display:flex; flex-direction:column; }
 .tile:focus, .tile:hover { border-color:var(--accent); outline:none; }
