@@ -80,6 +80,11 @@ class Config:
     # The url people reach the service on, which a claim link is built from:
     # the admin page is on another host and cannot know it otherwise.
     public_url: str = ""
+    # Origins other than the service's own that a browser may call it from,
+    # exactly as the browser sends them ("https://play.example.net"), or "*".
+    # Empty is same-origin only: a SPA served by this service needs none, and
+    # no CORS header is ever sent. /admin is never given CORS headers.
+    cors_origins: tuple[str, ...] = ()
     # How hard anybody may lean on an upstream through this proxy, in requests
     # per second, with a burst for the ordinary case of one client opening a
     # grid. Cache hits are not counted: they cost the upstream nothing.
@@ -95,6 +100,9 @@ class Config:
             raise ValueError(f"GOTG_FILES_URL is not an http(s) url: {self.files_url!r}")
         if self.files_preferred_url and not self.files_preferred_url.startswith(("http://", "https://")):
             raise ValueError(f"GOTG_FILES_PREFERRED_URL is not an http(s) url: {self.files_preferred_url!r}")
+        for origin in self.cors_origins:
+            if origin != "*" and not (origin.startswith(("http://", "https://")) and not origin.endswith("/")):
+                raise ValueError(f"GOTG_CORS_ORIGINS wants origins like https://host[:port], not {origin!r}")
         if not self.token:
             raise ValueError(
                 "no client token set. Refusing to start: an empty token "

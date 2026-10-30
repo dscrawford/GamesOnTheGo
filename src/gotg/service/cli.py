@@ -62,6 +62,7 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
         legacy_user=env.get("GOTG_LEGACY_USER", "legacy"),
         admin_url=env.get("GOTG_ADMIN_URL", "").rstrip("/"),
         public_url=env.get("GOTG_PUBLIC_URL", "").rstrip("/"),
+        cors_origins=tuple(o.strip() for o in env.get("GOTG_CORS_ORIGINS", "").split(",") if o.strip()),
     ).validate()
 
 
