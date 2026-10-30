@@ -19,10 +19,14 @@ import re
 from ..contract import ENTRY_ID_RE, PLATFORM_RE
 
 # EmulatorJS needs wasm, blob workers and the styles its loader injects. Nothing
-# third-party: every asset comes from /play/ejs on this origin. Unsafe-eval is
-# deliberately absent; if a core needs it, that shows up as a console error.
+# third-party: every asset comes from /play/ejs on this origin. 'unsafe-eval' is
+# required: EmulatorJS ships every core as a 7z, and its extractor
+# (data/compression/extract7z.js, old Emscripten) calls eval() while it starts.
+# It runs in a blob worker, which inherits this policy, so without 'unsafe-eval'
+# no core decompresses and the player hangs at "Decompress Game Core". This
+# applies to /play only; the SPA and the admin page keep their stricter policy.
 POLICY = (
-    "default-src 'none'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; "
+    "default-src 'none'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; "
     "style-src 'self' 'unsafe-inline'; connect-src 'self' blob: data:; img-src 'self' blob: data:; "
     "media-src 'self' blob:; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 )

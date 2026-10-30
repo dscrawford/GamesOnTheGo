@@ -50,7 +50,7 @@
   }
 
   async function push(files, { force = false, keepalive = false } = {}) {
-    if (conflicted && !force) return;
+    if (conflicted && !force) return "conflict";
     const body = pack(files);
     const response = await fetch("/saves/" + plan.save_attr + (force ? "?force=1" : ""), {
       method: "PUT",
@@ -61,11 +61,11 @@
     if (response.status === 409) {
       conflicted = true;
       $("conflict").hidden = false;
-      return;
+      return "conflict";
     }
     if (!response.ok) throw new Error("pushing the save: HTTP " + response.status);
     parent = (await response.json()).hash || parent;
-    dirty = null;
+    lastFiles = files;
     status("saved " + new Date().toLocaleTimeString());
   }
 
@@ -77,9 +77,18 @@
   function flush(keepalive = false) {
     clearTimeout(pushTimer);
     if (!dirty) return;
-    push({ ...lastFiles, ...dirty }, { keepalive }).catch((e) => fail(e.message));
+    const sending = dirty;
+    dirty = null; // anything queued while this is in flight goes in the next push
+    push({ ...lastFiles, ...sending }, { keepalive }).then((outcome) => {
+      if (outcome === "conflict") dirty = { ...sending, ...(dirty || {}) }; // kept for "keep mine"
+    }).catch((e) => {
+      dirty = { ...sending, ...(dirty || {}) };
+      fail(e.message);
+    });
   }
   let lastFiles = {}; // everything known server-side, so a partial push never drops a file
+  let exiting = false;
+  const sameBytes = (a, b) => !!b && a.length === b.length && a.every((v, i) => v === b[i]);
 
   // --- the ROM -----------------------------------------------------------------
   async function findRom() {
@@ -124,18 +133,30 @@
   function start(romBlob, saved) {
     const named = (blob, name) => URL.createObjectURL(new File([blob], name));
     window.EJS_player = "#game";
-    window.EJS_core = plan.system;
+    window.EJS_core = plan.core || plan.system; // the exact core the plan (and the licence table) names
     window.EJS_pathtodata = "/play/ejs/data/";
     window.EJS_gameUrl = named(romBlob, gameId + (plan.rom_ext || ""));
     window.EJS_gameName = gameId;
     window.EJS_startOnLoaded = true;
     if (saved[STATE]) window.EJS_loadStateURL = URL.createObjectURL(new Blob([saved[STATE]]));
 
-    window.EJS_ready = () => status("loading core");
+    // EmulatorJS writes the battery file out on its own timer (System Save
+    // interval) and once more while it exits on beforeunload; each time it emits
+    // "saveSaveFiles" with the bytes. That event is the only reliable hook: by
+    // pagehide its exit handler has already unmounted /data/saves.
+    window.EJS_defaultOptions = { "save-save-interval": "30" };
+    window.EJS_ready = () => {
+      status("loading core");
+      window.EJS_emulator.on("saveSaveFiles", (bytes) => {
+        if (!bytes || !bytes.length || sameBytes(bytes, lastFiles[SRAM])) return;
+        queue(SRAM, new Uint8Array(bytes));
+        if (exiting) flush(true);
+      });
+    };
     window.EJS_onGameStart = () => {
       status("playing");
       // Battery file: write the pulled one into the core's filesystem, then have
-      // the core re-read it. API names are EmulatorJS 4.2's (unverified in a browser).
+      // the core re-read it (EmulatorJS 4.2.3; checked in Chromium).
       const gm = window.EJS_emulator && window.EJS_emulator.gameManager;
       if (gm && saved[SRAM]) {
         try {
@@ -144,13 +165,9 @@
         } catch (e) { console.warn("could not restore the battery save", e); }
       }
     };
-    // In-game save (battery) changes are reported periodically by EmulatorJS.
-    window.EJS_onSaveUpdate = (e) => {
-      if (e && e.save) { lastFiles[SRAM] = e.save; queue(SRAM, e.save); }
-    };
     // The player's own "Save State" button.
     window.EJS_onSaveState = (e) => {
-      if (e && e.state) { lastFiles[STATE] = e.state; queue(STATE, e.state); flush(); }
+      if (e && e.state) { queue(STATE, e.state); flush(); }
     };
 
     const script = document.createElement("script");
@@ -159,9 +176,11 @@
     document.body.appendChild(script);
   }
 
+  // Tab hidden (switching away, phone locking): the core is still alive, so ask
+  // it to write the battery file now; its saveSaveFiles event queues the bytes.
   function pushOnExit() {
     const gm = window.EJS_emulator && window.EJS_emulator.gameManager;
-    try { if (gm) { const s = gm.getSaveFile(); if (s && s.length) { lastFiles[SRAM] = s; dirty = { ...(dirty || {}), [SRAM]: s }; } } } catch (e) { /* core already gone */ }
+    try { if (gm && window.EJS_emulator.started) gm.saveSaveFiles(); } catch (e) { /* core already gone */ }
     flush(true);
   }
 
@@ -203,6 +222,9 @@
     conflicted = false; $("conflict").hidden = true;
     push({ ...lastFiles, ...(dirty || {}) }, { force: true }).catch((e) => fail(e.message));
   });
+  // Registered before EmulatorJS loads, so this runs before its own
+  // beforeunload handler, whose final saveSaveFiles must push at once.
+  window.addEventListener("beforeunload", () => { exiting = true; });
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") pushOnExit(); });
   window.addEventListener("pagehide", pushOnExit);
   run();
