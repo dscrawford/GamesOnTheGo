@@ -81,7 +81,7 @@ def _oidc_provider(env: Mapping[str, str]) -> str:
 
 def _oidc_redirect(env: Mapping[str, str]) -> str:
     explicit = _alias(env, "GOTG_OIDC_REDIRECT_URL", "GOTG_OAUTH_REDIRECT_URI")
-    public = env.get("GOTG_PUBLIC_URL", "").rstrip("/")
+    public = (env.get("GOTG_WEB_URL") or env.get("GOTG_PUBLIC_URL", "")).rstrip("/")
     if explicit or not public or not _alias(env, "GOTG_OIDC_CLIENT_ID", "GOTG_OAUTH_CLIENT_ID"):
         return explicit
     return f"{public}/auth/callback"
@@ -115,6 +115,7 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
         legacy_user=env.get("GOTG_LEGACY_USER", "legacy"),
         admin_url=env.get("GOTG_ADMIN_URL", "").rstrip("/"),
         public_url=env.get("GOTG_PUBLIC_URL", "").rstrip("/"),
+        web_url=env.get("GOTG_WEB_URL", "").rstrip("/"),
         admin_users=tuple(sorted({u.strip().lower() for u in env.get("GOTG_ADMIN_USERS", "").split(",") if u.strip()})),
         web_dir=env.get("GOTG_WEB_DIR", ""),
         oidc_provider=_oidc_provider(env),

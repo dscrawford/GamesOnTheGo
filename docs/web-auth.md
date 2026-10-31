@@ -26,11 +26,12 @@ accepted as aliases; the `GOTG_OIDC_*` name wins when both are set.
 | `GOTG_OIDC_AUTHORIZE_URL`, `_TOKEN_URL`, `_USERINFO_URL` (`GOTG_OAUTH_*`) | Explicit endpoints (override discovery / GitHub defaults); all three replace the issuer. |
 | `GOTG_OIDC_SCOPES` (`GOTG_OAUTH_SCOPES`) | Default `read:user user:email` (github), `openid profile email` (oidc). |
 | `GOTG_OIDC_ALLOWLIST` (`GOTG_OAUTH_ALLOW`) | Comma/newline list: usernames, verified emails, or `@domain`, case-insensitive. **Empty is refused.** |
-| `GOTG_OIDC_REDIRECT_URL` (`GOTG_OAUTH_REDIRECT_URI`) | Register this at the provider. Through the aliases it defaults to `$GOTG_PUBLIC_URL/auth/callback`. |
+| `GOTG_OIDC_REDIRECT_URL` (`GOTG_OAUTH_REDIRECT_URI`) | Register this at the provider. Through the aliases it defaults to `$GOTG_WEB_URL/auth/callback` (else `$GOTG_PUBLIC_URL`). |
 | `GOTG_SESSION_TTL` (`GOTG_OAUTH_SESSION_DAYS`, days) | Session / device token lifetime in seconds, default 604800. |
 | `GOTG_COOKIE_NAME`, `GOTG_COOKIE_SECURE`, `GOTG_COOKIE_SAMESITE` | The session cookie's name and flags (defaults `gotg_session`, Secure, Lax). The short-lived state cookie is always Lax. |
 | `GOTG_SESSION_SECRET[_FILE]` | Required by the deployment's validation (>= 32 chars, distinct from every token). The cookie holds a `gotg_` token, which the token store checks, so nothing is signed with it yet. |
-| `GOTG_PUBLIC_URL` | Origin the CSRF check compares `Origin` against. |
+| `GOTG_PUBLIC_URL` | Origin the CSRF check compares `Origin` against, unless `GOTG_WEB_URL` is set. |
+| `GOTG_WEB_URL` | Where browsers reach the UI, when that is not `GOTG_PUBLIC_URL`: e.g. `https://example.net/games` behind a proxy that strips `/games`. Its origin replaces `GOTG_PUBLIC_URL` in the CSRF check; its path scopes both cookies and prefixes every redirect (device pages, the login hop, the default `next` of `<prefix>/ui/`). `GOTG_PUBLIC_URL` keeps naming the API for claim links. |
 
 Only a *verified* email counts (GitHub: primary and verified; oidc:
 `email_verified: true`). The OIDC username is `preferred_username`.
@@ -39,9 +40,9 @@ Providers are called with urllib only, redirects not followed.
 ## Endpoints (public listener)
 
 - `GET /auth/login[?next=/path]` -> 302 to the provider; sets `gotg_oauth_state`.
-  `next` must be a same-site path, else `/`.
+  `next` must be a same-site path, else `/` (`<prefix>/ui/` under `GOTG_WEB_URL`).
 - `GET /auth/callback` -> on success 302 to `next`, setting `gotg_session`
-  (`HttpOnly; Path=/`, plus `Secure` and `SameSite` per config; Max-Age = session TTL).
+  (`HttpOnly; Path=/` or `Path=<prefix>`, plus `Secure` and `SameSite` per config; Max-Age = session TTL).
   Errors are `{"error": ...}`: 400 bad/expired state, 403 refused or not on the
   allowlist, 502 provider failure.
 - `POST /auth/logout` -> `{"ok": true}`, revokes the session token, clears the cookie.
@@ -53,7 +54,7 @@ Providers are called with urllib only, redirects not followed.
   personal token: listed under `/admin`, revocable, and expiring after 6 h.
   A request that already carries a bearer gets 400.
   `admin` is true only for a cookie session whose user is in `GOTG_ADMIN_USERS`.
-- Cookie-authenticated writes whose `Origin` is not `GOTG_PUBLIC_URL` get 403.
+- Cookie-authenticated writes whose `Origin` is not the web origin (`GOTG_WEB_URL`'s, else `GOTG_PUBLIC_URL`) get 403.
 
 ### Device flow (CLI / Deck)
 
@@ -75,7 +76,7 @@ shows as `user`) lets a **signed-in cookie session** of one of those users call
 `/admin/*`, beside the admin bearer token. Needs sign-in on, else the service
 refuses to start. Only the cookie counts: any bearer other than the admin token,
 including the same person's CLI token, is not admin. A write (`POST`/`DELETE`)
-from a session must carry an `Origin` equal to `GOTG_PUBLIC_URL` (a missing
+from a session must carry an `Origin` equal to the web origin (a missing
 Origin is refused), on top of `SameSite`. Revoking the session token ends it.
 
 `/admin` is still 404 on a `public` listener and `/auth` is still 404 on the

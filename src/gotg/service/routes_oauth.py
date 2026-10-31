@@ -85,7 +85,10 @@ class OAuthRoutes:
         # when the session cookie is Strict.
         samesite = "Lax" if name == STATE_COOKIE else self.config.cookie_samesite
         secure = "; Secure" if self.config.cookie_secure else ""
-        return f"{name}={value}; Path=/; HttpOnly; SameSite={samesite}; Max-Age={max_age}{secure}"
+        # Scoped to the mount, so a site hosting the UI under a prefix does not
+        # hand the session to every other page it serves.
+        path = self.config.base_path or "/"
+        return f"{name}={value}; Path={path}; HttpOnly; SameSite={samesite}; Max-Age={max_age}{secure}"
 
     def _redirect(self, location: str, cookies: list[str] = ()) -> None:  # noqa: B006
         self.send_response(302)
@@ -113,8 +116,8 @@ class OAuthRoutes:
             self.wfile.write(body)
 
     def _origin(self) -> str:
-        if self.config.public_url:
-            return self.config.public_url
+        if self.config.web_origin:
+            return self.config.web_origin
         return f"http://{self.headers.get('Host', '')}"
 
     def _csrf_refused(self) -> bool:
@@ -164,7 +167,9 @@ class OAuthRoutes:
     def _oauth_login(self, query: dict) -> None:
         verifier, challenge = pkce_pair()
         state = secrets.token_urlsafe(24)
-        nxt = safe_next((query.get("next") or [""])[0])
+        nxt = safe_next(
+            (query.get("next") or [""])[0], f"{self.config.base_path}/ui/" if self.config.base_path else "/"
+        )
         if not self.oauth.states.put(state, {"verifier": verifier, "next": nxt}):
             self._problem(503, "too many sign-ins in flight; retry shortly")
             return
@@ -243,14 +248,14 @@ class OAuthRoutes:
 
     def _device_start(self) -> None:
         if self.command == "GET":
-            self._redirect("/auth/device/verify")
+            self._redirect(self.config.base_path + "/auth/device/verify")
             return
         self._read_small()
         started = self.oauth.start_device()
         if started is None:
             self._problem(503, "too many device sign-ins in flight; retry shortly")
             return
-        base = self._origin() + "/auth/device/verify"
+        base = self._origin() + self.config.base_path + "/auth/device/verify"
         self._json(
             200,
             {
@@ -286,14 +291,16 @@ class OAuthRoutes:
             )
             return
         if user is None:
-            here = "/auth/device/verify?" + urllib.parse.urlencode({"user_code": code})
-            self._redirect("/auth/login?" + urllib.parse.urlencode({"next": here}))
+            prefix = self.config.base_path
+            here = f"{prefix}/auth/device/verify?" + urllib.parse.urlencode({"user_code": code})
+            self._redirect(f"{prefix}/auth/login?" + urllib.parse.urlencode({"next": here}))
             return
         safe = html.escape(code)
         self._page(
             200,
             f"<h1>Connect a device</h1><p>Signed in as <b>{html.escape(user)}</b>. Allow the device showing "
-            f"<b>{safe}</b> to use your library?</p><form method=post action=/auth/device/approve>"
+            f"<b>{safe}</b> to use your library?</p>"
+            f"<form method=post action={self.config.base_path}/auth/device/approve>"
             f"<input type=hidden name=user_code value='{safe}'><button>Allow</button></form>",
         )
 

@@ -45,6 +45,7 @@ start unless the required ones are all present.
 | `GOTG_OIDC_ALLOWLIST` | yes | comma/newline separated logins (GitHub usernames; emails for `oidc`), case-insensitive. Empty is refused, never "everyone" |
 | `GOTG_SESSION_SECRET_FILE` / `GOTG_SESSION_SECRET` | yes | signs the session cookie; ≥32 chars, distinct from every token |
 | `GOTG_OIDC_AUTHORIZE_URL`, `_TOKEN_URL`, `_USERINFO_URL`, `GOTG_OIDC_SCOPES` | no | explicit provider endpoints / scopes (`docs/web-auth.md`) |
+| `GOTG_WEB_URL` | no | the UI's public url when it is mounted under a path prefix or on another host than `GOTG_PUBLIC_URL`, e.g. `https://dcraw.net/games` (`docs/web-auth.md`) |
 | `GOTG_WEB_DIR` | no | directory served at `/ui/` instead of the packaged files (set by the web image) |
 | `GOTG_ADMIN_USERS` | no | users whose signed-in session may use `/admin` (`docs/web-auth.md`) |
 | `GOTG_COOKIE_NAME` | no | default `gotg_session` |
@@ -94,6 +95,12 @@ the manifest). Build and push the image with `nix build .#web-image` then
   `Secure` by default; behind plain http nobody can sign in.
 - `GOTG_OIDC_REDIRECT_URL` and `GOTG_PUBLIC_URL` use the public host, not the
   pod's. Forward `Host` and `X-Forwarded-Proto` unchanged.
+- **Under a path prefix** (`https://site/games/...` proxied to the service with
+  `/games` stripped): set `GOTG_WEB_URL=https://site/games`. The UI and player
+  find the prefix from their own address; the service needs it for the cookie
+  `Path`, its redirects and the callback. Redirect a bare `/games` to
+  `/games/ui/` at the proxy, since the service never sees the prefix. Route
+  `<prefix>/catalog` wherever `/catalog` goes, so the cookie reaches it.
 - Keep `/admin` off the public ingress; use the tailnet listener
   (`GOTG_ADMIN_PORT`, `GOTG_ADMIN_URL`).
 - Raise the body-size limit (nginx `proxy-body-size`) for save and log uploads,

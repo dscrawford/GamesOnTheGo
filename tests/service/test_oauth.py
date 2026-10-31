@@ -616,3 +616,91 @@ def test_bearer_minting_needs_a_session_and_no_bearer(app):
     session = session_of(sign_in(url)[1][1])
     headers = {"Cookie": session, "Origin": "https://gotg.example", "Authorization": "Bearer " + LEGACY}
     assert raw(f"{url}/auth/bearer", method="POST", headers=headers)[0] == 400
+
+
+# --- mounted under a path prefix (GOTG_WEB_URL) --------------------------------
+# The proxy in front strips "/games", so requests arrive at the root as usual;
+# what changes is everything the service tells the browser.
+
+WEB = "https://site.example/games"
+
+
+@pytest.fixture
+def prefixed(tmp_path, github):
+    base, _, _ = github
+    config = config_for(base, web_url=WEB, oidc_redirect_url="")
+    store = TokenStore(db=tmp_path / "tokens.db")
+    with serve(config, token_store=store) as server:
+        yield server.url, store
+
+
+def test_prefix_scopes_cookies_and_defaults_next_to_the_ui(prefixed, github):
+    url, _ = prefixed
+    _, _, record = github
+    status, headers, _ = raw(f"{url}/auth/login")
+    assert status == 302
+    query = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(headers["Location"]).query))
+    assert query["redirect_uri"] == WEB + "/auth/callback"
+    assert "Path=/games;" in cookies(headers)["gotg_oauth_state"]
+    state_cookie = "gotg_oauth_state=" + cookies(headers)["gotg_oauth_state"].split(";")[0]
+    status, headers, _ = raw(
+        f"{url}/auth/callback?code=good-code&state={query['state']}", headers={"Cookie": state_cookie}
+    )
+    assert status == 302 and headers["Location"] == "/games/ui/"
+    assert all("Path=/games;" in c for c in cookies(headers).values())
+    # A next the UI sent (its own pathname, so already prefixed) is kept.
+    _, (_, headers, _) = sign_in(url, "/games/ui/#/saves")
+    assert headers["Location"] == "/games/ui/#/saves"
+
+
+def test_prefix_origin_is_the_web_hosts(prefixed):
+    url, _ = prefixed
+    session = session_of(sign_in(url)[1][1])
+    ok = raw(f"{url}/auth/bearer", method="POST", headers={"Cookie": session, "Origin": "https://site.example"})
+    assert ok[0] == 200
+    # public_url's host is not where the pages are any more.
+    old = raw(f"{url}/auth/bearer", method="POST", headers={"Cookie": session, "Origin": "https://gotg.example"})
+    assert old[0] == 403
+
+
+def test_prefix_device_flow_points_under_the_prefix(prefixed):
+    url, _ = prefixed
+    started = start_device(url)
+    assert started["verification_uri"] == WEB + "/auth/device/verify"
+    assert raw(f"{url}/auth/device")[1]["Location"] == "/games/auth/device/verify"
+    status, headers, _ = raw(f"{url}/auth/device/verify?user_code={started['user_code']}")
+    assert status == 302 and headers["Location"].startswith("/games/auth/login?next=%2Fgames%2Fauth%2Fdevice%2Fverify")
+    session = session_of(sign_in(url)[1][1])
+    _, _, page = raw(f"{url}/auth/device/verify?user_code={started['user_code']}", headers={"Cookie": session})
+    assert b"action=/games/auth/device/approve" in page
+
+
+def test_web_url_config():
+    env = {"GOTG_PROXY_TOKEN": "t", "GOTG_PUBLIC_URL": "https://g.test", "GOTG_WEB_URL": "https://s.test/games/"}
+    signin = {
+        "GOTG_OIDC_CLIENT_ID": "cid",
+        "GOTG_OIDC_CLIENT_SECRET": "sec",
+        "GOTG_OIDC_ALLOWLIST": "alice",
+        "GOTG_SESSION_SECRET": SECRET,
+    }
+    config = config_from_env({**env, **signin})
+    assert config.web_origin == "https://s.test" and config.base_path == "/games"
+    assert config.oidc_redirect_url == "https://s.test/games/auth/callback"
+    assert config.public_url == "https://g.test"  # claim links still name the API host
+    root = config_from_env({**env, "GOTG_WEB_URL": "https://s.test"})
+    assert root.base_path == "" and root.web_origin == "https://s.test"
+    unset = config_from_env({"GOTG_PROXY_TOKEN": "t", "GOTG_PUBLIC_URL": "https://g.test"})
+    assert unset.base_path == "" and unset.web_origin == "https://g.test"
+    for bad in (
+        "s.test/games",
+        "https://s.test/ga;mes",
+        "https://s.test/a/../b",
+        "https://s.test/g?x=1",
+        "https://s.test/a//b",
+    ):
+        with pytest.raises(ValueError, match="GOTG_WEB_URL"):
+            config_from_env({**env, "GOTG_WEB_URL": bad})
+
+
+def test_safe_next_default():
+    assert safe_next(None, "/games/ui/") == "/games/ui/" and safe_next("//evil", "/games/ui/") == "/games/ui/"

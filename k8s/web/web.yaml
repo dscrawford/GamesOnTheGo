@@ -3,6 +3,11 @@
 # the same service -- delete the env entries below and it is the service it
 # was. See docs/web-app.md.
 #
+# An example of a standalone deployment. A deployment that already runs the
+# service should switch sign-in on there instead: sessions live in that pod's
+# token store (GOTG_TOKENS_DB), and a second pod would have a store of its own.
+# Behind a path prefix, add GOTG_WEB_URL (docs/web-app.md, reverse-proxy notes).
+#
 #   nix build .#web-image
 #   skopeo copy docker-archive:result docker://localhost:30500/gotg-web:0.1.0
 #

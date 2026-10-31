@@ -7,6 +7,8 @@ the token cache need not import the handler it serves.
 
 from __future__ import annotations
 
+import re
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -83,14 +85,17 @@ class Config:
     # The url people reach the service on, which a claim link is built from:
     # the admin page is on another host and cannot know it otherwise.
     public_url: str = ""
+    # Where browsers reach the web UI and sign-in, when that is not public_url:
+    # "https://example.net/games" behind a proxy that strips "/games". Its
+    # origin is the one cookie writes must come from, and its path scopes the
+    # session cookie and prefixes every redirect sign-in sends. Empty is
+    # public_url, at the root of its host.
+    web_url: str = ""
     # Origins other than the service's own that a browser may call it from,
     # exactly as the browser sends them ("https://play.example.net"), or "*".
     # Empty is same-origin only: a SPA served by this service needs none, and
     # no CORS header is ever sent. /admin is never given CORS headers.
     cors_origins: tuple[str, ...] = ()
-    # How hard anybody may lean on an upstream through this proxy, in requests
-    # per second, with a burst for the ordinary case of one client opening a
-    # grid. Cache hits are not counted: they cost the upstream nothing.
     # How hard anybody may lean on an upstream through this proxy, in requests
     # per second, with a burst for the ordinary case of one client opening a
     # grid. Cache hits are not counted: they cost the upstream nothing.
@@ -139,11 +144,35 @@ class Config:
     def oidc_enabled(self) -> bool:
         return bool(self.oidc_provider)
 
+    @property
+    def web_origin(self) -> str:
+        """scheme://host[:port] the UI's pages are on, or "" when unknown."""
+        if not self.web_url:
+            return self.public_url
+        parts = urllib.parse.urlsplit(self.web_url)
+        return f"{parts.scheme}://{parts.netloc}"
+
+    @property
+    def base_path(self) -> str:
+        """The prefix the UI is mounted under: "" or like "/games", never a trailing slash."""
+        return urllib.parse.urlsplit(self.web_url).path.rstrip("/") if self.web_url else ""
+
     def validate(self) -> Config:
         if self.files_url and not self.files_url.startswith(("http://", "https://")):
             raise ValueError(f"GOTG_FILES_URL is not an http(s) url: {self.files_url!r}")
         if self.files_preferred_url and not self.files_preferred_url.startswith(("http://", "https://")):
             raise ValueError(f"GOTG_FILES_PREFERRED_URL is not an http(s) url: {self.files_preferred_url!r}")
+        if self.web_url:
+            parts = urllib.parse.urlsplit(self.web_url)
+            if parts.scheme not in ("http", "https") or not parts.netloc or parts.query or parts.fragment:
+                raise ValueError(f"GOTG_WEB_URL wants https://host[/prefix], not {self.web_url!r}")
+            # The path goes verbatim into Set-Cookie and Location headers.
+            if (
+                not re.fullmatch(r"(/[A-Za-z0-9._~-]+)*/?", parts.path)
+                or "/./" in parts.path + "/"
+                or "/../" in parts.path + "/"
+            ):
+                raise ValueError(f"GOTG_WEB_URL's path must be plain segments like /games, not {parts.path!r}")
         for origin in self.cors_origins:
             if origin != "*" and not (origin.startswith(("http://", "https://")) and not origin.endswith("/")):
                 raise ValueError(f"GOTG_CORS_ORIGINS wants origins like https://host[:port], not {origin!r}")

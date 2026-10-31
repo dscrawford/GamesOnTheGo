@@ -69,12 +69,12 @@ def pkce_pair() -> tuple[str, str]:
     return verifier, base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
 
-def safe_next(value: str | None) -> str:
-    """A same-site path or "/": never a URL, so login cannot be an open redirect."""
+def safe_next(value: str | None, default: str = "/") -> str:
+    """A same-site path or `default`: never a URL, so login cannot be an open redirect."""
     if not value or not value.startswith("/") or value.startswith(("//", "/\\")):
-        return "/"
+        return default
     if any(ord(c) < 32 or c == "\x7f" for c in value):
-        return "/"
+        return default
     return value
 
 
@@ -156,7 +156,7 @@ class OAuth:
     # --- configuration ------------------------------------------------------
 
     def redirect_uri(self) -> str:
-        return self.config.oidc_redirect_url or f"{self.config.public_url}/auth/callback"
+        return self.config.oidc_redirect_url or f"{self.config.web_url or self.config.public_url}/auth/callback"
 
     def endpoints(self) -> Endpoints:
         with self._lock:
