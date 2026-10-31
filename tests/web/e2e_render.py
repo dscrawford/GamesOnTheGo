@@ -52,6 +52,15 @@ with sync_playwright() as p:
 
     page.goto(f"{base}/ui/#/game/n64/usa.game_00")
     expect(page.locator(".detail img")).to_be_visible()
+    # The flake's builds of it: a Download for the pushed one, the push command for the other.
+    expect(page.locator("tr.port")).to_have_count(2)
+    expect(page.locator("tr[data-output='n64.usa.game_00'] a.button")).to_have_attribute(
+        "href", "/ports/n64.usa.game_00/file"
+    )
+    expect(page.locator("tr[data-output='n64.usa.game_00.emulate']")).to_contain_text(
+        "gotg port push usa.game_00 emulate"
+    )
+    page.screenshot(path=out / "2b-ports.png")
     page.get_by_text("Saves for this game").click()
     expect(page.locator("[data-attr=env-n64-usa_game_00] tr[data-gen]")).to_have_count(2)
     page.screenshot(path=out / "3-saves.png")

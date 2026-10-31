@@ -235,6 +235,10 @@ whole-game port back on it. The **Update available** chip, the **!** badge,
 Switch variants get (`GOTG_MACHINE`, `GOTG_EXTERNAL_DISPLAY`):
 [docs/variants.md](docs/variants.md).
 
+Any of them, ports included, can be built as one file that runs on Linux
+without Nix and kept on the server for the web app's Download:
+`gotg port push <id> [variant]` ([docs/ports.md](docs/ports.md)).
+
 ## Saves
 
 ```bash

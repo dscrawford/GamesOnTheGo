@@ -106,6 +106,20 @@ let
           (builtins.unsafeDiscardStringContext games.n64.usa.donkey_kong_64.drvAttrs.buildCommand or "");
       expected = true;
     };
+    # One file that runs without Nix, for the ports store: the game, its
+    # emulator and its variants each have one.
+    testEveryOutputHasAPortableBuild = {
+      expr = map (g: g.gotgPortable.name) [
+        games.n64.usa.donkey_kong_64
+        games.n64.usa.donkey_kong_64.emulate
+        games.n64.usa.legend_of_zelda_ocarina_of_time_rev2.rando
+      ];
+      expected = [
+        "gotg-portable-n64.usa.donkey_kong_64.run"
+        "gotg-portable-n64.usa.donkey_kong_64.emulate.run"
+        "gotg-portable-n64.usa.legend_of_zelda_ocarina_of_time_rev2.rando.run"
+      ];
+    };
     testNixRunFindsTheProgram = {
       expr = games.n64.usa.donkey_kong_64.meta.mainProgram;
       expected = "gotg-n64-usa-donkey_kong_64";

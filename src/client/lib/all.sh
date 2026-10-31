@@ -56,6 +56,8 @@ source "$GOTG_LIB/remote.sh"
 source "$GOTG_LIB/saves.sh"
 # shellcheck source=lib/cmd-saves.sh
 source "$GOTG_LIB/cmd-saves.sh"
+# shellcheck source=lib/cmd-port.sh
+source "$GOTG_LIB/cmd-port.sh"
 # shellcheck source=lib/saves-history.sh
 source "$GOTG_LIB/saves-history.sh"
 # shellcheck source=lib/saves-sync.sh

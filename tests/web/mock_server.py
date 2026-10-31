@@ -43,6 +43,29 @@ def games():
     return out
 
 
+# What the flake builds for usa.game_00, as GET /ports/<platform>/<id> says: one pushed.
+PORTS = [
+    {
+        "output": "n64.usa.game_00",
+        "variant": "",
+        "description": "Game 00 — a native port.",
+        "build": {
+            "output": "n64.usa.game_00",
+            "sha256": "cd" * 32,
+            "size": 734003200,
+            "device": "deck",
+            "written_at": "2026-10-30T10:00:00Z",
+        },
+    },
+    {
+        "output": "n64.usa.game_00.emulate",
+        "variant": "emulate",
+        "description": "The n64 emulator instead.",
+        "build": None,
+    },
+]
+
+
 class State:
     def __init__(self):
         self.lock = threading.Lock()
@@ -129,6 +152,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"version": 2, "games": games()})
         if path.startswith("/art/"):
             return self._send(200, PNG, "image/png") if "usa.game_0" in path else self._json(404, {"error": "none"})
+        if path == "/ports/n64/usa.game_00":
+            return self._json(200, {"version": 1, "available": PORTS})
+        if path.startswith("/ports/") and path.endswith("/file"):
+            return self._send(200, b"#!/bin/sh\n", "application/octet-stream")
+        if path.startswith("/ports/"):
+            return self._json(200, {"version": 1, "available": []})
         m = re.fullmatch(r"/saves/(env-[a-z0-9_-]+)(?:/(meta|history|gen/(\d+)))?", path)
         if m:
             return self._saves(m, query, body)

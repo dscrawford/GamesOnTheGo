@@ -30,6 +30,9 @@
       envDir,
       server,
       catalog,
+      # { game, program, name, gotg, server } -> one file that runs without Nix
+      # (nix/portable.nix); null where the caller has no way to make one.
+      portable ? null,
     }:
     let
       data = catalogLib.read catalog;
@@ -57,25 +60,17 @@
             game = builtins.removeAttrs game [ "path" ];
           };
           spec = pkgs.writeText "gotg-spec-${name}.json" (builtins.toJSON fields);
-        in
-        if chosen ? error then
-          throw "${name}: ${chosen.error}"
-        else
-          # The spec rides along as an attribute too: what a game would launch,
-          # readable without building it (checks.library, `nix eval`).
-          (
-            let
-              program = "gotg-${builtins.replaceStrings [ "." ] [ "-" ] name}";
-              launcher = pkgs.writeShellApplication {
-                name = program;
-                text = ''
-                  exec ${gotg}/bin/gotg launch --spec ${spec} "$@"
-                '';
-              };
-            in
-            # The program, and the spec beside it at share/gotg/spec.json: a
-            # client finds an environment's store path from the games built
-            # here by reading these, with no evaluation (env_root).
+          program = "gotg-${builtins.replaceStrings [ "." ] [ "-" ] name}";
+          launcher = pkgs.writeShellApplication {
+            name = program;
+            text = ''
+              exec ${gotg}/bin/gotg launch --spec ${spec} "$@"
+            '';
+          };
+          # The program, and the spec beside it at share/gotg/spec.json: a
+          # client finds an environment's store path from the games built
+          # here by reading these, with no evaluation (env_root).
+          output =
             pkgs.runCommand "gotg-game-${name}"
               {
                 meta = {
@@ -89,13 +84,27 @@
                 mkdir -p $out/bin $out/share/gotg
                 ln -s ${launcher}/bin/${program} $out/bin/${program}
                 ln -s ${spec} $out/share/gotg/spec.json
-              ''
-          )
+              '';
+        in
+        if chosen ? error then
+          throw "${name}: ${chosen.error}"
+        else
+          # The spec rides along as an attribute too: what a game would launch,
+          # readable without building it (checks.library, `nix eval`).
+          output
           // {
             gotgSpec = fields;
             # The file itself, for `gotg qa --spec`: the very spec this game
             # launches with.
             gotgSpecFile = spec;
+          }
+          // lib.optionalAttrs (portable != null) {
+            # One file that runs without Nix, for the ports store (`gotg port push`).
+            gotgPortable = portable {
+              game = output;
+              inherit program name gotg;
+              server = fields.server;
+            };
           };
 
       # A game, with its variants -- and `emulate`, for one that has a file of

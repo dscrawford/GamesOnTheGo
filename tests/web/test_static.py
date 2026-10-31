@@ -141,6 +141,14 @@ def test_detail_offers_play_only_when_the_service_says_so():
     assert "plan.nix" in detail
 
 
+def test_detail_lists_the_flakes_ports_with_a_download_or_the_push():
+    detail = (STATIC_DIR / "js" / "views" / "detail.js").read_text()
+    api = (STATIC_DIR / "js" / "api.js").read_text()
+    assert "api.ports(platform, id)" in detail and "api.portUrl(p.output)" in detail
+    assert "gotg port push ${game.id}" in detail
+    assert "`${BASE}/ports/${encodeURIComponent(output)}/file`" in api
+
+
 def test_the_ui_reaches_the_service_through_its_base_only():
     # Under a path prefix (a reverse proxy at /c/<id>/gotg/) a root-absolute
     # URL would leave the service. Every request goes through raw(), which

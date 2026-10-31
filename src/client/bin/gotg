@@ -47,6 +47,9 @@ usage: gotg <command> [args]
   versions <id> [variant]
                      which updates of a game are here, and which one runs
   saves <command>    move saves between machines (saves help for the rest)
+  port push <id> [variant]
+                     build the game as one file that runs without Nix and keep
+                     it on the server, for the web app's Download (port help)
   configure <id> [variant]
                      open that environment's own emulator settings
   configure storage  where games are kept: list, add, remove, default
@@ -132,6 +135,7 @@ main() {
     versions) cmd_versions "$@" ;;
     qa) cmd_qa "$@" ;;
     saves) cmd_saves "$@" ;;
+    port) cmd_port "$@" ;;
     logs) cmd_logs "$@" ;;
     controllers) cmd_controllers "$@" ;;
     configure) cmd_configure "$@" ;;

@@ -15,6 +15,8 @@ from pathlib import Path
 
 from ..catalog import CatalogStore
 from ..logs import DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_QUOTA_BYTES, LogsStore
+from ..ports import DEFAULT_MAX_BYTES as PORTS_MAX_BYTES
+from ..ports import PortsStore
 from ..saves import DEFAULT_KEEP, DEFAULT_MAX_BYTES, SavesStore
 from ..tokens import TokenStore
 from .app import Config, make_server
@@ -207,6 +209,26 @@ def logs_from_env(env: Mapping[str, str] | None = None) -> LogsStore | None:
     )
 
 
+# The environment files the flake's ports and variants are named by: beside
+# the service in a checkout; the package says where with GOTG_ENV_GAMES_DIR.
+CHECKOUT_GAMES_DIR = Path(__file__).resolve().parents[2] / "client" / "env" / "games"
+
+
+def ports_from_env(env: Mapping[str, str] | None = None) -> PortsStore | None:
+    """The ports store, or None: no directory means /ports answers 503."""
+    env = os.environ if env is None else env
+    root = env.get("GOTG_PORTS_DIR", "")
+    if not root:
+        return None
+    games = env.get("GOTG_ENV_GAMES_DIR", "")
+    games_dir = Path(games) if games else (CHECKOUT_GAMES_DIR if CHECKOUT_GAMES_DIR.is_dir() else None)
+    return PortsStore(
+        root=Path(root),
+        max_bytes=int(env.get("GOTG_PORTS_MAX_BYTES", str(PORTS_MAX_BYTES))),
+        games_dir=games_dir,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     port = int(os.environ.get("PORT", "8080"))
@@ -218,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
         catalog = catalog_from_env()
         store = store_from_env()
         logs = logs_from_env()
+        ports = ports_from_env()
         token_store = token_store_from_env()
         art = ArtCache(Path(config.art_dir)) if config.art_dir else None
         # A catalog row grants read on its path, so the library must not be
@@ -228,6 +251,11 @@ def main(argv: list[str] | None = None) -> int:
                 if saves_root.is_relative_to(root):
                     raise ValueError(f"the saves directory {store.root} is inside library root {root}")
         # Same rule, same reason.
+        if ports and catalog:
+            ports_root = Path(os.path.realpath(ports.root))
+            for root in catalog.roots:
+                if ports_root.is_relative_to(root):
+                    raise ValueError(f"the ports directory {ports.root} is inside library root {root}")
         if art and catalog:
             art_root = Path(os.path.realpath(art.root))
             for root in catalog.roots:
@@ -249,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
     shared = {
         "store": store,
         "logs": logs,
+        "ports": ports,
         "catalog": catalog,
         "files_dir": files_dir,
         "ejs_dir": ejs_dir,
@@ -267,6 +296,7 @@ def main(argv: list[str] | None = None) -> int:
     held = [name for name, on in (("steamgriddb", config.steamgriddb_key), ("igdb", config.igdb_client_id)) if on]
     saves = f"saves under {store.root}" if store else "no saves store"
     saves += f", logs under {logs.root}" if logs else ", no logs store"
+    saves += f", ports under {ports.root}" if ports else ", no ports store"
     games = f"catalog at {catalog.db}" if catalog else "no catalog"
     creds = ", ".join(held) or "nothing"
     if token_store:

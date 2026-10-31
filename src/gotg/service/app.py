@@ -50,6 +50,7 @@ from pathlib import Path
 from .._http import NO_REDIRECT_OPENER
 from ..catalog import CatalogStore
 from ..logs import LogsStore
+from ..ports import PortsStore
 from ..saves import SavesStore
 from ..tokens import TOKEN_RE, TokenStore
 from . import admin_page
@@ -65,6 +66,7 @@ from .routes_logs import LogsRoutes
 from .routes_oauth import ROUTES as OAUTH_ROUTES
 from .routes_oauth import OAuthRoutes
 from .routes_play import PlayRoutes
+from .routes_ports import PortsRoutes
 from .routes_saves import SavesRoutes
 from .routes_static import STATIC_DIR, StaticRoutes, static_file
 from .token_cache import TokenCache
@@ -200,6 +202,7 @@ class Handler(
     StaticRoutes,
     ArtRoutes,
     SavesRoutes,
+    PortsRoutes,
     LogsRoutes,
     CatalogRoutes,
     FileRoutes,
@@ -211,6 +214,7 @@ class Handler(
     tokens: TokenCache
     store: SavesStore | None
     logs: LogsStore | None
+    ports: PortsStore | None = None
     catalog: CatalogStore | None
     files_dir: Path | None
     ejs_dir: Path | None = None
@@ -251,7 +255,7 @@ class Handler(
     # --- replies ------------------------------------------------------------
 
     CORS_METHODS = "GET, HEAD, PUT, POST, DELETE, OPTIONS"
-    CORS_HEADERS = "Authorization, Content-Type, Range, If-Range, X-Gotg-Parent, X-Gotg-Device"
+    CORS_HEADERS = "Authorization, Content-Type, Range, If-Range, X-Gotg-Parent, X-Gotg-Device, X-Gotg-Sha256"
     CORS_EXPOSE = "Content-Length, Content-Range, Accept-Ranges, ETag, Retry-After, X-Gotg-Generation, X-Gotg-Hash"
 
     def _cors_origin(self) -> str | None:
@@ -601,12 +605,16 @@ class Handler(
             self._problem(401, "a bearer token is required", close=True)
             return
 
-        sent, body = self._read_body(body_cap(prefix, self.command, self.store, self.logs))
+        # A portable build runs to gigabytes: its route streams it to disk.
+        if prefix == "ports" and self.command == "PUT":
+            sent, body = True, None
+        else:
+            sent, body = self._read_body(body_cap(prefix, self.command, self.store, self.logs))
         if not sent:
             return
 
         if path_climbs(rest):
-            self._problem(400, "the path climbs out of the API it is proxied to")
+            self._problem(400, "the path climbs out of the API it is proxied to", close=body is None)
             return
         self._dispatch(prefix, rest, body, principal)
 
@@ -718,6 +726,8 @@ class Handler(
             self._igdb(rest, body)
         elif prefix == "saves":
             self._saves(rest, body, self._saves_user(principal))
+        elif prefix == "ports":
+            self._ports(rest, principal)
         elif prefix == "logs":
             self._logs(rest, body, principal)
         elif prefix == "catalog":
@@ -768,6 +778,7 @@ def make_server(
     listener: str = "both",
     logs: LogsStore | None = None,
     ejs_dir: Path | None = None,
+    ports: PortsStore | None = None,
 ) -> ThreadingHTTPServer:
     """Threading, because one slow upstream must not block every other client.
 
@@ -784,6 +795,7 @@ def make_server(
             "tokens": TokenCache(),
             "store": store,
             "logs": logs,
+            "ports": ports,
             "catalog": catalog,
             "files_dir": files_dir,
             "ejs_dir": ejs_dir,

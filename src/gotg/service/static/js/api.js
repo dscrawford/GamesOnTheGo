@@ -27,6 +27,11 @@
  *  PUT /saves/<attr>[?force=1] body=bundle, X-Gotg-Parent=<hash>, X-Gotg-Device
  *    -> 200 meta | 409 head meta (the conflict)
  *
+ *  Ports (portable builds a client pushed with `gotg port push`, per user):
+ *  GET /ports/<platform>/<id> -> {version:1, available:[{output, variant, description,
+ *    build: {output, sha256, size, device, written_at}|null}]}; 503 without a store.
+ *  GET /ports/<output>/file -> the build's bytes (a download; the session cookie is the credential).
+ *
  *  Admin (existing): GET /admin/info {public_url}; GET /admin/invites
  *    {invites:[{name,user,created_at,expires_at}]}; POST /admin/invites
  *    {name,user?,ttl_days?} -> {name,code}; GET /admin/tokens
@@ -140,6 +145,14 @@ export async function savePut(attr, bundle, { parent = "", device = "web", force
     throw e;
   }
 }
+
+/** What the flake can build for a game, each with its pushed build; null when the service keeps none. */
+export const ports = (platform, id) =>
+  call(`/ports/${encodeURIComponent(platform)}/${encodeURIComponent(id)}`).then((r) => r.available).catch((e) => {
+    if (e.status === 404 || e.status === 503) return null;
+    throw e;
+  });
+export const portUrl = (output) => `${BASE}/ports/${encodeURIComponent(output)}/file`;
 
 export const admin = {
   tokens: () => call("/admin/tokens").then((r) => r.tokens),

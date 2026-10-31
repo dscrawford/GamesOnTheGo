@@ -37,3 +37,4 @@ th { color:var(--dim); font-weight:500; }
 .banner { padding:.6rem 1rem; border-radius:6px; background:#3a1f22; border:1px solid var(--bad); margin-bottom:1rem; }
 code { background:#0c0d10; padding:.1rem .3rem; border-radius:4px; word-break:break-all; }
 @media (max-width:600px) { header { flex-wrap:wrap; gap:.6rem; } }
+.ports td { vertical-align:top; } .ports td:last-child { white-space:nowrap; }
