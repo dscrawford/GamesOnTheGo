@@ -695,8 +695,8 @@ pending_file() { printf '%s/steam-pending.json' "$GOTG_STATE_DIR"; }
   gotg steam picker
   local launcher="$GOTG_STATE_DIR/launchers/gotg-ui.sh"
 
-  run env -i HOME="$TEST_TMP/empty-home" PATH=/usr/bin:/bin "$BASH" "$launcher"
-  [ "$status" -ne 0 ]
+  # 127, as a shell says of a command it cannot find.
+  run -127 env -i HOME="$TEST_TMP/empty-home" PATH=/usr/bin:/bin "$BASH" "$launcher"
   [[ "$output" == *"no gotg-ui"* ]]
   [[ "$output" == *"nix profile add"* ]]
 }
