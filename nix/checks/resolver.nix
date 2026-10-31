@@ -3,9 +3,18 @@
 # would run one way from `nix run` and another from `gotg play`. Every game
 # in the fixture and one per game file under env/games, each with no variant,
 # each variant it has, `emulate`, and one it does not have.
-{ pkgs, packages }:
+{ pkgs }:
 let
   inherit (pkgs) lib;
+  # The client's lib as packages.gotg ships it (a plain copy), without building
+  # the package: its closure is SDL, Rust crates and danstick.
+  client = lib.fileset.toSource {
+    root = ../../src/client;
+    fileset = lib.fileset.unions [
+      ../../src/client/lib
+      ../../src/client/data
+    ];
+  };
   catalog = import ../../lib/catalog.nix { inherit lib; };
   envDir = ../../src/client/env;
   fixture = (catalog.read ../../tests/fixtures/catalog.json).games;
@@ -49,8 +58,7 @@ pkgs.runCommand "check-resolver" { nativeBuildInputs = [ pkgs.jq pkgs.bash ]; } 
   # Where common.sh looks for it, whatever GOTG_CACHE_FILE says.
   mkdir -p $GOTG_STATE_DIR && cp ${manifest} $GOTG_STATE_DIR/manifest.json
   export GOTG_ENV_DIR=${envDir} NO_COLOR=1
-  root=${packages.gotg}/share/gotg
-  export GOTG_ROOT=$root GOTG_LIB=$root/lib GOTG_DATA=$root/data GOTG_TEMPLATES=$root/templates
+  export GOTG_ROOT=${client} GOTG_LIB=${client}/lib GOTG_DATA=${client}/data
   bash -c '
     set -uo pipefail
     for lib in color common config manifest env; do . "$GOTG_LIB/$lib.sh"; done

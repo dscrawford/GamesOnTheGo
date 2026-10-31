@@ -308,7 +308,7 @@ resolve_target() {
   fi
 
   # shellcheck disable=SC2086 # the pattern is a glob on purpose
-  match="$(find "$path" -ipath "$path/$pattern" -type f 2>/dev/null | head -n1)"
+  match="$(find "$path" -ipath "$path/$pattern" -type f 2>/dev/null | first_line)"
   [[ -n "$match" ]] || die "no file matching '$pattern' under $path"
   printf '%s' "$match"
 }

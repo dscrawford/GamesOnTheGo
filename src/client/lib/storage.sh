@@ -40,7 +40,7 @@ storage_configured() {
 # shellcheck disable=SC2034 # both are read by every other lib
 storage_init() {
   local first
-  first="$(storage_dirs | head -n1)"
+  first="$(storage_dirs | first_line)"
   [[ -n "$first" ]] || return 0
   GOTG_GAMES_DIR="$first"
   [[ -n "${GOTG_PARTIAL_DIR_EXPLICIT:-}" ]] || GOTG_PARTIAL_DIR="$GOTG_GAMES_DIR/.gotg-partial"
@@ -104,7 +104,7 @@ storage_add() {
   # not make the games already on the disk invisible.
   _storage_write "$(jq -nc --args '$ARGS.positional' "${current[@]}" "$resolved")"
   log "added: $resolved"
-  log "downloads still land in $(storage_dirs | head -n1); to change that: gotg configure storage default $resolved"
+  log "downloads still land in $(storage_dirs | first_line); to change that: gotg configure storage default $resolved"
 }
 
 storage_remove() {

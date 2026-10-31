@@ -164,6 +164,8 @@ ensure_nix() {
     return 0
   fi
   if is_steamos; then install_nix_steamos; else install_nix_generic; fi
+  # A dry run installed nothing, so there is no Nix to find.
+  [[ "$DRY_RUN" != "1" ]] || return 0
   use_nix || die "Nix installed but is not on PATH. Open a new terminal and run this again."
 }
 

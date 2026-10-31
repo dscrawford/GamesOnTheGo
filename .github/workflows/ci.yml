@@ -1,0 +1,186 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read   # plan: find the last master commit CI passed on
+
+env:
+  # AGENTS.md's caps are for the shared desktop. A hosted runner is 4 cores and
+  # one job; a single long crate (danstick-rs) is the critical path, so let one
+  # build use all of them.
+  NIX_FLAGS: --max-jobs 2 --cores 4 --print-build-logs
+
+jobs:
+  # Evaluates every check, package and devShell (the "flake evaluates" gate),
+  # here and at the base, and lists what changed: a check or environment
+  # whose drvPath is the base's has a known result, and no runner starts for it.
+  plan:
+    name: plan (flake evaluates)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      checks: ${{ steps.plan.outputs.checks }}
+      envs: ${{ steps.plan.outputs.envs }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Pick the base
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          case "$EVENT" in
+            pull_request) base="$PR_BASE" ;;
+            # The last commit CI passed on, not the push's `before`: a cancelled or
+            # failed run would otherwise leave its changes unbuilt for good.
+            push) base="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml \
+                    --branch master --event push --status success --limit 1 \
+                    --json headSha -q '.[0].headSha' || true)" ;;
+            *) base="" ;;   # workflow_dispatch builds everything
+          esac
+          echo "base=$base" | tee -a "$GITHUB_OUTPUT"
+      - name: Evaluate, and compare with the base
+        id: plan
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: |
+          nej="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#nix-eval-jobs)"
+          export NIX_EVAL_JOBS="$nej/bin/nix-eval-jobs"
+          # Each gate is a flake check (nix/checks/*), so CI runs exactly what
+          # AGENTS.md says "must pass before a change is done".
+          #   ruff: lint + format of src/gotg and tests; shellcheck: the client;
+          #   rust: test, clippy -D warnings, fmt; client-tests: bats.
+          .github/scripts/ci-plan.sh "$BASE" \
+            ruff shellcheck rust python-tests client-tests \
+            catalog library resolver recipes platforms > plan.json
+          jq -r '"checks=\(.checks | tojson)", "envs=\(.envs | tojson)"' plan.json >> "$GITHUB_OUTPUT"
+          {
+            echo "Base: \`${BASE:-none, building everything}\`"
+            jq -r '"Checks to build: \(.checks | join(", ") | if . == "" then "none" else . end)",
+                   "Environments to build: \(.envs | length)"' plan.json
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  nix-check:
+    name: ${{ matrix.check }}
+    needs: plan
+    if: needs.plan.outputs.checks != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        check: ${{ fromJSON(needs.plan.outputs.checks) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      # Set the repository variable CACHIX_CACHE (and secret CACHIX_AUTH_TOKEN)
+      # to use Cachix; the GitHub cache throttles magic-nix-cache within a minute.
+      - uses: cachix/cachix-action@v16
+        if: vars.CACHIX_CACHE != ''
+        with:
+          name: ${{ vars.CACHIX_CACHE }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+        if: vars.CACHIX_CACHE == ''
+        with:
+          use-flakehub: false
+      - env:
+          CHECK: ${{ matrix.check }}
+        run: |
+          # shellcheck disable=SC2086 # NIX_FLAGS is a list
+          nix build ".#checks.x86_64-linux.$CHECK" $NIX_FLAGS
+
+  # checks.environments builds all ~50 launchers; a change touches a few. A
+  # manual run builds all.
+  environments:
+    name: environments (changed)
+    needs: plan
+    if: needs.plan.outputs.envs != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: cachix/cachix-action@v16
+        if: vars.CACHIX_CACHE != ''
+        with:
+          name: ${{ vars.CACHIX_CACHE }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+        if: vars.CACHIX_CACHE == ''
+        with:
+          use-flakehub: false
+      - name: Build them
+        env:
+          ENVS: ${{ needs.plan.outputs.envs }}
+        run: |
+          mapfile -t envs < <(jq -r '.[]' <<<"$ENVS")
+          echo "${#envs[@]} environment(s):"; printf '  %s\n' "${envs[@]}"
+          # shellcheck disable=SC2086
+          nix build --no-link $NIX_FLAGS "${envs[@]/#/.#packages.x86_64-linux.}"
+
+  picker-lint:
+    name: ruff (picker + e2e)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uvx ruff check src/ui tests/ui tests/e2e
+
+  k8s-manifests:
+    name: k8s manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fill the templates' placeholders
+        run: |
+          mkdir -p /tmp/k8s
+          sed -e 's/@NAME@/ci/' -e 's/@GAME@/usa.ci/' k8s/qa/job.yaml > /tmp/k8s/qa-job.yaml
+          sed -e 's/@TAG@/ci/' -e 's/@SHARDS@/3/' k8s/controllers/job.yaml > /tmp/k8s/controllers-job.yaml
+          cp k8s/qa/state.yaml /tmp/k8s/qa-state.yaml
+      - name: kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /tmp kubeconform
+          /tmp/kubeconform -strict -summary -kubernetes-version 1.30.0 /tmp/k8s
+      - name: run.py compiles
+        run: python3 -m py_compile k8s/controllers/run.py
+
+  install-script:
+    name: install.sh
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck install.sh uninstall.sh
+      - run: bash -n install.sh && bash -n uninstall.sh
+      - run: bash install.sh --server https://gotg.example.org --dry-run
+
+  # The one status to require: matrix entries that never start report nothing,
+  # so their names cannot be required. Skipped counts as passed.
+  ci-ok:
+    name: ci ok
+    if: always()
+    needs: [plan, nix-check, environments, picker-lint, k8s-manifests, install-script]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$RESULTS"
+          jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<<"$RESULTS" >/dev/null

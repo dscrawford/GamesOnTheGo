@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# common.sh's file writers: atomic_write and json_merge_file.
+# common.sh: the file writers atomic_write and json_merge_file, and first_line.
 #
 # atomic_write sets the mode before the secret goes in and leaves no `.tmp`
 # behind when the writer fails; these pin both.
@@ -168,4 +168,23 @@ hold_lock() {
   [ -x "$TEST_TMP/deep/dir/tool" ]
   run -3 "$TEST_TMP/deep/dir/tool" a b
   [ "$output" = "args: a b" ]
+}
+
+@test "first_line outlives a writer that is still writing, where head would not" {
+  # The pause puts the second line after head has gone: 141 every time, as
+  # storage_init hit by chance under load with two games directories.
+  run bash -c 'set -o pipefail; { echo one; sleep 0.3; echo two; } | head -n1'
+  [ "$status" -eq 141 ]
+  run --separate-stderr bash -c 'set -o pipefail; source "$GOTG_LIB/common.sh"
+    { echo one; sleep 0.3; echo two; } | first_line'
+  [ "$status" -eq 0 ]
+  [ "$output" = "one" ]
+}
+
+@test "first_line of nothing is nothing, and of an unterminated line is that line" {
+  run first_line </dev/null
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run first_line < <(printf 'only')
+  [ "$output" = "only" ]
 }

@@ -70,7 +70,7 @@ complete_ready() {
   game="$(jq -c --arg i "$id" --arg p "$platform" \
     'if .version != 2 then empty else
        (.games[] | select(.id == $i and ($p == "" or .platform == $p)))
-     end' "$GOTG_CACHE_FILE" 2>/dev/null | head -1 || true)"
+     end' "$GOTG_CACHE_FILE" 2>/dev/null | first_line || true)"
   [[ -n "$game" ]] || return 1
 
   # Its root built, from the library as it is now. A root the library has
@@ -157,5 +157,5 @@ _complete_game() {
   fi
   manifest_games 2>/dev/null |
     jq -c --arg i "$id" --arg p "$platform" \
-      'select(.id == $i and ($p == "" or .platform == $p))' 2>/dev/null | head -1
+      'select(.id == $i and ($p == "" or .platform == $p))' 2>/dev/null | first_line
 }

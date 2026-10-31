@@ -142,7 +142,7 @@ pads_cemu_profile_motion() {
   # Said after the flag is set, not instead of setting it: the flag is right
   # either way, and which emulated controller a game wants is the player's
   # choice to change.
-  type="$(sed -n 's:.*<type>\(.*\)</type>.*:\1:p' "$profile" | head -1)"
+  type="$(sed -n 's:.*<type>\(.*\)</type>.*:\1:p' "$profile" | first_line)"
   if [[ -n "$type" && "$type" != "$GOTG_CEMU_MOTION_TYPE" ]]; then
     warn "$(basename "$profile") emulates a $type, which has no motion hardware —"
     warn "a Wii U game reads the gyro from the $GOTG_CEMU_MOTION_TYPE."

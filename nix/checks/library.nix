@@ -5,13 +5,26 @@
 { pkgs, flake }:
 let
   inherit (pkgs) lib;
-  library = flake.lib.mkLibrary {
+  args = {
     server = "https://gotg.example/";
     catalog = ../../tests/fixtures/catalog.json;
     library = ../../tests/fixtures;
   };
+  library = flake.lib.mkLibrary args;
+  # Reading the real apps builds what they exec -- gotg-ui is danstick, SDL3 and
+  # two crates, ~15 min of CI -- so their scripts are made around stand-ins.
+  stubbed = import ../library.nix {
+    inherit lib;
+    pkgsFor = _: pkgs;
+    packagesFor = _: {
+      gotg = "/gotg";
+      gotg-ui = "/gotg-ui";
+    };
+    libraryLib = null;
+    envDir = null;
+  } args;
   games = library.legacyPackages.${pkgs.stdenv.hostPlatform.system};
-  apps = library.apps.${pkgs.stdenv.hostPlatform.system};
+  apps = stubbed.apps.${pkgs.stdenv.hostPlatform.system};
   appText = name: builtins.readFile apps.${name}.program;
   spec = drv: drv.gotgSpec // { env = builtins.unsafeDiscardStringContext drv.gotgSpec.env; };
   forced = v: (builtins.tryEval (builtins.seq v.drvPath true)).success;
@@ -111,7 +124,9 @@ let
     };
     # The apps a person runs from a library, each knowing the library.
     testTheLibrarysAppsAreThere = {
-      expr = builtins.sort builtins.lessThan (builtins.attrNames apps);
+      expr = builtins.sort builtins.lessThan (
+        builtins.attrNames library.apps.${pkgs.stdenv.hostPlatform.system}
+      );
       expected = [
         "default"
         "login"
