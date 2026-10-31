@@ -87,7 +87,7 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
       # Set the repository variable CACHIX_CACHE (and secret CACHIX_AUTH_TOKEN)
       # to use Cachix; the GitHub cache throttles magic-nix-cache within a minute.
-      - uses: cachix/cachix-action@v16
+      - uses: cachix/cachix-action@v17
         if: vars.CACHIX_CACHE != ''
         with:
           name: ${{ vars.CACHIX_CACHE }}
@@ -113,7 +113,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - uses: cachix/cachix-action@v16
+      - uses: cachix/cachix-action@v17
         if: vars.CACHIX_CACHE != ''
         with:
           name: ${{ vars.CACHIX_CACHE }}
