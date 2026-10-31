@@ -45,6 +45,15 @@ log() { printf '%s\n' "$*" >&2; }
 # For strings a server chose: a hostile endpoint must not write live escape
 # sequences into the terminal through an error message or a name.
 printable() { tr -cd '[:print:]' <<<"$*"; }
+
+# The first line of stdin, draining the rest. `x | head -n1` under pipefail
+# fails with SIGPIPE (141), silently, whenever x is still writing as head exits.
+first_line() {
+  local line
+  if IFS= read -r line || [[ -n "$line" ]]; then printf '%s\n' "$line"; fi
+  cat >/dev/null
+}
+
 warn() { printf '%swarning:%s %s\n' "$C_WARN" "$C_RESET" "$*" >&2; }
 success() { printf '%s%s%s\n' "$C_OK" "$*" "$C_RESET" >&2; }
 

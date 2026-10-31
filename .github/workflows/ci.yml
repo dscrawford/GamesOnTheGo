@@ -12,64 +12,123 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read   # plan: find the last master commit CI passed on
 
 env:
-  # AGENTS.md: builds share a machine; a hosted runner has 4 cores, so cap alike.
-  NIX_FLAGS: --max-jobs 2 --cores 2 --print-build-logs
+  # AGENTS.md's caps are for the shared desktop. A hosted runner is 4 cores and
+  # one job; a single long crate (danstick-rs) is the critical path, so let one
+  # build use all of them.
+  NIX_FLAGS: --max-jobs 2 --cores 4 --print-build-logs
 
 jobs:
-  # Each gate is a flake check (nix/checks/*), so CI runs exactly what AGENTS.md
-  # says "must pass before a change is done".
+  # Evaluates every check, package and devShell (the "flake evaluates" gate),
+  # here and at the base, and lists what changed: a check or environment
+  # whose drvPath is the base's has a known result, and no runner starts for it.
+  plan:
+    name: plan (flake evaluates)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      checks: ${{ steps.plan.outputs.checks }}
+      envs: ${{ steps.plan.outputs.envs }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Pick the base
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          case "$EVENT" in
+            pull_request) base="$PR_BASE" ;;
+            # The last commit CI passed on, not the push's `before`: a cancelled or
+            # failed run would otherwise leave its changes unbuilt for good.
+            push) base="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml \
+                    --branch master --event push --status success --limit 1 \
+                    --json headSha -q '.[0].headSha' || true)" ;;
+            *) base="" ;;   # workflow_dispatch builds everything
+          esac
+          echo "base=$base" | tee -a "$GITHUB_OUTPUT"
+      - name: Evaluate, and compare with the base
+        id: plan
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: |
+          nej="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#nix-eval-jobs)"
+          export NIX_EVAL_JOBS="$nej/bin/nix-eval-jobs"
+          # Each gate is a flake check (nix/checks/*), so CI runs exactly what
+          # AGENTS.md says "must pass before a change is done".
+          #   ruff: lint + format of src/gotg and tests; shellcheck: the client;
+          #   rust: test, clippy -D warnings, fmt; client-tests: bats.
+          .github/scripts/ci-plan.sh "$BASE" \
+            ruff shellcheck rust python-tests client-tests \
+            catalog library resolver recipes platforms > plan.json
+          jq -r '"checks=\(.checks | tojson)", "envs=\(.envs | tojson)"' plan.json >> "$GITHUB_OUTPUT"
+          {
+            echo "Base: \`${BASE:-none, building everything}\`"
+            jq -r '"Checks to build: \(.checks | join(", ") | if . == "" then "none" else . end)",
+                   "Environments to build: \(.envs | length)"' plan.json
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
   nix-check:
     name: ${{ matrix.check }}
+    needs: plan
+    if: needs.plan.outputs.checks != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        check:
-          - ruff          # lint + format of src/gotg and tests
-          - shellcheck    # the bash client
-          - rust          # cargo test, clippy -D warnings, fmt
-          - python-tests  # service, indexer, ui unit tests
-          - client-tests  # bats suite
-          - catalog
-          - library
-          - resolver
-          - recipes
-          - platforms
+        check: ${{ fromJSON(needs.plan.outputs.checks) }}
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
+      # Set the repository variable CACHIX_CACHE (and secret CACHIX_AUTH_TOKEN)
+      # to use Cachix; the GitHub cache throttles magic-nix-cache within a minute.
+      - uses: cachix/cachix-action@v16
+        if: vars.CACHIX_CACHE != ''
+        with:
+          name: ${{ vars.CACHIX_CACHE }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - uses: DeterminateSystems/magic-nix-cache-action@main
+        if: vars.CACHIX_CACHE == ''
         with:
           use-flakehub: false
-      - run: nix build .#checks.x86_64-linux.${{ matrix.check }} $NIX_FLAGS
+      - env:
+          CHECK: ${{ matrix.check }}
+        run: |
+          # shellcheck disable=SC2086 # NIX_FLAGS is a list
+          nix build ".#checks.x86_64-linux.$CHECK" $NIX_FLAGS
 
-  # checks.environments builds all ~50 launchers; a change touches a few. Build
-  # the ones whose derivation differs from the base. A manual run builds all.
+  # checks.environments builds all ~50 launchers; a change touches a few. A
+  # manual run builds all.
   environments:
     name: environments (changed)
+    needs: plan
+    if: needs.plan.outputs.envs != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: DeterminateSystems/nix-installer-action@main
+      - uses: cachix/cachix-action@v16
+        if: vars.CACHIX_CACHE != ''
+        with:
+          name: ${{ vars.CACHIX_CACHE }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - uses: DeterminateSystems/magic-nix-cache-action@main
+        if: vars.CACHIX_CACHE == ''
         with:
           use-flakehub: false
-      - name: Pick the environments that changed
-        env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          .github/scripts/changed-envs.sh "$BASE" > changed.txt
-          echo "$(wc -l < changed.txt) environment(s) to build:"; cat changed.txt
       - name: Build them
+        env:
+          ENVS: ${{ needs.plan.outputs.envs }}
         run: |
-          mapfile -t envs < changed.txt
-          [ ${#envs[@]} -gt 0 ] || { echo "no environment changed"; exit 0; }
+          mapfile -t envs < <(jq -r '.[]' <<<"$ENVS")
+          echo "${#envs[@]} environment(s):"; printf '  %s\n' "${envs[@]}"
+          # shellcheck disable=SC2086
           nix build --no-link $NIX_FLAGS "${envs[@]/#/.#packages.x86_64-linux.}"
 
   picker-lint:
@@ -80,24 +139,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uvx ruff check src/ui tests/ui tests/e2e
-
-  flake-eval:
-    name: flake evaluates
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
-        with:
-          use-flakehub: false
-      # `flake check --no-build` refuses to realize the sources uv2nix reads at
-      # eval time, and several outputs are x86_64-only; so force every drvPath.
-      - run: |
-          for out in checks packages devShells; do
-            nix eval --raw ".#$out.x86_64-linux" --apply \
-              's: builtins.concatStringsSep "\n" (map (d: d.drvPath) (builtins.attrValues s))' >/dev/null
-          done
 
   k8s-manifests:
     name: k8s manifests
@@ -128,3 +169,18 @@ jobs:
       - run: shellcheck install.sh uninstall.sh
       - run: bash -n install.sh && bash -n uninstall.sh
       - run: bash install.sh --server https://gotg.example.org --dry-run
+
+  # The one status to require: matrix entries that never start report nothing,
+  # so their names cannot be required. Skipped counts as passed.
+  ci-ok:
+    name: ci ok
+    if: always()
+    needs: [plan, nix-check, environments, picker-lint, k8s-manifests, install-script]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$RESULTS"
+          jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<<"$RESULTS" >/dev/null
