@@ -22,7 +22,10 @@
 
   python-tests = import ./python-tests.nix { inherit pkgs py; };
   shellcheck = import ./shellcheck.nix { inherit pkgs; };
-  client-tests = import ./client-tests.nix { inherit pkgs packages; };
+  client-tests = import ./client-tests.nix {
+    inherit pkgs packages;
+    danstickPkgs = flake.inputs.danstick.packages.${pkgs.stdenv.hostPlatform.system};
+  };
   recipes = import ./recipes.nix { inherit pkgs packages; };
   switchContent = import ./switch-content.nix { inherit pkgs; };
   platforms = import ./platforms.nix { inherit pkgs py; };
