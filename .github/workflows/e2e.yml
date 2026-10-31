@@ -38,7 +38,7 @@ jobs:
     runs-on: [self-hosted, gotg-cluster]
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run tests/e2e, a pod per node
         run: nix run .#controllers-cluster --max-jobs 2 --cores 4 -- ${{ inputs.pytest_args }}
       - name: Keep the per-share logs
@@ -58,7 +58,7 @@ jobs:
     runs-on: [self-hosted, gotg-cluster]
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run a QA Job
         env:
           GAME: usa.diddy_kong_racing_rev1

@@ -32,7 +32,7 @@ jobs:
       checks: ${{ steps.plan.outputs.checks }}
       envs: ${{ steps.plan.outputs.envs }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: DeterminateSystems/nix-installer-action@main
       - name: Pick the base
         id: base
@@ -83,7 +83,7 @@ jobs:
       matrix:
         check: ${{ fromJSON(needs.plan.outputs.checks) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: DeterminateSystems/nix-installer-action@main
       # Set the repository variable CACHIX_CACHE (and secret CACHIX_AUTH_TOKEN)
       # to use Cachix; the GitHub cache throttles magic-nix-cache within a minute.
@@ -111,7 +111,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: cachix/cachix-action@v17
         if: vars.CACHIX_CACHE != ''
@@ -136,7 +136,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
       - run: uvx ruff check src/ui tests/ui tests/e2e
 
@@ -145,7 +145,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Fill the templates' placeholders
         run: |
           mkdir -p /tmp/k8s
@@ -165,7 +165,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: shellcheck install.sh uninstall.sh
       - run: bash -n install.sh && bash -n uninstall.sh
       - run: bash install.sh --server https://gotg.example.org --dry-run
