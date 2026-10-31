@@ -232,6 +232,26 @@ class TokenStore:
             )
         return name, token
 
+    def issue(self, name: str, user: str, ttl: float | None = None) -> str:
+        """A token minted straight to a signed-in person, with no invite.
+
+        Unlike a claim it never retires the name's live token: browser and device
+        sessions get a name each, so a second login is not a logout elsewhere.
+        """
+        if not NAME_RE.match(name) or name in RESERVED_NAMES:
+            raise ValueError(f"not a usable token name: {name!r}")
+        if not NAME_RE.match(user) or user in RESERVED_NAMES:
+            raise ValueError(f"not a usable user name: {user!r}")
+        now = int(time.time())
+        token, display = mint_token()
+        with self._write_lock, self._write:
+            self._write.execute(
+                "INSERT INTO tokens (name, user, token_hash, display, created_at, expires_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (name, user, _hash(token), display, now, None if ttl is None else int(now + ttl)),
+            )
+        return token
+
     def verify(self, token: str) -> str | None:
         now = time.time()
         with self._read() as conn:

@@ -7,7 +7,12 @@ the token cache need not import the handler it serves.
 
 from __future__ import annotations
 
+import re
+import urllib.parse
 from dataclasses import dataclass
+from pathlib import Path
+
+from ..tokens import NAME_RE
 
 USER_AGENT = "gotg-proxy/0.5.5"
 
@@ -80,6 +85,17 @@ class Config:
     # The url people reach the service on, which a claim link is built from:
     # the admin page is on another host and cannot know it otherwise.
     public_url: str = ""
+    # Where browsers reach the web UI and sign-in, when that is not public_url:
+    # "https://example.net/games" behind a proxy that strips "/games". Its
+    # origin is the one cookie writes must come from, and its path scopes the
+    # session cookie and prefixes every redirect sign-in sends. Empty is
+    # public_url, at the root of its host.
+    web_url: str = ""
+    # Origins other than the service's own that a browser may call it from,
+    # exactly as the browser sends them ("https://play.example.net"), or "*".
+    # Empty is same-origin only: a SPA served by this service needs none, and
+    # no CORS header is ever sent. /admin is never given CORS headers.
+    cors_origins: tuple[str, ...] = ()
     # How hard anybody may lean on an upstream through this proxy, in requests
     # per second, with a burst for the ordinary case of one client opening a
     # grid. Cache hits are not counted: they cost the upstream nothing.
@@ -89,12 +105,77 @@ class Config:
     # instead. Long enough that a warmer simply runs slower, short enough that
     # a burst cannot pin every thread in the pool.
     upstream_wait: float = 5.0
+    # --- Web sign-in. All optional; every one unset is a service with no web
+    # login, exactly as before. Set any and `validate` demands the rest. The
+    # flow itself lives in the oauth module; this is only what it is told.
+    # "github" (OAuth app) or "oidc" (needs oidc_issuer_url).
+    oidc_provider: str = ""
+    oidc_issuer_url: str = ""
+    oidc_client_id: str = ""
+    # Read from GOTG_OIDC_CLIENT_SECRET_FILE in a deployment, so it is a
+    # mounted Secret and never in the environment, the store or the manifest.
+    oidc_client_secret: str = ""
+    # The callback registered with the provider: {public}/auth/callback.
+    oidc_redirect_url: str = ""
+    # Who may sign in: provider logins (GitHub usernames, or emails for oidc),
+    # lower-cased. Empty with sign-in on is refused, not "everybody".
+    oidc_allowlist: tuple[str, ...] = ()
+    # Signs the session cookie. Also from a file (GOTG_SESSION_SECRET_FILE).
+    session_secret: str = ""
+    cookie_name: str = "gotg_session"
+    # Secure by default: the cookie is for https behind a TLS-terminating
+    # proxy. Turn it off only for http://localhost development.
+    cookie_secure: bool = True
+    cookie_samesite: str = "Lax"
+    session_ttl: int = 604800
+    # Explicit endpoints (override discovery / the GitHub defaults) and scopes.
+    # A directory served at /ui/ instead of the files packaged with the service
+    # (the deployment image's GOTG_WEB_DIR). Same layout as service/static.
+    web_dir: str = ""
+    # Token-store users whose signed-in cookie session may use /admin (never a
+    # bearer, which is what the admin token is for). Needs sign-in on.
+    admin_users: tuple[str, ...] = ()
+    oidc_authorize_url: str = ""
+    oidc_token_url: str = ""
+    oidc_userinfo_url: str = ""
+    oidc_scopes: str = ""
+
+    @property
+    def oidc_enabled(self) -> bool:
+        return bool(self.oidc_provider)
+
+    @property
+    def web_origin(self) -> str:
+        """scheme://host[:port] the UI's pages are on, or "" when unknown."""
+        if not self.web_url:
+            return self.public_url
+        parts = urllib.parse.urlsplit(self.web_url)
+        return f"{parts.scheme}://{parts.netloc}"
+
+    @property
+    def base_path(self) -> str:
+        """The prefix the UI is mounted under: "" or like "/games", never a trailing slash."""
+        return urllib.parse.urlsplit(self.web_url).path.rstrip("/") if self.web_url else ""
 
     def validate(self) -> Config:
         if self.files_url and not self.files_url.startswith(("http://", "https://")):
             raise ValueError(f"GOTG_FILES_URL is not an http(s) url: {self.files_url!r}")
         if self.files_preferred_url and not self.files_preferred_url.startswith(("http://", "https://")):
             raise ValueError(f"GOTG_FILES_PREFERRED_URL is not an http(s) url: {self.files_preferred_url!r}")
+        if self.web_url:
+            parts = urllib.parse.urlsplit(self.web_url)
+            if parts.scheme not in ("http", "https") or not parts.netloc or parts.query or parts.fragment:
+                raise ValueError(f"GOTG_WEB_URL wants https://host[/prefix], not {self.web_url!r}")
+            # The path goes verbatim into Set-Cookie and Location headers.
+            if (
+                not re.fullmatch(r"(/[A-Za-z0-9._~-]+)*/?", parts.path)
+                or "/./" in parts.path + "/"
+                or "/../" in parts.path + "/"
+            ):
+                raise ValueError(f"GOTG_WEB_URL's path must be plain segments like /games, not {parts.path!r}")
+        for origin in self.cors_origins:
+            if origin != "*" and not (origin.startswith(("http://", "https://")) and not origin.endswith("/")):
+                raise ValueError(f"GOTG_CORS_ORIGINS wants origins like https://host[:port], not {origin!r}")
         if not self.token:
             raise ValueError(
                 "no client token set. Refusing to start: an empty token "
@@ -116,4 +197,66 @@ class Config:
                 "the library token equals another credential. Refusing to start: "
                 "seeing server paths must not come with any other power."
             )
+        if self.web_dir and not Path(self.web_dir).is_dir():
+            raise ValueError(f"GOTG_WEB_DIR is not a directory: {self.web_dir!r}")
+        self._validate_oidc()
+        if self.admin_users:
+            if not self.oidc_enabled:
+                raise ValueError("GOTG_ADMIN_USERS needs web sign-in; without it nobody has a session")
+            bad = [u for u in self.admin_users if not NAME_RE.match(u)]
+            if bad:
+                raise ValueError(f"GOTG_ADMIN_USERS has names no user can have: {', '.join(bad)}")
         return self
+
+    def _validate_oidc(self) -> None:
+        untouched = Config(token=self.token)
+        names = [f for f in _OIDC_FIELDS if getattr(self, f) != getattr(untouched, f)]
+        if not names:
+            return
+        if self.oidc_provider not in ("github", "oidc"):
+            raise ValueError(f"GOTG_OIDC_PROVIDER must be github or oidc, not {self.oidc_provider!r}")
+        needed = {
+            "GOTG_OIDC_CLIENT_ID": self.oidc_client_id,
+            "GOTG_OIDC_CLIENT_SECRET[_FILE]": self.oidc_client_secret,
+            "GOTG_OIDC_REDIRECT_URL": self.oidc_redirect_url,
+            "GOTG_SESSION_SECRET[_FILE]": self.session_secret,
+            "GOTG_OIDC_ALLOWLIST": self.oidc_allowlist,
+        }
+        explicit = self.oidc_authorize_url and self.oidc_token_url and self.oidc_userinfo_url
+        if self.oidc_provider == "oidc" and not explicit:
+            needed["GOTG_OIDC_ISSUER_URL (or all three endpoint urls)"] = self.oidc_issuer_url
+        missing = [k for k, v in needed.items() if not v]
+        if missing:
+            raise ValueError(f"web sign-in is half configured; missing {', '.join(missing)}")
+        for name, url in (
+            ("GOTG_OIDC_REDIRECT_URL", self.oidc_redirect_url),
+            ("GOTG_OIDC_ISSUER_URL", self.oidc_issuer_url),
+        ):
+            if url and not url.startswith(("http://", "https://")):
+                raise ValueError(f"{name} is not an http(s) url: {url!r}")
+        if self.cookie_secure and self.oidc_redirect_url.startswith("http://"):
+            raise ValueError(
+                "GOTG_OIDC_REDIRECT_URL is http but cookies are Secure, so a browser would drop the "
+                "session. Use https, or set GOTG_COOKIE_SECURE=0 for local development."
+            )
+        if len(self.session_secret) < 32:
+            raise ValueError("the session secret is shorter than 32 characters")
+        if self.session_secret in (self.token, self.index_token, self.admin_token, self.library_token):
+            raise ValueError("the session secret equals another credential. Refusing to start.")
+        if self.cookie_samesite not in ("Lax", "Strict", "None"):
+            raise ValueError(f"GOTG_COOKIE_SAMESITE must be Lax, Strict or None, not {self.cookie_samesite!r}")
+        if self.cookie_samesite == "None" and not self.cookie_secure:
+            raise ValueError("SameSite=None needs Secure cookies")
+        if self.session_ttl <= 0:
+            raise ValueError("GOTG_SESSION_TTL must be positive")
+
+
+_OIDC_FIELDS = (
+    "oidc_provider",
+    "oidc_issuer_url",
+    "oidc_client_id",
+    "oidc_client_secret",
+    "oidc_redirect_url",
+    "oidc_allowlist",
+    "session_secret",
+)

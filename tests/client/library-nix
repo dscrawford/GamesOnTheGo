@@ -67,6 +67,18 @@ export GOTG_DATA="${GOTG_DATA:-$root/data}" GOTG_ENV_DIR="${GOTG_ENV_DIR:-$root/
 # shellcheck source=/dev/null
 for lib in color common config storage manifest env; do . "$GOTG_LIB/$lib.sh"; done
 
+# A portable build (nix/portable.nix): one file, reached through the -o
+# symlink as nix leaves it. NIX_FAIL_PORTABLE makes the build fail.
+if [[ "$path" == *.gotgPortable ]]; then
+  [[ -z "${NIX_FAIL_PORTABLE:-}" ]] || exit 1
+  store="${TEST_TMP:-/tmp}/store"
+  mkdir -p "$store"
+  file="$store/gotg-portable-${path%.gotgPortable}.run"
+  printf '#!/bin/sh\necho portable %s\n' "${path%.gotgPortable}" >"$file"
+  ln -sfn "$file" "$out"
+  exit 0
+fi
+
 spec_only=""
 if [[ "$path" == *.gotgSpecFile ]]; then
   spec_only=1

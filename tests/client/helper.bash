@@ -120,6 +120,7 @@ _start_saves_service_once() {
     GOTG_INDEX_TOKEN="index-token" \
     GOTG_ART_DIR="$TEST_TMP/service-art" \
     GOTG_LOGS_DIR="$TEST_TMP/service-logs" \
+    GOTG_PORTS_DIR="$TEST_TMP/service-ports" \
     GOTG_ADMIN_TOKEN="admin-token" \
     GOTG_LIBRARY_TOKEN="library-token" \
     GOTG_TOKENS_DB="$TEST_TMP/service-state/tokens.db" \

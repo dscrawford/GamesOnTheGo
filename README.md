@@ -235,6 +235,10 @@ whole-game port back on it. The **Update available** chip, the **!** badge,
 Switch variants get (`GOTG_MACHINE`, `GOTG_EXTERNAL_DISPLAY`):
 [docs/variants.md](docs/variants.md).
 
+Any of them, ports included, can be built as one file that runs on Linux
+without Nix and kept on the server for the web app's Download:
+`gotg port push <id> [variant]` ([docs/ports.md](docs/ports.md)).
+
 ## Saves
 
 ```bash
@@ -327,6 +331,9 @@ network; the public `/admin` then answers 404 and says where it went.
 command they run), lists tokens with their last use, and revokes. The
 terminal finds it through `admin_url` in `~/.config/gotg/api.json` or
 `GOTG_ADMIN_URL`.
+
+Browser and device sign-in through GitHub or any OIDC provider, minting the
+same revocable tokens: [docs/web-auth.md](docs/web-auth.md).
 
 ## home-manager
 

@@ -33,6 +33,7 @@ include = ["gotg*"]
 
 [tool.setuptools.package-data]
 "gotg.indexer" = ["rules.yaml"]
+"gotg.service" = ["play_systems.json", "static/*.html", "static/*.css", "static/js/*.js", "static/js/views/*.js", "static/play/*"]
 
 [tool.ruff]
 line-length = 120

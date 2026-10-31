@@ -97,21 +97,43 @@ class AdminRoutes:
             user = self.token_store.user_for(principal)
             if user:
                 reply["user"] = user
+        reply["admin"] = self._is_admin(principal)
         self._json(200, reply)
 
-    def _needs_admin(self, principal: str) -> bool:
-        if not self.config.admin_token:
-            self._problem(503, "no admin token is configured; administration is off")
-            return True
+    def _session_admin(self, principal: str) -> bool:
+        """A signed-in browser session whose user is on the admin allowlist.
+        Cookie only: a bearer that is not the admin token is never admin."""
+        if self._bearer() or not self.config.admin_users or self.token_store is None:
+            return False
+        user = self.token_store.user_for(principal)
+        return bool(user) and user.lower() in self.config.admin_users
+
+    def _admin_bearer(self) -> bool:
         # The bearer, not the name — what _is_index does, and for the same
         # reason. A principal is "admin" either because the token matched here
         # or because {auth_url}/auth/whoami said so, and that reply is parsed
         # unvalidated. Nothing can currently make a peer say "admin", but the
         # gate on the credential store should not rest on that staying true.
-        if not hmac.compare_digest(self._bearer(), self.config.admin_token.encode()):
-            self._problem(403, "administration needs the admin token")
+        return bool(self.config.admin_token) and hmac.compare_digest(self._bearer(), self.config.admin_token.encode())
+
+    def _is_admin(self, principal: str) -> bool:
+        return self._admin_bearer() or self._session_admin(principal)
+
+    def _needs_admin(self, principal: str) -> bool:
+        if not self.config.admin_token and not self.config.admin_users:
+            self._problem(503, "no admin token is configured; administration is off")
             return True
-        return False
+        if self._admin_bearer():
+            return False
+        if self._session_admin(principal):
+            # A cookie rides along on cross-site requests, so a write must come from our own page:
+            # a missing Origin is refused here, unlike the general check.
+            if self.command not in ("GET", "HEAD") and self.headers.get("Origin") != self._origin():
+                self._problem(403, "an admin write from a session must carry this site's Origin")
+                return True
+            return False
+        self._problem(403, "administration needs the admin token or an admin session")
+        return True
 
     def _admin_scan(self, query: str) -> None:
         """`GET /admin/scan` — what the library gained, and what has gone from it.

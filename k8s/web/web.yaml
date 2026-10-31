@@ -1,0 +1,113 @@
+# The web app's deployment: the service (gotg-proxy) with browser sign-in
+# switched on, and an Ingress in front. Sign-in is optional configuration of
+# the same service -- delete the env entries below and it is the service it
+# was. See docs/web-app.md.
+#
+# An example of a standalone deployment. A deployment that already runs the
+# service should switch sign-in on there instead: sessions live in that pod's
+# token store (GOTG_TOKENS_DB), and a second pod would have a store of its own.
+# Behind a path prefix, add GOTG_WEB_URL (docs/web-app.md, reverse-proxy notes).
+#
+#   nix build .#web-image
+#   skopeo copy docker-archive:result docker://localhost:30500/gotg-web:0.1.0
+#
+# Secrets are never in this file. Create them once:
+#
+#   kubectl -n default create secret generic gotg-web \
+#     --from-literal=client-token="$(openssl rand -hex 32)" \
+#     --from-literal=oidc-client-secret='<GitHub OAuth app client secret>' \
+#     --from-literal=session-secret="$(openssl rand -hex 32)"
+#
+# Both sign-in secrets are mounted as files (GOTG_*_FILE), not exposed as
+# environment variables, so they stay out of `kubectl describe`, crash dumps
+# and child processes.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gotg-web
+  namespace: default
+spec:
+  replicas: 1 # sessions are signed cookies, but the token store is a local file
+  selector:
+    matchLabels: { app: gotg-web }
+  template:
+    metadata:
+      labels: { app: gotg-web }
+    spec:
+      containers:
+        - name: service
+          image: localhost:30500/gotg-web:0.1.0
+          ports:
+            - containerPort: 8080
+          env:
+            - name: GOTG_PROXY_TOKEN
+              valueFrom:
+                secretKeyRef: { name: gotg-web, key: client-token }
+            - name: GOTG_PUBLIC_URL
+              value: https://gotg.example.com
+            - name: GOTG_OIDC_PROVIDER
+              value: github
+            - name: GOTG_OIDC_CLIENT_ID
+              value: Iv1.REPLACE_ME # public; not a secret
+            - name: GOTG_OIDC_CLIENT_SECRET_FILE
+              value: /run/secrets/gotg/oidc-client-secret
+            - name: GOTG_SESSION_SECRET_FILE
+              value: /run/secrets/gotg/session-secret
+            - name: GOTG_OIDC_REDIRECT_URL
+              value: https://gotg.example.com/auth/callback
+            - name: GOTG_OIDC_ALLOWLIST # GitHub logins, comma separated
+              value: your-github-login
+            - name: GOTG_COOKIE_SECURE
+              value: "1" # TLS ends at the ingress; the browser still sees https
+            - name: GOTG_COOKIE_SAMESITE
+              value: Lax
+          volumeMounts:
+            - { name: secrets, mountPath: /run/secrets/gotg, readOnly: true }
+          readinessProbe:
+            tcpSocket: { port: 8080 }
+      volumes:
+        - name: secrets
+          secret:
+            secretName: gotg-web
+            items:
+              - { key: oidc-client-secret, path: oidc-client-secret }
+              - { key: session-secret, path: session-secret }
+            defaultMode: 0400
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gotg-web
+  namespace: default
+spec:
+  selector: { app: gotg-web }
+  ports:
+    - { port: 80, targetPort: 8080 }
+---
+# TLS terminates here. The cookie is Secure, so the site must be reached over
+# https end to end as the browser sees it; a plain-http ingress means no login.
+# cert-manager and the ingress class are the cluster's -- adjust the two
+# annotations/names to match. Do NOT route /admin through this ingress: it
+# belongs on the tailnet listener (GOTG_ADMIN_PORT).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gotg-web
+  namespace: default
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+    # Large save/log uploads pass through the service.
+    nginx.ingress.kubernetes.io/proxy-body-size: 64m
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [gotg.example.com]
+      secretName: gotg-web-tls
+  rules:
+    - host: gotg.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: gotg-web, port: { number: 80 } }

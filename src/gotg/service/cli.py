@@ -15,6 +15,8 @@ from pathlib import Path
 
 from ..catalog import CatalogStore
 from ..logs import DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_QUOTA_BYTES, LogsStore
+from ..ports import DEFAULT_MAX_BYTES as PORTS_MAX_BYTES
+from ..ports import PortsStore
 from ..saves import DEFAULT_KEEP, DEFAULT_MAX_BYTES, SavesStore
 from ..tokens import TokenStore
 from .app import Config, make_server
@@ -40,6 +42,59 @@ def _number(env: Mapping[str, str], name: str, fallback: float) -> float:
     return value
 
 
+def _secret(env: Mapping[str, str], name: str) -> str:
+    """A credential from NAME_FILE (a mounted Secret; wins) or NAME itself.
+
+    A file that cannot be read is a refusal, not an empty secret: sign-in
+    would otherwise look configured and fail on the first login.
+    """
+    path = env.get(name + "_FILE", "")
+    if path:
+        try:
+            return Path(path).read_text().strip()
+        except OSError as e:
+            raise ValueError(f"{name}_FILE is unreadable: {e}") from None
+    return env.get(name, "")
+
+
+def _flag(env: Mapping[str, str], name: str, fallback: bool) -> bool:
+    raw = env.get(name, "").strip().lower()
+    if not raw:
+        return fallback
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(f"{name} is not a boolean: {raw!r}")
+
+
+def _alias(env: Mapping[str, str], name: str, legacy: str) -> str:
+    """NAME, or its earlier GOTG_OAUTH_* spelling. The new name wins."""
+    return env.get(name, "") or env.get(legacy, "")
+
+
+def _oidc_provider(env: Mapping[str, str]) -> str:
+    provider = _alias(env, "GOTG_OIDC_PROVIDER", "GOTG_OAUTH_PROVIDER").strip().lower()
+    # The OAUTH spelling defaulted to github once a client id was given.
+    if not provider and _alias(env, "GOTG_OIDC_CLIENT_ID", "GOTG_OAUTH_CLIENT_ID"):
+        return "github"
+    return provider
+
+
+def _oidc_redirect(env: Mapping[str, str]) -> str:
+    explicit = _alias(env, "GOTG_OIDC_REDIRECT_URL", "GOTG_OAUTH_REDIRECT_URI")
+    public = (env.get("GOTG_WEB_URL") or env.get("GOTG_PUBLIC_URL", "")).rstrip("/")
+    if explicit or not public or not _alias(env, "GOTG_OIDC_CLIENT_ID", "GOTG_OAUTH_CLIENT_ID"):
+        return explicit
+    return f"{public}/auth/callback"
+
+
+def _session_ttl(env: Mapping[str, str]) -> int:
+    if env.get("GOTG_SESSION_TTL") or not env.get("GOTG_OAUTH_SESSION_DAYS"):
+        return int(_number(env, "GOTG_SESSION_TTL", 604800))
+    return int(_number(env, "GOTG_OAUTH_SESSION_DAYS", 7) * 86400)
+
+
 def config_from_env(env: Mapping[str, str] | None = None) -> Config:
     env = os.environ if env is None else env
     return Config(
@@ -62,6 +117,33 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
         legacy_user=env.get("GOTG_LEGACY_USER", "legacy"),
         admin_url=env.get("GOTG_ADMIN_URL", "").rstrip("/"),
         public_url=env.get("GOTG_PUBLIC_URL", "").rstrip("/"),
+        web_url=env.get("GOTG_WEB_URL", "").rstrip("/"),
+        admin_users=tuple(sorted({u.strip().lower() for u in env.get("GOTG_ADMIN_USERS", "").split(",") if u.strip()})),
+        web_dir=env.get("GOTG_WEB_DIR", ""),
+        oidc_provider=_oidc_provider(env),
+        oidc_issuer_url=_alias(env, "GOTG_OIDC_ISSUER_URL", "GOTG_OAUTH_ISSUER").rstrip("/"),
+        oidc_client_id=_alias(env, "GOTG_OIDC_CLIENT_ID", "GOTG_OAUTH_CLIENT_ID"),
+        oidc_client_secret=_secret(env, "GOTG_OIDC_CLIENT_SECRET") or env.get("GOTG_OAUTH_CLIENT_SECRET", ""),
+        oidc_redirect_url=_oidc_redirect(env),
+        oidc_allowlist=tuple(
+            sorted(
+                {
+                    p.strip().lower()
+                    for p in _alias(env, "GOTG_OIDC_ALLOWLIST", "GOTG_OAUTH_ALLOW").replace("\n", ",").split(",")
+                    if p.strip()
+                }
+            )
+        ),
+        oidc_authorize_url=_alias(env, "GOTG_OIDC_AUTHORIZE_URL", "GOTG_OAUTH_AUTHORIZE_URL"),
+        oidc_token_url=_alias(env, "GOTG_OIDC_TOKEN_URL", "GOTG_OAUTH_TOKEN_URL"),
+        oidc_userinfo_url=_alias(env, "GOTG_OIDC_USERINFO_URL", "GOTG_OAUTH_USERINFO_URL"),
+        oidc_scopes=_alias(env, "GOTG_OIDC_SCOPES", "GOTG_OAUTH_SCOPES"),
+        session_secret=_secret(env, "GOTG_SESSION_SECRET"),
+        cookie_name=env.get("GOTG_COOKIE_NAME", "gotg_session"),
+        cookie_secure=_flag(env, "GOTG_COOKIE_SECURE", True),
+        cookie_samesite=env.get("GOTG_COOKIE_SAMESITE", "Lax").strip().capitalize(),
+        session_ttl=_session_ttl(env),
+        cors_origins=tuple(o.strip() for o in env.get("GOTG_CORS_ORIGINS", "").split(",") if o.strip()),
     ).validate()
 
 
@@ -127,6 +209,26 @@ def logs_from_env(env: Mapping[str, str] | None = None) -> LogsStore | None:
     )
 
 
+# The environment files the flake's ports and variants are named by: beside
+# the service in a checkout; the package says where with GOTG_ENV_GAMES_DIR.
+CHECKOUT_GAMES_DIR = Path(__file__).resolve().parents[2] / "client" / "env" / "games"
+
+
+def ports_from_env(env: Mapping[str, str] | None = None) -> PortsStore | None:
+    """The ports store, or None: no directory means /ports answers 503."""
+    env = os.environ if env is None else env
+    root = env.get("GOTG_PORTS_DIR", "")
+    if not root:
+        return None
+    games = env.get("GOTG_ENV_GAMES_DIR", "")
+    games_dir = Path(games) if games else (CHECKOUT_GAMES_DIR if CHECKOUT_GAMES_DIR.is_dir() else None)
+    return PortsStore(
+        root=Path(root),
+        max_bytes=int(env.get("GOTG_PORTS_MAX_BYTES", str(PORTS_MAX_BYTES))),
+        games_dir=games_dir,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     port = int(os.environ.get("PORT", "8080"))
@@ -138,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
         catalog = catalog_from_env()
         store = store_from_env()
         logs = logs_from_env()
+        ports = ports_from_env()
         token_store = token_store_from_env()
         art = ArtCache(Path(config.art_dir)) if config.art_dir else None
         # A catalog row grants read on its path, so the library must not be
@@ -148,6 +251,11 @@ def main(argv: list[str] | None = None) -> int:
                 if saves_root.is_relative_to(root):
                     raise ValueError(f"the saves directory {store.root} is inside library root {root}")
         # Same rule, same reason.
+        if ports and catalog:
+            ports_root = Path(os.path.realpath(ports.root))
+            for root in catalog.roots:
+                if ports_root.is_relative_to(root):
+                    raise ValueError(f"the ports directory {ports.root} is inside library root {root}")
         if art and catalog:
             art_root = Path(os.path.realpath(art.root))
             for root in catalog.roots:
@@ -158,6 +266,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     files_dir = Path(os.environ["GOTG_FILES_DIR"]) if os.environ.get("GOTG_FILES_DIR") else None
+    ejs_dir = Path(os.environ["GOTG_EJS_DIR"]) if os.environ.get("GOTG_EJS_DIR") else None
     try:
         stream_slots = int(os.environ.get("GOTG_STREAM_SLOTS", "4"))
         if stream_slots < 1:
@@ -168,8 +277,10 @@ def main(argv: list[str] | None = None) -> int:
     shared = {
         "store": store,
         "logs": logs,
+        "ports": ports,
         "catalog": catalog,
         "files_dir": files_dir,
+        "ejs_dir": ejs_dir,
         "stream_slots": stream_slots,
         "token_store": token_store,
         "art": art,
@@ -185,6 +296,7 @@ def main(argv: list[str] | None = None) -> int:
     held = [name for name, on in (("steamgriddb", config.steamgriddb_key), ("igdb", config.igdb_client_id)) if on]
     saves = f"saves under {store.root}" if store else "no saves store"
     saves += f", logs under {logs.root}" if logs else ", no logs store"
+    saves += f", ports under {ports.root}" if ports else ", no ports store"
     games = f"catalog at {catalog.db}" if catalog else "no catalog"
     creds = ", ".join(held) or "nothing"
     if token_store:

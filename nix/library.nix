@@ -75,6 +75,7 @@ in
       envs = lib.filterAttrs (name: _: lib.hasPrefix "env-" name) (packagesFor system);
       inherit (packagesFor system) gotg;
       inherit envDir server catalog;
+      portable = (pkgsFor system).callPackage ./portable.nix { };
     }
   );
 }

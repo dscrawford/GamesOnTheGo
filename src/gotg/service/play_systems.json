@@ -1,0 +1,20 @@
+{
+  "_comment": "Which GOTG platforms play in the browser, and with which EmulatorJS core. Read by the service (play_page.py: /play/plan) and by Nix (nix/emulatorjs.nix keeps exactly these cores). Anything not under 'browser' is played with the Nix launcher; 'unsupported' says why for the systems that never will be browser-playable.",
+  "browser": {
+    "nes":     {"system": "nes",    "core": "nestopia",         "exts": [".nes", ".fds", ".unf"]},
+    "snes":    {"system": "snes",   "core": "snes9x",           "exts": [".sfc", ".smc", ".fig", ".swc"]},
+    "gb":      {"system": "gb",     "core": "gambatte",         "exts": [".gb"]},
+    "gbc":     {"system": "gb",     "core": "gambatte",         "exts": [".gbc", ".gb"]},
+    "gba":     {"system": "gba",    "core": "mgba",             "exts": [".gba"]},
+    "genesis": {"system": "segaMD", "core": "genesis_plus_gx",  "exts": [".md", ".gen", ".bin", ".smd"]},
+    "n64":     {"system": "n64",    "core": "mupen64plus_next", "exts": [".z64", ".n64", ".v64"],
+                "experimental": true, "note": "heavy: wants a desktop-class CPU/GPU"},
+    "ps1":     {"system": "psx",    "core": "pcsx_rearmed",     "exts": [".cue", ".chd", ".pbp", ".iso", ".bin"],
+                "experimental": true, "note": "disc images are large; some games want a BIOS the page cannot supply"}
+  },
+  "unsupported": {
+    "gamecube": "GameCube emulation needs a native emulator and a real GPU; it cannot run in a browser.",
+    "wiiu":     "Wii U emulation needs a native emulator and a real GPU; it cannot run in a browser.",
+    "switch":   "Switch emulation needs a native emulator, keys and firmware; it cannot run in a browser."
+  }
+}

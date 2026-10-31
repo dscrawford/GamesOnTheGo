@@ -1,0 +1,117 @@
+# Playing in the browser
+
+`/play/?platform=<slug>&id=<id>` on the service plays a game in a tab with
+[EmulatorJS](https://emulatorjs.org). It streams the ROM from
+`/games/<platform>/<id>/<file>` and keeps the save in step with `/saves`.
+
+Who you are comes from the session cookie when the browser is signed in
+(`docs/web-auth.md`); the web UI's game page links here with "Play in browser".
+Signed out, the page offers "Sign in with your account" (`/auth/login`, which
+brings you back to the same game) or a pasted GOTG token. The token is kept in
+`sessionStorage` and is gone with the tab; one pasted into the web UI in the
+same tab is used too. A token, when present, is sent as a bearer and wins over
+the cookie.
+
+Only systems that run at a useful speed in WASM are mapped. The list is
+`src/gotg/service/play_systems.json`, read both by the service (`/play/plan`)
+and by Nix (`nix/emulatorjs.nix` packages exactly those cores). Add a system
+there and both follow.
+
+| GOTG slug | EmulatorJS system | libretro core |
+|---|---|---|
+| nes | nes | nestopia |
+| snes | snes | snes9x |
+| gb, gbc | gb | gambatte |
+| gba | gba | mgba |
+| genesis | segaMD | genesis_plus_gx |
+| n64 (experimental) | n64 | mupen64plus_next |
+| ps1 (experimental) | psx | pcsx_rearmed |
+
+Every other platform shows the launcher instead (see "Not in the browser" below):
+`nix run gotg#<platform>.<id>`. `GET /play/plan/<platform>/<id>` (authenticated)
+returns that decision as JSON.
+
+## Saves
+
+Pull before start (`GET /saves/<attr>`) and write the battery file into the
+core once it starts. Push:
+- when EmulatorJS writes the battery file: its "System Save interval" (set to
+  30 s by default here) emits `saveSaveFiles`, and an unchanged file is not
+  re-pushed;
+- on the player's Save State;
+- on tab hide (the page asks the core to write the file first) and on close.
+  On close, EmulatorJS's own `beforeunload` handler writes the file one last
+  time and then unmounts it. The page catches that final `saveSaveFiles` and
+  pushes it straight away with `fetch` keepalive (64 KiB cap; larger bundles go
+  on the timer). By `pagehide` the file is already gone.
+The push carries `X-Gotg-Parent`; a 409 stops pushing and asks which side wins,
+it never overwrites silently.
+
+The attr is `env-web-<platform>-<id with . as _>`, per game. The bundle is a
+small JSON `{"version":1,"files":{"save.srm":<base64>,"state.bin":<base64>}}`.
+It is **not** the tar.zst native clients push; the separate `env-web-` prefix keeps
+the two from ever being read as each other, so a browser save does **not** carry
+over to a native emulator (the formats differ per emulator anyway).
+
+## EmulatorJS: built by Nix
+
+`nix build .#emulatorjs` fetches the pinned upstream release (4.2.3, fixed by
+hash) and keeps only the mapped cores, in their plain and WebGL 1 ("legacy")
+builds. That is about 18 MB instead of the release's ~300 MB. It is a prebuilt
+release, not a from-source build of the cores. The build fails if a core in
+`play_systems.json` is missing from the release. The web image
+(`.#web-image`) carries it at `/share/emulatorjs` and sets `GOTG_EJS_DIR`.
+Elsewhere, point the service at it:
+
+```bash
+GOTG_EJS_DIR=$(nix build --print-out-paths .#emulatorjs) nix run .#service
+```
+
+`/play/ejs/` serves it from the same origin. Without it, the page says
+EmulatorJS is not installed.
+
+## Not in the browser
+
+GameCube, Wii U and Switch are unsupported here for good (`"unsupported"` in
+`play_systems.json`). They need a native emulator, a real GPU and, for Switch,
+keys and firmware. Their plan is `{"mode": "nix", "unsupported": true,
+"reason": …}`. The game page and the player show the reason and the
+`nix run gotg#<platform>.<id>` command. Any other unmapped platform gets the
+same, with a generic reason.
+
+Licensing: EmulatorJS is GPL-3.0. The cores keep their own licences (nestopia
+GPL-2.0, snes9x non-commercial custom, gambatte GPL-2.0, mgba MPL-2.0,
+genesis_plus_gx non-commercial custom, mupen64plus_next GPL-2.0, pcsx_rearmed
+GPL-2.0). They are not committed: Nix downloads them from upstream when the
+package is built. The web image does contain them, so keep that image in your
+own registry rather than publishing it. The snes9x and genesis_plus_gx terms forbid commercial use; check
+them before serving anyone but your own household. ROMs and BIOS files are not part
+of any of this.
+
+## Limits and what is unverified
+
+- The page tries the ROM from the catalog's byte hosts first (`files_urls`, in
+  order), then from this service's own `/games`. On an https page it skips
+  http hosts, which would be mixed content. In a split deployment, the API
+  holds no files and answers `/games` with 503. The byte host therefore has to
+  allow the site: set `GOTG_CORS_ORIGINS=<the site's public URL>` on the files
+  service. The page's CSP `connect-src` lists the same hosts that `/catalog`
+  advertises. A byte host gets a bearer and never this site's cookie: a pasted
+  token, or, for a signed-in browser, a 6-hour token from `POST /auth/bearer`
+  (cookie session, same `Origin`; it is listed and revocable like any token).
+- Checked in headless Chromium against EmulatorJS 4.2.3, with homebrew NES and
+  SNES test ROMs that keep a boot counter in battery SRAM:
+  - The page loads the exact core the plan names (`EJS_core` is `plan.core`;
+    passing just the system would give fceumm for NES).
+  - Both games run and their saves round-trip: the counter goes up on each
+    reload.
+  - A second tab gets the 409 dialog, and "overwrite" force-pushes.
+  The other systems have not been run.
+- The CSP allows `'unsafe-eval'` on `/play` only. Every core ships as a 7z, and
+  EmulatorJS's extractor (`compression/extract7z.js`) calls `eval()` in a blob
+  worker, which inherits the page's policy. Without it the player hangs at
+  "Decompress Game Core".
+- When the page is served from `localhost`/`127.0.0.1`, EmulatorJS also tries an
+  update check against `cdn.emulatorjs.org`. The CSP blocks it, and the result
+  is a harmless console error.
+- Multi-disc PS1 sets and BIOS provisioning are not handled.

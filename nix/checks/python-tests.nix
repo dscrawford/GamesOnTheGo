@@ -21,8 +21,14 @@ pkgs.runCommand "check-python-tests" { nativeBuildInputs = [ venv ]; } ''
   # The theme and settings the picker reads.
   cp -r ${../../config} config
   cp ${../../src/client/lib/common.sh} src/client/lib/common.sh
+  # The browser player's cores are packaged from the list the service
+  # reads (test_play), and /ports names a game's builds by the
+  # environment files (test_ports).
+  mkdir -p nix src/client/env
+  cp ${../../nix/emulatorjs.nix} nix/emulatorjs.nix
+  cp -r ${../../src/client/env/games} src/client/env/games
   cp ${../../pyproject.toml} pyproject.toml
-  chmod -R u+w tests src config
+  chmod -R u+w tests src config nix
   # And how the controller suite is split across the cluster's nodes: pure,
   # beside a suite that otherwise needs real devices.
   python -m pytest tests/service tests/indexer tests/ui tests/e2e/test_shards.py -q

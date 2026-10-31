@@ -44,6 +44,11 @@ foreign_gl_fetch() {
   if [[ -e "$path/lib/dri" && "$(readlink -f "$root" 2>/dev/null)" == "$path" ]]; then
     return 0
   fi
+  # A portable build (nix/portable.nix) carries its mesa, and has no nix to
+  # fetch one with or to keep a root for.
+  if [[ "${GOTG_PORTABLE:-}" == 1 && -e "$path/lib/dri" ]]; then
+    return 0
+  fi
   mkdir -p "$(foreign_gl_dir)"
   log "fetching the GL this machine needs: $(basename "$path")"
   # A store path by itself: nix substitutes it from the binary cache, the same

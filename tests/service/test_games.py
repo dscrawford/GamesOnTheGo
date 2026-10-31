@@ -116,6 +116,8 @@ def test_a_full_download_carries_every_resume_header(service):
         (f"bytes={len(ROM) - 1}-", 206, ROM[-1:], f"bytes {len(ROM) - 1}-{len(ROM) - 1}/{len(ROM)}"),
         ("bytes=0-999", 206, ROM, f"bytes 0-{len(ROM) - 1}/{len(ROM)}"),
         (" bytes=0-5", 206, ROM[:6], f"bytes 0-5/{len(ROM)}"),
+        ("bytes=-5", 206, ROM[-5:], f"bytes {len(ROM) - 5}-{len(ROM) - 1}/{len(ROM)}"),
+        ("bytes=-999", 206, ROM, f"bytes 0-{len(ROM) - 1}/{len(ROM)}"),
         (f"bytes={len(ROM)}-", 416, b"", f"bytes */{len(ROM)}"),
         ("bytes=999-", 416, b"", f"bytes */{len(ROM)}"),
         # An inverted range invalidates the whole header, which is ignored,
@@ -123,7 +125,7 @@ def test_a_full_download_carries_every_resume_header(service):
         ("bytes=5-2", 200, ROM, None),
         # Shapes RANGE_RE refuses all fall back to 200 with the whole file — a
         # restart, never a corrupt splice.
-        ("bytes=-5", 200, ROM, None),
+        ("bytes=-0", 416, b"", f"bytes */{len(ROM)}"),
         ("bytes=0-1,3-4", 200, ROM, None),
         ("bytes = 0-5", 200, ROM, None),
         ("Bytes=0-5", 200, ROM, None),

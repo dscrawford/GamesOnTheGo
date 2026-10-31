@@ -50,18 +50,25 @@ from pathlib import Path
 from .._http import NO_REDIRECT_OPENER
 from ..catalog import CatalogStore
 from ..logs import LogsStore
+from ..ports import PortsStore
 from ..saves import SavesStore
 from ..tokens import TOKEN_RE, TokenStore
 from . import admin_page
 from .artcache import ArtCache
 from .config import TIMEOUT, USER_AGENT, Config
+from .oauth import OAuth
 from .ratelimit import RateLimiter
 from .routes_admin import AdminRoutes
 from .routes_art import ArtRoutes
 from .routes_catalog import CatalogRoutes
 from .routes_files import FileRoutes
 from .routes_logs import LogsRoutes
+from .routes_oauth import ROUTES as OAUTH_ROUTES
+from .routes_oauth import OAuthRoutes
+from .routes_play import PlayRoutes
+from .routes_ports import PortsRoutes
 from .routes_saves import SavesRoutes
+from .routes_static import STATIC_DIR, StaticRoutes, static_file
 from .token_cache import TokenCache
 
 # Introspection is an in-cluster hop on every cache miss; a wedged api pod
@@ -190,16 +197,31 @@ def body_cap(prefix: str, command: str, store: SavesStore | None, logs: LogsStor
     return MAX_BODY
 
 
-class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, AdminRoutes, BaseHTTPRequestHandler):
+class Handler(
+    PlayRoutes,
+    StaticRoutes,
+    ArtRoutes,
+    SavesRoutes,
+    PortsRoutes,
+    LogsRoutes,
+    CatalogRoutes,
+    FileRoutes,
+    AdminRoutes,
+    OAuthRoutes,
+    BaseHTTPRequestHandler,
+):
     config: Config
     tokens: TokenCache
     store: SavesStore | None
     logs: LogsStore | None
+    ports: PortsStore | None = None
     catalog: CatalogStore | None
     files_dir: Path | None
+    ejs_dir: Path | None = None
     streams: threading.BoundedSemaphore
     scans: threading.BoundedSemaphore
     token_store: TokenStore | None
+    oauth: OAuth | None
     art: ArtCache | None
     limits: dict[str, RateLimiter]
     auth_cache: dict
@@ -231,6 +253,47 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
         print("".join(c if c.isprintable() else "�" for c in line))
 
     # --- replies ------------------------------------------------------------
+
+    CORS_METHODS = "GET, HEAD, PUT, POST, DELETE, OPTIONS"
+    CORS_HEADERS = "Authorization, Content-Type, Range, If-Range, X-Gotg-Parent, X-Gotg-Device, X-Gotg-Sha256"
+    CORS_EXPOSE = "Content-Length, Content-Range, Accept-Ranges, ETag, Retry-After, X-Gotg-Generation, X-Gotg-Hash"
+
+    def _cors_origin(self) -> str | None:
+        """The Access-Control-Allow-Origin value for this request, or None.
+
+        Same-origin is the default and needs nothing: a browser sends no
+        cross-origin Origin for it, and none of this is ever added. Only an
+        Origin the operator listed is echoed, and never on /admin."""
+        origin = self.headers.get("Origin")
+        allowed = self.config.cors_origins
+        if not origin or not allowed or self.path.lstrip("/").startswith("admin"):
+            return None
+        if "*" in allowed:
+            return "*"
+        return origin if origin in allowed else None
+
+    def end_headers(self) -> None:
+        self.send_header("X-Content-Type-Options", "nosniff")
+        origin = self._cors_origin()
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Expose-Headers", self.CORS_EXPOSE)
+            if origin != "*":
+                self.send_header("Vary", "Origin")
+        super().end_headers()
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        """A CORS preflight, answered before authentication: it carries no
+        credentials by design. Without a listed Origin it is a bare 204 with no
+        Allow-* headers, which the browser reads as a refusal."""
+        self.close_connection = True
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        if self._cors_origin():
+            self.send_header("Access-Control-Allow-Methods", self.CORS_METHODS)
+            self.send_header("Access-Control-Allow-Headers", self.CORS_HEADERS)
+            self.send_header("Access-Control-Max-Age", "600")
+        self.end_headers()
 
     def _send(self, code: int, body: bytes, content_type: str, extra: dict[str, str] | None = None) -> None:
         self.send_response(code)
@@ -321,7 +384,7 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
         # first wrong byte, which leaks the secret a character at a time.
         bearer = self._bearer()
         if not bearer:
-            return None
+            return self._cookie_principal()
         if hmac.compare_digest(bearer, self.config.token.encode()):
             return "legacy"
         if self.config.index_token and hmac.compare_digest(bearer, self.config.index_token.encode()):
@@ -339,6 +402,18 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
         # junk bearer would be a library-thread famine.
         if self.config.auth_url and TOKEN_RE.match(bearer.decode("latin-1")):
             return self._introspect(bearer)
+        return None
+
+    def _cookie_principal(self) -> str | None:
+        """The session cookie as a principal: a personal token and nothing else,
+        so a cookie can never be one of the shared secrets."""
+        value = self._cookie(self.config.cookie_name)
+        if not TOKEN_RE.match(value):
+            return None
+        if self.token_store is not None:
+            return self.token_store.verify(value)
+        if self.config.auth_url:
+            return self._introspect(value.encode())
         return None
 
     def _introspect(self, bearer: bytes) -> str | None:
@@ -515,6 +590,12 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
             self._problem(401, "a bearer token is required", close=True)
             return
 
+        # A browser session rides on ambient credentials, so its writes are
+        # held to the page that made them being ours.
+        if not self._bearer() and self.command not in ("GET", "HEAD") and self._csrf_refused():
+            self._problem(403, "cross-origin request", close=True)
+            return
+
         prefix, rest = split_route(path)
 
         # The admin token opens /admin and the read side of /logs, nothing else:
@@ -524,12 +605,16 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
             self._problem(401, "a bearer token is required", close=True)
             return
 
-        sent, body = self._read_body(body_cap(prefix, self.command, self.store, self.logs))
+        # A portable build runs to gigabytes: its route streams it to disk.
+        if prefix == "ports" and self.command == "PUT":
+            sent, body = True, None
+        else:
+            sent, body = self._read_body(body_cap(prefix, self.command, self.store, self.logs))
         if not sent:
             return
 
         if path_climbs(rest):
-            self._problem(400, "the path climbs out of the API it is proxied to")
+            self._problem(400, "the path climbs out of the API it is proxied to", close=body is None)
             return
         self._dispatch(prefix, rest, body, principal)
 
@@ -544,7 +629,7 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
             where = f": it is at {self.config.admin_url}/admin/" if self.config.admin_url else ""
             self._problem(404, f"administration is not on this listener{where}", close=True)
             return True
-        if self.listener == "admin" and top not in ("admin", "healthz", "logs"):
+        if self.listener == "admin" and top not in ("admin", "healthz", "logs", "ui"):
             self._problem(404, "this listener serves administration only", close=True)
             return True
         return False
@@ -567,12 +652,36 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
             self._send_page(body, content_type)
             return True
 
+        # Relative URLs in the page resolve against /ui/, so bare /ui goes there.
+        # A relative Location ("ui/"), so it lands right under a path prefix too.
+        if self.command in ("GET", "HEAD") and clean == "ui":
+            self.close_connection = True
+            query = self.path.partition("?")[2]
+            self._redirect("ui/" + (f"?{query}" if query else ""))
+            return True
+
+        # The web UI's files: static, and the session (not these) is the credential.
+        if self.command in ("GET", "HEAD") and clean.startswith("ui/"):
+            found = static_file(clean, Path(self.config.web_dir) if self.config.web_dir else STATIC_DIR)
+            self.close_connection = True
+            if found is None:
+                self._problem(404, "no such file under /ui/", close=True)
+            else:
+                self._send_static(*found)
+            return True
+
         # Before authentication, and the only thing that is: kubelet has no
         # token, and a health check is not a credentialed operation.
         # Both replies below go out before the body is read, so they close the
         # connection: on kept-alive HTTP/1.1 the unread body would frame the
         # next request — behind an ingress that shares upstream connections,
         # that is request smuggling, not just the caller's own confusion.
+        if clean in OAUTH_ROUTES:
+            self._oauth_route(clean)
+            return True
+        if self._serve_play_page(clean):
+            return True
+
         if clean == "healthz":
             self.close_connection = True
             self._send(200, b'{"ok":true}', "application/json")
@@ -617,6 +726,8 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
             self._igdb(rest, body)
         elif prefix == "saves":
             self._saves(rest, body, self._saves_user(principal))
+        elif prefix == "ports":
+            self._ports(rest, principal)
         elif prefix == "logs":
             self._logs(rest, body, principal)
         elif prefix == "catalog":
@@ -627,6 +738,8 @@ class Handler(ArtRoutes, SavesRoutes, LogsRoutes, CatalogRoutes, FileRoutes, Adm
             self._games(rest)
         elif prefix == "files":
             self._files(rest)
+        elif prefix == "play":
+            self._play(rest)
         elif prefix == "auth":
             self._auth(rest, principal)
         elif prefix == "admin":
@@ -664,6 +777,8 @@ def make_server(
     auth_neg_ttl: float = 5.0,
     listener: str = "both",
     logs: LogsStore | None = None,
+    ejs_dir: Path | None = None,
+    ports: PortsStore | None = None,
 ) -> ThreadingHTTPServer:
     """Threading, because one slow upstream must not block every other client.
 
@@ -680,11 +795,14 @@ def make_server(
             "tokens": TokenCache(),
             "store": store,
             "logs": logs,
+            "ports": ports,
             "catalog": catalog,
             "files_dir": files_dir,
+            "ejs_dir": ejs_dir,
             "streams": threading.BoundedSemaphore(stream_slots),
             "scans": threading.BoundedSemaphore(1),
             "token_store": token_store,
+            "oauth": OAuth(config) if config.oidc_enabled else None,
             "art": art,
             # One bucket per upstream: they are different quotas, and a warm
             # run against SteamGridDB must not throttle an IGDB lookup.

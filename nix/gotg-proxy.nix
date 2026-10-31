@@ -19,5 +19,7 @@ runCommand "gotg-proxy-0.5.8"
   }
   ''
     mkdir -p $out/bin
-    makeWrapper $venv/bin/gotg-proxy $out/bin/gotg-proxy
+    # The environment files name the ports and variants /ports lists (src/gotg/ports.py).
+    makeWrapper $venv/bin/gotg-proxy $out/bin/gotg-proxy \
+      --set-default GOTG_ENV_GAMES_DIR ${../src/client/env/games}
   ''
