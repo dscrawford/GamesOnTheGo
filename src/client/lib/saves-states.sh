@@ -115,7 +115,7 @@ saves_states_newest() {
       [[ -f "$match" && ! -L "$match" ]] && matches+=("$match")
     done
     [[ ${#matches[@]} -gt 0 ]] || exit 0
-    stat -c '%Y %n' -- "${matches[@]}" | sort -rn | head -1 | cut -d' ' -f2-
+    stat -c '%Y %n' -- "${matches[@]}" | sort -rn | first_line | cut -d' ' -f2-
   )
 }
 

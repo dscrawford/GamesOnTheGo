@@ -49,7 +49,7 @@ versions_names() { versions_available "$1" | cut -f1; }
 
 # The newest version installed, which is what a launch uses when nothing says
 # otherwise — and what the emulator would have picked for itself.
-versions_newest() { versions_names "$1" | head -n1; }
+versions_newest() { versions_names "$1" | first_line; }
 
 versions_has() {
   local game="$1" want="$2" have
@@ -62,7 +62,7 @@ versions_has() {
 # Is the first version no newer than the second? Compared with sort -V, so
 # 1.4.10 is above 1.4.9 and below 1.5, which no string comparison gets right.
 versions_le() {
-  [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$1" ]]
+  [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | first_line)" == "$1" ]]
 }
 
 # Is one version inside a mod's window? An empty end is an open one.

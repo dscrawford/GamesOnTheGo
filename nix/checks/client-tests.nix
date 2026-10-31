@@ -1,7 +1,31 @@
 # End-to-end against a stand-in File Browser — real HTTP, real resume, real
 # checksums, no network — and against the real GOTG service for saves, since
 # its conflict rules are the thing under test.
-{ pkgs, packages }:
+{
+  pkgs,
+  packages,
+  danstickPkgs,
+}:
+let
+  # The real client and the real danstick, gotg-pads and gotg-killswitch it
+  # runs, built without re-running their own cargo suites: danstick's CI and the
+  # `rust` check run those, and here they were most of this check's wall time.
+  noCheck = drv: drv.overrideAttrs { doCheck = false; };
+  danstick-rs = noCheck danstickPkgs.danstick-rs;
+  # danstick's own wrapper (its flake.nix), around the danstick-rs above.
+  danstick = pkgs.writeShellApplication {
+    name = "danstick";
+    text = ''
+      export DANSTICK_BUILD_ID="${danstick-rs}"
+      exec ${danstick-rs}/bin/danstick-rs "$@"
+    '';
+  };
+  gotg-killswitch = noCheck packages.gotg-killswitch;
+  gotg = packages.gotg.override {
+    inherit danstick danstick-rs gotg-killswitch;
+    gotg-pads = noCheck packages.gotg-pads;
+  };
+in
 pkgs.runCommand "check-client-tests"
   {
     nativeBuildInputs = with pkgs; [
@@ -27,13 +51,13 @@ pkgs.runCommand "check-client-tests"
       # The watcher itself, so its own process handling — a target already
       # gone, a target that exits while it waits — is tested against the real
       # binary rather than a stand-in.
-      packages.gotg-killswitch
+      gotg-killswitch
       # install.bats sources the packaged installer rather than the checkout's
       # copy, so what is tested is what somebody would actually download.
       packages.gotg-install
       packages.gotg-uninstall
     ];
-    GOTG_BIN = pkgs.lib.getExe packages.gotg;
+    GOTG_BIN = pkgs.lib.getExe gotg;
     # play-anywhere.bats reads the script, which is outside the package.
     GOTG_PLAY_ANYWHERE = ../../src/client/play-anywhere.sh;
   }

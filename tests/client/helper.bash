@@ -262,8 +262,13 @@ add_member_game() {
       --data-binary @- "$GOTG_SERVICE_URL/catalog/$platform/$id" >/dev/null
 }
 
+# bats prints a test's own output only when it fails, so this trace costs
+# nothing on a pass and, on a failure, says which call failed and why --
+# --print-output-on-failure shows $output alone, never $stderr.
 gotg() {
   run --separate-stderr "$GOTG_BIN" "$@"
+  printf '$ gotg %s  [exit %s]\n' "$*" "$status"
+  [[ -z "$stderr" ]] || printf '%s\n' "$stderr"
 }
 
 # Source the client's own libraries into the test shell.

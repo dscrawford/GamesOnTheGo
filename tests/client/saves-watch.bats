@@ -46,6 +46,11 @@ remote_generation() {
 }
 
 remote_is() { [ "$(remote_generation)" = "$1" ]; }
+# The server counts the upload before the client, which is still reading the
+# reply, writes it down: wait for both, not just the first.
+pushed_recorded() {
+  [ -n "$(jq -r '.pushed_hash // ""' "$GOTG_STATE_DIR/saves/env-n64.json" 2>/dev/null)" ]
+}
 watcher_gone() { ! kill -0 "$WATCHER" 2>/dev/null; }
 
 # A process standing in for the game, and the watcher following it.
@@ -89,7 +94,7 @@ second_device() {
   start_watching
   write_save zelda.ram "first"
   wait_for 10 remote_is 1
-  [ "$(jq -r .pushed_hash "$GOTG_STATE_DIR/saves/env-n64.json")" != "" ]
+  wait_for 10 pushed_recorded
   write_save zelda.ram "second"
   wait_for 10 remote_is 2
 }

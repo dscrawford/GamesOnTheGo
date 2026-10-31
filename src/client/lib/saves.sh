@@ -196,7 +196,7 @@ saves_check_size() {
     local biggest
     biggest="$(for file in "$@"; do
       printf '%s\t%s\n' "$(stat -c '%s' "$state/$file" 2>/dev/null || echo 0)" "$file"
-    done | sort -rn | head -5 | while IFS=$'\t' read -r size file; do
+    done | sort -rn | sed -n 1,5p | while IFS=$'\t' read -r size file; do
       printf '       %10s  %s\n' "$(human_size "$size")" "$file"
     done)"
     die "the saves for this environment come to $(human_size "$total"), over the $(human_size "$max") limit.
