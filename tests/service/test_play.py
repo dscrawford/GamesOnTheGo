@@ -223,3 +223,17 @@ def test_without_an_ejs_directory_the_assets_say_so():
 def test_admin_listener_has_no_player():
     with serve(Config(token=CLIENT_TOKEN, admin_token="a" * 20), listener="admin") as s:
         assert s.call("GET", "/play/", token=None)[0] == 404
+
+
+def test_player_names_the_control_scheme_and_follows_a_phone_turned_sideways():
+    script = (Path(play_page.__file__).parent / "static/play/app.js").read_text()
+    # EmulatorJS would guess the system from the core, and genesis_plus_gx is
+    # listed under the Master System first: no Start button for Genesis games.
+    assert "window.EJS_controlScheme = plan.system;" in script
+    assert {"genesis": "segaMD"}.items() <= {p: c.system for p, c in play_page.CORES.items()}.items()
+    # On-screen buttons on any touch screen, not just phone-looking user agents.
+    assert '"virtual-gamepad"] = "enabled"' in script
+    # Sideways on a touch screen: the game is the whole viewport, then fullscreen.
+    assert "@media (orientation: landscape) and (pointer: coarse)" in play_page.STYLE
+    assert "body.playing #game" in play_page.STYLE
+    assert 'requestFullscreen({ navigationUI: "hide" })' in script

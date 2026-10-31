@@ -181,6 +181,10 @@
     const named = (blob, name) => URL.createObjectURL(new File([blob], name));
     window.EJS_player = "#game";
     window.EJS_core = plan.core || plan.system; // the exact core the plan (and the licence table) names
+    // EmulatorJS guesses the system from the core by taking the first system
+    // that lists it, and genesis_plus_gx is listed under segaMS (Master System)
+    // first: a Genesis game got the two-button layout with no Start. Name it.
+    window.EJS_controlScheme = plan.system;
     window.EJS_pathtodata = at("/play/ejs/data/");
     window.EJS_gameUrl = named(romBlob, gameId + (plan.rom_ext || ""));
     window.EJS_gameName = gameId;
@@ -192,6 +196,10 @@
     // "saveSaveFiles" with the bytes. That event is the only reliable hook: by
     // pagehide its exit handler has already unmounted /data/saves.
     window.EJS_defaultOptions = { "save-save-interval": "30" };
+    // On-screen buttons: EmulatorJS turns them on only from a phone-looking user
+    // agent (iPads say Mac) or a tap on its Start button, which EJS_startOnLoaded
+    // skips. Any touch screen gets them; the player's menu still turns them off.
+    if (window.matchMedia("(pointer: coarse)").matches) window.EJS_defaultOptions["virtual-gamepad"] = "enabled";
     window.EJS_ready = () => {
       status("loading core");
       window.EJS_emulator.on("saveSaveFiles", (bytes) => {
@@ -202,6 +210,8 @@
     };
     window.EJS_onGameStart = () => {
       status("playing");
+      document.body.classList.add("playing");
+      followRotation();
       // Battery file: write the pulled one into the core's filesystem, then have
       // the core re-read it (EmulatorJS 4.2.3; checked in Chromium).
       const gm = window.EJS_emulator && window.EJS_emulator.gameManager;
@@ -222,6 +232,53 @@
     script.onerror = () => fail("EmulatorJS is not installed on this service (docs/browser-play.md).");
     document.body.appendChild(script);
   }
+
+  // --- Phone rotation -----------------------------------------------------------
+  // In landscape on a touch screen the game takes the whole viewport (app.css),
+  // and the page asks for real fullscreen too. Browsers grant that only after a
+  // tap, so if the rotation alone is refused, the next tap enters it. Turning
+  // back to portrait leaves the fullscreen the rotation entered.
+  const LANDSCAPE = window.matchMedia("(orientation: landscape) and (pointer: coarse)");
+  let autoFullscreen = false;
+  let armed = false;
+
+  function enterFullscreen() {
+    const el = $("game");
+    if (document.fullscreenElement || !el.requestFullscreen) return;
+    el.requestFullscreen({ navigationUI: "hide" }).then(() => {
+      autoFullscreen = true;
+      try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) { /* not supported */ }
+    }, () => arm());
+  }
+
+  function onTap() {
+    disarm();
+    if (LANDSCAPE.matches) enterFullscreen();
+  }
+  function arm() {
+    if (armed) return;
+    armed = true;
+    // touchend and pointerup carry user activation; touchstart does not.
+    document.addEventListener("touchend", onTap, true);
+    document.addEventListener("pointerup", onTap, true);
+  }
+  function disarm() {
+    armed = false;
+    document.removeEventListener("touchend", onTap, true);
+    document.removeEventListener("pointerup", onTap, true);
+  }
+
+  function onRotate() {
+    if (LANDSCAPE.matches) return enterFullscreen();
+    disarm();
+    if (autoFullscreen && document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    autoFullscreen = false;
+  }
+  function followRotation() {
+    LANDSCAPE.addEventListener("change", onRotate);
+    if (LANDSCAPE.matches) enterFullscreen();
+  }
+  document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement) autoFullscreen = false; });
 
   // Tab hidden (switching away, phone locking): the core is still alive, so ask
   // it to write the battery file now; its saveSaveFiles event queues the bytes.

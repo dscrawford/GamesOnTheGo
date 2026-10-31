@@ -134,7 +134,7 @@ PAGE = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <title>GOTG play</title>
 <link rel="stylesheet" href="app.css">
@@ -180,6 +180,19 @@ main { padding: 0 1rem 1rem; }
 pre { background: #000; padding: .75rem; overflow-x: auto; user-select: all; }
 button, input { font: inherit; padding: .4rem .7rem; }
 #game { width: 100%; max-width: 960px; aspect-ratio: 4 / 3; margin: 0 auto; }
+/* A phone turned sideways: the game is the whole screen, even where the
+   browser has no element fullscreen (iPhone Safari). */
+@media (orientation: landscape) and (pointer: coarse) {
+  body.playing header { display: none; }
+  body.playing main { padding: 0; }
+  body.playing #game {
+    position: fixed; inset: 0; z-index: 10; max-width: none; aspect-ratio: auto;
+    width: 100vw; height: 100vh; height: 100dvh;
+  }
+  body.playing #conflict, body.playing #error {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 20; margin: 0; padding: .5rem 1rem; background: #111;
+  }
+}
 """
 
 
