@@ -43,7 +43,7 @@ jobs:
         run: nix run .#controllers-cluster --max-jobs 2 --cores 4 -- ${{ inputs.pytest_args }}
       - name: Keep the per-share logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: controllers-runs
           path: ~/.cache/gotg/controllers-runs/
