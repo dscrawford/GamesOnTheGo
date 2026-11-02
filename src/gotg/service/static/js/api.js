@@ -30,6 +30,8 @@
  *  Ports (portable builds a client pushed with `gotg port push`, per user):
  *  GET /ports/<platform>/<id> -> {version:1, available:[{output, variant, description,
  *    build: {output, sha256, size, device, written_at}|null}]}; 503 without a store.
+ *    web: {output, description, build|null, request: {state, device?, error?}|null}|null}
+ *    -- web: the game compiled for the browser, built on request (`gotg port worker`).
  *  GET /ports/<output>/file -> the build's bytes (a download; the session cookie is the credential).
  *
  *  Admin (existing): GET /admin/info {public_url}; GET /admin/invites
@@ -146,12 +148,15 @@ export async function savePut(attr, bundle, { parent = "", device = "web", force
   }
 }
 
-/** What the flake can build for a game, each with its pushed build; null when the service keeps none. */
+/** What the flake can build for a game: {available: [each with its pushed build],
+ * web: its browser build or null}; null when the service keeps none. */
 export const ports = (platform, id) =>
-  call(`/ports/${encodeURIComponent(platform)}/${encodeURIComponent(id)}`).then((r) => r.available).catch((e) => {
+  call(`/ports/${encodeURIComponent(platform)}/${encodeURIComponent(id)}`).catch((e) => {
     if (e.status === 404 || e.status === 503) return null;
     throw e;
   });
+/** The player page, running the game's browser build rather than an emulator. */
+export const portPlayUrl = (platform, id) => `${BASE}/play/?${new URLSearchParams({ platform, id, port: "web" })}`;
 export const portUrl = (output) => `${BASE}/ports/${encodeURIComponent(output)}/file`;
 
 export const admin = {

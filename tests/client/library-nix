@@ -79,6 +79,24 @@ if [[ "$path" == *.gotgPortable ]]; then
   exit 0
 fi
 
+# A browser builder (env/web): a program that "compiles" the ROM it is given
+# into a JavaScript file naming it. NIX_FAIL_WEB=build: there is none to
+# build; NIX_FAIL_WEB=run: the program fails, as a compile would.
+if [[ "$path" == *.gotgWeb ]]; then
+  [[ "${NIX_FAIL_WEB:-}" != build ]] || exit 1
+  store="${TEST_TMP:-/tmp}/store/gotg-web-${path%.gotgWeb}"
+  mkdir -p "$store/bin"
+  if [[ "${NIX_FAIL_WEB:-}" == run ]]; then
+    printf '#!%s\necho "emcc: error: the compile went wrong" >&2\nexit 1\n' "$BASH" >"$store/bin/gotg-web-test"
+  else
+    # shellcheck disable=SC2016 # the script's own $(...), run when it runs
+    printf '#!%s\nprintf "built from %%s\\n" "$(sha256sum "$1" | cut -d" " -f1)" >"$2"\n' "$BASH" >"$store/bin/gotg-web-test"
+  fi
+  chmod +x "$store/bin/gotg-web-test"
+  ln -sfn "$store" "$out"
+  exit 0
+fi
+
 spec_only=""
 if [[ "$path" == *.gotgSpecFile ]]; then
   spec_only=1

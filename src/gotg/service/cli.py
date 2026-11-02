@@ -212,6 +212,8 @@ def logs_from_env(env: Mapping[str, str] | None = None) -> LogsStore | None:
 # The environment files the flake's ports and variants are named by: beside
 # the service in a checkout; the package says where with GOTG_ENV_GAMES_DIR.
 CHECKOUT_GAMES_DIR = Path(__file__).resolve().parents[2] / "client" / "env" / "games"
+# And the builders of games' browser builds (GOTG_ENV_WEB_DIR).
+CHECKOUT_WEB_DIR = CHECKOUT_GAMES_DIR.parent / "web"
 
 
 def ports_from_env(env: Mapping[str, str] | None = None) -> PortsStore | None:
@@ -222,10 +224,13 @@ def ports_from_env(env: Mapping[str, str] | None = None) -> PortsStore | None:
         return None
     games = env.get("GOTG_ENV_GAMES_DIR", "")
     games_dir = Path(games) if games else (CHECKOUT_GAMES_DIR if CHECKOUT_GAMES_DIR.is_dir() else None)
+    web = env.get("GOTG_ENV_WEB_DIR", "")
+    web_dir = Path(web) if web else (CHECKOUT_WEB_DIR if CHECKOUT_WEB_DIR.is_dir() else None)
     return PortsStore(
         root=Path(root),
         max_bytes=int(env.get("GOTG_PORTS_MAX_BYTES", str(PORTS_MAX_BYTES))),
         games_dir=games_dir,
+        web_dir=web_dir,
     )
 
 

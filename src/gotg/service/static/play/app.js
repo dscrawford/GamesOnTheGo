@@ -13,6 +13,9 @@
   const query = new URLSearchParams(location.search);
   const platform = query.get("platform") || "";
   const gameId = query.get("id") || "";
+  // ?port=web: the game's browser build (a port compiled to WebAssembly, kept
+  // per account in the ports store) rather than an emulator.
+  const portMode = query.get("port") === "web";
   const DEVICE = "web";
   const PUSH_DELAY_MS = 5000;
 
@@ -288,6 +291,75 @@
     flush(true);
   }
 
+  // --- a port built for the browser ------------------------------------------
+  // The build is the game's data, so it is per account and never cached by a
+  // shared URL: fetched with this tab's credentials and run from a blob.
+  const PORT_POLL_MS = 5000;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  async function portState(output) {
+    const response = await fetch(at("/ports/" + output + "/web"), { headers: auth() });
+    if (response.status === 404) throw new Error("this game has no browser build");
+    if (response.status === 503) throw new Error("this service keeps no ports");
+    if (!response.ok) throw new Error("checking the browser build: HTTP " + response.status);
+    return response.json();
+  }
+
+  async function askForBuild(output) {
+    const response = await fetch(at("/ports/" + output + "/web"), { method: "POST", headers: auth() });
+    if (!response.ok) throw new Error("asking for a browser build: HTTP " + response.status);
+  }
+
+  async function runPort() {
+    const output = platform + "." + gameId;
+    let state = await portState(output);
+    let asked = false;
+    // No build yet: ask for one (or again, after an earlier failure) and wait
+    // while one of this account's machines with Nix builds it.
+    while (!state.build) {
+      const request = state.request;
+      if (!request || (request.state === "failed" && !asked)) {
+        await askForBuild(output);
+        asked = true;
+      } else if (request.state === "failed") {
+        return fail("The build failed on " + (request.device || "the worker") + ":\n" + (request.error || "no detail") +
+          "\nReload to try again.");
+      } else if (request.state === "building") {
+        status("building it on " + (request.device || "one of your machines") + ": a few minutes, the first time only");
+      } else {
+        status("waiting for one of your machines with Nix to build it: run `gotg port worker` on one");
+      }
+      await sleep(PORT_POLL_MS);
+      state = await portState(output);
+    }
+
+    status("downloading (" + Math.max(1, Math.round(state.build.size / 1048576)) + " MiB)");
+    const response = await fetch(at("/ports/" + output + "/web/file"), { headers: auth() });
+    if (!response.ok) throw new Error("downloading the browser build: HTTP " + response.status);
+    const code = new Blob([await response.arrayBuffer()], { type: "text/javascript" });
+
+    const canvas = document.createElement("canvas");
+    canvas.id = "canvas";
+    canvas.tabIndex = 0;
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    $("game").replaceChildren(canvas);
+    document.body.classList.add("playing", "port");
+    status("starting");
+    // Emscripten's runtime reads its settings from a global Module.
+    window.Module = {
+      canvas,
+      print: (text) => console.log(text),
+      printErr: (text) => console.warn(text),
+      onRuntimeInitialized: () => { status(""); canvas.focus(); },
+      onAbort: (what) => fail("the game stopped: " + what),
+    };
+    const script = document.createElement("script");
+    script.src = URL.createObjectURL(code);
+    script.onerror = () => fail("the browser build would not load");
+    document.body.append(script);
+    followRotation();
+  }
+
   async function run() {
     if (!/^[a-z0-9][a-z0-9_-]*$/.test(platform) || !/^[a-z]{3,5}\.[a-z0-9_]+$/.test(gameId)) {
       return fail("open this page as /play/?platform=<slug>&id=<id>");
@@ -307,6 +379,10 @@
     }
     if (!response.ok) return fail("HTTP " + response.status);
     plan = await response.json();
+    if (portMode) {
+      try { await runPort(); } catch (e) { fail(e.message); }
+      return;
+    }
 
     if (plan.mode !== "browser") {
       $("nix-title").textContent = gameId;

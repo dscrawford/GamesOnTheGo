@@ -26,9 +26,14 @@ export async function detail(root, ctx) {
     }
   }).catch(() => { /* the page still works without a play button */ });
   // The flake's native ports and variants of this game, filled in when the service answers.
+  // And its browser build, beside the emulator's Play: a port compiled for the
+  // tab, built by one of this account's machines the first time it is asked for.
   const ports = h("div", { class: "ports" });
-  api.ports(platform, id).then((list) => {
+  const webPlay = h("div", { class: "play web-port" });
+  api.ports(platform, id).then((info) => {
+    const list = info && info.available;
     if (list && list.length) ports.replaceChildren(...portsSection(game, list));
+    if (info && info.web) webPlay.replaceChildren(...webPortSection(platform, id, info.web));
   }).catch(() => { /* the page still works without it */ });
   root.replaceChildren(
     h("p", {}, h("a", { href: "#/" }, "← All games")),
@@ -36,6 +41,7 @@ export async function detail(root, ctx) {
       h("h1", {}, game.title),
       h("p", { class: "dim" }, `${game.platform} · ${regionOf(game)} · ${game.handler}`),
       play,
+      webPlay,
       h("p", {}, h("code", {}, `gotg play ${game.id}`)),
       ports,
       h("p", {}, h("a", { href: `#/saves/${encodeURIComponent(platform)}/${encodeURIComponent(id)}` }, "Saves for this game")),
@@ -45,6 +51,23 @@ export async function detail(root, ctx) {
 }
 
 const mib = (n) => `${Math.max(1, Math.round(n / 1048576))} MiB`;
+
+/** Play the game's browser build: straight away when one is built, and
+ * otherwise the player page asks for one and waits while a worker builds it. */
+export function webPortSection(platform, id, web) {
+  const request = web.request;
+  const note = web.build
+    ? `built ${new Date(web.build.written_at).toLocaleDateString()} on ${web.build.device || "a machine"}`
+    : request && request.state === "building"
+      ? `building on ${request.device || "a machine"}`
+      : request && request.state === "failed"
+        ? "the last build failed: Play tries again"
+        : "built on first play by a machine running gotg port worker";
+  return [
+    h("a", { class: "button primary", href: api.portPlayUrl(platform, id), id: "play-port" }, "▶ Play the port in browser"),
+    h("span", { class: "dim" }, ` ${web.description} `, h("small", {}, `(${note})`)),
+  ];
+}
 
 /** One row per output the flake builds for this game: a Download when a client
  * has pushed it (`gotg port push`), and otherwise how to push one. */

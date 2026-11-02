@@ -145,6 +145,7 @@ def test_detail_lists_the_flakes_ports_with_a_download_or_the_push():
     detail = (STATIC_DIR / "js" / "views" / "detail.js").read_text()
     api = (STATIC_DIR / "js" / "api.js").read_text()
     assert "api.ports(platform, id)" in detail and "api.portUrl(p.output)" in detail
+    assert "api.portPlayUrl(platform, id)" in detail
     assert "gotg port push ${game.id}" in detail
     assert "`${BASE}/ports/${encodeURIComponent(output)}/file`" in api
 

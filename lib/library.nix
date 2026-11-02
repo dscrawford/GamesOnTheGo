@@ -59,6 +59,7 @@
             env = "${env}";
             game = builtins.removeAttrs game [ "path" ];
           };
+          webFile = envDir + "/web/${game.platform}/${game.id}.nix";
           spec = pkgs.writeText "gotg-spec-${name}.json" (builtins.toJSON fields);
           program = "gotg-${builtins.replaceStrings [ "." ] [ "-" ] name}";
           launcher = pkgs.writeShellApplication {
@@ -97,6 +98,12 @@
             # The file itself, for `gotg qa --spec`: the very spec this game
             # launches with.
             gotgSpecFile = spec;
+          }
+          // lib.optionalAttrs (variant == null && builtins.pathExists webFile) {
+            # The game compiled for the browser: a builder, run against a ROM
+            # outside the store (`gotg port worker`), never the build itself --
+            # that holds the game's data. env/web/<platform>/<id>.nix.
+            gotgWeb = import webFile { inherit pkgs lib; };
           }
           // lib.optionalAttrs (portable != null) {
             # One file that runs without Nix, for the ports store (`gotg port push`).

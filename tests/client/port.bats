@@ -73,3 +73,62 @@ teardown() {
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"run: gotg login"* ]]
 }
+
+# --- the worker: browser builds the web app asks for ----------------------------
+
+web_api() {
+  curl -sS -H "Authorization: Bearer test-token" "$@"
+}
+
+ask_for_web_build() {
+  # The service lists a game as buildable for the browser by its builder file.
+  mkdir -p "$TEST_TMP/service-web/n64"
+  : >"$TEST_TMP/service-web/n64/usa.zelda.nix"
+  web_api -X POST "$GOTG_SERVICE_URL/ports/n64.usa.zelda/web" >/dev/null
+}
+
+@test "worker builds what was asked for against the ROM, and pushes it" {
+  ask_for_web_build
+  GOTG_DEVICE_NAME=the-desk gotg port worker --once
+  [ "$status" -eq 0 ]
+  grep -q "build $GOTG_LIBRARY#n64.usa.zelda.gotgWeb -o" "$NIX_LOG"
+  [[ "$stderr" == *"n64.usa.zelda is on the server"* ]]
+
+  run web_api "$GOTG_SERVICE_URL/ports/n64.usa.zelda/web"
+  [ "$(jq -r .build.device <<<"$output")" = the-desk ]
+  [ "$(jq -r .request <<<"$output")" = null ]
+  # Built from the ROM the catalog has, downloaded as an install is.
+  run web_api "$GOTG_SERVICE_URL/ports/n64.usa.zelda/web/file"
+  [ "$output" = "built from $(printf rom | sha256sum | cut -d' ' -f1)" ]
+
+  # Nothing is left waiting, so a second pass builds nothing.
+  : >"$NIX_LOG"
+  gotg port worker --once
+  [ "$status" -eq 0 ]
+  ! grep -q gotgWeb "$NIX_LOG"
+}
+
+@test "worker with nothing asked for does nothing" {
+  gotg port worker --once
+  [ "$status" -eq 0 ]
+  ! grep -q gotgWeb "${NIX_LOG}" 2>/dev/null
+}
+
+@test "a failed build is reported to the web app with the reason" {
+  ask_for_web_build
+  NIX_FAIL_WEB=run gotg port worker --once
+  [ "$status" -eq 0 ] # the worker carries on; the game failed
+  [[ "$stderr" == *"the browser build of n64.usa.zelda failed"* ]]
+  run web_api "$GOTG_SERVICE_URL/ports/n64.usa.zelda/web"
+  [ "$(jq -r .request.state <<<"$output")" = failed ]
+  [[ "$(jq -r .request.error <<<"$output")" == *"emcc: error: the compile went wrong"* ]]
+  [ "$(jq -r .build <<<"$output")" = null ]
+}
+
+@test "a library with no builder for it fails the request" {
+  ask_for_web_build
+  NIX_FAIL_WEB=build gotg port worker --once
+  run web_api "$GOTG_SERVICE_URL/ports/n64.usa.zelda/web"
+  [ "$(jq -r .request.state <<<"$output")" = failed ]
+  [[ "$(jq -r .request.error <<<"$output")" == *"has no browser build of n64.usa.zelda"* ]]
+}

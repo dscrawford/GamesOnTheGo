@@ -727,7 +727,7 @@ class Handler(
         elif prefix == "saves":
             self._saves(rest, body, self._saves_user(principal))
         elif prefix == "ports":
-            self._ports(rest, principal)
+            self._ports(rest, principal, body)
         elif prefix == "logs":
             self._logs(rest, body, principal)
         elif prefix == "catalog":

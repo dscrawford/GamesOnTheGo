@@ -180,6 +180,9 @@ main { padding: 0 1rem 1rem; }
 pre { background: #000; padding: .75rem; overflow-x: auto; user-select: all; }
 button, input { font: inherit; padding: .4rem .7rem; }
 #game { width: 100%; max-width: 960px; aspect-ratio: 4 / 3; margin: 0 auto; }
+/* A port draws into its own canvas, which SDL sizes to the game's window. */
+#game canvas { display: block; width: 100%; height: 100%; outline: none; }
+#error { white-space: pre-wrap; }
 /* A phone turned sideways: the game is the whole screen, even where the
    browser has no element fullscreen (iPhone Safari). */
 @media (orientation: landscape) and (pointer: coarse) {

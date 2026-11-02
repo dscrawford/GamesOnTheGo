@@ -65,3 +65,48 @@ What a game *can* be built as comes from the environment files
 game's own file is the default output and adds `emulate`, and each
 `<id>.<variant>.nix` is a variant. The description is the file's header
 comment, to its first sentence.
+
+## Browser builds: a port played in a tab
+
+A game with a file under `src/client/env/web/<platform>/<id>.nix` can also be
+played in the browser as a port compiled to WebAssembly (today: Super Mario
+64, through sm64ex's WebGL target). The decomp bakes Nintendo's assets in at
+compile time, so the server never builds it and nothing in the repository
+holds it: the file is a *builder*, `gotg-web-<name> <rom> <out.js>`, run on
+one of the user's own machines against the ROM.
+
+```bash
+gotg port worker            # on a machine with Nix and a library; leave it running
+gotg port worker --once     # or: build what is asked for now, then exit
+```
+
+Pressing **Play the port in browser** on the game's page opens the player with
+`?port=web`. With no build yet, the page files a request and says it is
+waiting for a machine; a worker polls `GET /ports/requests` (every
+`GOTG_PORT_WORKER_INTERVAL` seconds, default 15), claims the request, runs
+`nix build <library>#<output>.gotgWeb`, builds against the ROM it downloads
+from the server, and pushes the one JavaScript file (SINGLE_FILE: the wasm is
+inside it). The page shows which machine is building, then downloads and
+starts it. The first build is about five minutes; afterwards Play starts it
+straight away. A failed build shows the worker's error on the page, and
+reloading asks again. A claim that has not landed in three hours goes back to
+pending for any worker.
+
+The builder runs with no network: SDL2, which `-s USE_SDL=2` would download,
+is pinned in the store and handed to Emscripten. Emscripten's compiled system
+libraries are cached under `~/.cache/gotg/emscripten/`, keyed by compiler.
+
+Builds are per user, like `.run` files, and stored beside them (`web.json`,
+`web-<sha>.js`, `request.json`). The service learns which games have a builder
+from `GOTG_ENV_WEB_DIR` (the package sets it).
+
+| Route | |
+|---|---|
+| `GET /ports/requests` | pending requests: what a worker should build |
+| `GET /ports/<output>/web` | `{build, request}`, what the player page polls |
+| `POST /ports/<output>/web` | ask for a build; the live request if there is one |
+| `PUT /ports/<output>/web` | push one, as for `.run`; ends the request |
+| `GET /ports/<output>/web/file` | the bytes |
+| `POST /ports/<output>/web/claim` | a worker takes the request (409 if it is gone) |
+| `POST /ports/<output>/web/fail` | a worker gave up: `{"error": "..."}` |
+| `DELETE /ports/<output>/web` | drop the build |

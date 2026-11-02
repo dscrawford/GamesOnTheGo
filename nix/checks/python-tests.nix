@@ -27,6 +27,7 @@ pkgs.runCommand "check-python-tests" { nativeBuildInputs = [ venv ]; } ''
   mkdir -p nix src/client/env
   cp ${../../nix/emulatorjs.nix} nix/emulatorjs.nix
   cp -r ${../../src/client/env/games} src/client/env/games
+  cp -r ${../../src/client/env/web} src/client/env/web
   cp ${../../pyproject.toml} pyproject.toml
   chmod -R u+w tests src config nix
   # And how the controller suite is split across the cluster's nodes: pure,
