@@ -9,6 +9,7 @@ and used for `/catalog`, `/games` and `/saves`, which authenticate as ever). Onl
 from __future__ import annotations
 
 import os
+import urllib.parse
 from pathlib import Path
 
 from . import play_page
@@ -43,13 +44,24 @@ class PlayRoutes:
         self._send_play(body, content_type)
         return True
 
+    def _play_files_origin(self) -> str:
+        """files_url as the play page's policy should name it. The pod serving
+        this page is often not the one holding the tunnel's port file (gotg-api
+        vs gotg-library): there files_url is a bare host whose port is whatever
+        the VPN lease says today, so the policy allows that host on any port.
+        A port named in files_url, or read from a port file here, stays exact."""
+        files = self._files_url()
+        if not files or self.config.files_port_file or urllib.parse.urlsplit(files).port is not None:
+            return files
+        return files + ":*"
+
     def _send_play(self, body: bytes, content_type: str) -> None:
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         # The ROM may come from the catalog's byte hosts (a split deployment):
         # the same list, worked out the same way, as /catalog's files_urls.
-        hosts = advertised_hosts(self.config.files_preferred_url, self._files_url())
+        hosts = advertised_hosts(self.config.files_preferred_url, self._play_files_origin())
         self.send_header("Content-Security-Policy", play_page.policy(hosts))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Cache-Control", "no-store")
