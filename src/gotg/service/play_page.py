@@ -54,7 +54,8 @@ def policy(byte_hosts: list[str] | tuple[str, ...] = ()) -> str:
     )
 
 
-_ORIGIN_SAFE = re.compile(r"[A-Za-z0-9.\-\[\]:]+")
+# A trailing ":*" is CSP's any-port, for a byte host whose port the VPN assigns.
+_ORIGIN_SAFE = re.compile(r"[A-Za-z0-9.\-\[\]:]+?(:\*)?")
 
 # The bundle a browser pushes is a tiny JSON container, not the tar.zst a native
 # client pushes, so the two can never be mistaken for one another: its attr has

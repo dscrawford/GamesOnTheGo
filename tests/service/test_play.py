@@ -173,7 +173,8 @@ def test_policy_adds_only_the_origins_of_http_byte_hosts():
     assert play_page.policy([]) == play_page.POLICY
     assert "https://files.example:45581 " in connect(["https://files.example:45581/some/path"])
     assert "http://100.70.0.1:30780 " in connect(["http://100.70.0.1:30780"])
-    for junk in ("javascript:alert(1)", "https://evil.test; script-src *", "ftp://x.test", "https://"):
+    assert "https://files.example:* " in connect(["https://files.example:*"])
+    for junk in ("javascript:alert(1)", "https://evil.test; script-src *", "ftp://x.test", "https://", "https://*"):
         assert play_page.policy([junk]) == play_page.POLICY, junk
 
 
@@ -182,6 +183,23 @@ def test_page_policy_allows_the_advertised_byte_host(tmp_path):
     with serve(config) as s:
         _, headers, _ = s.call("GET", "/play/?platform=nes&id=usa.x", token=None)
     assert "connect-src 'self' https://files.example:45581 " in headers["Content-Security-Policy"]
+
+
+def test_page_policy_allows_a_portless_byte_host_on_any_port(tmp_path):
+    # gotg-api serves the page; the tunnel's port file lives on gotg-library.
+    config = Config(token=CLIENT_TOKEN, files_url="https://files.example")
+    with serve(config) as s:
+        _, headers, _ = s.call("GET", "/play/?platform=nes&id=usa.x", token=None)
+    assert "connect-src 'self' https://files.example:* " in headers["Content-Security-Policy"]
+
+
+def test_page_policy_keeps_the_port_read_from_a_port_file(tmp_path):
+    port_file = tmp_path / "forwarded_port"
+    port_file.write_text("52695\n")
+    config = Config(token=CLIENT_TOKEN, files_url="https://files.example", files_port_file=str(port_file))
+    with serve(config) as s:
+        _, headers, _ = s.call("GET", "/play/?platform=nes&id=usa.x", token=None)
+    assert "connect-src 'self' https://files.example:52695 " in headers["Content-Security-Policy"]
 
 
 def test_script_fetches_the_rom_from_the_catalogs_byte_hosts():
