@@ -1,4 +1,4 @@
-# The Rust workspace -- gotg-pads and gotg-killswitch -- tested, linted and
+# The Rust workspace -- gotg-pads, gotg-killswitch, gotg-saves -- tested, linted and
 # formatted in one pass: `cargo test` for every crate, clippy with warnings
 # as errors, and rustfmt's check. The packages also run their own crate's
 # tests as they build; this is the gate that covers both and the style.

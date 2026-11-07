@@ -1,0 +1,18 @@
+[package]
+name = "gotg-saves"
+description = "GOTG's save sync, as the bash client does it, for the Windows launcher"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json = { workspace = true }
+sha2 = "0.10"
+# Pure Rust zstd: the bundles are tar.zst, and the C libzstd is what the
+# Windows cross build must not need.
+ruzstd = "0.9"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[lints]
+workspace = true

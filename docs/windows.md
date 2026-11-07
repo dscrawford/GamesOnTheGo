@@ -133,10 +133,14 @@ An unknown action is an error, not a skip: a bundle never half-applies.
    `%LOCALAPPDATA%\gotg\games\<platform>\` with resume and sha256 check
    (the same files_urls, the same layout as `download.sh`).
 3. Fetch `keys` / `firmware` when declared (`keys.sh`, `firmware.sh`).
-4. `saves pull`, create `saves_dirs`, seed `config_files` (only if absent),
-   apply `actions`.
+4. `saves sync` (what a Linux launch does: pull what is newer on the
+   service, push what is newer here, leave a conflict for `saves keep`),
+   create `saves_dirs`, seed `config_files` (only if absent), apply `actions`.
 5. Start `exe` with the rendered args and env; wait for it.
-6. `saves push`; history as on Linux.
+6. `saves push`; history as on Linux. Journal and archives in
+   `%LOCALAPPDATA%\gotg\saves` (Linux: `$GOTG_STATE_DIR/saves`). All of
+   it is `rust/crates/gotg-saves` (`Saves::sync`, `push`, `pull`, `check`,
+   `keep`, `list`, `restore`, `states`); its lib.rs documents the API.
 
 Also: `gotg.exe saves list|push|pull|restore`, `gotg.exe --version`.
 
@@ -149,6 +153,7 @@ Also: `gotg.exe saves list|push|pull|restore`, `gotg.exe --version`.
 | Windows emulator packages     | `nix/windows/emulators/<emu>.nix`       |
 | bundle builder                | `nix/windows/bundle.nix`                |
 | launcher                      | `rust/crates/gotg-launch`               |
+| save sync                     | `rust/crates/gotg-saves`                |
 | cross build of the launcher   | `rust/gotg-launch.nix`                  |
 | server/web: the `win` kind    | `src/gotg/ports.py`, `routes_ports.py`  |
 | drvPath guard, inheritance    | `nix/checks/windows-facet.nix`          |
