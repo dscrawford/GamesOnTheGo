@@ -118,6 +118,9 @@ mod tests {
         assert_eq!(d.api_file, PathBuf::from("/c").join("api.json"));
         assert_eq!(d.games, PathBuf::from("/g"));
         assert_eq!(d.state("env-n64"), PathBuf::from("/s"));
-        assert_eq!(dirs(&[("HOME", "/h"), ("GOTG_LOCAL_DIR", "/l2")]).saves, PathBuf::from("/l2").join("saves"));
+        assert_eq!(
+            dirs(&[("HOME", "/h"), ("GOTG_LOCAL_DIR", "/l2")]).saves,
+            PathBuf::from("/l2").join("saves")
+        );
     }
 }
