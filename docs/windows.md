@@ -152,6 +152,19 @@ Also: `gotg.exe saves list|push|pull|restore`, `gotg.exe --version`.
 | cross build of the launcher   | `rust/gotg-launch.nix`                  |
 | server/web: the `win` kind    | `src/gotg/ports.py`, `routes_ports.py`  |
 | drvPath guard                 | `nix/checks/windows-drvpaths.nix`       |
+| platforms that must have one  | `nix/checks/windows-platforms.nix`    |
+
+## ares
+
+The official release (`nix/windows/emulators/ares.nix`, flake package
+`windows-ares`), the same version as nixpkgs' `ares`. Left alone it reads
+`settings.bml` beside `ares.exe`, else `%LOCALAPPDATA%\ares\`, else
+`%PROGRAMDATA%\ares\`, and otherwise creates it beside `ares.exe`; the
+facet passes `--settings-file {state}/settings.bml` so an installed ares'
+settings are never picked up and each environment has its own, and
+`Paths/Home={state}/Systems/` so its `<System>.sys` directories stay out of
+the bundle. `config_root` stays `"state"` with no seed files. ares still
+writes `hiro\windows.bml` (window geometry) beside the exe on exit.
 
 ## Not yet
 
