@@ -40,6 +40,7 @@
   sm64Coop = import ./sm64-coop.nix { inherit pkgs; };
   prelaunchProbe = import ./prelaunch-probe.nix { inherit pkgs; };
   rust = import ./rust.nix { inherit pkgs; };
+  rustSaves = import ./rust-saves.nix { inherit pkgs packages; };
   ruff = import ./ruff.nix { inherit pkgs; };
   windowsFacet = import ./windows-facet.nix { inherit pkgs; };
 }

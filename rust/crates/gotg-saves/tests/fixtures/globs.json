@@ -1,0 +1,68 @@
+[
+  {
+    "name": "a whole tree, excludes crossing slashes",
+    "files": ["saves/a.srm", "saves/a.bs1", "saves/Nintendo 64/Zelda (USA).ram", "saves/Nintendo 64/Zelda (USA).bs2",
+              "saves/.hidden/x.sav", "saves/deep/a/b/c.eep", "other/x.srm"],
+    "saves": ["saves/**"],
+    "excludes": ["saves/*.bs[0-9]"],
+    "expect": ["saves/.hidden/x.sav", "saves/Nintendo 64/Zelda (USA).ram", "saves/a.srm", "saves/deep/a/b/c.eep"]
+  },
+  {
+    "name": "one star stays in its directory, and sees dotfiles",
+    "files": ["saves/a.srm", "saves/.b.srm", "saves/sub/c.srm"],
+    "saves": ["saves/*"],
+    "excludes": [],
+    "expect": ["saves/.b.srm", "saves/a.srm"]
+  },
+  {
+    "name": "globstar at the front matches the top too",
+    "files": ["a.sav", "x/b.sav", "x/y/c.sav", "x/y/c.txt"],
+    "saves": ["**/*.sav"],
+    "excludes": [],
+    "expect": ["a.sav", "x/b.sav", "x/y/c.sav"]
+  },
+  {
+    "name": "globstar in the middle, a question mark and a bracket",
+    "files": ["data/save1.dat", "data/p/save2.dat", "data/p/q/saveX.dat", "data/p/q/save10.dat", "1game.ram", "game.ram"],
+    "saves": ["data/**/save?.dat", "[0-9]*.ram"],
+    "excludes": [],
+    "expect": ["1game.ram", "data/p/q/saveX.dat", "data/p/save2.dat", "data/save1.dat"]
+  },
+  {
+    "name": "an exclude matches any trailing run of components",
+    "files": ["data/sm64coopdx/sm64_save_file.bin", "data/sm64coopdx/tex/a.png", "data/sm64coopdx/tex/b/c.png",
+              "config/Ryujinx/system/prod.keys", "config/Ryujinx/system/x.json"],
+    "saves": ["data/sm64coopdx/**", "config/Ryujinx/system/*"],
+    "excludes": ["tex/**", "config/Ryujinx/system/*.keys"],
+    "expect": ["config/Ryujinx/system/x.json", "data/sm64coopdx/sm64_save_file.bin"]
+  },
+  {
+    "name": "an unquoted glob is split on spaces, as bash splits it",
+    "files": ["saves/Nintendo 64/x.ram", "64/y.ram"],
+    "saves": ["saves/Nintendo 64/*"],
+    "excludes": [],
+    "expect": ["64/y.ram"]
+  },
+  {
+    "name": "a literal path, a missing one, and overlapping globs",
+    "files": ["config/settings.ini", "saves/a.srm"],
+    "saves": ["config/settings.ini", "config/missing.ini", "saves/*.srm", "saves/**"],
+    "excludes": [],
+    "expect": ["config/settings.ini", "saves/a.srm"]
+  },
+  {
+    "name": "symlinks: never a member, never followed by globstar, followed by a star",
+    "files": ["real/r.sav", "saves/s.sav", "outside/o.sav"],
+    "symlinks": [["saves/link.sav", "../real/r.sav"], ["saves/linkdir", "../outside"]],
+    "saves": ["saves/**", "saves/*/o.sav"],
+    "excludes": [],
+    "expect": ["saves/linkdir/o.sav", "saves/s.sav"]
+  },
+  {
+    "name": "nothing there",
+    "files": [],
+    "saves": ["saves/**"],
+    "excludes": [],
+    "expect": []
+  }
+]
