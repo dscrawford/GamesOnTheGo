@@ -13,3 +13,7 @@ helpers.coopVariant {
   players = 2;
   inherit base gotgPkgs;
 }
+// {
+  # Stated, because coopVariant starts from `base` and would carry its facet.
+  windows.reason = "a split-screen session of Dolphin and 2 GBA windows inside danstick's sandbox, which is Linux only";
+}

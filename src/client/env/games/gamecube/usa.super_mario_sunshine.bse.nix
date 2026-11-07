@@ -39,4 +39,5 @@ base
   # Added to the platform's rather than replacing it: the base sets up Dolphin's
   # input configuration, which this game needs exactly as much as any other.
   preLaunch = base.preLaunch + disc.preLaunch;
+  windows.reason = "the modded disc is built at first launch with pyisotools and dolphin-tool from Nix, which a Windows bundle does not carry";
 }

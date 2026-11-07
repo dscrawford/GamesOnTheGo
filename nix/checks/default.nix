@@ -43,4 +43,5 @@
   ruff = import ./ruff.nix { inherit pkgs; };
   windowsFacet = import ./windows-facet.nix { inherit pkgs; };
   windowsPlatforms = import ./windows-platforms.nix { inherit pkgs packages; };
+  windowsDolphin = import ./windows-dolphin.nix { inherit pkgs packages; };
 }

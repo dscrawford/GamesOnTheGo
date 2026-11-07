@@ -7,4 +7,5 @@ let
 in
 {
   ares = callPackage ./ares.nix { };
+  dolphin = callPackage ./dolphin.nix { };
 }
