@@ -9,7 +9,7 @@ it from the game's page and runs `gotg.exe`. Nothing on the Linux path
 changes: `nix run gotg#...`, the bash client, danstick and the overlay are
 untouched, and **every Linux derivation keeps its drvPath**. The Windows side
 rides in `passthru`, which is not part of a derivation, so this holds by
-construction; `checks.windows-drvpaths` holds it by test.
+construction; `checks.windowsFacet` holds it by test (a facet leaves drvPath alone).
 
 ```
 nix build <library>#n64.usa.donkey_kong_64.gotgWindows
@@ -151,7 +151,7 @@ Also: `gotg.exe saves list|push|pull|restore`, `gotg.exe --version`.
 | launcher                      | `rust/crates/gotg-launch`               |
 | cross build of the launcher   | `rust/gotg-launch.nix`                  |
 | server/web: the `win` kind    | `src/gotg/ports.py`, `routes_ports.py`  |
-| drvPath guard                 | `nix/checks/windows-drvpaths.nix`       |
+| drvPath guard, inheritance    | `nix/checks/windows-facet.nix`          |
 | platforms that must have one  | `nix/checks/windows-platforms.nix`    |
 
 ## ares
