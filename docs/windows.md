@@ -153,7 +153,7 @@ Also: `gotg.exe saves list|push|pull|restore`, `gotg.exe --version`.
 | Windows emulator packages     | `nix/windows/emulators/<emu>.nix`       |
 | bundle builder                | `nix/windows/bundle.nix`                |
 | launcher                      | `rust/crates/gotg-launch`               |
-| save sync                     | `rust/crates/gotg-saves`               |
+| save sync                     | `rust/crates/gotg-saves`                |
 | cross build of the launcher   | `rust/gotg-launch.nix`                  |
 | server/web: the `win` kind    | `src/gotg/ports.py`, `routes_ports.py`  |
 | drvPath guard                 | `nix/checks/windows-drvpaths.nix`       |
