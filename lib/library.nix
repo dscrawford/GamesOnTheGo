@@ -33,6 +33,11 @@
       # { game, program, name, gotg, server } -> one file that runs without Nix
       # (nix/portable.nix); null where the caller has no way to make one.
       portable ? null,
+      # { name, fields, facet, launcher } -> the game as a Windows zip
+      # (nix/windows/bundle.nix); null where the caller has none.
+      windows ? null,
+      # gotg.exe, cross-built (rust/gotg-launch.nix); null until there is one.
+      windowsLauncher ? null,
     }:
     let
       data = catalogLib.read catalog;
@@ -97,6 +102,20 @@
             # The file itself, for `gotg qa --spec`: the very spec this game
             # launches with.
             gotgSpecFile = spec;
+          }
+          // lib.optionalAttrs (windows != null) {
+            # The game as a zip that plays on Windows (docs/windows.md). Its
+            # facet rides in the environment's passthru, so nothing here moves
+            # a Linux drvPath; asking for a game with no facet says why.
+            gotgWindows = windows {
+              inherit name fields;
+              facet =
+                env.gotgWindows or {
+                  supported = false;
+                  reason = "${chosen.attr} predates Windows facets";
+                };
+              launcher = windowsLauncher;
+            };
           }
           // lib.optionalAttrs (portable != null) {
             # One file that runs without Nix, for the ports store (`gotg port push`).

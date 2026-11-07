@@ -174,6 +174,11 @@
   # environment, which is what lets tests stub a multi-gigabyte conversion
   # into an echo.
   recipes ? { },
+  # The same environment, for Windows: the emulator's Windows build and what
+  # differs about starting it there (docs/windows.md, "The contract"). Null is
+  # "no Windows build"; `{ reason = "..."; }` says why. Read only through
+  # passthru, so it never touches this derivation or its drvPath.
+  windows ? null,
 }:
 
 let
@@ -257,9 +262,7 @@ let
   # that: it is the answer for a launch that met no danstick at all.
   steamHidapi = ''export SDL_JOYSTICK_HIDAPI_STEAM="''${SDL_JOYSTICK_HIDAPI_STEAM:-1}"'';
 
-  exports = lib.concatLines (
-    lib.mapAttrsToList (k: v: "export ${k}=${render (toString v)}") env
-  );
+  exports = lib.concatLines (lib.mapAttrsToList (k: v: "export ${k}=${render (toString v)}") env);
 
   # GL on a machine that is not NixOS: see foreign-gl.nix, which is also
   # what the picker and the QA tools use.
@@ -501,6 +504,45 @@ let
       '';
     };
   };
+
+  # The Windows facet, resolved: what nix/windows/bundle.nix packs, or a
+  # reason it cannot. Placeholders stay unrendered; gotg.exe renders them.
+  gotgWindows =
+    if windows == null || !(windows ? emulator) then
+      {
+        supported = false;
+        reason = (if windows == null then { } else windows).reason or "${name} has no Windows build yet";
+      }
+    else
+      let
+        winConfig = windows.configFiles or { };
+        bundlePath = rel: "config/${rel}";
+      in
+      {
+        supported = true;
+        inherit (windows) emulator;
+        # bundle-relative path -> file, for the bundle builder to copy in.
+        files = lib.mapAttrs' (rel: v: lib.nameValuePair (bundlePath rel) (sourceOf v)) winConfig;
+        manifest = {
+          version = 1;
+          inherit name saves;
+          exe = "emulator/${windows.exe}";
+          args = windows.args or args;
+          fullscreen_flag = windows.fullscreenFlag or fullscreenFlag;
+          env = lib.mapAttrs (_: toString) (windows.env or { });
+          config_root = windows.configRoot or "state";
+          config_files = lib.mapAttrs (rel: _: bundlePath rel) winConfig;
+          actions = windows.actions or [ ];
+          states = saveStates;
+          excludes = saveExcludes;
+          saves_dirs = savesDirs;
+          inherit keys firmware;
+          native_port = nativePort;
+          game_version_min = gameVersionMin;
+          game_version_max = gameVersionMax;
+        }
+        // lib.optionalAttrs (title != null) { inherit title; };
+      };
 in
 # writeShellApplication has no postInstall to hang the manifest off, and
 # overrideAttrs cannot reach inside it, so the runnable is wrapped rather than
@@ -509,6 +551,8 @@ in
 pkgs.runCommand "gotg-env-${name}"
   {
     meta.mainProgram = "gotg-play";
+    # Not part of the derivation: adding it moved no Linux drvPath.
+    passthru = { inherit gotgWindows; };
   }
   ''
     mkdir -p $out/bin $out/share/gotg
@@ -550,26 +594,27 @@ pkgs.runCommand "gotg-env-${name}"
         )
       } $out/share/gotg/configure.json
     ''}
-    ${lib.optionalString (
-      padEmulator != null || padIdentity != null || padReserve != null || padController != null
-    ) ''
-      cp ${
-        pkgs.writeText "pads.json" (
-          builtins.toJSON (
-            {
-              # Which configuration directory the writer should be editing.
-              # Cemu's lives under XDG_CONFIG_HOME, which isolation moves — and
-              # on a first launch neither location exists yet, so this cannot be
-              # settled by looking.
-              inherit isolate;
-            }
-            // lib.optionalAttrs (padEmulator != null) { emulator = padEmulator; }
-            // lib.optionalAttrs (padConsole != null) { console = padConsole; }
-            // lib.optionalAttrs (padIdentity != null) { identity = padIdentity; }
-            // lib.optionalAttrs (padReserve != null) { reserve = padReserve; }
-            // lib.optionalAttrs (padController != null) { controller = padController; }
+    ${lib.optionalString
+      (padEmulator != null || padIdentity != null || padReserve != null || padController != null)
+      ''
+        cp ${
+          pkgs.writeText "pads.json" (
+            builtins.toJSON (
+              {
+                # Which configuration directory the writer should be editing.
+                # Cemu's lives under XDG_CONFIG_HOME, which isolation moves — and
+                # on a first launch neither location exists yet, so this cannot be
+                # settled by looking.
+                inherit isolate;
+              }
+              // lib.optionalAttrs (padEmulator != null) { emulator = padEmulator; }
+              // lib.optionalAttrs (padConsole != null) { console = padConsole; }
+              // lib.optionalAttrs (padIdentity != null) { identity = padIdentity; }
+              // lib.optionalAttrs (padReserve != null) { reserve = padReserve; }
+              // lib.optionalAttrs (padController != null) { controller = padController; }
+            )
           )
-        )
-      } $out/share/gotg/pads.json
-    ''}
+        } $out/share/gotg/pads.json
+      ''
+    }
   ''

@@ -97,10 +97,48 @@ let
   # derivation and a recursive merge would splice two of them together; the two
   # attributes a game is likely to want to add to rather than replace are merged
   # by hand.
+  #
+  # The Windows facet is the exception to "a game states only what it
+  # changes": a patch that touches how the game *starts* and says nothing of
+  # Windows drops the platform's facet rather than inheriting one that would
+  # start the wrong program, or the right one without the game's settings
+  # (docs/windows.md, "Inheritance fails safe").
+  launchFields = [
+    "emulator"
+    "bin"
+    "args"
+    "preLaunch"
+    "env"
+    "configFiles"
+    "path"
+    "isolate"
+    "ownsSession"
+    "nativePort"
+    "fullscreenFlag"
+  ];
+  windowsOf =
+    base: patch:
+    let
+      touched = lib.filter (f: patch ? ${f}) launchFields;
+    in
+    if patch ? windows then
+      patch.windows
+    else if touched == [ ] then
+      base.windows or null
+    else if (base.windows or null) == null then
+      null
+    else
+      {
+        reason = "this game changes ${lib.concatStringsSep ", " touched} and states no Windows facet of its own";
+      };
+
   merge =
     base: patch:
     base
     // patch
+    // lib.optionalAttrs (base ? windows || patch ? windows) {
+      windows = windowsOf base patch;
+    }
     // lib.optionalAttrs (base ? env || patch ? env) {
       env = (base.env or { }) // (patch.env or { });
     }

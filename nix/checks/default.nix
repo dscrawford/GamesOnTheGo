@@ -41,4 +41,5 @@
   prelaunchProbe = import ./prelaunch-probe.nix { inherit pkgs; };
   rust = import ./rust.nix { inherit pkgs; };
   ruff = import ./ruff.nix { inherit pkgs; };
+  windowsFacet = import ./windows-facet.nix { inherit pkgs; };
 }
