@@ -41,8 +41,14 @@ let
     inherit (danstickPkgs) danstick-rs;
     inherit gotg-pads;
   };
+  # The emulators' Windows builds (docs/windows.md), as windows-<name>: what
+  # a bundle ships as emulator/. nix/windows/emulators lists them.
+  windowsEmulators = pkgs.lib.mapAttrs' (n: pkgs.lib.nameValuePair "windows-${n}") (
+    import ./windows/emulators { inherit pkgs; }
+  );
 in
 envs
+// windowsEmulators
 // rec {
   gotg = pkgs.callPackage ../src/client {
     inherit gotg-pads gotg-killswitch;
