@@ -66,6 +66,23 @@ PORTS = [
 ]
 
 
+# Its Windows zip, as the same response's "windows" says.
+WINDOWS = [
+    {
+        "output": "n64.usa.game_00",
+        "variant": "",
+        "build": {
+            "kind": "win",
+            "output": "n64.usa.game_00",
+            "sha256": "ef" * 32,
+            "size": 68157440,
+            "device": "deck",
+            "written_at": "2026-11-06T10:00:00Z",
+        },
+    },
+]
+
+
 class State:
     def __init__(self):
         self.lock = threading.Lock()
@@ -153,11 +170,13 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/art/"):
             return self._send(200, PNG, "image/png") if "usa.game_0" in path else self._json(404, {"error": "none"})
         if path == "/ports/n64/usa.game_00":
-            return self._json(200, {"version": 1, "available": PORTS})
+            return self._json(200, {"version": 1, "available": PORTS, "windows": WINDOWS})
+        if path.startswith("/ports/") and path.endswith("/win/file"):
+            return self._send(200, b"PK\x03\x04", "application/zip")
         if path.startswith("/ports/") and path.endswith("/file"):
             return self._send(200, b"#!/bin/sh\n", "application/octet-stream")
         if path.startswith("/ports/"):
-            return self._json(200, {"version": 1, "available": []})
+            return self._json(200, {"version": 1, "available": [], "windows": []})
         m = re.fullmatch(r"/saves/(env-[a-z0-9_-]+)(?:/(meta|history|gen/(\d+)))?", path)
         if m:
             return self._saves(m, query, body)

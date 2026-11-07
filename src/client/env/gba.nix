@@ -12,6 +12,10 @@ let
     platform = "gba";
     console = "GameBoyAdvance";
   };
+  bios = [
+    "--setting"
+    "GameBoyAdvance/Firmware/BIOS.World={state}/bios/bios.zip"
+  ];
 in
 base
 // {
@@ -29,8 +33,10 @@ base
   # The settings key is <EmulatorName>/Firmware/<Type>.<Region>, read off
   # settings.cpp — ares restores command-line overrides before it saves, so
   # this never rewrites a path someone set by hand in its own UI.
-  args = base.args ++ [
-    "--setting"
-    "GameBoyAdvance/Firmware/BIOS.World={state}/bios/bios.zip"
-  ];
+  args = base.args ++ bios;
+
+  # The same on Windows: gotg.exe fetches `keys` into {state}/bios too.
+  windows = base.windows // {
+    args = base.windows.args ++ bios;
+  };
 }

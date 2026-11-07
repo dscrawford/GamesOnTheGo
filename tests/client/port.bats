@@ -73,3 +73,61 @@ teardown() {
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"run: gotg login"* ]]
 }
+
+@test "push --windows builds the Windows zip and puts it on the server beside the .run" {
+  gotg port push usa.zelda rando
+  [ "$status" -eq 0 ]
+  GOTG_DEVICE_NAME=the-deck gotg port push --windows usa.zelda rando
+  [ "$status" -eq 0 ]
+  grep -q "build $GOTG_LIBRARY#n64.usa.zelda.rando.gotgWindows -o" "$NIX_LOG"
+  [[ "$stderr" == *"the Windows build of n64.usa.zelda.rando is on the server"* ]]
+
+  run curl -fsS -H "Authorization: Bearer test-token" "$GOTG_SERVICE_URL/ports/n64.usa.zelda.rando/win"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .kind <<<"$output")" = win ]
+  [ "$(jq -r .device <<<"$output")" = the-deck ]
+  [[ "$(jq -r .sha256 <<<"$output")" == "$(sha256sum "$TEST_TMP/store/gotg-n64.usa.zelda.rando-win64.zip" | cut -d' ' -f1)" ]]
+
+  gotg port list
+  [ "$status" -eq 0 ]
+  [[ "$output" == *n64.usa.zelda.rando$'\t'*$'\t'linux* ]]
+  [[ "$output" == *n64.usa.zelda.rando$'\t'*$'\t'windows* ]]
+}
+
+@test "pull --windows and rm --windows touch only the zip" {
+  gotg port push usa.zelda
+  [ "$status" -eq 0 ]
+  gotg port push usa.zelda --windows
+  [ "$status" -eq 0 ]
+
+  cd "$TEST_TMP"
+  gotg port pull --windows usa.zelda
+  [ "$status" -eq 0 ]
+  cmp "$TEST_TMP/gotg-n64.usa.zelda-win64.zip" "$TEST_TMP/store/gotg-n64.usa.zelda-win64.zip"
+  [[ "$stderr" == *"gotg.exe login"* ]]
+
+  gotg port rm --windows usa.zelda
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"dropped the Windows build of n64.usa.zelda"* ]]
+  gotg port pull --windows usa.zelda -o "$TEST_TMP/again.zip"
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"nothing has been pushed for the Windows build of n64.usa.zelda; on a machine with Nix: gotg port push --windows usa.zelda"* ]]
+  [ ! -e "$TEST_TMP/again.zip" ]
+  # The .run is still there.
+  gotg port pull usa.zelda -o "$TEST_TMP/still.run"
+  [ "$status" -eq 0 ]
+}
+
+@test "a Windows build that fails uploads nothing" {
+  NIX_FAIL_WINDOWS=1 gotg port push --windows usa.zelda
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"could not build n64.usa.zelda.gotgWindows"* ]]
+  run curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer test-token" "$GOTG_SERVICE_URL/ports/n64.usa.zelda/win"
+  [ "$output" = 404 ]
+}
+
+@test "an unknown option is a usage error" {
+  gotg port push --linux usa.zelda
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"usage: gotg port push [--windows] <id> [variant]"* ]]
+}

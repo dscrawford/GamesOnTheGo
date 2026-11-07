@@ -79,9 +79,13 @@ let
     ];
   };
 
+  # The emulators' Windows builds, for the facets (docs/windows.md). Only in
+  # passthru, so nothing here reaches a Linux derivation.
+  windowsEmulators = import ../../../../nix/windows/emulators { inherit pkgs; };
+
   # How a game is launched, one emulator per file.
   emulators = [
-    (import ../emulators/ares.nix { inherit pkgs lib; })
+    (import ../emulators/ares.nix { inherit pkgs lib windowsEmulators; })
     (import ../emulators/dolphin.nix { inherit pkgs lib discArchiveRecipe; })
     (import ../emulators/ryujinx.nix { inherit pkgs lib; })
     (import ../emulators/harkinian.nix { inherit pkgs lib steps; })
@@ -108,6 +112,7 @@ in
 {
   inherit
     steps
+    windowsEmulators
     sceneArchiveRecipe
     discArchiveRecipe
     switchRecipe

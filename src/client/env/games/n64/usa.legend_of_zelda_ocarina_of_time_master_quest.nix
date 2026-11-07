@@ -6,12 +6,19 @@
 # game: SoH can hold both archives at once, but two environments means two sets
 # of saves and settings, and either game can be removed on its own. The port
 # itself is built once and shared.
-{ helpers, pkgs, gotgPkgs, ... }:
+{
+  helpers,
+  pkgs,
+  gotgPkgs,
+  ...
+}:
 helpers.harkinianPort {
   port = gotgPkgs.shipwright;
   bin = "soh";
   appName = "soh";
   romArgument = true;
+  windowsPort = helpers.windowsEmulators.shipwright;
+  saveGlobs = [ "Save/**" ];
   config = "shipofharkinian.json";
   archives = [
     "oot.o2r"

@@ -149,6 +149,39 @@ def test_detail_lists_the_flakes_ports_with_a_download_or_the_push():
     assert "`${BASE}/ports/${encodeURIComponent(output)}/file`" in api
 
 
+def test_detail_offers_the_windows_zip_or_how_to_push_one():
+    detail = (STATIC_DIR / "js" / "views" / "detail.js").read_text()
+    api = (STATIC_DIR / "js" / "api.js").read_text()
+    assert "windowsSection(game, info.windows)" in detail and "api.windowsUrl(w.output)" in detail
+    assert "Download for Windows" in detail and "mib(w.build.size)" in detail and "pushedBy(w.build)" in detail
+    assert "gotg port push --windows ${game.id}" in detail
+    assert "gotg.exe login" in detail
+    assert "`${BASE}/ports/${encodeURIComponent(output)}/win/file`" in api
+    assert "windows: r.windows || []" in api
+
+
+def test_the_mock_says_what_the_service_says_about_windows(tmp_path):
+    # The detail page is developed against the mock: its /ports/<platform>/<id>
+    # has the keys the real one has, and the real one has "windows".
+    from mock_server import serve as mock
+
+    from gotg.ports import PortsStore
+
+    server = mock()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        cookie = {"Cookie": "gotg_session=admin"}
+        mocked = json.loads(send(f"{base}/ports/n64/usa.game_00", token=None, headers=cookie)[2])
+        assert mocked["windows"][0]["build"]["kind"] == "win"
+        assert send(f"{base}/ports/n64.usa.game_00/win/file", token=None, headers=cookie)[2].startswith(b"PK")
+    finally:
+        server.shutdown()
+        server.server_close()
+    with serve(Config(token=LEGACY), ports=PortsStore(root=tmp_path)) as served:
+        status, _, body = served.call("GET", "/ports/n64/usa.game_00")
+        assert status == 200 and set(json.loads(body)) == set(mocked)
+
+
 def test_the_ui_reaches_the_service_through_its_base_only():
     # Under a path prefix (a reverse proxy at /c/<id>/gotg/) a root-absolute
     # URL would leave the service. Every request goes through raw(), which

@@ -128,4 +128,6 @@ in
   args = map (a: if a == "{target}" then "{state}/rogue/pokeemerald.gba" else a) base.args;
 
   inherit (base) saves saveExcludes;
+
+  windows.reason = "the ROM is compiled from source on the first launch, with a Linux toolchain a Windows machine does not have";
 }

@@ -40,5 +40,12 @@
   sm64Coop = import ./sm64-coop.nix { inherit pkgs; };
   prelaunchProbe = import ./prelaunch-probe.nix { inherit pkgs; };
   rust = import ./rust.nix { inherit pkgs; };
+  rustSaves = import ./rust-saves.nix { inherit pkgs packages; };
   ruff = import ./ruff.nix { inherit pkgs; };
+  windowsFacet = import ./windows-facet.nix { inherit pkgs; };
+  windowsPlatforms = import ./windows-platforms.nix { inherit pkgs packages; };
+  windowsDolphin = import ./windows-dolphin.nix { inherit pkgs packages; };
+  windowsHarkinian = import ./windows-harkinian.nix { inherit pkgs packages; };
+  windowsLauncher = import ./windows-launcher.nix { inherit pkgs packages; };
+  windowsBundle = import ./windows-bundle.nix { inherit pkgs packages flake; };
 }

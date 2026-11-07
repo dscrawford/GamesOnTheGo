@@ -1,3 +1,3 @@
 # GameCube — dolphin, which takes the disc image with -e ("exec").
 { helpers, ... }:
-helpers.dolphinPlatform { }
+helpers.dolphinPlatform { windowsEmulator = helpers.windowsEmulators.dolphin; }

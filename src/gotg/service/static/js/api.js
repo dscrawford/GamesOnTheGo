@@ -29,8 +29,10 @@
  *
  *  Ports (portable builds a client pushed with `gotg port push`, per user):
  *  GET /ports/<platform>/<id> -> {version:1, available:[{output, variant, description,
- *    build: {output, sha256, size, device, written_at}|null}]}; 503 without a store.
+ *    build: {output, sha256, size, device, written_at}|null}],
+ *    windows:[{output, variant, build: {kind:"win", ...}}]}; 503 without a store.
  *  GET /ports/<output>/file -> the build's bytes (a download; the session cookie is the credential).
+ *  GET /ports/<output>/win/file -> the output's Windows zip (`gotg port push --windows`).
  *
  *  Admin (existing): GET /admin/info {public_url}; GET /admin/invites
  *    {invites:[{name,user,created_at,expires_at}]}; POST /admin/invites
@@ -180,13 +182,18 @@ export async function savePut(attr, bundle, { parent = "", device = "web", force
   }
 }
 
-/** What the flake can build for a game, each with its pushed build; null when the service keeps none. */
+/** What the flake can build for a game, each with its pushed build, and the game's
+ * pushed Windows zips: {available, windows}; null when the service keeps none. */
 export const ports = (platform, id) =>
-  call(`/ports/${encodeURIComponent(platform)}/${encodeURIComponent(id)}`).then((r) => r.available).catch((e) => {
+  call(`/ports/${encodeURIComponent(platform)}/${encodeURIComponent(id)}`).then((r) => ({
+    available: r.available || [],
+    windows: r.windows || [],
+  })).catch((e) => {
     if (e.status === 404 || e.status === 503) return null;
     throw e;
   });
 export const portUrl = (output) => `${BASE}/ports/${encodeURIComponent(output)}/file`;
+export const windowsUrl = (output) => `${BASE}/ports/${encodeURIComponent(output)}/win/file`;
 
 export const admin = {
   tokens: () => call("/admin/tokens").then((r) => r.tokens),

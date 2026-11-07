@@ -5,6 +5,11 @@
 # window rules and the controller numbers follow from it inside the split
 # function. Discovery wants one file per variant (the name is the variant), so
 # each is a call.
+#
+# `base //` carries the game's Windows facet into the patch, where the
+# inheritance rule (env/default.nix) would read it as the variant's own. A
+# split-screen session is a nested compositor with a copy per player, Linux
+# only, so the variant says so -- unless its split states a facet itself.
 _: {
   coopVariant =
     {
@@ -13,5 +18,15 @@ _: {
       gotgPkgs,
       base,
     }:
-    base // split { inherit gotgPkgs base players; };
+    let
+      patch = split { inherit gotgPkgs base players; };
+    in
+    base
+    // patch
+    // {
+      windows =
+        patch.windows or {
+          reason = "the ${toString players}-player split screen runs a Linux-only nested session";
+        };
+    };
 }

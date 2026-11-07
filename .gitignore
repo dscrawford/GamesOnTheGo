@@ -31,3 +31,4 @@ src/ui/assets/built/
 
 # The Rust workspace's build output.
 /rust/target/
+/rust/windows/target/

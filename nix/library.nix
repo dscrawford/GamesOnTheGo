@@ -76,6 +76,8 @@ in
       inherit (packagesFor system) gotg;
       inherit envDir server catalog;
       portable = (pkgsFor system).callPackage ./portable.nix { };
+      windows = (pkgsFor system).callPackage ./windows/bundle.nix { };
+      windowsLauncher = (packagesFor system).gotg-launch-windows or null;
     }
   );
 }

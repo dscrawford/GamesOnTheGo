@@ -49,6 +49,12 @@ helpers.harkinianPort {
   bin = "BattleShip";
   # nativePort comes from the helper: everything it builds is a port.
   archives = [ "BattleShip.o2r" ];
+  # On Windows it extracts by itself, silently, from a ROM of this name in
+  # its data directory (port/first_run.cpp, FindBaseRom), with the torch.exe
+  # beside it; the copy is kept so a new version can re-extract.
+  windowsPort = helpers.windowsEmulators.battleship;
+  windowsRomCopy = "baserom.us.z64";
+  saveGlobs = [ "ssb64_save.bin" ];
   config = "BattleShip.cfg.json";
   # No lus-cvars.cmake: libultraship's Compat.h fallbacks, unprefixed
   # (gControlNav, gMSAAValue...), and no frame-rate interpolation to match a
