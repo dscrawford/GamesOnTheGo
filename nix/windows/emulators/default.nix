@@ -8,4 +8,7 @@ in
 {
   ares = callPackage ./ares.nix { };
   dolphin = callPackage ./dolphin.nix { };
+  shipwright = callPackage ./shipwright.nix { };
+  "2ship" = callPackage ./2ship.nix { };
+  battleship = callPackage ./battleship.nix { };
 }
