@@ -5,7 +5,7 @@
 # environments (Four Swords' split screen) depend on.
 [workspace]
 resolver = "2"
-members = ["crates/gotg-saves"]
+members = ["crates/gotg-launch", "crates/gotg-saves"]
 
 [workspace.package]
 version = "0.3.0"

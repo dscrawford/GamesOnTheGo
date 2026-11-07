@@ -174,6 +174,33 @@ An unknown action is an error, not a skip: a bundle never half-applies.
 
 Also: `gotg.exe saves list|push|pull|restore`, `gotg.exe --version`.
 
+### gotg.exe, as built (rust/crates/gotg-launch)
+
+- `gotg login [--server URL] [--token | --claim URL]`: the server defaults to
+  the spec's. At a terminal it is the device flow (`/auth/device`), falling
+  back to a pasted token where the deployment has no browser sign-in;
+  `--token`, or a token on a pipe, is the Linux client's typed-token login;
+  `--claim` is its claim link. Checked against the service before api.json
+  (`{url, token, name?}`, merged) is written. No netrc: that is Nix's.
+- `gotg [--spec PATH] [--windowed] [--dry-run] [-- ARGS...]`: `--dry-run`
+  prints `cwd:`, `env:` and `run:` (the command line, Windows-quoted) and
+  touches nothing. The emulator runs with its own directory as the working
+  directory.
+- Downloads: `single_file`/`no_intro_set` games are placed as
+  `games\<platform>\<member>`, `wiiu_decrypted` as `games\<platform>\<id>\`;
+  extras (updates, DLC) are not installed. Any other handler needs a Linux
+  recipe and is refused by name.
+- Action paths: a relative `file`, `path` or `to` is under `{state}`; a
+  relative `copy.from` is under `{bundle}`. `copy` takes a file or a tree;
+  without `once` it is copied every launch.
+- `GOTG_ENV_STATE` is `{state}` itself; `GOTG_GAMES`, `GOTG_CONFIG_DIR`,
+  `GOTG_API_FILE`, `GOTG_LOCAL_DIR` (the %LOCALAPPDATA%\gotg half),
+  `GOTG_FILES_URL`, `GOTG_FIRMWARE_DIR`, `GOTG_PROGRESS_LINES=1` and
+  `GOTG_NO_BROWSER` as their names say. Off Windows (tests) the defaults are
+  `$XDG_CONFIG_HOME/gotg` and `$XDG_DATA_HOME/gotg-launch`.
+- Saves: `src/saves.rs` is the seam (`SaveSync::pull`/`push`/`command`);
+  until `gotg-saves` is wired in, saves stay on the machine.
+
 ## Where the pieces live
 
 | piece                         | path                                    |
