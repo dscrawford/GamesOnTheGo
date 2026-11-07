@@ -267,6 +267,17 @@ fn linux_and_windows_share_one_save() {
     got.retain(|(p, _)| p != "saves/a.bs1");
     assert_eq!(got, want);
     assert!(!linux.state().join("saves/b.bs2").exists());
+    // Pulled is not changed: the bash client pushes nothing back, though its
+    // own bundle of these files is other bytes than ours, and a second pull
+    // finds it already there. The service stays at generation 2.
+    let (ok, _, err) = linux.saves(&["push", &name]);
+    assert!(ok, "bash push after pull: {err}");
+    let (ok, _, err) = linux.saves(&["pull", &name]);
+    assert!(ok, "bash pull again: {err}");
+    assert!(err.contains("already has generation 2"), "bash pull again: {err}");
+    let check = w.saves.check(&w.env).unwrap();
+    assert_eq!(check.state, State::Same);
+    assert_eq!(check.remote.map(|m| m.generation), Some(2));
 
     // And the bash client's verdict on a conflict made across the two.
     write(&linux.state(), "saves/a.srm", b"linux again");

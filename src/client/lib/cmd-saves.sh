@@ -373,7 +373,12 @@ saves_pull_one() {
   if saves_bundle "$attr" "$tmp/current.tar.zst" 2>/dev/null; then
     current="$(saves_hash "$tmp/current.tar.zst")"
   fi
-  if [[ "$current" == "$rhash" ]]; then
+  # Or the files here are that generation as this machine bundles them: a
+  # generation pushed from Windows (gotg.exe) holds the same files in
+  # different bytes, so its hash never equals a bundle made here.
+  if [[ "$current" == "$rhash" ]] ||
+    [[ -n "$current" && "$current" == "$(saves_journal_get "$attr" pushed_hash)" &&
+      "$rgen" == "$(saves_journal_get "$attr" base_generation)" ]]; then
     log "$attr: already has generation $rgen"
     saves_journal_set "$attr" "$(jq -nc --argjson g "$rgen" --arg h "$rhash" \
       '{base_generation: $g, base_hash: $h}')"
@@ -400,9 +405,18 @@ saves_pull_one() {
   saves_verify_bundle "$attr" "$tmp/pull.tar.zst" "$rhash"
   saves_extract "$attr" "$tmp/pull.tar.zst"
 
-  saves_journal_set "$attr" "$(jq -nc --argjson g "$rgen" --arg h "$rhash" --arg at "$(iso_now)" \
+  # pushed_hash is what a bundle of these files hashes to *here*, so the next
+  # push sees nothing new. The same as $rhash for a bundle this client made;
+  # not for one from gotg.exe, whose archiver writes the same files in other
+  # bytes -- recording $rhash would push that generation straight back.
+  local here="$rhash"
+  if saves_bundle "$attr" "$tmp/here.tar.zst" 2>/dev/null; then
+    here="$(saves_hash "$tmp/here.tar.zst")"
+  fi
+
+  saves_journal_set "$attr" "$(jq -nc --argjson g "$rgen" --arg h "$rhash" --arg here "$here" --arg at "$(iso_now)" \
     --arg written "$(jq -r '.written_at // empty' <<<"$latest")" \
-    '{base_generation: $g, base_hash: $h, pushed_hash: $h, pulled_at: $at, base_written_at: $written}')"
+    '{base_generation: $g, base_hash: $h, pushed_hash: $here, pulled_at: $at, base_written_at: $written}')"
   log "$attr: now at generation $rgen"
 }
 
