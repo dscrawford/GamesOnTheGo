@@ -27,6 +27,11 @@ let
     font = "${pkgs.freefont_ttf}/share/fonts/truetype/FreeSansBold.ttf";
   };
 
+  # gotg.exe, the Windows bundle's launcher (docs/windows.md), and the same
+  # crate built for this machine, which the tests run.
+  gotg-launch = pkgs.callPackage ../rust/gotg-launch.nix { };
+  gotg-launch-windows = pkgs.pkgsCross.mingwW64.callPackage ../rust/gotg-launch.nix { };
+
   # One launchable environment per platform, plus one per game that needs
   # its own settings -- see src/client/env. `gotg play` builds these by name.
   envs = import ../src/client/env {
@@ -131,7 +136,12 @@ envs
   # The browser player's emulators, trimmed to the cores play_systems.json maps.
   emulatorjs = pkgs.callPackage ./emulatorjs.nix { };
   default = gotg;
-  inherit gotg-pads gotg-killswitch;
+  inherit
+    gotg-pads
+    gotg-killswitch
+    gotg-launch
+    gotg-launch-windows
+    ;
   inherit (tools)
     dk64recomp
     melee-pc

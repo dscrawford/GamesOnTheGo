@@ -1,0 +1,22 @@
+[package]
+name = "gotg-launch"
+description = "gotg.exe: a game's Windows bundle, downloaded, prepared and started without Nix"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "gotg"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json.workspace = true
+sha2 = "0.11"
+ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+rpassword = "7"
+
+[lints]
+workspace = true
