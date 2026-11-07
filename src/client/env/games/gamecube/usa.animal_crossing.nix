@@ -96,6 +96,9 @@ in
   # Not the platform emulator: a native port. `gotg play <id> emulate`
   # is the way back to ares/dolphin when this one misbehaves.
   nativePort = true;
+  # The release is a Windows program, but the RVZ-to-ISO conversion before it
+  # is a preLaunch, which the Windows contract has no action for yet.
+  windows.reason = "a native port (the ac-decomp PC build) that needs the disc converted to ISO by a first-launch step a Windows bundle cannot run yet";
   # Settings are the keybindings ini and the in-game menus; there is no
   # separate configuration program to open.
   configurable = false;

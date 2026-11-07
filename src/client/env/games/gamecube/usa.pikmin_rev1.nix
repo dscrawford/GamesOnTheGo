@@ -54,6 +54,7 @@ in
   # Not the platform emulator: a native port. `gotg play <id> emulate`
   # is the way back to ares/dolphin when this one misbehaves.
   nativePort = true;
+  windows.reason = "a native port (Open Nectar), built here for Linux, whose first launch extracts the disc with Linux tools";
   # Settings are in-game, on F1. There is no separate configuration screen to
   # open, and `gotg configure` opening it would just start the game.
   configurable = false;

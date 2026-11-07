@@ -66,4 +66,5 @@ base
   isolate = true;
   inherit (disc) path;
   preLaunch = base.preLaunch + disc.preLaunch;
+  windows.reason = "the modded disc is built at first launch with pyisotools and dolphin-tool from Nix, which a Windows bundle does not carry";
 }

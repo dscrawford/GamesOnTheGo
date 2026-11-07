@@ -4,6 +4,58 @@
   lib,
   discArchiveRecipe,
 }:
+let
+  # The preLaunch below as Windows data (docs/windows.md). --user puts
+  # Dolphin's whole user directory where XDG_DATA_HOME/dolphin-emu is on
+  # Linux, so GC/, Wii/ and StateSaves/ sit at the same {state}-relative
+  # paths and the platform's save globs mean the same files on both. Only the
+  # config differs: Config/ inside that directory, not config/dolphin-emu.
+  user = "{state}/data/dolphin-emu";
+  ini = file: section: key: value: {
+    ini = {
+      file = "${user}/Config/${file}";
+      inherit section key value;
+    };
+  };
+  dolphinWindows = emulator: {
+    inherit emulator;
+    exe = "Dolphin.exe";
+    args = [
+      "--user=${user}"
+      "-b"
+      "{fullscreen}"
+      "-e"
+      "{target}"
+    ];
+    # A command-line config layer, which Dolphin never writes back: a
+    # windowed run keeps the Fullscreen = False below, as Linux decides per
+    # launch.
+    fullscreenFlag = "--config=Dolphin.Display.Fullscreen=True";
+    # GameCube port 1 on the first XInput pad, seeded once: pads-dolphin.sh's
+    # bindings with XInput's names for the same positions. Wii remotes are
+    # not written, as on Linux.
+    configFiles."data/dolphin-emu/Config/GCPadNew.ini" = ./dolphin-windows/GCPadNew.ini;
+    actions = [
+      (ini "Dolphin.ini" "Input" "BackgroundInput" "True")
+      (ini "Dolphin.ini" "Display" "Fullscreen" "False")
+      (ini "Dolphin.ini" "Interface" "SkipNKitWarning" "True")
+      (ini "Dolphin.ini" "Analytics" "PermissionAsked" "True")
+      (ini "Dolphin.ini" "Analytics" "Enabled" "False")
+      (ini "Dolphin.ini" "Interface" "ConfirmStop" "False")
+      # Direct3D 11, Dolphin's own Windows default: every Windows 10/11 driver
+      # has it, where Vulkan (Linux's pick, for Mesa) is missing or weakest
+      # on the Intel iGPUs a Windows laptop is likely to have.
+      (ini "Dolphin.ini" "Core" "GFXBackend" "D3D")
+      # The bundle pins one Dolphin and its updater would replace emulator/
+      # under gotg.exe. An empty track is the settings screen's "Don't Update".
+      (ini "Dolphin.ini" "AutoUpdate" "UpdateTrack" "")
+      (ini "GFX.ini" "Settings" "ShaderCompilationMode" "2")
+      (ini "GFX.ini" "Settings" "WaitForShadersBeforeStarting" "True")
+      # No InternalResolution: on Linux it comes from the player's video.json,
+      # which has no Windows counterpart, and its "default" writes nothing.
+    ];
+  };
+in
 {
   # Two things here are about input rather than emulation, and both were learned
   # from a pad that worked in Dolphin's own configuration screen and did nothing
@@ -20,7 +72,11 @@
   # writes this file itself, so it is edited in place on each launch rather than
   # seeded through configFiles, which only ever fills in a file that is absent.
   dolphinPlatform =
-    { }:
+    {
+      # The official Windows build (nix/windows/emulators/dolphin.nix), handed
+      # in by the platform file from gotgPkgs.windows; null is no Windows facet.
+      windowsEmulator ? null,
+    }:
     {
       emulator = pkgs.dolphin-emu;
       bin = "dolphin-emu";
@@ -209,6 +265,12 @@
           fi
         fi
       '';
+
+      windows =
+        if windowsEmulator == null then
+          { reason = "no Windows Dolphin was handed to this platform"; }
+        else
+          dolphinWindows windowsEmulator;
     };
 
 }
