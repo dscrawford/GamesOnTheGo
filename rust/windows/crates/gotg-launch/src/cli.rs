@@ -27,7 +27,7 @@ pub struct Cli {
 pub const USAGE: &str = "\
 usage: gotg [--spec PATH] [--windowed] [--dry-run] [-- EMULATOR ARGS...]
        gotg login [--server URL] [--token | --claim URL]
-       gotg saves list|push|pull|restore ...
+       gotg saves list | check | push [--force] | pull | restore <id> | keep here|remote
        gotg --version
 
 With no command, gotg downloads the game named by spec.json (beside gotg.exe,

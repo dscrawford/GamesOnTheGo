@@ -262,6 +262,7 @@ dependencies = [
 name = "gotg-launch"
 version = "0.3.0"
 dependencies = [
+ "gotg-saves",
  "rpassword",
  "serde",
  "serde_json",

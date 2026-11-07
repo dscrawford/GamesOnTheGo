@@ -66,13 +66,83 @@ pub fn apply(action: &Action, ph: &Placeholders) -> Result<(), String> {
     }
 }
 
+/// What a launch's `first_run` comes to, decided without touching anything
+/// (a dry run prints it), then carried out by [`first_run_apply`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FirstRunPlan {
+    /// Archives stamped by another version (or unstamped): deleted first.
+    pub delete: Vec<PathBuf>,
+    /// The stamp to write, on a first run with one.
+    pub stamp: Option<(PathBuf, String)>,
+    /// Start with `first_run.args` rather than `args`.
+    pub first: bool,
+}
+
+pub fn first_run_plan(spec: &Spec, ph: &Placeholders) -> FirstRunPlan {
+    let Some(fr) = &spec.windows.first_run else {
+        return FirstRunPlan::default();
+    };
+    let paths: Vec<PathBuf> = fr.unless_exists.iter().map(|p| ph.path(p, &ph.state)).collect();
+    let stamp = fr
+        .stamp
+        .as_ref()
+        .map(|s| (ph.path(&s.file, &ph.state), s.value.clone()));
+    // As the Linux preLaunch reads it, $(cat): trailing newlines are not the value.
+    let stale = stamp.as_ref().is_some_and(|(file, value)| {
+        fs::read_to_string(file)
+            .map(|t| t.trim_end_matches(['\n', '\r']) != value)
+            .unwrap_or(true)
+    });
+    let delete: Vec<PathBuf> = if stale {
+        paths.iter().filter(|p| p.exists()).cloned().collect()
+    } else {
+        Vec::new()
+    };
+    let first = paths.iter().all(|p| !p.exists() || delete.contains(p));
+    FirstRunPlan {
+        delete,
+        stamp: if first { stamp } else { None },
+        first,
+    }
+}
+
+pub fn first_run_apply(plan: &FirstRunPlan) -> Result<(), String> {
+    for p in &plan.delete {
+        crate::log(&format!(
+            "{} is from another version; extracting again",
+            p.display()
+        ));
+        let r = if p.is_dir() {
+            fs::remove_dir_all(p)
+        } else {
+            fs::remove_file(p)
+        };
+        r.map_err(|e| format!("{}: {e}", p.display()))?;
+    }
+    // Stamped before the start, as on Linux: an extraction that fails leaves
+    // no archive, and the next launch tries again.
+    if let Some((file, value)) = &plan.stamp {
+        if let Some(dir) = file.parent() {
+            fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        fsx::write_atomic(file, value.as_bytes(), None)?;
+    }
+    Ok(())
+}
+
+/// The working directory, rendered (relative: under `{state}`).
+pub fn cwd(spec: &Spec, ph: &Placeholders) -> PathBuf {
+    ph.path(&spec.windows.cwd, &ph.state)
+}
+
 pub fn run(spec: &Spec, ph: &Placeholders) -> Result<(), String> {
     saves_dirs(spec, &ph.state)?;
     seed_config(spec, ph)?;
     for (i, a) in spec.windows.actions.iter().enumerate() {
         apply(a, ph).map_err(|e| format!("action {}: {e}", i + 1))?;
     }
-    Ok(())
+    let dir = cwd(spec, ph);
+    fs::create_dir_all(&dir).map_err(|e| format!("cwd {}: {e}", dir.display()))
 }
 
 #[cfg(test)]
@@ -180,5 +250,119 @@ mod tests {
             fs::read_to_string(ph.state.join("copied.bml")).expect("copy"),
             "mine"
         );
+    }
+
+    #[test]
+    fn cwd_defaults_to_state_and_is_made() {
+        let (_t, spec, ph) = setup("cwd", json!({"config_files": {}, "actions": []}));
+        assert_eq!(cwd(&spec, &ph), ph.state);
+        let (_t, spec, ph) = setup(
+            "cwd2",
+            json!({"config_files": {}, "cwd": "{state}/data/soh", "actions": []}),
+        );
+        assert_eq!(cwd(&spec, &ph), ph.state.join("data").join("soh"));
+        run(&spec, &ph).expect("run");
+        assert!(ph.state.join("data").join("soh").is_dir());
+        // Relative: under {state}, like an action's path.
+        let (_t, spec, ph) = setup(
+            "cwd3",
+            json!({"config_files": {}, "cwd": "data/x", "actions": []}),
+        );
+        assert_eq!(cwd(&spec, &ph), ph.state.join("data").join("x"));
+    }
+
+    fn harkinian(tag: &str) -> (Tmp, Spec, Placeholders) {
+        setup(
+            tag,
+            json!({"config_files": {}, "actions": [], "args": [], "cwd": "{state}/data/soh", "first_run": {
+                "unless_exists": ["{state}/data/soh/oot.o2r", "{state}/data/soh/oot-mq.o2r"],
+                "stamp": {"file": "{state}/data/soh/.gotg-archive-version", "value": "9.3.0"},
+                "args": ["{target}"]}}),
+        )
+    }
+
+    #[test]
+    fn first_run_without_an_archive_stamps_and_passes_the_rom() {
+        let (_t, spec, ph) = harkinian("fr1");
+        let data = ph.state.join("data").join("soh");
+        let plan = first_run_plan(&spec, &ph);
+        assert!(plan.first && plan.delete.is_empty());
+        assert_eq!(
+            plan.stamp,
+            Some((data.join(".gotg-archive-version"), "9.3.0".into()))
+        );
+        first_run_apply(&plan).expect("apply");
+        assert_eq!(
+            fs::read_to_string(data.join(".gotg-archive-version")).expect("stamp"),
+            "9.3.0"
+        );
+    }
+
+    #[test]
+    fn an_archive_of_this_version_is_a_normal_run() {
+        let (_t, spec, ph) = harkinian("fr2");
+        let data = ph.state.join("data").join("soh");
+        fs::create_dir_all(&data).expect("mkdir");
+        fs::write(data.join("oot-mq.o2r"), "archive").expect("write");
+        // Linux's echo leaves a newline; $(cat) does not read it.
+        fs::write(data.join(".gotg-archive-version"), "9.3.0\n").expect("write");
+        let plan = first_run_plan(&spec, &ph);
+        assert_eq!(plan, FirstRunPlan::default());
+        first_run_apply(&plan).expect("apply");
+        assert!(data.join("oot-mq.o2r").exists());
+    }
+
+    #[test]
+    fn an_archive_of_another_version_is_deleted_and_extracted_again() {
+        for (tag, stamp) in [("fr3", Some("9.2.0")), ("fr4", None)] {
+            let (_t, spec, ph) = harkinian(tag);
+            let data = ph.state.join("data").join("soh");
+            fs::create_dir_all(&data).expect("mkdir");
+            fs::write(data.join("oot.o2r"), "old").expect("write");
+            if let Some(s) = stamp {
+                fs::write(data.join(".gotg-archive-version"), s).expect("write");
+            }
+            let plan = first_run_plan(&spec, &ph);
+            assert!(plan.first, "{tag}");
+            assert_eq!(plan.delete, vec![data.join("oot.o2r")]);
+            first_run_apply(&plan).expect("apply");
+            assert!(!data.join("oot.o2r").exists());
+            assert_eq!(
+                fs::read_to_string(data.join(".gotg-archive-version")).expect("stamp"),
+                "9.3.0"
+            );
+        }
+    }
+
+    #[test]
+    fn no_stamp_means_only_presence_counts() {
+        let (_t, spec, ph) = setup(
+            "fr5",
+            json!({"config_files": {}, "actions": [], "first_run": {"unless_exists": ["a.o2r"], "stamp": null, "args": ["x"]}}),
+        );
+        assert!(first_run_plan(&spec, &ph).first);
+        assert_eq!(first_run_plan(&spec, &ph).stamp, None);
+        fs::create_dir_all(&ph.state).expect("mkdir");
+        fs::write(ph.state.join("a.o2r"), "").expect("write");
+        assert!(!first_run_plan(&spec, &ph).first);
+        // And without first_run at all, nothing.
+        let (_t, spec, ph) = setup("fr6", json!({"config_files": {}, "actions": []}));
+        assert_eq!(first_run_plan(&spec, &ph), FirstRunPlan::default());
+    }
+
+    #[test]
+    fn copy_from_the_target_once() {
+        let (_t, spec, ph) = setup(
+            "target",
+            json!({"config_files": {}, "actions": [{"copy": {"from": "{target}", "to": "{state}/data/battleship/baserom.us.z64", "once": true}}]}),
+        );
+        fs::create_dir_all(&ph.install).expect("mkdir");
+        fs::write(&ph.target, "ROM").expect("write");
+        run(&spec, &ph).expect("run");
+        let dest = ph.state.join("data").join("battleship").join("baserom.us.z64");
+        assert_eq!(fs::read_to_string(&dest).expect("copied"), "ROM");
+        fs::write(&ph.target, "NEWER").expect("write");
+        run(&spec, &ph).expect("run again");
+        assert_eq!(fs::read_to_string(&dest).expect("kept"), "ROM");
     }
 }

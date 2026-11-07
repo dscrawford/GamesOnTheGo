@@ -137,7 +137,7 @@ impl Bundle {
         let emu = dir.join("emulator").join("emu");
         fs::write(
             &emu,
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$GOTG_TEST_ARGS\"\nprintf '%s' \"$EMU_STATE\" > \"$GOTG_TEST_ARGS.env\"\npwd > \"$GOTG_TEST_ARGS.cwd\"\nexit 7\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$GOTG_TEST_ARGS\"\nprintf '%s' \"$EMU_STATE\" > \"$GOTG_TEST_ARGS.env\"\npwd > \"$GOTG_TEST_ARGS.cwd\"\nif [ -n \"$GOTG_TEST_SAVE\" ]; then printf %s \"$GOTG_TEST_SAVE\" > \"$EMU_STATE/saves/game.srm\"; fi\nexit 7\n",
         )
         .unwrap();
         use std::os::unix::fs::PermissionsExt;
@@ -167,6 +167,10 @@ impl Bundle {
     }
 
     fn gotg(&self, args: &[&str], stdin: Option<&str>) -> Output {
+        self.gotg_env(args, stdin, &[])
+    }
+
+    fn gotg_env(&self, args: &[&str], stdin: Option<&str>, env: &[(&str, &str)]) -> Output {
         let mut cmd = Command::new(GOTG);
         cmd.args(["--spec", self.dir.join("spec.json").to_str().unwrap()])
             .args(args)
@@ -176,6 +180,7 @@ impl Bundle {
             .env("GOTG_CONFIG_DIR", self.home.join("config"))
             .env("GOTG_LOCAL_DIR", self.home.join("local"))
             .env("GOTG_TEST_ARGS", self.home.join("args"))
+            .envs(env.iter().copied())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -268,7 +273,7 @@ fn login_download_and_launch_against_the_service() {
     );
     assert_eq!(
         fs::read_to_string(b.home.join("args.cwd")).unwrap().trim(),
-        b.dir.join("emulator").display().to_string()
+        state.display().to_string()
     );
     assert!(state.join("saves").is_dir());
     assert_eq!(
@@ -334,5 +339,121 @@ fn a_poisoned_partial_is_replaced() {
         GAME
     );
     drop(svc);
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// Two machines on one service: a launch pushes after the game, the other's
+/// launch pulls before it, a conflict stops a launch until `saves keep`, and
+/// an unreachable service is played through.
+#[test]
+fn saves_follow_the_player_between_machines() {
+    let Some(proxy) = std::env::var("GOTG_TEST_PROXY").ok().filter(|p| !p.is_empty()) else {
+        eprintln!("skipped: GOTG_TEST_PROXY is not set");
+        return;
+    };
+    let root = std::env::temp_dir().join(format!("gotg-launch-saves-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let svc = start(&proxy, &root);
+    let name = "A Game (USA).z64";
+    let game = publish(&svc, "n64", "usa.a_game", name, GAME);
+    let a = Bundle::new(&root, &svc, game);
+    let b = Bundle {
+        dir: a.dir.clone(),
+        home: root.join("home-b"),
+    };
+    let save = |m: &Bundle| {
+        m.home
+            .join("local")
+            .join("env")
+            .join("env-n64")
+            .join("saves")
+            .join("game.srm")
+    };
+    for m in [&a, &b] {
+        let out = m.gotg(&["login", "--token"], Some("test-token\n"));
+        assert!(out.status.success(), "{}", text(&out.stderr));
+    }
+
+    // Not signed in to the saves store is never the case here; a game that
+    // writes a save has it pushed once it exits, its exit code kept.
+    let out = a.gotg_env(
+        &[],
+        None,
+        &[("GOTG_TEST_SAVE", "one"), ("GOTG_DEVICE_NAME", "pc-a")],
+    );
+    let err = text(&out.stderr);
+    assert_eq!(out.status.code(), Some(7), "{err}");
+    assert!(err.contains("env-n64: pushed saves, generation 1"), "{err}");
+
+    // The other machine has it before its game starts.
+    let out = b.gotg(&[], None);
+    let err = text(&out.stderr);
+    assert_eq!(out.status.code(), Some(7), "{err}");
+    assert!(err.contains("pulled saves, generation 1"), "{err}");
+    assert_eq!(fs::read_to_string(save(&b)).unwrap(), "one");
+
+    // Both move on: a's game pushes 2, b's own work since 1 is a conflict,
+    // and b's launch stops before its game.
+    let out = a.gotg_env(&[], None, &[("GOTG_TEST_SAVE", "two")]);
+    assert!(
+        text(&out.stderr).contains("generation 2"),
+        "{}",
+        text(&out.stderr)
+    );
+    fs::write(save(&b), "b's own").unwrap();
+    let _ = fs::remove_file(b.home.join("args"));
+    let out = b.gotg(&[], None);
+    let err = text(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{err}");
+    assert!(
+        err.contains("gotg saves keep here") && err.contains("gotg saves keep remote"),
+        "{err}"
+    );
+    assert!(!b.home.join("args").exists(), "the game started over a conflict");
+    assert_eq!(fs::read_to_string(save(&b)).unwrap(), "b's own");
+
+    // Settled for this machine's: pushed over the head, which stays listed.
+    let out = b.gotg(&["saves", "keep", "here"], None);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert!(
+        text(&out.stdout).contains("generation 3"),
+        "{}",
+        text(&out.stdout)
+    );
+    let out = b.gotg(&["saves", "list"], None);
+    let list = text(&out.stdout);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert!(
+        list.contains("remote:3 (here)") && list.contains("remote:2"),
+        "{list}"
+    );
+    assert!(list.contains("pc-a"), "the device is the name a gave: {list}");
+
+    // a takes the service's; then a restore of generation 2 puts "two" back.
+    let out = a.gotg(&["saves", "keep", "remote"], None);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert_eq!(fs::read_to_string(save(&a)).unwrap(), "b's own");
+    let out = a.gotg(&["saves", "restore", "remote:2"], None);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert_eq!(fs::read_to_string(save(&a)).unwrap(), "two");
+    let out = a.gotg(&["saves", "push"], None);
+    assert!(
+        text(&out.stdout).contains("pushed generation 4"),
+        "{}",
+        text(&out.stdout)
+    );
+    let out = a.gotg(&["saves", "pull"], None);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert!(a.gotg(&["saves", "frob"], None).status.code() == Some(1));
+
+    // The service gone: the game is played anyway, with a warning, and the
+    // push after it is a warning too.
+    drop(svc);
+    let out = a.gotg_env(&[], None, &[("GOTG_TEST_SAVE", "offline")]);
+    let err = text(&out.stderr);
+    assert_eq!(out.status.code(), Some(7), "{err}");
+    assert!(err.contains("saves not synced"), "{err}");
+    assert!(err.contains("saves were not pushed"), "{err}");
     let _ = fs::remove_dir_all(&root);
 }
