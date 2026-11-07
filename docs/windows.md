@@ -142,6 +142,18 @@ every launch makes Ship of Harkinian ask "Confirm Re-extract" and
 2 Ship 2 Harkinian extract again. Both fields are new since d007731 and
 optional, so a manifest without them means what it did.
 
+### Unpack
+
+`unpack` is null or `{"target": "<glob>"}`. When set and the game's
+download is a `.zip`, gotg.exe unpacks the members whose file name matches
+the glob (`*`, `?`, case-insensitive; paths inside the zip are dropped)
+into a directory beside it named for the zip, and `{target}` is the first
+match. Any other download is placed as it is. This is the Windows half of
+the Linux client's `unzip` override (`data/overrides.json`), whose
+unpacking is a Nix recipe there: the Harkinian ports read a bare `.z64`
+and the catalog ships Ocarina of Time, Master Quest and Majora's Mask as
+No-Intro zips.
+
 ### Actions (version 1)
 
 Each is an object with one key. gotg.exe applies them in order on every

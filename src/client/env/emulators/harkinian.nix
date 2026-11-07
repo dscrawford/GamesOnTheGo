@@ -112,6 +112,9 @@ let
       # No flag: full screen is the seed's Window.Fullscreen.Enabled.
       fullscreenFlag = null;
       cwd = data;
+      # The ports read a bare ROM; a No-Intro zip (overrides.json `unzip`)
+      # is unpacked by gotg.exe first. A bare .z64 download is left as it is.
+      unpack.target = "*.z64";
       configFiles."data/${appName}/${config}" = builtins.toJSON seed;
     }
     // (

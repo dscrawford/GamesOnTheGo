@@ -104,6 +104,16 @@ pub struct Windows {
     pub cwd: String,
     #[serde(default)]
     pub first_run: Option<FirstRun>,
+    /// A game downloaded as a zip is unpacked, and `{target}` is the member
+    /// matching this; the Linux client's `unzip` override and recipe.
+    #[serde(default)]
+    pub unpack: Option<Unpack>,
+}
+
+/// `{"target": "*.z64"}`: a file-name glob (`*`, `?`; case-insensitive).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Unpack {
+    pub target: String,
 }
 
 fn default_cwd() -> String {
@@ -296,6 +306,11 @@ impl Spec {
                 return Err(format!("firmware.file is a name, not a path: {}", f.file));
             }
             validate::filename(&f.file)?;
+        }
+        if let Some(u) = &w.unpack
+            && (u.target.is_empty() || u.target.contains(['/', '\\']))
+        {
+            return Err("unpack.target must be a file name glob".into());
         }
         if let Some(fr) = &w.first_run
             && fr.unless_exists.is_empty()

@@ -174,7 +174,7 @@ fn launch(cli: &Cli, dirs: &Dirs) -> Result<i32, String> {
     let on = fullscreen_on(cli);
 
     if cli.dry_run {
-        let target = download::install_path(&spec.game, &dirs.games)?;
+        let target = download::target_path(&spec, &dirs.games)?;
         let ph = placeholders(&spec, dirs, &bundle, target, on);
         let first = prepare::first_run_plan(&spec, &ph);
         if spec.windows.first_run.is_some() {
@@ -191,7 +191,7 @@ fn launch(cli: &Cli, dirs: &Dirs) -> Result<i32, String> {
             exe.display()
         ));
     }
-    let installed = download::install_path(&spec.game, &dirs.games)?.exists();
+    let installed = download::target_path(&spec, &dirs.games)?.exists();
     if !installed && api.is_none() && std::io::stdin().is_terminal() {
         log("this computer is not signed in yet; signing in first (gotg login)");
         let server = (!spec.server.is_empty()).then_some(spec.server.as_str());
@@ -329,7 +329,7 @@ mod tests {
             _ => None,
         })
         .expect("dirs");
-        let target = download::install_path(&spec.game, &dirs.games).expect("target");
+        let target = download::target_path(&spec, &dirs.games).expect("target");
         let ph = placeholders(&spec, &dirs, Path::new("/b"), target, false);
         let p = plan(&spec, &ph, &["--extra".to_string()], false);
         assert_eq!(p.exe, Path::new("/b").join("emulator").join("ares.exe"));

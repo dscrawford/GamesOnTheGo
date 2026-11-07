@@ -63,6 +63,109 @@ pub fn install_path(game: &Game, games: &Path) -> Result<PathBuf, String> {
     })
 }
 
+/// `{target}` as a launch sees it: the installed file, or for a zipped game
+/// with `unpack`, the member of its unpacked directory matching the glob
+/// (the glob itself when nothing is unpacked yet, so a dry run can say).
+pub fn target_path(spec: &Spec, games: &Path) -> Result<PathBuf, String> {
+    let path = install_path(&spec.game, games)?;
+    match unpack_dir(spec, &path) {
+        None => Ok(path),
+        Some((dir, glob)) => Ok(find_member(&dir, glob).unwrap_or_else(|| dir.join(glob))),
+    }
+}
+
+/// The directory a zipped game unpacks into, beside where the zip would go
+/// and named for it, and the glob: only with `unpack` and a `.zip` member.
+fn unpack_dir<'a>(spec: &'a Spec, path: &Path) -> Option<(PathBuf, &'a str)> {
+    let u = spec.windows.unpack.as_ref()?;
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    let stem = name
+        .len()
+        .checked_sub(4)
+        .filter(|&i| name[i..].eq_ignore_ascii_case(".zip"))?;
+    Some((path.with_file_name(&name[..stem]), u.target.as_str()))
+}
+
+fn find_member(dir: &Path, glob: &str) -> Option<PathBuf> {
+    let mut found: Vec<PathBuf> = fs::read_dir(dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter(|e| glob_match(glob, &e.file_name().to_string_lossy()))
+        .map(|e| e.path())
+        .collect();
+    found.sort();
+    found.into_iter().next()
+}
+
+/// `*` and `?`, case-insensitively: a file-name glob, as the override's
+/// `target` is.
+pub fn glob_match(glob: &str, name: &str) -> bool {
+    fn go(g: &[char], n: &[char]) -> bool {
+        match g.split_first() {
+            None => n.is_empty(),
+            Some(('*', rest)) => (0..=n.len()).any(|i| go(rest, &n[i..])),
+            Some(('?', rest)) => !n.is_empty() && go(rest, &n[1..]),
+            Some((c, rest)) => n
+                .split_first()
+                .is_some_and(|(m, nr)| c.to_lowercase().eq(m.to_lowercase()) && go(rest, nr)),
+        }
+    }
+    let g: Vec<char> = glob.chars().collect();
+    let n: Vec<char> = name.chars().collect();
+    go(&g, &n)
+}
+
+/// Every member of `zip_path` whose file name matches `glob`, flattened into
+/// `dir` (built aside, then moved in). Names are the archive's: only the
+/// last path segment is kept, and the whole is capped at `cap` bytes.
+fn unzip_matching(zip_path: &Path, dir: &Path, glob: &str, cap: u64) -> Result<(), String> {
+    let file = File::open(zip_path).map_err(|e| format!("{}: {e}", zip_path.display()))?;
+    let mut zip =
+        zip::ZipArchive::new(file).map_err(|e| format!("{}: not a zip: {e}", zip_path.display()))?;
+    let part = dir.with_extension("part");
+    let _ = fs::remove_dir_all(&part);
+    fs::create_dir_all(&part).map_err(|e| format!("{}: {e}", part.display()))?;
+    let result = (|| -> Result<usize, String> {
+        let (mut count, mut total) = (0, 0u64);
+        for i in 0..zip.len() {
+            let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
+            if !entry.is_file() {
+                continue;
+            }
+            let raw = entry.name().map_err(|e| e.to_string())?.replace('\\', "/");
+            let base = raw.rsplit('/').next().unwrap_or_default().to_string();
+            if base.is_empty() || base == "." || base == ".." || !glob_match(glob, &base) {
+                continue;
+            }
+            let out = part.join(&base);
+            let mut w = File::create(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+            let n = std::io::copy(&mut (&mut entry).take(cap - total + 1), &mut w)
+                .map_err(|e| format!("{}: {e}", out.display()))?;
+            total += n;
+            if total > cap {
+                return Err(format!("{} inflates past {}", zip_path.display(), human(cap)));
+            }
+            count += 1;
+        }
+        Ok(count)
+    })();
+    match result {
+        Ok(0) => {
+            let _ = fs::remove_dir_all(&part);
+            Err(format!("{} holds no file matching {glob}", zip_path.display()))
+        }
+        Ok(_) => {
+            let _ = fs::remove_dir_all(dir);
+            fs::rename(&part, dir).map_err(|e| format!("{} -> {}: {e}", part.display(), dir.display()))
+        }
+        Err(e) => {
+            let _ = fs::remove_dir_all(&part);
+            Err(e)
+        }
+    }
+}
+
 /// The members to fetch. A single-file game with updates or DLC beside it
 /// gets the game alone: placing those is a recipe's job, and the game plays
 /// without them (the Linux client's "legacy" install is the same file).
@@ -301,8 +404,9 @@ fn fetch_once(
 pub fn ensure(spec: &Spec, dirs: &Dirs, api: Option<&Api>) -> Result<PathBuf, String> {
     let game = &spec.game;
     let dest = install_path(game, &dirs.games)?;
-    if dest.exists() {
-        return Ok(dest);
+    let target = target_path(spec, &dirs.games)?;
+    if target.exists() {
+        return Ok(target);
     }
     let api = api.ok_or("not logged in -- run: gotg login")?;
     let _lock = crate::fsx::lock(
@@ -310,8 +414,8 @@ pub fn ensure(spec: &Spec, dirs: &Dirs, api: Option<&Api>) -> Result<PathBuf, St
         Duration::from_secs(3600),
         &format!("downloading {}", game.id),
     )?;
-    if dest.exists() {
-        return Ok(dest);
+    if target.exists() {
+        return Ok(target);
     }
     let wanted = members(game);
     if game.files.iter().any(is_extra) && matches!(layout(game)?, Layout::File(_)) {
@@ -428,7 +532,13 @@ pub fn ensure(spec: &Spec, dirs: &Dirs, api: Option<&Api>) -> Result<PathBuf, St
     match layout(game)? {
         Layout::File(name) => {
             let from = under(&staged, &name);
-            fs::rename(&from, &dest).map_err(|e| format!("{} -> {}: {e}", from.display(), dest.display()))?;
+            if let Some((dir, glob)) = unpack_dir(spec, &dest) {
+                // A ROM a port reads bare, from the zip it is distributed in.
+                unzip_matching(&from, &dir, glob, 8 << 30)?;
+            } else {
+                fs::rename(&from, &dest)
+                    .map_err(|e| format!("{} -> {}: {e}", from.display(), dest.display()))?;
+            }
             let _ = fs::remove_dir_all(&staged);
         }
         Layout::Tree => {
@@ -437,8 +547,9 @@ pub fn ensure(spec: &Spec, dirs: &Dirs, api: Option<&Api>) -> Result<PathBuf, St
                 .map_err(|e| format!("{} -> {}: {e}", staged.display(), dest.display()))?;
         }
     }
-    crate::log(&format!("installed {}", dest.display()));
-    Ok(dest)
+    let target = target_path(spec, &dirs.games)?;
+    crate::log(&format!("installed {}", target.display()));
+    Ok(target)
 }
 
 #[cfg(test)]
@@ -473,6 +584,62 @@ mod tests {
         assert_eq!(members(&t).len(), 2);
         let r = game("scene_archive", &["a.rar"]);
         assert!(layout(&r).expect_err("should fail").contains("recipe"));
+    }
+
+    #[test]
+    fn globs() {
+        assert!(glob_match("*.z64", "Zelda (USA).Z64"));
+        assert!(glob_match("a?c", "abc"));
+        assert!(!glob_match("*.z64", "readme.txt"));
+        assert!(!glob_match("*.z64", "x.z64.bak"));
+    }
+
+    #[test]
+    fn a_zipped_rom_is_unpacked_to_its_member() {
+        let root = std::env::temp_dir().join(format!("gotg-unpack-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("mkdir");
+        let zp = root.join("Zelda (USA).zip");
+        let mut w = zip::ZipWriter::new(File::create(&zp).expect("create"));
+        let o = zip::write::SimpleFileOptions::default();
+        w.start_file("inner/Zelda (USA).z64", o).expect("start");
+        w.write_all(b"rom").expect("write");
+        w.start_file("readme.txt", o).expect("start");
+        w.write_all(b"no").expect("write");
+        w.finish().expect("finish");
+        let dir = root.join("Zelda (USA)");
+        unzip_matching(&zp, &dir, "*.z64", 1 << 20).expect("unzip");
+        assert_eq!(fs::read(dir.join("Zelda (USA).z64")).expect("read"), b"rom");
+        assert!(!dir.join("readme.txt").exists());
+        assert_eq!(find_member(&dir, "*.z64"), Some(dir.join("Zelda (USA).z64")));
+        assert!(unzip_matching(&zp, &root.join("none"), "*.n64", 1 << 20).is_err());
+        assert!(unzip_matching(&zp, &root.join("big"), "*.z64", 1).is_err());
+        assert!(!root.join("none").exists() && !root.join("big").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn target_follows_unpack() {
+        let mut v = sample();
+        v["game"]["files"] = serde_json::json!([{"name": "Zelda (USA).zip", "size_bytes": 1}]);
+        let plain = Spec::parse(&v.to_string()).expect("spec");
+        let g = Path::new("/g");
+        assert_eq!(
+            target_path(&plain, g).expect("t"),
+            g.join("n64").join("Zelda (USA).zip")
+        );
+        v["windows"]["unpack"] = serde_json::json!({"target": "*.z64"});
+        let unpacked = Spec::parse(&v.to_string()).expect("spec");
+        assert_eq!(
+            target_path(&unpacked, g).expect("t"),
+            g.join("n64").join("Zelda (USA)").join("*.z64")
+        );
+        v["game"]["files"] = serde_json::json!([{"name": "Smash (USA).z64", "size_bytes": 1}]);
+        let bare = Spec::parse(&v.to_string()).expect("spec");
+        assert_eq!(
+            target_path(&bare, g).expect("t"),
+            g.join("n64").join("Smash (USA).z64")
+        );
     }
 
     #[test]

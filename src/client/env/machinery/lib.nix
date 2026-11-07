@@ -545,6 +545,10 @@ let
               }
             else
               null;
+          # A zipped download unpacked by gotg.exe, {target} its member
+          # matching this glob: what the Linux client's `unzip` override and
+          # recipe do (docs/windows.md, "Unpack").
+          unpack = windows.unpack or null;
           states = saveStates;
           excludes = saveExcludes;
           saves_dirs = savesDirs;
