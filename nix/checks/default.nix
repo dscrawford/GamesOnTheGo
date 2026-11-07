@@ -47,4 +47,5 @@
   windowsDolphin = import ./windows-dolphin.nix { inherit pkgs packages; };
   windowsHarkinian = import ./windows-harkinian.nix { inherit pkgs packages; };
   windowsLauncher = import ./windows-launcher.nix { inherit pkgs packages; };
+  windowsBundle = import ./windows-bundle.nix { inherit pkgs packages flake; };
 }
