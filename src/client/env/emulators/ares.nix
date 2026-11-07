@@ -1,5 +1,9 @@
 # ares, for the cartridge platforms that share it.
-{ pkgs, lib }:
+{
+  pkgs,
+  lib,
+  windowsEmulators,
+}:
 {
   # It does not consult XDG for saves. Emulator::locate reads settings.paths.saves,
   # which is empty by default, and falls back to the ROM's own path with the
@@ -119,6 +123,51 @@
       ]
       ++ [ "{target}" ];
       recipes = lib.optionalAttrs (recipe != null) recipe;
+
+      # The same ares (nix/windows/emulators/ares.nix, the release matching
+      # pkgs.ares), told the same things where they still apply. Read off
+      # ares v148's desktop-ui.cpp and ruby/, and run under Wine:
+      #
+      #   * --settings-file: the isolation `isolate` gives on Linux. Unasked,
+      #     ares takes a settings.bml beside ares.exe, else the one in
+      #     %LOCALAPPDATA%\ares\ an installed ares made -- shared by every
+      #     game, and the user's own -- else creates one beside ares.exe.
+      #     Pointed into {state}, each environment has its own; ares creates
+      #     the file, and the directory exists (saves_dirs is under it).
+      #   * Paths/Home: the <System>.sys directories ares writes (mia's
+      #     System::locate), which would otherwise go to Systems\ beside the
+      #     exe, i.e. into the unpacked bundle. Trailing slash as for Saves.
+      #   * Not Audio/Frequency, Audio/Latency: the zero-latency starvation is
+      #     ruby/audio/sdl.cpp's; Windows starts on WASAPI, whose shared-mode
+      #     buffer is at least two device periods whatever Latency says, and
+      #     which only accepts the mixer's own rate.
+      #   * --fullscreen, not --pseudofullscreen: the override-redirect
+      #     trouble is X11's (ruby/video/glx.cpp); on Windows it is plain
+      #     exclusive-or-borderless fullscreen of the presentation window.
+      #
+      # No seed config: ares writes a complete settings.bml on first start.
+      # The overlay's save-state hotkeys (states_prepare) are Linux only.
+      windows = {
+        emulator = windowsEmulators.ares;
+        exe = "ares.exe";
+        fullscreenFlag = "--fullscreen";
+        args = [
+          "{fullscreen}"
+          "--settings-file"
+          "{state}/settings.bml"
+          "--setting"
+          "Paths/Saves={state}/saves/"
+          "--setting"
+          "Paths/Home={state}/Systems/"
+          "--no-file-prompt"
+        ]
+        ++ lib.optionals (aresSystem != null) [
+          "--system"
+          aresSystem
+        ]
+        ++ [ "{target}" ];
+      };
+
       saves = [ "saves/**" ];
       # Nothing is bound in ares' Hotkey block until the launch writes it.
       saveStates = {
