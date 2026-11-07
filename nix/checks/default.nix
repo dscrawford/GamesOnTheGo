@@ -42,4 +42,5 @@
   rust = import ./rust.nix { inherit pkgs; };
   ruff = import ./ruff.nix { inherit pkgs; };
   windowsFacet = import ./windows-facet.nix { inherit pkgs; };
+  windowsDolphin = import ./windows-dolphin.nix { inherit pkgs packages; };
 }
