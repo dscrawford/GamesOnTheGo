@@ -280,12 +280,13 @@ The ports' official Windows releases (`nix/windows/emulators/shipwright.nix`,
 - The official builds refuse a few places: Ship of Harkinian and 2 Ship
   stop if their exe is under `%TEMP%` or a path containing `OneDrive`, so
   the bundle must be unpacked somewhere else.
-- **Saves do not travel yet, for two of them.** The globs are the Linux
-  ones, and two miss the save itself on both systems: Ship of Harkinian
-  writes `Save/file<n>.sav` (SaveManager.cpp), not `saves/`, and BattleShip
-  `ssb64_save.bin` beside its settings (port_save.cpp). 2 Ship's
-  `saves/` is right. Fixing the globs changes the Linux saves.json, which
-  moves those environments' drvPaths, so it is left for its own change.
+- **Saves.** The globs are the Linux ones, so a save made on either system
+  lands at the same path under {state}: Ship of Harkinian's `Save/**`
+  (SaveManager.cpp writes `Save/file<n>.sav`), BattleShip's
+  `ssb64_save.bin` (port_save.cpp), 2 Ship's `saves/**`, each with its
+  settings file. Before this work every port used 2 Ship's `saves/**`, so
+  Ship of Harkinian and BattleShip carried their settings and no save, on
+  Linux too; `harkinianPort { saveGlobs }` fixed it for both systems.
 - Split-screen variants (2p/3p/4p) have no facet.
 
 ## Not yet

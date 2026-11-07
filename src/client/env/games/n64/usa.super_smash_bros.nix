@@ -54,6 +54,7 @@ helpers.harkinianPort {
   # beside it; the copy is kept so a new version can re-extract.
   windowsPort = helpers.windowsEmulators.battleship;
   windowsRomCopy = "baserom.us.z64";
+  saveGlobs = [ "ssb64_save.bin" ];
   config = "BattleShip.cfg.json";
   # No lus-cvars.cmake: libultraship's Compat.h fallbacks, unprefixed
   # (gControlNav, gMSAAValue...), and no frame-rate interpolation to match a

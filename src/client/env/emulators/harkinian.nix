@@ -172,6 +172,10 @@ in
   #             its dot ("gSettings."; BattleShip has none and "g"), and
   #             `refresh` the match-refresh-rate cvar, which each port names
   #             for itself (2Ship: gMatchRefreshRate) or lacks (null)
+  #   saveGlobs  the port's saves, relative to its data directory. Each port
+  #             files them for itself: 2Ship under saves/, Ship of Harkinian
+  #             as Save/file<n>.sav (soh/Enhancements/savestates/SaveManager),
+  #             BattleShip as one ssb64_save.bin (port/port_save.cpp)
   #   romArgument  hand the first run its ROM on the command line rather than
   #             leave it to be found: Ship of Harkinian 9.3 asks "Generate
   #             one now?" before it scans, and only its argument path extracts
@@ -184,6 +188,7 @@ in
       archives,
       config,
       settings ? { },
+      saveGlobs ? [ "saves/**" ],
       romArgument ? false,
       # The port's Windows build (helpers.windowsEmulators.*), or null for
       # none; and harkinianWindows' romCopy for it.
@@ -255,10 +260,9 @@ in
       # moves nothing — it only says what is worth carrying to another machine.
       # Matched against a live 2ship directory: the saves themselves, and the
       # settings file beside them, which is small and worth keeping in step.
-      saves = [
-        "data/${appName}/saves/**"
-        "data/${appName}/${config}"
-      ];
+      # Until 2026-11 every port's glob was 2Ship's saves/**, so Ship of
+      # Harkinian and BattleShip carried their settings and never a save.
+      saves = map (g: "data/${appName}/${g}") saveGlobs ++ [ "data/${appName}/${config}" ];
       # The .o2r is tens of megabytes and is rebuilt from the ROM by the first
       # run on any machine, so uploading it would be paying to move something
       # the other end can make for itself. The rest is noise.
