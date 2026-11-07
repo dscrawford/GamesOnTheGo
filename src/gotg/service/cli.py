@@ -16,6 +16,7 @@ from pathlib import Path
 from ..catalog import CatalogStore
 from ..logs import DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_QUOTA_BYTES, LogsStore
 from ..ports import DEFAULT_MAX_BYTES as PORTS_MAX_BYTES
+from ..ports import DEFAULT_MAX_WIN_BYTES as PORTS_MAX_WIN_BYTES
 from ..ports import PortsStore
 from ..saves import DEFAULT_KEEP, DEFAULT_MAX_BYTES, SavesStore
 from ..tokens import TokenStore
@@ -225,6 +226,7 @@ def ports_from_env(env: Mapping[str, str] | None = None) -> PortsStore | None:
     return PortsStore(
         root=Path(root),
         max_bytes=int(env.get("GOTG_PORTS_MAX_BYTES", str(PORTS_MAX_BYTES))),
+        max_win_bytes=int(env.get("GOTG_PORTS_MAX_WIN_BYTES", str(PORTS_MAX_WIN_BYTES))),
         games_dir=games_dir,
     )
 

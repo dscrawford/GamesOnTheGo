@@ -5,13 +5,15 @@ from __future__ import annotations
 
 import hashlib
 import http.client
+import io
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
 from harness import send, serve
 
-from gotg.ports import PortsStore, available
+from gotg.ports import PortsStore, TooLarge, available
 from gotg.service.app import Config
 from gotg.service.routes_ports import ports_target
 from gotg.tokens import TokenStore
@@ -158,3 +160,118 @@ def test_no_store_is_a_503(tmp_path):
     with serve(Config(token="client-token")) as server:
         assert send(f"{server.url}/ports")[0] == 503
         assert put(server.url, "n64.usa.donkey_kong_64", b"x")[0] == 503
+
+
+def bundle(top="gotg-n64.usa.donkey_kong_64", names=("gotg.exe", "spec.json", "emulator/ares.exe")) -> bytes:
+    """A zip shaped as nix/windows/bundle.nix makes one."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as z:
+        for name in names:
+            z.writestr(f"{top}/{name}" if top else name, f"contents of {name}")
+    return buffer.getvalue()
+
+
+def test_win_targets():
+    assert ports_target("n64.usa.donkey_kong_64/win") == ("build", "n64.usa.donkey_kong_64", "win")
+    assert ports_target("n64.usa.donkey_kong_64/win/file") == ("file", "n64.usa.donkey_kong_64", "win")
+    assert ports_target("n64.usa.donkey_kong_64/win/other") is None
+    assert ports_target("n64.usa.donkey_kong_64/win/file/x") is None
+
+
+def test_a_windows_zip_sits_beside_the_run_and_is_its_own(service, ports):
+    output = "n64.usa.donkey_kong_64"
+    run = b"#!/bin/sh\necho portable\n"
+    win = bundle()
+    assert put(service, output, run)[0] == 200
+    status, _, raw = send(f"{service}/ports/{output}/win", method="PUT", body=win, headers={"X-Gotg-Device": "deck"})
+    assert status == 200
+    meta = json.loads(raw)
+    assert meta["kind"] == "win" and meta["sha256"] == hashlib.sha256(win).hexdigest() and meta["size"] == len(win)
+
+    directory = ports.root / "legacy" / output
+    digest = meta["sha256"][:12]
+    assert sorted(p.name for p in directory.iterdir()) == sorted(
+        ["current.json", f"build-{hashlib.sha256(run).hexdigest()[:12]}.run", "win.json", f"win-{digest}.zip"]
+    )
+
+    status, headers, got = send(f"{service}/ports/{output}/win/file")
+    assert status == 200 and got == win
+    assert f"gotg-{output}-win64.zip" in headers["Content-Disposition"]
+    assert headers["ETag"] == f'"{meta["sha256"]}"'
+    assert send(f"{service}/ports/{output}/win/file", headers={"Range": "bytes=4-"})[2] == win[4:]
+    assert send(f"{service}/ports/{output}/file")[2] == run
+    assert json.loads(send(f"{service}/ports/{output}/win")[2])["file"] == f"win-{digest}.zip"
+    assert json.loads(send(f"{service}/ports/{output}")[2])["kind"] == "run"
+
+    listed = json.loads(send(f"{service}/ports")[2])["ports"]
+    assert [(p["output"], p["kind"]) for p in listed] == [(output, "run"), (output, "win")]
+
+    # Newest only, per kind: a second zip replaces the first and leaves the .run.
+    second = bundle(names=("gotg.exe", "spec.json", "emulator/ares.exe", "config/x"))
+    assert send(f"{service}/ports/{output}/win", method="PUT", body=second)[0] == 200
+    zips = [p.name for p in directory.iterdir() if p.suffix == ".zip"]
+    assert zips == [f"win-{hashlib.sha256(second).hexdigest()[:12]}.zip"]
+
+    # Dropping one kind leaves the other.
+    assert send(f"{service}/ports/{output}/win", method="DELETE")[0] == 200
+    assert send(f"{service}/ports/{output}/win/file")[0] == 404
+    assert send(f"{service}/ports/{output}/file")[2] == run
+    assert send(f"{service}/ports/{output}/win", method="DELETE")[0] == 404
+
+
+def test_the_games_page_has_its_windows_zips_even_for_an_emulator_only_game(service):
+    assert send(f"{service}/ports/genesis/usa.sonic_the_hedgehog_3")[0] == 200
+    empty = json.loads(send(f"{service}/ports/genesis/usa.sonic_the_hedgehog_3")[2])
+    assert empty == {"version": 1, "available": [], "windows": []}
+
+    sonic = "genesis.usa.sonic_the_hedgehog_3"
+    assert send(f"{service}/ports/{sonic}/win", method="PUT", body=bundle(f"gotg-{sonic}"))[0] == 200
+    two = f"{sonic}.2p"
+    assert send(f"{service}/ports/{two}/win", method="PUT", body=bundle(f"gotg-{two}"))[0] == 200
+    # Another game whose id starts the same is not this one's.
+    other = "genesis.usa.sonic_the_hedgehog_3_and_knuckles"
+    assert send(f"{service}/ports/{other}/win", method="PUT", body=bundle(f"gotg-{other}"))[0] == 200
+
+    windows = json.loads(send(f"{service}/ports/genesis/usa.sonic_the_hedgehog_3")[2])["windows"]
+    assert [(w["output"], w["variant"]) for w in windows] == [(sonic, ""), (two, "2p")]
+    assert windows[0]["build"]["kind"] == "win" and windows[0]["build"]["size"] > 0
+
+    # A .run of the game is not a Windows build.
+    assert put(service, "n64.usa.donkey_kong_64", b"run")[0] == 200
+    available = json.loads(send(f"{service}/ports/n64/usa.donkey_kong_64")[2])
+    assert available["windows"] == []
+
+
+@pytest.mark.parametrize(
+    ("body", "why"),
+    [
+        (b"#!/bin/sh\necho not a zip\n", b"does not start like one"),
+        (b"PK\x03\x04" + b"\0" * 64, b"unreadable"),
+        (bundle(names=("gotg.exe", "emulator/ares.exe")), b"no gotg-n64.usa.donkey_kong_64/spec.json"),
+        (bundle(names=("spec.json",)), b"no gotg-n64.usa.donkey_kong_64/gotg.exe"),
+        (bundle(top="gotg-n64.usa.banjo_kazooie"), b"outside gotg-n64.usa.donkey_kong_64/"),
+        (bundle(top="", names=("gotg.exe", "spec.json")), b"outside"),
+        (bundle(names=("gotg.exe", "spec.json", "../../evil.dll")), b"outside"),
+    ],
+)
+def test_a_windows_upload_that_is_not_a_bundle_keeps_nothing(service, ports, body, why):
+    status, _, raw = send(f"{service}/ports/n64.usa.donkey_kong_64/win", method="PUT", body=body)
+    assert status == 400 and why in raw, raw
+    assert ports.meta("legacy", "n64.usa.donkey_kong_64", "win") is None
+    assert list((ports.root / "legacy" / "n64.usa.donkey_kong_64").iterdir()) == []
+
+
+def test_a_windows_zip_has_its_own_cap(tmp_path):
+    store = PortsStore(root=tmp_path / "ports", max_bytes=1_000_000, max_win_bytes=100)
+    body = bundle()
+    with pytest.raises(TooLarge, match="Windows"):
+        store.put("legacy", "n64.usa.donkey_kong_64", io.BytesIO(body).read, len(body), kind="win")
+    assert store.put("legacy", "n64.usa.donkey_kong_64", io.BytesIO(body).read, len(body))["kind"] == "run"
+    with pytest.raises(ValueError, match="kind"):
+        store.meta("legacy", "n64.usa.donkey_kong_64", "exe")
+
+
+def test_win_shapes_and_methods(service):
+    assert send(f"{service}/ports/n64.usa.donkey_kong_64/win/file", method="PUT", body=b"x")[0] == 405
+    assert send(f"{service}/ports/n64.usa.donkey_kong_64/win", token=None)[0] == 401
+    assert send(f"{service}/ports/n64.usa.donkey_kong_64/win")[0] == 404
