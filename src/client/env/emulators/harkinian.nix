@@ -70,9 +70,79 @@ let
         }}
       fi
     '';
+
+  # The same port on Windows (docs/windows.md, "Ship of Harkinian"): its
+  # official release, which is portable -- libultraship's app directory is
+  # the working directory there, and SHIP_HOME is not read -- so it starts
+  # in {state}/data/<appName>, where XDG_DATA_HOME puts it on Linux. The
+  # files, and so the save globs, are the same on both.
+  #
+  #   port     the Windows build (helpers.windowsEmulators.*)
+  #   unsaid   lusSettings' cvars: the seed is the file a first Linux launch
+  #            writes, full screen on. Not edited per launch (no JSON action),
+  #            so --windowed is not heard: F11 is the port's own toggle.
+  #   romCopy  null: the first run (no archive, or one stamped by another
+  #            version) gets the ROM as its argument, which both
+  #            HarbourMasters ports extract from without a question;
+  #            passing it every launch would re-extract each time. A file
+  #            name: copied there once instead, for a port that finds its
+  #            ROM by name and extracts it itself (BattleShip).
+  harkinianWindows =
+    {
+      port,
+      appName,
+      config,
+      archives,
+      unsaid,
+      romCopy ? null,
+    }:
+    let
+      data = "{state}/data/${appName}";
+      value = v: if builtins.isBool v then (if v then 1 else 0) else v;
+      seed = lib.foldl' lib.recursiveUpdate { Window.Fullscreen.Enabled = true; } (
+        lib.mapAttrsToList (
+          cvar: v: lib.setAttrByPath ([ "CVars" ] ++ lib.splitString "." cvar) (value v)
+        ) unsaid
+      );
+    in
+    {
+      emulator = port;
+      inherit (port) exe;
+      args = [ ];
+      # No flag: full screen is the seed's Window.Fullscreen.Enabled.
+      fullscreenFlag = null;
+      cwd = data;
+      configFiles."data/${appName}/${config}" = builtins.toJSON seed;
+    }
+    // (
+      if romCopy == null then
+        {
+          firstRun = {
+            unlessExists = map (a: "${data}/${a}") archives;
+            # The Linux preLaunch's stamp, same file and meaning.
+            stamp = {
+              file = "${data}/.gotg-archive-version";
+              value = port.version;
+            };
+            args = [ "{target}" ];
+          };
+        }
+      else
+        {
+          actions = [
+            {
+              copy = {
+                from = "{target}";
+                to = "${data}/${romCopy}";
+                once = true;
+              };
+            }
+          ];
+        }
+    );
 in
 {
-  inherit lusSettings;
+  inherit lusSettings harkinianWindows;
 
   # The HarbourMasters ports — Ship of Harkinian, 2 Ship 2 Harkinian — are native
   # ports rather than emulators, and take the ROM differently from anything else
@@ -115,6 +185,10 @@ in
       config,
       settings ? { },
       romArgument ? false,
+      # The port's Windows build (helpers.windowsEmulators.*), or null for
+      # none; and harkinianWindows' romCopy for it.
+      windowsPort ? null,
+      windowsRomCopy ? null,
     }:
     let
       prefix = settings.prefix or "gSettings.";
@@ -161,6 +235,21 @@ in
       # everything it made. Saves live here too.
       isolate = true;
       args = [ ];
+
+      windows =
+        if windowsPort == null then
+          { reason = "${bin} has no Windows build here"; }
+        else
+          harkinianWindows {
+            port = windowsPort;
+            inherit
+              appName
+              config
+              archives
+              unsaid
+              ;
+            romCopy = windowsRomCopy;
+          };
 
       # These ports were already writing under {state}, so naming their saves
       # moves nothing — it only says what is worth carrying to another machine.

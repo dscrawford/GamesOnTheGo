@@ -13,6 +13,7 @@ helpers.harkinianPort {
   bin = "soh";
   appName = "soh";
   romArgument = true;
+  windowsPort = helpers.windowsEmulators.shipwright;
   config = "shipofharkinian.json";
   archives = [
     "oot.o2r"
