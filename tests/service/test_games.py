@@ -538,3 +538,41 @@ def test_a_member_beyond_the_depth_limit_is_a_404(service):
     base, _ = service
     status, _, _ = fetch(base, "/games/n64/usa.zelda/a/b/c/d/e/f/g/h/i.z64")
     assert status == 404
+
+
+# --- a browser download: the token rides the link ----------------------------
+
+
+@pytest.fixture
+def with_tokens(tmp_path, catalog, files_dir):
+    from gotg.tokens import TokenStore
+
+    tokens = TokenStore(db=tmp_path / "state" / "tokens.db")
+    config = Config(token=CLIENT, index_token=INDEX)
+    with serve(config, None, catalog, files_dir=files_dir, token_store=tokens) as server:
+        yield server.url, tokens.issue("frank-play-abc123", "frank", 3600)
+
+
+def test_a_personal_token_in_the_query_downloads_a_game_file(with_tokens):
+    # The web UI's Download is a link to the byte host on another origin: no header, no cookie.
+    base, token = with_tokens
+    status, body, headers = fetch(base, f"/games/n64/usa.zelda/usa.zelda.z64?token={token}", token=None)
+    assert status == 200 and body == ROM
+    assert headers["Content-Disposition"].startswith("attachment;")
+    status, _, _ = fetch(base, f"/games/n64/usa.zelda/usa.zelda.z64?token={token}", method="HEAD", token=None)
+    assert status == 200
+
+
+def test_a_query_token_opens_game_files_and_nothing_else(with_tokens):
+    base, token = with_tokens
+    for path in (f"/catalog?token={token}", f"/files/switch/prod.keys?token={token}", f"/auth/whoami?token={token}"):
+        status, _, _ = fetch(base, path, token=None)
+        assert status == 401, path
+    # A shared secret never rides a URL, even where a personal token may.
+    status, _, _ = fetch(base, f"/games/n64/usa.zelda/usa.zelda.z64?token={CLIENT}", token=None)
+    assert status == 401
+    for junk in ("", "gotg_short", f"{token}&token={token}"):
+        status, _, _ = fetch(base, f"/games/n64/usa.zelda/usa.zelda.z64?token={junk}", token=None)
+        assert status == 401, junk
+    status, _, _ = fetch(base, f"/games/n64/usa.zelda/usa.zelda.z64?token={token}", method="PUT", token=None)
+    assert status == 401
