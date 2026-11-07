@@ -45,4 +45,5 @@
   windowsFacet = import ./windows-facet.nix { inherit pkgs; };
   windowsPlatforms = import ./windows-platforms.nix { inherit pkgs packages; };
   windowsDolphin = import ./windows-dolphin.nix { inherit pkgs packages; };
+  windowsHarkinian = import ./windows-harkinian.nix { inherit pkgs packages; };
 }

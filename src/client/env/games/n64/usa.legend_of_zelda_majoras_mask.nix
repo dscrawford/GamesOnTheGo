@@ -15,4 +15,5 @@ helpers.harkinianPort {
   # 2Ship names this one without its settings prefix (BenMenuSettings.cpp).
   settings.refresh = "gMatchRefreshRate";
   archives = [ "mm.o2r" ];
+  windowsPort = helpers.windowsEmulators."2ship";
 }

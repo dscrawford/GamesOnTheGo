@@ -1,7 +1,8 @@
 # Windows: games built by Nix, played without it
 
 Status: in progress on `feat/windows`. First milestone: the ares platforms,
-Dolphin (GameCube, Wii) and Ship of Harkinian, as one zip per game.
+Dolphin (GameCube, Wii) and the Harkinian ports (Ship of Harkinian,
+2 Ship 2 Harkinian, BattleShip), as one zip per game.
 
 Nix stays where it is. A Linux machine with Nix builds a game's **Windows
 bundle**, pushes it to the server like a `.run`, and a Windows user downloads
@@ -49,6 +50,15 @@ windows = {
   # Where configFiles land: "state" (default) or "emulator" (beside the exe,
   # for an emulator whose portable mode reads its settings from there).
   configRoot = "state";
+  # Optional: the directory the exe starts in (default "{state}"), for a
+  # port whose data directory is its working directory.
+  cwd = "{state}/data/soh";
+  # Optional: arguments for a first run only (below).
+  firstRun = {
+    unlessExists = [ "{state}/data/soh/oot.o2r" "{state}/data/soh/oot-mq.o2r" ];
+    stamp = { file = "{state}/data/soh/.gotg-archive-version"; value = "9.3.0"; };
+    args = [ "{target}" ];
+  };
 };
 # or, to say why there is none:
 windows = { reason = "needs danstick's split-screen session, which is Linux only"; };
@@ -100,6 +110,8 @@ The library spec, unchanged (`version`, `server`, `files_urls`, `attr`,
   "config_root": "state",
   "config_files": { "config/Ares/settings.bml": "config/0/settings.bml" },
   "actions": [],
+  "cwd": "{state}",
+  "first_run": null,
   "saves": ["saves/**"], "excludes": ["saves/*.bs[0-9]"], "states": { ... },
   "saves_dirs": ["saves"],
   "keys": null, "firmware": null,
@@ -113,6 +125,23 @@ The library spec, unchanged (`version`, `server`, `files_urls`, `attr`,
 saves move between a Linux and a Windows machine (their emulators must agree
 on the format; ares and Dolphin memory saves do).
 
+### Working directory and first run
+
+`cwd` is rendered and created if absent, and the exe starts there; absent
+it is `{state}`. `first_run` is null or `{unless_exists, stamp, args}`:
+
+1. If `stamp` is not null and `stamp.file` does not hold exactly
+   `stamp.value`, delete every `unless_exists` path (an archive made by
+   another version of the port; the Linux preLaunch's stamp).
+2. If none of `unless_exists` exists, write `stamp.value` to `stamp.file`
+   (when `stamp` is set) and start the exe with `first_run.args` instead of
+   `args`. Otherwise start it with `args`.
+
+For a port that must be handed its ROM once and never again: passing it
+every launch makes Ship of Harkinian ask "Confirm Re-extract" and
+2 Ship 2 Harkinian extract again. Both fields are new since d007731 and
+optional, so a manifest without them means what it did.
+
 ### Actions (version 1)
 
 Each is an object with one key. gotg.exe applies them in order on every
@@ -122,6 +151,7 @@ launch, after seeding config files.
   file as needed (Dolphin's `gotg_ini_set`). `key = value` with spaces.
 - `mkdir`: `{path}`.
 - `copy`: `{from, to, once}`; `from` a bundle path or `{install}` path.
+  `once`: only when `to` does not exist. `{target}` is an `{install}` path.
 
 An unknown action is an error, not a skip: a bundle never half-applies.
 
@@ -170,6 +200,53 @@ settings are never picked up and each environment has its own, and
 `Paths/Home={state}/Systems/` so its `<System>.sys` directories stay out of
 the bundle. `config_root` stays `"state"` with no seed files. ares still
 writes `hiro\windows.bml` (window geometry) beside the exe on exit.
+
+## Ship of Harkinian, 2 Ship 2 Harkinian, BattleShip
+
+The ports' official Windows releases (`nix/windows/emulators/shipwright.nix`,
+`2ship.nix`, `battleship.nix`; `windows-shipwright`, `windows-2ship`,
+`windows-battleship`), the same versions the Linux environments run
+(9.3.0, 5.0.1, 1.6). The facet is `harkinianWindows` in
+`env/emulators/harkinian.nix`, set by `harkinianPort`'s `windowsPort`.
+
+- **Where they keep things.** All three releases are portable builds
+  (no `NON_PORTABLE` in their release workflows), so libultraship's
+  `Context::GetAppDirectoryPath` returns `"."`, the working directory:
+  `SHIP_HOME` is read only on Linux and macOS, and `SDL_GetPrefPath` only
+  under `NON_PORTABLE`. Archives (`oot.o2r`, `mm.o2r`, `BattleShip.o2r`),
+  settings, saves, logs and `mods/` all land in the working directory;
+  `soh.o2r`, `assets/` and BattleShip's `torch.exe`/`config.yml` are read
+  from beside the exe. So `cwd` is `{state}/data/<appName>`, where
+  `XDG_DATA_HOME={state}/data` puts them on Linux, and a path under {state}
+  means the same file on both. Seen under Wine: each wrote its settings
+  file (and BattleShip `logs/`) into the working directory. BattleShip
+  alone also opens an empty `%APPDATA%\BattleShip\ssb64.log` before its
+  context exists.
+- **Settings.** The seed `config_files` entry is the file a first Linux
+  launch writes (`lusSettings`: pad menu navigation, windowed full screen,
+  matched refresh rate, 4x MSAA, full screen on); it is only written when
+  absent, so one pulled with the saves wins. No per-launch edit, so
+  `--windowed` is not heard; F11 is the ports' own toggle.
+- **The ROM.** Ship of Harkinian and 2 Ship 2 Harkinian extract their
+  archive from a ROM given as an argument (`first_run`); with no archive
+  and no argument they ask, and with both Ship of Harkinian asks
+  "Confirm Re-extract". Ship of Harkinian then asks "All files have been
+  processed. Run SoH?" once (the question pkgs/shipwright patches out on
+  Linux; here it is the official build). BattleShip extracts by itself,
+  silently, from `baserom.us.z64` in its data directory, so a `copy`
+  action puts the ROM there once.
+- Not a `run` action: Ship of Harkinian has no extract-only mode, so
+  running it for the extraction would start the game, then start it again.
+- The official builds refuse a few places: Ship of Harkinian and 2 Ship
+  stop if their exe is under `%TEMP%` or a path containing `OneDrive`, so
+  the bundle must be unpacked somewhere else.
+- **Saves do not travel yet, for two of them.** The globs are the Linux
+  ones, and two miss the save itself on both systems: Ship of Harkinian
+  writes `Save/file<n>.sav` (SaveManager.cpp), not `saves/`, and BattleShip
+  `ssb64_save.bin` beside its settings (port_save.cpp). 2 Ship's
+  `saves/` is right. Fixing the globs changes the Linux saves.json, which
+  moves those environments' drvPaths, so it is left for its own change.
+- Split-screen variants (2p/3p/4p) have no facet.
 
 ## Not yet
 
