@@ -52,5 +52,8 @@ in
     # The relay Ship of Harkinian's co-op talks through, run locally so four
     # copies of Ocarina of Time on one sofa need no internet.
     anchor-server = pkgs.callPackage ../pkgs/anchor-server { };
+    # The emulators' official Windows builds, for the Windows facet
+    # (docs/windows.md); an attrset, one per emulator.
+    windows = pkgs.callPackage ./windows/emulators { };
   };
 }

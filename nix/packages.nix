@@ -143,6 +143,8 @@ envs
     wiimms-szs-tools
     pyisotools
     ;
+  # Dolphin's official Windows build, as a Windows bundle ships it.
+  windows-dolphin = tools.windows.dolphin;
 
   # What `gotg qa` runs a game inside: headless compositor, recorders,
   # analyzers, and a python that can create uinput pads. Built on
