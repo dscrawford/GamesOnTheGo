@@ -1,7 +1,8 @@
 # gotg-saves against the real service and the real bash client: a Windows
 # player's saves must be a Linux player's, so its integration tests push,
 # pull and conflict through gotg-proxy and hand bundles to `gotg saves`.
-# The `rust` check runs the same tests, which skip there without these.
+# Also the Windows workspace's gate (rust/windows, apart from ../../rust so it
+# never moves gotg-pads): rustfmt, clippy with warnings as errors.
 { pkgs, packages }:
 
 let
@@ -17,9 +18,11 @@ in
 pkgs.rustPlatform.buildRustPackage {
   pname = "check-rust-saves";
   version = "0.3.0";
-  src = import ../../rust/source.nix { inherit (pkgs) lib; };
-  cargoLock.lockFile = ../../rust/Cargo.lock;
+  src = import ../../rust/windows/source.nix { inherit (pkgs) lib; };
+  cargoLock.lockFile = ../../rust/windows/Cargo.lock;
   nativeBuildInputs = with pkgs; [
+    clippy
+    rustfmt
     packages.gotg-proxy
     bash
     jq
@@ -36,6 +39,8 @@ pkgs.rustPlatform.buildRustPackage {
   ];
   buildPhase = ''
     runHook preBuild
+    cargo fmt --all --check
+    cargo clippy --offline --all-targets -- -D warnings
     export HOME=$TMPDIR/home
     mkdir -p $HOME
     svc=$TMPDIR/service

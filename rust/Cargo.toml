@@ -3,7 +3,7 @@
 # were C until 2026-09.
 [workspace]
 resolver = "2"
-members = ["crates/gotg-pads", "crates/gotg-killswitch", "crates/gotg-saves"]
+members = ["crates/gotg-pads", "crates/gotg-killswitch"]
 
 [workspace.package]
 version = "0.3.0"

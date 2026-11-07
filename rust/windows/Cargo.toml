@@ -1,0 +1,29 @@
+# The Windows launcher's crates (docs/windows.md): gotg.exe and the save sync
+# it shares with the bash client. A workspace of their own, apart from
+# ../Cargo.toml, so that adding to them never moves gotg-pads or
+# gotg-killswitch -- whose source is that whole workspace, and which Linux
+# environments (Four Swords' split screen) depend on.
+[workspace]
+resolver = "2"
+members = ["crates/gotg-saves"]
+
+[workspace.package]
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
+
+[workspace.dependencies]
+serde_json = "1"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
