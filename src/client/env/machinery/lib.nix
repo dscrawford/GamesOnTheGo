@@ -533,6 +533,18 @@ let
           config_root = windows.configRoot or "state";
           config_files = lib.mapAttrs (rel: _: bundlePath rel) winConfig;
           actions = windows.actions or [ ];
+          # Where the exe starts, rendered; for a port whose data directory is
+          # its working directory (docs/windows.md, "Ship of Harkinian").
+          cwd = windows.cwd or "{state}";
+          first_run =
+            if windows ? firstRun then
+              {
+                unless_exists = windows.firstRun.unlessExists;
+                args = windows.firstRun.args;
+                stamp = windows.firstRun.stamp or null;
+              }
+            else
+              null;
           states = saveStates;
           excludes = saveExcludes;
           saves_dirs = savesDirs;
