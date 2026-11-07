@@ -48,6 +48,8 @@ with sync_playwright() as p:
 
     page.locator(".tile").first.click()
     expect(page.locator("h1")).to_have_text("Tetris")
+    # No Windows zip pushed: how to push one.
+    expect(page.locator("#no-windows")).to_contain_text("gotg port push --windows world.tetris")
     page.screenshot(path=out / "2-detail.png")
 
     page.goto(f"{base}/ui/#/game/n64/usa.game_00")
@@ -60,6 +62,10 @@ with sync_playwright() as p:
     expect(page.locator("tr[data-output='n64.usa.game_00.emulate']")).to_contain_text(
         "gotg port push usa.game_00 emulate"
     )
+    # Its pushed Windows zip: a Download with its size and date.
+    windows = page.locator(".windows-build[data-output='n64.usa.game_00'] a.button")
+    expect(windows).to_have_attribute("href", "/ports/n64.usa.game_00/win/file")
+    expect(windows).to_contain_text("Download for Windows · 65 MiB")
     page.screenshot(path=out / "2b-ports.png")
     page.get_by_text("Saves for this game").click()
     expect(page.locator("[data-attr=env-n64-usa_game_00] tr[data-gen]")).to_have_count(2)

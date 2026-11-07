@@ -237,7 +237,8 @@ Switch variants get (`GOTG_MACHINE`, `GOTG_EXTERNAL_DISPLAY`):
 
 Any of them, ports included, can be built as one file that runs on Linux
 without Nix and kept on the server for the web app's Download:
-`gotg port push <id> [variant]` ([docs/ports.md](docs/ports.md)).
+`gotg port push <id> [variant]` ([docs/ports.md](docs/ports.md)); with `--windows`,
+a zip that plays on Windows ([docs/windows.md](docs/windows.md)).
 
 ## Saves
 

@@ -79,6 +79,25 @@ if [[ "$path" == *.gotgPortable ]]; then
   exit 0
 fi
 
+# A Windows bundle (nix/windows/bundle.nix): a zip with gotg-<output>/ on top,
+# as the server checks. NIX_FAIL_WINDOWS makes the build fail.
+if [[ "$path" == *.gotgWindows ]]; then
+  [[ -z "${NIX_FAIL_WINDOWS:-}" ]] || exit 1
+  name="${path%.gotgWindows}"
+  store="${TEST_TMP:-/tmp}/store"
+  work="$store/win-$name"
+  rm -rf "$work"
+  mkdir -p "$work/gotg-$name/emulator"
+  printf 'MZ %s\n' "$name" >"$work/gotg-$name/gotg.exe"
+  printf '{"output":"%s"}\n' "$name" >"$work/gotg-$name/spec.json"
+  : >"$work/gotg-$name/emulator/ares.exe"
+  file="$store/gotg-$name-win64.zip"
+  rm -f "$file"
+  (cd "$work" && zip -q -r "$file" "gotg-$name") || exit 1
+  ln -sfn "$file" "$out"
+  exit 0
+fi
+
 spec_only=""
 if [[ "$path" == *.gotgSpecFile ]]; then
   spec_only=1

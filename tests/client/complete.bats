@@ -175,6 +175,25 @@ comp() {
   [[ "$output" != *"usa.metroid"* ]]
 }
 
+@test "port completes ids and variants with --windows anywhere" {
+  add_game gamecube usa.super_mario_sunshine.rvz "iso" "Super Mario Sunshine"
+  gotg refresh
+  run comp gotg port push --windows ""
+  [[ "$output" == *"usa.super_mario_sunshine"* ]]
+  run comp gotg port push --windows usa.super_mario_sunshine ""
+  [[ "$output" == *"bse"* ]]
+  run comp gotg port rm usa.super_mario_sunshine --windows ""
+  [[ "$output" == *"bse"* ]]
+  run comp gotg port pull -o out.zip usa.super_mario_sunshine ""
+  [[ "$output" == *"bse"* ]]
+  run comp gotg port pull "-"
+  [[ "$output" == *"--windows"* && "$output" == *"-o"* ]]
+  run comp gotg port push "--"
+  [ "$output" = "--windows" ]
+  run comp gotg port list ""
+  [ -z "$output" ]
+}
+
 @test "steam art offers its own options" {
   add_game n64 usa.zelda.z64 "rom" "Zelda"
   gotg refresh
