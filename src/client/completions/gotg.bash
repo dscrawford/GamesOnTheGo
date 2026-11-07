@@ -113,10 +113,34 @@ _gotg() {
             esac
             ;;
         port)
-            case $COMP_CWORD in
-                2) mapfile -t COMPREPLY < <(compgen -W "push list pull rm" -- "$cur") ;;
-                3) [[ "$sub" == list ]] || mapfile -t COMPREPLY < <(_gotg_ids "$cur") ;;
-                4) mapfile -t COMPREPLY < <(compgen -W "$(gotg complete variants "${COMP_WORDS[3]}")" -- "$cur") ;;
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                mapfile -t COMPREPLY < <(compgen -W "push list pull rm" -- "$cur")
+                return
+            fi
+            [[ "$sub" == list ]] && return
+            if [[ "$sub" == pull && "$prev" == -o ]]; then
+                mapfile -t COMPREPLY < <(compgen -f -- "$cur")
+                return
+            fi
+            if [[ "$cur" == -* ]]; then
+                local flags="--windows"
+                [[ "$sub" == pull ]] && flags+=" -o"
+                mapfile -t COMPREPLY < <(compgen -W "$flags" -- "$cur")
+                return
+            fi
+            # --windows may come anywhere, so the id is the first word that is
+            # not a flag (or -o's file), and the variant the second.
+            local i words=()
+            for ((i = 3; i < COMP_CWORD; i++)); do
+                case "${COMP_WORDS[i]}" in
+                    -o) ((i++)) ;;
+                    -*) ;;
+                    *) words+=("${COMP_WORDS[i]}") ;;
+                esac
+            done
+            case ${#words[@]} in
+                0) mapfile -t COMPREPLY < <(_gotg_ids "$cur") ;;
+                1) mapfile -t COMPREPLY < <(compgen -W "$(gotg complete variants "${words[0]}")" -- "$cur") ;;
             esac
             ;;
         logs)
