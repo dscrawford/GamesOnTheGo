@@ -99,6 +99,33 @@ pub struct Windows {
     pub keys: Option<Keys>,
     #[serde(default)]
     pub firmware: Option<Firmware>,
+    /// Where the exe starts, rendered (relative: under `{state}`).
+    #[serde(default = "default_cwd")]
+    pub cwd: String,
+    #[serde(default)]
+    pub first_run: Option<FirstRun>,
+}
+
+fn default_cwd() -> String {
+    "{state}".into()
+}
+
+/// Arguments for a first run only (docs/windows.md, "Working directory and
+/// first run"): for a port handed its ROM once, to extract, and never again.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FirstRun {
+    #[serde(default)]
+    pub unless_exists: Vec<String>,
+    #[serde(default)]
+    pub stamp: Option<Stamp>,
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Stamp {
+    pub file: String,
+    pub value: String,
 }
 
 fn default_root() -> ConfigRoot {
@@ -270,6 +297,12 @@ impl Spec {
             }
             validate::filename(&f.file)?;
         }
+        if let Some(fr) = &w.first_run
+            && fr.unless_exists.is_empty()
+        {
+            // None of nothing exists: every launch would be a first run.
+            return Err("first_run.unless_exists is empty".into());
+        }
         for k in w.env.keys() {
             if k.is_empty() || k.contains('=') || k.contains('\0') {
                 return Err(format!("invalid environment variable name: {k:?}"));
@@ -411,5 +444,32 @@ pub(crate) mod tests {
         v["windows"]["config_root"] = json!("emulator");
         let spec = Spec::parse(&v.to_string()).expect("parse");
         assert_eq!(spec.windows.config_root, ConfigRoot::Emulator);
+    }
+
+    #[test]
+    fn cwd_and_first_run() {
+        let spec = Spec::parse(&sample().to_string()).expect("parse");
+        assert_eq!(spec.windows.cwd, "{state}");
+        assert!(spec.windows.first_run.is_none());
+        let mut v = sample();
+        v["windows"]["cwd"] = json!("{state}/data/soh");
+        v["windows"]["first_run"] = json!({"unless_exists": ["{state}/data/soh/oot.o2r"],
+            "stamp": {"file": "{state}/data/soh/.gotg-archive-version", "value": "9.3.0"},
+            "args": ["{target}"]});
+        let spec = Spec::parse(&v.to_string()).expect("parse");
+        assert_eq!(spec.windows.cwd, "{state}/data/soh");
+        let fr = spec.windows.first_run.expect("first_run");
+        assert_eq!(fr.args, vec!["{target}".to_string()]);
+        assert_eq!(fr.stamp.map(|s| s.value).as_deref(), Some("9.3.0"));
+        v["windows"]["first_run"] = json!(null);
+        assert!(
+            Spec::parse(&v.to_string())
+                .expect("parse")
+                .windows
+                .first_run
+                .is_none()
+        );
+        v["windows"]["first_run"] = json!({"unless_exists": [], "stamp": null, "args": []});
+        assert!(Spec::parse(&v.to_string()).is_err());
     }
 }

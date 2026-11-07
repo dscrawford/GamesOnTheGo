@@ -15,7 +15,7 @@ construction; `checks.windowsFacet` holds it by test (a facet leaves drvPath alo
 ```
 nix build <library>#n64.usa.donkey_kong_64.gotgWindows
   -> gotg-n64.usa.donkey_kong_64-win64.zip
-       gotg.exe          the launcher (rust/crates/gotg-launch, cross-built)
+       gotg.exe          the launcher (rust/windows/crates/gotg-launch, cross-built)
        spec.json         the game's spec, with a "windows" section (below)
        emulator/         the emulator or port's Windows build, portable mode
        config/           the environment's seed files, by bundle-relative path
@@ -169,12 +169,12 @@ An unknown action is an error, not a skip: a bundle never half-applies.
 5. Start `exe` with the rendered args and env; wait for it.
 6. `saves push`; history as on Linux. Journal and archives in
    `%LOCALAPPDATA%\gotg\saves` (Linux: `$GOTG_STATE_DIR/saves`). All of
-   it is `rust/crates/gotg-saves` (`Saves::sync`, `push`, `pull`, `check`,
+   it is `rust/windows/crates/gotg-saves` (`Saves::sync`, `push`, `pull`, `check`,
    `keep`, `list`, `restore`, `states`); its lib.rs documents the API.
 
-Also: `gotg.exe saves list|push|pull|restore`, `gotg.exe --version`.
+Also: `gotg.exe saves list|push|pull|restore|keep`, `gotg.exe --version`.
 
-### gotg.exe, as built (rust/crates/gotg-launch)
+### gotg.exe, as built (rust/windows/crates/gotg-launch)
 
 - `gotg login [--server URL] [--token | --claim URL]`: the server defaults to
   the spec's. At a terminal it is the device flow (`/auth/device`), falling
@@ -184,8 +184,10 @@ Also: `gotg.exe saves list|push|pull|restore`, `gotg.exe --version`.
   (`{url, token, name?}`, merged) is written. No netrc: that is Nix's.
 - `gotg [--spec PATH] [--windowed] [--dry-run] [-- ARGS...]`: `--dry-run`
   prints `cwd:`, `env:` and `run:` (the command line, Windows-quoted) and
-  touches nothing. The emulator runs with its own directory as the working
-  directory.
+  touches nothing (and `first run: yes|no` when the spec has a `first_run`).
+  The emulator starts in `cwd` (default `{state}`). While it runs, Ctrl+C
+  and closing the console are the emulator's: gotg.exe ignores them (a
+  console control handler) and pushes the saves once it exits.
 - Downloads: `single_file`/`no_intro_set` games are placed as
   `games\<platform>\<member>`, `wiiu_decrypted` as `games\<platform>\<id>\`;
   extras (updates, DLC) are not installed. Any other handler needs a Linux
@@ -198,8 +200,19 @@ Also: `gotg.exe saves list|push|pull|restore`, `gotg.exe --version`.
   `GOTG_FILES_URL`, `GOTG_FIRMWARE_DIR`, `GOTG_PROGRESS_LINES=1` and
   `GOTG_NO_BROWSER` as their names say. Off Windows (tests) the defaults are
   `$XDG_CONFIG_HOME/gotg` and `$XDG_DATA_HOME/gotg-launch`.
-- Saves: `src/saves.rs` is the seam (`SaveSync::pull`/`push`/`command`);
-  until `gotg-saves` is wired in, saves stay on the machine.
+- Saves (`src/saves.rs`, over gotg-saves): before the game `sync(Both)`; a
+  conflict stops the launch and names `gotg saves keep here|remote`; not
+  signed in, an unreachable service or a refused token is a warning and the
+  game starts (the Linux launch's behaviour). After it `push(false)`, whose
+  failure is a warning; the game's exit code stands. Journal and archives in
+  `GOTG_LOCAL_DIR\saves`; the device is api.json's `name`
+  (`GOTG_DEVICE_NAME` overrides). `gotg saves list | check | push [--force] |
+  pull | restore <id> | keep here|remote`, `<id>` as `list` prints it
+  (`remote:<n>`, `local:<archive>`). One environment's saves are synced by
+  one gotg.exe at a time (`locks\<env>.saves.lock`, 30 s wait).
+- `first_run.stamp.file` is compared as the Linux `$(cat)` reads it:
+  trailing newlines are not part of the value. An empty `unless_exists` is
+  refused (every launch would be a first one).
 
 ## Where the pieces live
 
@@ -209,9 +222,9 @@ Also: `gotg.exe saves list|push|pull|restore`, `gotg.exe --version`.
 | inheritance rule              | `src/client/env/default.nix`            |
 | Windows emulator packages     | `nix/windows/emulators/<emu>.nix`       |
 | bundle builder                | `nix/windows/bundle.nix`                |
-| launcher                      | `rust/crates/gotg-launch`               |
-| save sync                     | `rust/crates/gotg-saves`                |
-| cross build of the launcher   | `rust/gotg-launch.nix`                  |
+| launcher                      | `rust/windows/crates/gotg-launch`      |
+| save sync                     | `rust/windows/crates/gotg-saves`       |
+| cross build of the launcher   | `rust/windows/gotg-launch.nix`          |
 | server/web: the `win` kind    | `src/gotg/ports.py`, `routes_ports.py`  |
 | drvPath guard, inheritance    | `nix/checks/windows-facet.nix`          |
 | platforms that must have one  | `nix/checks/windows-platforms.nix`    |

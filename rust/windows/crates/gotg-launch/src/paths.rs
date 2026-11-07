@@ -13,6 +13,8 @@ pub struct Dirs {
     pub locks: PathBuf,
     pub env_root: PathBuf,
     pub firmware: PathBuf,
+    /// gotg-saves' journal and archives (Linux: $GOTG_STATE_DIR/saves).
+    pub saves: PathBuf,
     /// GOTG_ENV_STATE: `{state}` itself, whatever the environment.
     pub state_override: Option<PathBuf>,
 }
@@ -57,6 +59,7 @@ impl Dirs {
             locks: local.join("locks"),
             env_root: local.join("env"),
             firmware: var("GOTG_FIRMWARE_DIR").unwrap_or_else(|| local.join("firmware")),
+            saves: local.join("saves"),
             state_override: var("GOTG_ENV_STATE"),
         })
     }
@@ -115,5 +118,6 @@ mod tests {
         assert_eq!(d.api_file, PathBuf::from("/c").join("api.json"));
         assert_eq!(d.games, PathBuf::from("/g"));
         assert_eq!(d.state("env-n64"), PathBuf::from("/s"));
+        assert_eq!(dirs(&[("HOME", "/h"), ("GOTG_LOCAL_DIR", "/l2")]).saves, PathBuf::from("/l2").join("saves"));
     }
 }

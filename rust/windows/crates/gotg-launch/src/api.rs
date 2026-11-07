@@ -14,6 +14,8 @@ use crate::fsx;
 pub struct Api {
     pub url: String,
     pub token: String,
+    /// The login's name (`daniel-laptop`): this machine, to the saves store.
+    pub name: Option<String>,
 }
 
 /// A token over cleartext is a token given away; loopback is exempt.
@@ -48,9 +50,11 @@ pub fn load(file: &Path) -> Result<Option<Api>, String> {
     if url.is_empty() || token.is_empty() {
         return Ok(None);
     }
+    let name = v.get("name").and_then(Value::as_str).filter(|n| !n.is_empty());
     Ok(Some(Api {
         url: url.trim_end_matches('/').to_string(),
         token: token.to_string(),
+        name: name.map(str::to_string),
     }))
 }
 

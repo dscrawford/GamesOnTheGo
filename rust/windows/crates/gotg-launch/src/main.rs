@@ -4,6 +4,7 @@
 
 mod api;
 mod cli;
+mod console;
 mod download;
 mod extras;
 mod fsx;
@@ -110,9 +111,13 @@ struct Plan {
     cwd: PathBuf,
 }
 
-fn plan(spec: &Spec, ph: &Placeholders, extra: &[String]) -> Plan {
+fn plan(spec: &Spec, ph: &Placeholders, extra: &[String], first: bool) -> Plan {
     let exe = under(&ph.bundle, &spec.windows.exe);
-    let mut args = ph.args(&spec.windows.args);
+    let args = match &spec.windows.first_run {
+        Some(fr) if first => &fr.args,
+        _ => &spec.windows.args,
+    };
+    let mut args = ph.args(args);
     args.extend(extra.iter().cloned());
     let env = spec
         .windows
@@ -120,12 +125,7 @@ fn plan(spec: &Spec, ph: &Placeholders, extra: &[String]) -> Plan {
         .iter()
         .map(|(k, v)| (k.clone(), ph.env_value(v)))
         .collect();
-    // Portable-mode emulators look beside themselves; so does a relative path
-    // in their own settings.
-    let cwd = exe
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| ph.bundle.clone());
+    let cwd = prepare::cwd(spec, ph);
     Plan { exe, args, env, cwd }
 }
 
@@ -149,14 +149,21 @@ fn login_cmd(cli: &Cli, dirs: &Dirs) -> Result<i32, String> {
     Ok(0)
 }
 
-fn saves_job<'a>(spec: &'a Spec, state: &'a Path, api: Option<&'a api::Api>) -> saves::SavesJob<'a> {
+fn saves_job<'a>(
+    spec: &'a Spec,
+    dirs: &'a Dirs,
+    state: &'a Path,
+    api: Option<&'a api::Api>,
+) -> saves::SavesJob<'a> {
     saves::SavesJob {
-        attr: &spec.attr,
+        env: &spec.windows.name,
         state,
         saves: &spec.windows.saves,
         excludes: &spec.windows.excludes,
         states: spec.windows.states.as_ref(),
         api,
+        home: &dirs.saves,
+        locks: &dirs.locks,
     }
 }
 
@@ -169,7 +176,11 @@ fn launch(cli: &Cli, dirs: &Dirs) -> Result<i32, String> {
     if cli.dry_run {
         let target = download::install_path(&spec.game, &dirs.games)?;
         let ph = placeholders(&spec, dirs, &bundle, target, on);
-        print_plan(&plan(&spec, &ph, &cli.extra));
+        let first = prepare::first_run_plan(&spec, &ph);
+        if spec.windows.first_run.is_some() {
+            println!("first run: {}", if first.first { "yes" } else { "no" });
+        }
+        print_plan(&plan(&spec, &ph, &cli.extra, first.first));
         return Ok(0);
     }
 
@@ -196,11 +207,17 @@ fn launch(cli: &Cli, dirs: &Dirs) -> Result<i32, String> {
 
     let sync = saves::backend();
     std::fs::create_dir_all(&ph.state).map_err(|e| format!("{}: {e}", ph.state.display()))?;
-    sync.pull(&saves_job(&spec, &ph.state, api.as_ref()))?;
+    let job = saves_job(&spec, dirs, &ph.state, api.as_ref());
+    sync.before(&job)?;
     prepare::run(&spec, &ph)?;
+    let first = prepare::first_run_plan(&spec, &ph);
+    prepare::first_run_apply(&first)?;
 
-    let p = plan(&spec, &ph, &cli.extra);
+    let p = plan(&spec, &ph, &cli.extra, first.first);
     log(&format!("starting {}", spec.title()));
+    // Ctrl+C and the console's close button are the game's while it runs;
+    // gotg.exe stays to push its saves.
+    let shield = console::Shield::up();
     let status = Process::new(&p.exe)
         .args(&p.args)
         .envs(p.env.iter().map(|(k, v)| (k, v)))
@@ -211,9 +228,10 @@ fn launch(cli: &Cli, dirs: &Dirs) -> Result<i32, String> {
     if code != 0 {
         warn(&format!("{} exited with {code}", spec.windows.exe));
     }
-    if let Err(e) = sync.push(&saves_job(&spec, &ph.state, api.as_ref())) {
+    if let Err(e) = sync.after(&job) {
         warn(&format!("saves were not pushed: {e}"));
     }
+    drop(shield);
     Ok(code)
 }
 
@@ -222,7 +240,7 @@ fn saves_cmd(cli: &Cli, dirs: &Dirs, args: &[String]) -> Result<i32, String> {
     let api = api::load(&dirs.api_file)?;
     check_server(&spec, api.as_ref())?;
     let state = dirs.state(&spec.windows.name);
-    saves::backend().command(&saves_job(&spec, &state, api.as_ref()), args)
+    saves::backend().command(&saves_job(&spec, dirs, &state, api.as_ref()), args)
 }
 
 fn run(cli: &Cli) -> Result<i32, String> {
@@ -285,6 +303,7 @@ mod tests {
         let other = api::Api {
             url: "https://other".into(),
             token: "t".into(),
+            name: None,
         };
         assert!(
             check_server(&spec, Some(&other))
@@ -294,6 +313,7 @@ mod tests {
         let same = api::Api {
             url: "https://gotg.example".into(),
             token: "t".into(),
+            name: None,
         };
         assert!(check_server(&spec, Some(&same)).is_ok());
         assert!(check_server(&spec, None).is_ok());
@@ -311,11 +331,11 @@ mod tests {
         .expect("dirs");
         let target = download::install_path(&spec.game, &dirs.games).expect("target");
         let ph = placeholders(&spec, &dirs, Path::new("/b"), target, false);
-        let p = plan(&spec, &ph, &["--extra".to_string()]);
+        let p = plan(&spec, &ph, &["--extra".to_string()], false);
         assert_eq!(p.exe, Path::new("/b").join("emulator").join("ares.exe"));
         assert_eq!(p.args.first().map(String::as_str), Some("--setting"));
         assert_eq!(p.args.last().map(String::as_str), Some("--extra"));
         assert!(p.env.contains(&("FS".to_string(), String::new())));
-        assert_eq!(p.cwd, Path::new("/b").join("emulator"));
+        assert_eq!(p.cwd, ph.state);
     }
 }
