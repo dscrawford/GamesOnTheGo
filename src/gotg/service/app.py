@@ -340,7 +340,31 @@ class Handler(
             return header[len("Bearer ") :].encode("latin-1", "replace")
         if header.startswith("Basic ") and self._basic_allowed():
             return self._basic_password(header[len("Basic ") :])
+        if not header:
+            return self._query_token()
         return b""
+
+    def _query_token(self) -> bytes:
+        """A personal token as `?token=`, on a game file read and nowhere else.
+
+        The web UI's Download is a plain link to the byte host, on another
+        origin: a navigation cannot carry a header, and the byte host never
+        sees this site's cookie. Only a personal token (TOKEN_RE) is taken
+        from a URL -- the shared secrets stay header-only -- and the UI uses a
+        short-lived one from POST /auth/bearer. log_message drops the query.
+        """
+        if self.command not in ("GET", "HEAD"):
+            return b""
+        try:
+            parts = urllib.parse.urlsplit(self.path)
+        except ValueError:
+            return b""
+        if not parts.path.lstrip("/").startswith("games/"):
+            return b""
+        values = urllib.parse.parse_qs(parts.query).get("token", [])
+        if len(values) != 1 or not TOKEN_RE.match(values[0]):
+            return b""
+        return values[0].encode()
 
     def _split(self, rest: str) -> urllib.parse.SplitResult | None:
         """The route's path and query, or None once a 400 has been sent.

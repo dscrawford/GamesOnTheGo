@@ -40,8 +40,30 @@ export async function detail(root, ctx) {
       ports,
       h("p", {}, h("a", { href: `#/saves/${encodeURIComponent(platform)}/${encodeURIComponent(id)}` }, "Saves for this game")),
       h("h2", {}, `Files (${bytes(total)})`),
-      h("table", {}, h("tr", {}, h("th", {}, "Name"), h("th", {}, "Size")),
-        game.files.map((f) => h("tr", {}, h("td", {}, f.name), h("td", {}, bytes(f.size_bytes))))))));
+      h("table", { class: "files" }, h("tr", {}, h("th", {}, "Name"), h("th", {}, "Size"), h("th", {}, "")),
+        game.files.map((f) => h("tr", {}, h("td", {}, f.name), h("td", {}, bytes(f.size_bytes)),
+          h("td", {}, downloadButton(game, f))))))));
+}
+
+/** A link to one file, resolved on click: the byte host's port moves when its
+ * tunnel reconnects, and the token is minted only when someone wants it. */
+export function downloadButton(game, file) {
+  const button = h("button", { class: "download" }, "⬇ Download");
+  button.onclick = async () => {
+    button.disabled = true;
+    try {
+      const a = h("a", { href: await api.fileUrl(game.platform, game.id, file.name), download: file.name.split("/").pop() });
+      document.body.append(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      if (e.login) location.href = api.loginUrl();
+      else alert(`Could not start the download: ${e.message}`);
+    } finally {
+      button.disabled = false;
+    }
+  };
+  return button;
 }
 
 const mib = (n) => `${Math.max(1, Math.round(n / 1048576))} MiB`;

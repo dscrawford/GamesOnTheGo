@@ -41,6 +41,7 @@
  */
 
 const BEARER_KEY = "gotg.bearer";
+const DOWNLOAD_KEY = "gotg.download";
 
 export class ApiError extends Error {
   constructor(status, message, body) {
@@ -108,6 +109,39 @@ export async function isAdmin(who) {
 }
 
 let catalogCache;
+/** Where a game file downloads from: the catalog's https byte hosts in its
+ * order of preference (an https page's link to http would be mixed content),
+ * then this service, which answers 503 when it holds no files. */
+export function fileBases(cat) {
+  const hosts = cat.files_urls || (cat.files_url ? [cat.files_url] : []);
+  const ok = hosts.map((b) => b.replace(/\/+$/, "")).filter((b) => location.protocol !== "https:" || b.startsWith("https:"));
+  return ok.length ? ok : [location.origin + BASE];
+}
+
+/** A token a plain link can carry to a byte host on another origin: the one
+ * pasted into this tab, or a short-lived one minted for the signed-in session
+ * (POST /auth/bearer), kept for the tab. The byte host takes it as ?token= on
+ * /games reads only. */
+export async function downloadToken() {
+  const pasted = sessionStorage.getItem(BEARER_KEY);
+  if (pasted) return pasted;
+  const kept = JSON.parse(sessionStorage.getItem(DOWNLOAD_KEY) || "null");
+  if (kept && kept.until > Date.now()) return kept.token;
+  const data = await call("/auth/bearer", { method: "POST" });
+  // Renewed an hour early, so a download started now does not outlive it.
+  const until = Date.now() + (data.expires_in - 3600) * 1000;
+  sessionStorage.setItem(DOWNLOAD_KEY, JSON.stringify({ token: data.token, until }));
+  return data.token;
+}
+
+/** The link for one member file of a game. */
+export async function fileUrl(platform, id, name) {
+  const base = fileBases(await catalog())[0];
+  const url = `${base}/games/${[platform, id, ...name.split("/")].map(encodeURIComponent).join("/")}`;
+  if (base === location.origin + BASE) return url; // same origin: the cookie is enough
+  return `${url}?token=${encodeURIComponent(await downloadToken())}`;
+}
+
 export const catalog = () => (catalogCache ??= call("/catalog").catch((e) => { catalogCache = undefined; throw e; }));
 
 const artCache = new Map();
