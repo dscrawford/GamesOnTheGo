@@ -28,6 +28,7 @@
   };
   recipes = import ./recipes.nix { inherit pkgs packages; };
   switchContent = import ./switch-content.nix { inherit pkgs; };
+  melondsConfig = import ./melonds-config.nix { inherit pkgs; };
   platforms = import ./platforms.nix { inherit pkgs py; };
   environments = import ./environments.nix { inherit pkgs packages; };
   catalog = import ./catalog.nix { inherit pkgs; };

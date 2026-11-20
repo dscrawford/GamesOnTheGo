@@ -113,6 +113,14 @@ def test_dat_dir_name_maps_to_platform():
     assert (verdict.handler, verdict.platform) == (HANDLER_NO_INTRO_SET, "n64")
 
 
+@pytest.mark.parametrize("rules", [defaults(), load()], ids=["defaults", "rules.yaml"])
+def test_the_decrypted_ds_set_and_a_loose_nds_are_nds(rules):
+    verdict = classify(src("Nintendo - Nintendo DS (Decrypted)", files=("a.zip", "b.zip")), rules)
+    assert (verdict.handler, verdict.platform) == (HANDLER_NO_INTRO_SET, "nds")
+    verdict = classify(src("Mario Kart DS (USA, Australia) (En,Fr,De,Es,It).nds", is_dir=False), rules)
+    assert (verdict.handler, verdict.platform) == (HANDLER_SINGLE_FILE, "nds")
+
+
 def test_excluded_set_is_honored():
     name = "Nintendo - Nintendo Entertainment System (Headered) (Aftermarket)"
     assert classify(src(name, files=("a.zip",)), RULES).handler == HANDLER_EXCLUDED

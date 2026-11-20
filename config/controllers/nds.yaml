@@ -1,0 +1,30 @@
+# Nintendo DS.
+#
+# The DS's face buttons and shoulders are a SNES pad's, so it walks danstick's
+# snes layout. The drawing names its circles after danstick's controls, so it
+# needs no `anchors:`.
+
+label: Nintendo DS
+
+# The danstick layout the capture walks; `controls` is its control set.
+layout: snes
+# assets/controllers/<artwork>.svg
+artwork: nds
+players: 1
+# The GOTG platforms played with this controller.
+platforms: [nds]
+
+# danstick's control id -> what the button says.
+controls:
+  a: B (bottom)
+  b: A (right)
+  x: Y (left)
+  y: X (top)
+  dpup: D-pad up
+  dpdown: D-pad down
+  dpleft: D-pad left
+  dpright: D-pad right
+  back: Select
+  start: Start
+  leftshoulder: L
+  rightshoulder: R

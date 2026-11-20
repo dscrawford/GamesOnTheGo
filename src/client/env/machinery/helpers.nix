@@ -84,6 +84,7 @@ let
     (import ../emulators/ares.nix { inherit pkgs lib; })
     (import ../emulators/dolphin.nix { inherit pkgs lib discArchiveRecipe; })
     (import ../emulators/ryujinx.nix { inherit pkgs lib; })
+    (import ../emulators/melonds.nix { inherit pkgs lib; })
     (import ../emulators/harkinian.nix { inherit pkgs lib steps; })
     (import ../emulators/recomp-port.nix { inherit pkgs steps; })
   ];

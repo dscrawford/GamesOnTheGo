@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="220mm" height="250mm" viewBox="0 0 220 250" version="1.1" id="nds">
+  <g id="body" stroke="#2b2b2b" stroke-width="1.2" stroke-linejoin="round">
+    <rect id="lid" x="10" y="4" width="200" height="118" rx="12" fill="#d9d9de"/>
+    <rect id="top-screen" x="50" y="18" width="120" height="90" rx="2" fill="#3a4250"/>
+    <rect id="hinge" x="16" y="120" width="188" height="10" rx="4" fill="#bfc0c6"/>
+    <rect id="base" x="10" y="128" width="200" height="118" rx="12" fill="#e4e4e8"/>
+    <rect id="bottom-screen" x="62" y="142" width="96" height="72" rx="2" fill="#3a4250"/>
+    <path id="shoulder-l" d="M14 140 q2 -10 14 -11 h18 v6 h-26 q-4 1 -6 5 z" fill="#bfc0c6"/>
+    <path id="shoulder-r" d="M206 140 q-2 -10 -14 -11 h-18 v6 h26 q4 1 6 5 z" fill="#bfc0c6"/>
+    <path id="dpad" d="M31 160 h8 v10 h10 v8 h-10 v10 h-8 v-10 h-10 v-8 h10 z" fill="#4a4a4f"/>
+    <circle id="btn-x" cx="185" cy="160" r="6" fill="#f4f4f6"/>
+    <circle id="btn-a" cx="198" cy="174" r="6" fill="#f4f4f6"/>
+    <circle id="btn-b" cx="185" cy="188" r="6" fill="#f4f4f6"/>
+    <circle id="btn-y" cx="172" cy="174" r="6" fill="#f4f4f6"/>
+    <rect id="btn-start" x="178" y="206" width="12" height="5" rx="2.5" fill="#9a9aa0"/>
+    <rect id="btn-select" x="178" y="218" width="12" height="5" rx="2.5" fill="#9a9aa0"/>
+  </g>
+  <g id="anchors" fill="none">
+    <circle id="anchor-dpup" cx="35" cy="164" r="1.2"/>
+    <circle id="anchor-dpdown" cx="35" cy="184" r="1.2"/>
+    <circle id="anchor-dpleft" cx="25" cy="174" r="1.2"/>
+    <circle id="anchor-dpright" cx="45" cy="174" r="1.2"/>
+    <circle id="anchor-y" cx="185" cy="160" r="1.2"/>
+    <circle id="anchor-b" cx="198" cy="174" r="1.2"/>
+    <circle id="anchor-a" cx="185" cy="188" r="1.2"/>
+    <circle id="anchor-x" cx="172" cy="174" r="1.2"/>
+    <circle id="anchor-start" cx="184" cy="208.5" r="1.2"/>
+    <circle id="anchor-back" cx="184" cy="220.5" r="1.2"/>
+    <circle id="anchor-leftshoulder" cx="28" cy="132" r="1.2"/>
+    <circle id="anchor-rightshoulder" cx="192" cy="132" r="1.2"/>
+  </g>
+</svg>

@@ -26,6 +26,8 @@ DAT_DIR_PLATFORM = {
     "Sega - Mega Drive - Genesis": ("genesis", "no_intro_set"),
     # A Redump set: one .7z per disc, converted to RVZ on the client.
     "Nintendo - GameCube": ("gamecube", "archive_set"),
+    # Decrypted only: melonDS's FreeBIOS cannot boot an encrypted dump. See rules.yaml.
+    "Nintendo - Nintendo DS (Decrypted)": ("nds", "no_intro_set"),
 }
 
 # Single-file extension -> platform (for loose ROM torrents).
@@ -36,6 +38,7 @@ EXT_PLATFORM = {
     # ares' mia also opens .bin for this console, but .bin is a raw disc track
     # on half a dozen others — it is deliberately not mapped. See rules.yaml.
     "md": "genesis", "gen": "genesis",
+    "nds": "nds",
     "nsp": "switch", "xci": "switch",
     "rvz": "gamecube", "gcm": "gamecube",
     "wua": "wiiu", "wux": "wiiu",
