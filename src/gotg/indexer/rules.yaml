@@ -68,6 +68,11 @@ dat_dirs:
   "Sony - PlayStation 2":
     platform: ps2
     handler: archive_set
+  # Redump too: a .cue and its tracks per .7z, installed as-is (env/psx.nix).
+  # "(Disc N)" parses to one slug, so 1G1R keeps one disc of a multi-disc game.
+  "Sony - PlayStation":
+    platform: psx
+    handler: archive_set
 
 # Single-file extension -> platform, for loose ROM torrents.
 extensions:

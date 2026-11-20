@@ -25,7 +25,7 @@ there and both follow.
 | gba | gba | mgba |
 | genesis | segaMD | genesis_plus_gx |
 | n64 (experimental) | n64 | mupen64plus_next |
-| ps1 (experimental) | psx | pcsx_rearmed |
+| psx (experimental) | psx | pcsx_rearmed |
 
 Every other platform shows the launcher instead (see "Not in the browser" below):
 `nix run gotg#<platform>.<id>`. `GET /play/plan/<platform>/<id>` (authenticated)
