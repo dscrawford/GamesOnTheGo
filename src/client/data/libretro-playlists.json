@@ -21,6 +21,7 @@
     "gamecube": "Nintendo - GameCube",
     "wii": "Nintendo - Wii",
     "wiiu": "Nintendo - Wii U",
-    "genesis": "Sega - Mega Drive - Genesis"
+    "genesis": "Sega - Mega Drive - Genesis",
+    "ps2": "Sony - PlayStation 2"
   }
 }

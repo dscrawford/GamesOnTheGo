@@ -20,6 +20,7 @@ artwork itself can be drawn however it likes.
 | `nes.svg` | ES-DE `gamepad_nintendo_nes.svg` | MIT |
 | `n64.svg` | ES-DE `gamepad_nintendo_64.svg` | MIT |
 | `gamecube.svg` | ES-DE `gamepad_nintendo_gamecube.svg` | MIT |
+| `dualshock2.svg` | ES-DE `gamepad_playstation.svg`, via `../icons/playstation.svg` | MIT |
 | `megadrive.svg` | ES-DE `gamepad_sega_md_3_buttons.svg` | MIT |
 | `gameboy.svg` | Wikimedia Commons `Gameboy pocket.svg` | CC0 |
 | `gba.svg` | Openclipart 344577 `game-boy-advance` | CC0 |
@@ -38,7 +39,7 @@ photographs.
 ## The wordmarks are removed on purpose
 
 The ES-DE originals carry "SUPER NINTENDO", "Nintendo", "SEGA", "MEGA DRIVE
-CONTROL PAD" and "NINTENDO GAMECUBE". MIT grants copyright, not trademark, so those paths are deleted
+CONTROL PAD" and "NINTENDO GAMECUBE"; `dualshock2.svg` drops the PS logo (`g196-6`) that `../icons/playstation.svg` still carries. MIT grants copyright, not trademark, so those paths are deleted
 when the file is vendored — and deleted *completely*, since half a wordmark
 renders as a glitch rather than as restraint. Removing them is also why the
 files here differ from upstream, which MIT permits and this note records.

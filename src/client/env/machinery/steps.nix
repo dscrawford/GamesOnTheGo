@@ -270,4 +270,22 @@ in
       cur="$dest.rvz"
     '';
   };
+
+  # Terminal: a PS2 disc as CHD. A CD title's cue wins over its bigger tracks,
+  # since only the cue says how they fit; a DVD title is its one .iso.
+  convertChd = {
+    name = "convert-chd";
+    tools.CHDMAN = "${pkgs.mame-tools}/bin/chdman";
+    script = ''
+      disc="$(find "$cur" -type f -iname '*.cue' -print -quit || true)"
+      mode=createcd
+      if [ -z "$disc" ]; then
+        disc="$(find "$cur" -type f -printf '%s\t%p\0' | sort -z -rn | head -z -n1 | cut -z -f2- | tr -d '\0' || true)"
+        mode=createdvd
+      fi
+      [ -n "$disc" ] || fail "no disc image in $cur"
+      "$CHDMAN" "$mode" -i "$disc" -o "$dest.chd" >/dev/null || fail "conversion failed"
+      cur="$dest.chd"
+    '';
+  };
 }

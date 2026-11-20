@@ -59,14 +59,16 @@ dat_dirs:
   "Nintendo - GameCube":
     platform: gamecube
     handler: archive_set
+  # Redump again, one .7z per disc; the client converts each to CHD on install.
+  "Sony - PlayStation 2":
+    platform: ps2
+    handler: archive_set
 
 # Single-file extension -> platform, for loose ROM torrents.
 extensions:
-  # `.iso` is genuinely ambiguous — GameCube, Wii, PS2 and PSP all use it — so it
-  # is mapped here rather than in the code defaults, where the assumption would
-  # be invisible. This library holds no Wii or PS2 titles; when one arrives this
-  # mapping must go and the platform be decided from the disc header instead
-  # (dolphin-tool reports the Game ID, which distinguishes them).
+  # `.iso` is genuinely ambiguous — GameCube, Wii, PS2 and PSP all use it. PS2
+  # arrives only as the Redump set above; a loose PS2 .iso would need this
+  # decided from the disc header instead (a PS2 disc has SYSTEM.CNF).
   iso: gamecube
   z64: n64
   n64: n64
@@ -102,3 +104,6 @@ targets:
   # plays correctly but is not a pristine dump.
   gamecube: { ext: rvz, tool: dolphin-tool }
   wii: { ext: rvz, tool: dolphin-tool }
+  # A Redump PS2 .7z holds an .iso (DVD) or a cue and its tracks (CD); CHD
+  # holds either as one file PCSX2 reads.
+  ps2: { ext: chd, tool: chdman }

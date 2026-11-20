@@ -42,7 +42,7 @@ def test_every_platform_the_indexer_emits_is_browser_played_or_unsupported():
     emitted |= {platform for platform, _ in DAT_DIR_PLATFORM.values()} | set(EXT_PLATFORM.values())
     unplaced = emitted - set(play_page.CORES) - set(play_page.UNSUPPORTED)
     assert not unplaced, f"decide browser or unsupported for: {sorted(unplaced)}"
-    assert {"gamecube", "wiiu", "switch"} <= set(play_page.UNSUPPORTED)
+    assert {"gamecube", "wiiu", "switch", "ps2"} <= set(play_page.UNSUPPORTED)
     assert not set(play_page.CORES) & set(play_page.UNSUPPORTED)
 
 
@@ -50,7 +50,7 @@ def test_unsupported_systems_get_the_launcher_and_a_reason():
     plan = play_page.play_plan("switch", "usa.x")
     assert plan["mode"] == "nix" and plan["unsupported"] is True
     assert "browser" in plan["reason"] and plan["nix"] == "nix run gotg#switch.usa.x"
-    other = play_page.play_plan("ps2", "usa.x")
+    other = play_page.play_plan("dreamcast", "usa.x")
     assert other["mode"] == "nix" and other["unsupported"] is False and other["reason"]
 
 

@@ -79,6 +79,14 @@ let
     ];
   };
 
+  # The same for a PlayStation 2 disc, kept as CHD rather than RVZ.
+  chdArchiveRecipe = {
+    single_archive = [
+      steps.extract7z
+      steps.convertChd
+    ];
+  };
+
   # How a game is launched, one emulator per file.
   emulators = [
     (import ../emulators/ares.nix { inherit pkgs lib; })
@@ -110,6 +118,7 @@ in
     steps
     sceneArchiveRecipe
     discArchiveRecipe
+    chdArchiveRecipe
     switchRecipe
     bundleRecipe
     ;
