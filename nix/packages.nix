@@ -161,7 +161,8 @@ envs
     # deliberately absent: each brings its own large emulator. One
     # decompiled port, so a native PC build of a game -- its own
     # window, its own renderer, no emulator -- is gradable too; the
-    # overlay has to draw over all three kinds.
+    # overlay has to draw over all three kinds. And the PS4, whose
+    # shadPS4 needs an AVX2 host and Vulkan, so only the GPU tier grades it.
     environments = pkgs.lib.getAttrs [
       "env-gb"
       "env-gbc"
@@ -172,6 +173,7 @@ envs
       "env-n64"
       "env-n64-usa_super_mario_64-pc"
       "env-switch"
+      "env-ps4"
     ] envs;
   };
 

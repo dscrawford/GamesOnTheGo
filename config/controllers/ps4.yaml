@@ -1,0 +1,53 @@
+# DualShock 4. The generic layout, not ps2: that one walks no sticks.
+# No DualShock drawing yet, so the generic pad stands in.
+
+label: DualShock 4
+
+# The danstick layout the capture walks; `controls` is its control set.
+layout: generic
+# assets/controllers/<artwork>.svg
+artwork: generic
+players: 4
+# The GOTG platforms played with this controller.
+platforms: [ps4]
+
+# danstick's control id -> what the button says.
+controls:
+  a: Cross (bottom)
+  b: Circle (right)
+  x: Square (left)
+  y: Triangle (top)
+  dpup: D-pad up
+  dpdown: D-pad down
+  dpleft: D-pad left
+  dpright: D-pad right
+  back: Share
+  start: Options
+  leftshoulder: L1
+  rightshoulder: R1
+  lefttrigger: L2
+  righttrigger: R2
+  leftstick_up: Left stick up
+  leftstick_down: Left stick down
+  leftstick_left: Left stick left
+  leftstick_right: Left stick right
+  rightstick_up: Right stick up
+  rightstick_down: Right stick down
+  rightstick_left: Right stick left
+  rightstick_right: Right stick right
+
+# Where the drawing marks it, when the circle is not named after the
+# control. These drawings predate danstick and use the console's letters.
+anchors:
+  a: A
+  b: B
+  x: X
+  y: Y
+  dpup: Up
+  dpdown: Down
+  dpleft: Left
+  dpright: Right
+  back: Select
+  start: Start
+  leftshoulder: L
+  rightshoulder: R

@@ -15,6 +15,7 @@ import pathlib
 import sys
 
 from gotg.indexer import rules as rules_module
+from gotg.indexer.classify import CONTENT_PLATFORMS
 from gotg.indexer.plan import DAT_DIR_PLATFORM, EXT_PLATFORM
 
 envs = pathlib.Path(os.environ["GOTG_ENV_DIR"])
@@ -34,6 +35,10 @@ for name, (platform, handler) in dat_dirs.items():
 for ext, platform in extensions.items():
     if not (envs / f"{platform}.nix").is_file():
         missing.append(f".{ext} -> {platform}: no client/env/{platform}.nix")
+
+for platform in CONTENT_PLATFORMS:
+    if not (envs / f"{platform}.nix").is_file():
+        missing.append(f"{platform}, named from contents: no client/env/{platform}.nix")
 
 if missing:
     print("\n".join(missing), file=sys.stderr)

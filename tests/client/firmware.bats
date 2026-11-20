@@ -330,3 +330,42 @@ EOF
     [ -f "$GOTG_STATE_DIR/firmware/switch/$nca.nca/00" ]
   done
 }
+
+# PS4 system modules: a flat directory of the *.sprx files, wherever the zip
+# kept them, and nothing else from it.
+@test "a flat layout takes every matching file, flattened, and leaves the rest" {
+  mkdir -p "$GOTG_ROOTS_DIR/env-ps4/share/gotg"
+  jq -n '{into: "data/shadPS4/sys_modules", file: "sys_modules.zip", flat: "*.sprx"}' \
+    >"$GOTG_ROOTS_DIR/env-ps4/share/gotg/firmware.json"
+  local src="$TEST_TMP/sprx-src"
+  mkdir -p "$src/system/common/lib"
+  printf 'ngs2' >"$src/system/common/lib/libSceNgs2.sprx"
+  printf 'font' >"$src/libSceFont.SPRX"
+  printf 'notes' >"$src/readme.txt"
+  mkdir -p "$SERVICE_FILES_DIR/ps4"
+  (cd "$src" && python3 -m zipfile -c "$SERVICE_FILES_DIR/ps4/sys_modules.zip" system libSceFont.SPRX readme.txt)
+
+  run firmware_ensure env-ps4 ps4
+  [ "$status" -eq 0 ]
+  local dir="$GOTG_STATE_DIR/env/env-ps4/data/shadPS4/sys_modules"
+  grep -q ngs2 "$dir/libSceNgs2.sprx"
+  [ -f "$dir/libSceFont.SPRX" ]
+  [ ! -e "$dir/readme.txt" ]
+  [ ! -e "$dir/system" ]
+}
+
+@test "a flat layout with nothing matching is refused, and the launch still goes on" {
+  mkdir -p "$GOTG_ROOTS_DIR/env-ps4/share/gotg"
+  jq -n '{into: "data/shadPS4/sys_modules", file: "sys_modules.zip", flat: "*.sprx"}' \
+    >"$GOTG_ROOTS_DIR/env-ps4/share/gotg/firmware.json"
+  local src="$TEST_TMP/sprx-src"
+  mkdir -p "$src"
+  printf 'notes' >"$src/readme.txt"
+  mkdir -p "$SERVICE_FILES_DIR/ps4"
+  (cd "$src" && python3 -m zipfile -c "$SERVICE_FILES_DIR/ps4/sys_modules.zip" readme.txt)
+
+  run firmware_ensure env-ps4 ps4
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no ps4 firmware"* ]]
+  [[ "$output" != *"offer to install"* ]]
+}

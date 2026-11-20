@@ -172,6 +172,37 @@ teardown() {
   [ -f "$GOTG_GAMES_DIR/wiiu/usa.title/meta/meta.xml" ]
 }
 
+@test "a PS4 tree arrives as its tree, and its eboot.bin is what launches" {
+  mkdir -p "$SERVICE_LIBRARY_DIR/ps4/CUSA00900/sce_sys"
+  echo elf >"$SERVICE_LIBRARY_DIR/ps4/CUSA00900/eboot.bin"
+  echo sfo >"$SERVICE_LIBRARY_DIR/ps4/CUSA00900/sce_sys/param.sfo"
+  local files
+  files="$(jq -n --arg root "$SERVICE_LIBRARY_DIR/ps4/CUSA00900" '[
+    {name: "eboot.bin", path: ($root + "/eboot.bin"), size_bytes: 4, mtime: 1, sha256: null},
+    {name: "sce_sys/param.sfo", path: ($root + "/sce_sys/param.sfo"), size_bytes: 4, mtime: 1, sha256: null}
+  ]')"
+  add_member_game ps4 usa.bloodborne "Bloodborne" ps4_tree "$files"
+
+  gotg refresh
+  gotg download usa.bloodborne
+
+  [ "$status" -eq 0 ]
+  [ -f "$GOTG_GAMES_DIR/ps4/usa.bloodborne/sce_sys/param.sfo" ]
+  load_client_libs
+  run resolve_target "$(manifest_find ps4/usa.bloodborne)"
+  [ "$output" = "$GOTG_GAMES_DIR/ps4/usa.bloodborne/eboot.bin" ]
+}
+
+@test "a PS4 package is the platform's recipe's to unpack, into the same tree" {
+  add_game ps4 "usa.bloodborne.pkg" "pkg-bytes"
+  gotg refresh
+  gotg download usa.bloodborne
+  # No environment is built here, so the recipe is what it asks for.
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"recipe"* ]]
+  [ ! -e "$GOTG_GAMES_DIR/ps4/usa.bloodborne.pkg" ]
+}
+
 @test "downloading twice does not re-fetch" {
   add_game n64 "usa.zelda.z64" "rom-content"
   gotg refresh

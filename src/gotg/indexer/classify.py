@@ -12,8 +12,9 @@ import collections
 import re
 from dataclasses import dataclass
 
-from ..contract import (  # noqa: F401 — re-exported; the wire-legal six live in the contract
+from ..contract import (  # noqa: F401 — re-exported; the wire-legal handlers live in the contract
     HANDLER_NO_INTRO_SET,
+    HANDLER_PS4_TREE,
     HANDLER_SCENE_ARCHIVE,
     HANDLER_SINGLE_ARCHIVE,
     HANDLER_SINGLE_FILE,
@@ -30,6 +31,10 @@ HANDLER_MANUAL = "manual"
 # title): every member is its own single_archive entry, chosen 1G1R like a
 # No-Intro set. Named in rules.yaml dat_dirs; the catalog never sees the name.
 HANDLER_ARCHIVE_SET = "archive_set"
+
+# Platforms named from a payload's contents rather than rules.yaml; the platforms
+# check holds them to having an environment too.
+CONTENT_PLATFORMS = ("wiiu", "ps4")
 
 _HEX8_RE = re.compile(r"^[0-9a-f]{8}(\.(app|h3))?$", re.I)
 _TMD_RE = re.compile(r"^(title\.tmd|tmd(\.[0-9a-f]+)?)$", re.I)
@@ -97,6 +102,12 @@ def _platform_from_files(source: Source, rules: Rules) -> tuple[str, int]:
 
 def classify(source: Source, rules: Rules) -> Classification:
     """Decide how to import one payload: a file by extension, a directory by name, then contents."""
+    if source.ps4:
+        # Its own param.sfo says what it is, and a PS3 .pkg has none to read.
+        # The planner stamps each member's handler: a tree or a package.
+        handler = HANDLER_PS4_TREE if source.ps4[0].is_dir else HANDLER_SINGLE_FILE
+        return Classification(handler, "ps4", "PS4 param.sfo")
+
     if not source.is_dir:
         platform = rules.platform_for_ext(_ext(source.name))
         if platform:
@@ -112,6 +123,8 @@ def classify(source: Source, rules: Rules) -> Classification:
                 reason="archive whose contents name no known platform; add the extension to rules.yaml",
             )
 
+        if _ext(source.name) == "pkg":
+            return Classification(HANDLER_MANUAL, reason="a .pkg that is not a readable PS4 package")
         return Classification(
             HANDLER_MANUAL,
             reason=f"unmapped extension {_ext(source.name) or '(none)'}; add it to rules.yaml",
