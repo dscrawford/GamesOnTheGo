@@ -43,8 +43,11 @@ keys_ensure() {
   # a GameCube game that will not emulate its Game Boy Advances without the
   # GBA's BIOS, and that file belongs to the Game Boy Advance directory rather
   # than being copied into every platform that has a use for it.
-  local from
+  local from optional
   from="$(jq -r '.platform // empty' "$manifest")"
+  # A file the emulator can do without (melonDS has a BIOS of its own): its
+  # absence is a line in the log, not a warning on every launch.
+  optional="$(jq -r '.optional // false' "$manifest")"
   [[ -n "$from" ]] && platform="$from"
 
   into="$(jq -r '.into // empty' "$manifest")"
@@ -97,11 +100,15 @@ keys_ensure() {
     else
       rm -f "$dest.part"
       missing=$((missing + 1))
-      warn "no $file on the server at /Games/$platform/$file"
+      if [[ "$optional" == true ]]; then
+        log "no $file at /Games/$platform/$file -- the emulator's own is used"
+      else
+        warn "no $file on the server at /Games/$platform/$file"
+      fi
     fi
   done
 
-  if ((missing > 0)); then
+  if ((missing > 0)) && [[ "$optional" != true ]]; then
     warn "$platform needs its keys in /Games/$platform"
   fi
 }

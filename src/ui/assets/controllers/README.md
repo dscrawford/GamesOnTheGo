@@ -24,6 +24,7 @@ artwork itself can be drawn however it likes.
 | `gameboy.svg` | Wikimedia Commons `Gameboy pocket.svg` | CC0 |
 | `gba.svg` | Openclipart 344577 `game-boy-advance` | CC0 |
 | `generic.svg` | Drawn here | CC0 |
+| `nds.svg` | Drawn here | CC0 |
 
 ES-DE is [EmulationStation Desktop Edition](https://gitlab.com/es-de/emulationstation-de),
 MIT, © Northwestern Software AB / Leon Styhre / Alec Lofquist. Its root `LICENSE`

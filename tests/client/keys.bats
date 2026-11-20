@@ -76,6 +76,17 @@ keys_dir() { printf '%s/env-switch/config/Ryujinx/system' "$GOTG_STATE_DIR/env";
   [[ "$output" == *"needs its keys in /Games/"* ]]
 }
 
+@test "an optional BIOS that is not on the server is a log line, not a warning" {
+  mkdir -p "$GOTG_ROOTS_DIR/env-nds/share/gotg"
+  jq -n '{into: "bios", files: ["bios7.bin"], optional: true}' \
+    >"$GOTG_ROOTS_DIR/env-nds/share/gotg/keys.json"
+  run keys_ensure env-nds nds
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no bios7.bin"* ]]
+  [[ "$output" != *"warning"* ]]
+  [[ "$output" != *"needs its keys"* ]]
+}
+
 @test "an interrupted fetch leaves no half a key behind" {
   fake_keys_env
   # Nothing on the server at all.
