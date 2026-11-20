@@ -3,7 +3,8 @@
     "Per-game local tweaks the CLI has to know before anything is built: where a",
     "game lands on disk, and which file inside it to launch. How a game runs —",
     "emulator, arguments, settings — lives in src/client/env instead.",
-    "Key by id, or by platform/id when the same id exists on several platforms.",
+    "Key by id, or by platform/id when the same id exists on several platforms,",
+    "or by platform/* for every game on a platform.",
     "  target:   glob for the file to launch, relative to the installed game",
     "  unzip:    the game installs as a directory of the unpacked ROM. The",
     "            unpacking itself is the game environment's recipe; this flag",
@@ -31,6 +32,13 @@
   "n64/usa.donkey_kong_64": { "unzip": true, "target": "*.z64" },
   "n64/usa.snowboard_kids_2": { "unzip": true, "target": "*.z64" },
   "n64/usa.super_smash_bros": { "unzip": true, "target": "*.z64" },
+
+  "_comment_ps4": [
+    "Every PS4 game installs as its extracted tree, whether it arrived as one",
+    "or as a .pkg that env/ps4.nix's recipe unpacks, and shadPS4 runs its eboot.bin."
+  ],
+
+  "ps4/*": { "unzip": true, "target": "eboot.bin" },
 
   "wiiu/usa.legend_of_zelda_twilight_princess_hd": { "target": "code/*.rpx" },
   "wiiu/usa.legend_of_zelda_the_wind_waker_hd": { "target": "code/*.rpx" }
