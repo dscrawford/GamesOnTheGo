@@ -82,6 +82,16 @@ extensions:
   wbfs: wii
   wua: wiiu
   wux: wiiu
+  # Decrypted or encrypted alike: Azahar decrypts with the console's
+  # aes_keys.txt, which env/3ds.nix fetches the way switch.nix fetches prod.keys.
+  3ds: 3ds
+  cci: 3ds
+  cxi: 3ds
+  cia: 3ds
+  3dsx: 3ds
+  zcci: 3ds
+  zcxi: 3ds
+  z3dsx: 3ds
   gba: gba
   gbc: gbc
   gb: gb

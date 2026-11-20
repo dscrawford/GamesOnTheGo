@@ -46,6 +46,8 @@ source "$GOTG_LIB/pads-dolphin.sh"
 source "$GOTG_LIB/pads-ryujinx.sh"
 # shellcheck source=lib/pads-cemu.sh
 source "$GOTG_LIB/pads-cemu.sh"
+# shellcheck source=lib/pads-azahar.sh
+source "$GOTG_LIB/pads-azahar.sh"
 # shellcheck source=lib/keys.sh
 source "$GOTG_LIB/keys.sh"
 # shellcheck source=lib/firmware.sh
