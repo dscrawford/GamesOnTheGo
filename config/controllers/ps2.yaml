@@ -1,7 +1,4 @@
-# PlayStation 2.
-#
-# danstick's ps2 layout walks the buttons only; the sticks reach the game as
-# the clone's own sticks, so a DualShock's analog play needs no walk.
+# PlayStation 2. danstick's ps2 layout walks the buttons; the sticks pass through.
 
 label: PlayStation 2
 

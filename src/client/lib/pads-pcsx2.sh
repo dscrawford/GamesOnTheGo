@@ -1,12 +1,6 @@
 # shellcheck shell=bash
-# Writing PCSX2's controller bindings: the PlayStation 2 half of what pads.sh
-# does for ares.
-#
-# PCSX2 names an SDL input by its standard gamepad element (`SDL-0/FaceSouth`,
-# `SDL-0/-LeftY`) and does the per-model lookup itself, so the section is the
-# same for every pad and only the device number moves. That number is SDL's
-# player index, handed out in the order pads appear; under `danstick-rs exec`
-# the game sees only the clones, published in seat order, so player N is SDL-N.
+# PCSX2's controller bindings. SDL-N is SDL's player index, given in the order
+# pads appear; under `danstick-rs exec` that is danstick's seat order.
 
 # Two ports and no multitap: what a console on its own has.
 GOTG_PCSX2_PORTS=2
@@ -31,9 +25,7 @@ pads_pcsx2_section() {
   done
 }
 
-# Replace both [PadN] sections and leave every other one as it was. Both go
-# even when one player is seated: a pad unplugged since the last run would
-# otherwise keep port two.
+# Replace every [PadN] section, so a pad unplugged since the last run loses its port.
 pads_pcsx2_rewrite() {
   local file="$1" body="$2"
   local tmp="$file.gotg-tmp"
