@@ -89,7 +89,7 @@ ARCHIVES = (".zip", ".7z")
 
 # The one list of browser-playable systems, shared with Nix: nix/emulatorjs.nix
 # packages exactly the cores named here, so the two cannot drift. Only what
-# runs in WASM at a useful speed is under "browser" (n64 and ps1 flagged: they
+# runs in WASM at a useful speed is under "browser" (n64 and psx flagged: they
 # run on good hardware and are the first thing to stutter on a phone).
 # "unsupported" are the systems that stay with the Nix launcher for good.
 SYSTEMS_FILE = Path(__file__).with_name("play_systems.json")

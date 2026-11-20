@@ -1,6 +1,6 @@
 # gotg.lib.mkLibrary over the fixture catalog: what each game would launch,
 # read from its spec without building it, and that asking for one game forces
-# no other -- the fixture's PlayStation game has no environment, and only
+# no other -- the fixture's Saturn game has no environment, and only
 # forcing it may fail.
 { pkgs, flake }:
 let
@@ -92,7 +92,7 @@ let
     };
     testAGameWithNoEnvironmentFailsOnlyWhenRun = {
       expr = [
-        (forced games.psx.usa.crash_bandicoot)
+        (forced games.saturn.usa.nights_into_dreams)
         (forced games.n64.usa.donkey_kong_64)
       ];
       expected = [
