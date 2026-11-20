@@ -9,7 +9,7 @@
     "genesis": {"system": "segaMD", "core": "genesis_plus_gx",  "exts": [".md", ".gen", ".bin", ".smd"]},
     "n64":     {"system": "n64",    "core": "mupen64plus_next", "exts": [".z64", ".n64", ".v64"],
                 "experimental": true, "note": "heavy: wants a desktop-class CPU/GPU"},
-    "ps1":     {"system": "psx",    "core": "pcsx_rearmed",     "exts": [".cue", ".chd", ".pbp", ".iso", ".bin"],
+    "psx":     {"system": "psx",    "core": "pcsx_rearmed",     "exts": [".cue", ".chd", ".pbp", ".iso", ".bin"],
                 "experimental": true, "note": "disc images are large; some games want a BIOS the page cannot supply"}
   },
   "unsupported": {
