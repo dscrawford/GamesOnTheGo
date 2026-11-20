@@ -154,5 +154,25 @@
       "C": "b",
       "Start": "start"
     }
+  },
+
+  "PlayStation": {
+    "layout": { "container": "Controller.Port", "pad": "Digital.Gamepad", "players": 2 },
+    "buttons": {
+      "Up": ["dpup", "lefty-"],
+      "Down": ["dpdown", "lefty+"],
+      "Left": ["dpleft", "leftx-"],
+      "Right": ["dpright", "leftx+"],
+      "Cross": "a",
+      "Circle": "b",
+      "Square": "x",
+      "Triangle": "y",
+      "L1": "leftshoulder",
+      "L2": "lefttrigger",
+      "R1": "rightshoulder",
+      "R2": "righttrigger",
+      "Select": "back",
+      "Start": "start"
+    }
   }
 }

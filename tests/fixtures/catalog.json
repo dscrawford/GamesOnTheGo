@@ -18,7 +18,7 @@
      "files": [{"name": "Super Metroid (World).sfc", "size_bytes": 1, "sha256": "7777777777777777777777777777777777777777777777777777777777777777"}]},
     {"id": "usa.pikmin_rev1", "platform": "gamecube", "handler": "single_archive", "title": "Pikmin",
      "files": [{"name": "Pikmin (USA) (Rev 1).7z", "size_bytes": 1, "sha256": "8888888888888888888888888888888888888888888888888888888888888888"}]},
-    {"id": "usa.crash_bandicoot", "platform": "psx", "handler": "single_file", "title": "Crash Bandicoot",
-     "files": [{"name": "Crash Bandicoot (USA).bin", "size_bytes": 1, "sha256": "9999999999999999999999999999999999999999999999999999999999999999"}]}
+    {"id": "usa.nights_into_dreams", "platform": "saturn", "handler": "single_file", "title": "NiGHTS into Dreams",
+     "files": [{"name": "NiGHTS into Dreams... (USA).bin", "size_bytes": 1, "sha256": "9999999999999999999999999999999999999999999999999999999999999999"}]}
   ]
 }

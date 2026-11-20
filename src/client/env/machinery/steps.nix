@@ -185,6 +185,26 @@ in
     '';
   };
 
+  # Terminal: a disc as its cue sheet and tracks, placed as <id>/ with the
+  # sheet renamed <id>.cue for resolve_target. The tracks keep their names,
+  # because the sheet refers to them by name.
+  placeCueTree = {
+    name = "place-cue-tree";
+    script = ''
+      [ -z "$(find "$cur" -type l -print -quit)" ] || fail "refusing a tree containing symlinks"
+      cues=()
+      while IFS= read -r -d "" cue; do cues+=("$cue"); done \
+        < <(find "$cur" -maxdepth 1 -type f -iname '*.cue' -print0)
+      [ "''${#cues[@]}" -eq 1 ] || fail "want one .cue in the disc, found ''${#cues[@]}"
+      sheet="$(basename "''${cues[0]}")"
+      rm -rf "$dest"
+      mv "$cur" "$dest" || fail "could not place $dest"
+      [ "$sheet" = "$(basename "$dest").cue" ] ||
+        mv "$dest/$sheet" "$dest/$(basename "$dest").cue" || fail "could not rename $sheet"
+      cur="$dest"
+    '';
+  };
+
   # Terminal: the source names the format. Emulators dispatch on the
   # extension, so it has to survive the rename onto the id — but it is an
   # extracted name's to choose, so anything but a plain one is refused rather

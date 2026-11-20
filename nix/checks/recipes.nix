@@ -7,6 +7,7 @@ let
   gamecube = packages.env-gamecube;
   threeds = packages.env-3ds;
   ps2 = packages.env-ps2;
+  psx = packages.env-psx;
   # The real harkinian envs are too heavy to build in a check (they
   # carry the ports); a dummy port pins the helper's contract at
   # eval time instead. Both handlers, because the same zip is
@@ -256,6 +257,14 @@ pkgs.runCommand "check-recipes" {
   [ "$(cat $TMPDIR/out/usa.ps2dvd.chd)" = "createdvd-of:iso-bytes" ]
   GOTG_TEST_7Z_CUE=1 ${ps2}/bin/gotg-recipe single_archive $raw $TMPDIR/out/usa.ps2cd
   [ "$(cat $TMPDIR/out/usa.ps2cd.chd)" = "createcd-of:cue" ]
+
+  # A PlayStation disc: the sheet becomes <id>.cue, its tracks keep their
+  # names beside it.
+  GOTG_TEST_7Z_CUE=1 ${psx}/bin/gotg-recipe single_archive $raw $TMPDIR/out/usa.disc
+  [ "$(cat $TMPDIR/out/usa.disc/usa.disc.cue)" = cue ]
+  [ -e "$TMPDIR/out/usa.disc/game (Track 1).bin" ]
+  [ ! -e $TMPDIR/out/usa.disc/game.cue ]
+  grep -q '"single_archive"' ${psx}/share/gotg/recipe.json
 
   # An unknown handler is a refusal, not a guess.
   if ${switch}/bin/gotg-recipe mystery $raw $TMPDIR/out/y 2>$TMPDIR/err-dispatch; then
