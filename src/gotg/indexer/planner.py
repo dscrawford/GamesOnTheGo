@@ -123,9 +123,7 @@ def _plan_classified(source, verdict, games_root: Path | str, rules: Rules) -> l
         ]
 
     if verdict.handler == cl.HANDLER_NO_INTRO_SET:
-        return pl.plan_no_intro_set(
-            verdict.platform, games_root, str(source.path), _rom_files(source, rules), one_g_one_r=True
-        )
+        return _plan_loose(verdict.platform, games_root, str(source.path), _rom_files(source, rules), True)
 
     if verdict.handler == cl.HANDLER_ARCHIVE_SET:
         archives = [name for name in source.files if cl._ext(name) in SINGLE_ARCHIVE_EXTS]
@@ -137,16 +135,34 @@ def _plan_classified(source, verdict, games_root: Path | str, rules: Rules) -> l
         # A single deliberately-downloaded game: keep it even if it is a demo or
         # prototype, so no 1G1R curation here.
         if source.is_dir:
-            return pl.plan_no_intro_set(
-                verdict.platform, games_root, str(source.path), _rom_files(source, rules), one_g_one_r=False
-            )
-        return pl.plan_no_intro_set(verdict.platform, games_root, src_dir, [source.name], one_g_one_r=False)
+            return _plan_loose(verdict.platform, games_root, str(source.path), _rom_files(source, rules), False)
+        return _plan_loose(verdict.platform, games_root, src_dir, [source.name], False)
 
     return [
         pl.Op(
             pl.ACTION_MANUAL, verdict.platform, str(source.path), "", "", reason=f"unknown handler {verdict.handler!r}"
         )
     ]
+
+
+def _plan_loose(
+    platform: str, games_root: Path | str, src_dir: str, filenames: list[str], one_g_one_r: bool
+) -> list[pl.Op]:
+    """Loose ROMs, with a platform's tagged updates and DLC attached rather than imported.
+
+    An update shares its base's slug, so left in the set it would compete with the
+    base for the 1G1R pick instead of attaching to it.
+    """
+    extras: list[pl.Op] = []
+    games: list[str] = []
+    for name in filenames:
+        op = pl.plan_extra(platform, f"{src_dir}/{name}", name) if platform in pl.EXTRAS_PLATFORMS else None
+        if op is None:
+            games.append(name)
+        else:
+            extras.append(op)
+    games_ops = pl.plan_no_intro_set(platform, games_root, src_dir, games, one_g_one_r=one_g_one_r) if games else []
+    return games_ops + extras
 
 
 def mod_platforms(games_root: Path | str) -> list[str]:

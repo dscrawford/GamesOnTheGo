@@ -538,3 +538,51 @@ def test_mod_platforms_come_from_the_tree_not_a_list(tmp_path):
 
     assert mod_platforms(tmp_path) == ["n64"]
     assert mod_platforms(tmp_path / "missing") == []
+
+
+def test_a_3ds_set_attaches_its_updates_and_dlc_instead_of_curating_them(roots):
+    src, games = roots
+    make_dir(
+        src,
+        "3DS",
+        files=(
+            "Fire Emblem - Awakening (USA).3ds",
+            "Fire Emblem - Awakening (Europe).3ds",
+            "Fire Emblem - Awakening (USA) (v1.1) (Update).cia",
+            "Fire Emblem - Awakening (USA) (DLC).cia",
+            "Kid Icarus - Uprising (USA).cia",
+        ),
+    )
+
+    ops = plan_source(src / "3DS", games, RULES)
+
+    kept = {(o.entry_id, o.dst) for o in ops if o.action == ACTION_HARDLINK}
+    assert kept == {
+        ("usa.fire_emblem_awakening", f"{games}/3ds/usa.fire_emblem_awakening.3ds"),
+        ("usa.kid_icarus_uprising", f"{games}/3ds/usa.kid_icarus_uprising.cia"),
+    }
+    attached = {(o.entry_id, o.role, o.version) for o in ops if o.action == ACTION_ATTACH}
+    assert attached == {("usa.fire_emblem_awakening", "update", "1.1"), ("usa.fire_emblem_awakening", "dlc", "")}
+
+
+def test_a_loose_3ds_update_attaches_to_its_base(roots):
+    src, games = roots
+    (src / "Pokemon Y (USA) (v1.5) (Update).cia").write_bytes(b"x")
+
+    ops = plan_source(src / "Pokemon Y (USA) (v1.5) (Update).cia", games, RULES)
+
+    assert [(o.action, o.platform, o.entry_id, o.role) for o in ops] == [
+        (ACTION_ATTACH, "3ds", "usa.pokemon_y", "update")
+    ]
+
+
+@pytest.mark.parametrize("ext", ["3ds", "cci", "cxi", "cia", "3dsx", "zcci"])
+def test_every_3ds_form_is_a_3ds_game(roots, ext):
+    src, games = roots
+    (src / f"Super Mario 3D Land (USA).{ext}").write_bytes(b"x")
+
+    ops = plan_source(src / f"Super Mario 3D Land (USA).{ext}", games, RULES)
+
+    assert [(o.action, o.platform, o.dst) for o in ops] == [
+        (ACTION_HARDLINK, "3ds", f"{games}/3ds/usa.super_mario_3d_land.{ext}")
+    ]
