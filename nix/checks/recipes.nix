@@ -5,6 +5,7 @@
 let
   switch = packages.env-switch;
   gamecube = packages.env-gamecube;
+  psx = packages.env-psx;
   # The real harkinian envs are too heavy to build in a check (they
   # carry the ports); a dummy port pins the helper's contract at
   # eval time instead. Both handlers, because the same zip is
@@ -197,6 +198,12 @@ pkgs.runCommand "check-recipes" {
       printf 'x' > "$stage/padding-file-with-a-long-name-to-fill-the-pipe-buffer-$i.bin"
     done
   fi
+  if [ "''${GOTG_TEST_7Z_CUE:-0}" = 1 ]; then
+    printf 'FILE "Game (USA) (Track 1).bin" BINARY' > "$stage/Game (USA).cue"
+    printf 't1' > "$stage/Game (USA) (Track 1).bin"
+    printf 't2' > "$stage/Game (USA) (Track 2).bin"
+    exit 0
+  fi
   printf 'iso-bytes' > "$stage/game.iso"
   EOF
   cat > $TMPDIR/bin/dolphin-tool <<'EOF'
@@ -232,6 +239,16 @@ pkgs.runCommand "check-recipes" {
   touch "$raw/Game (USA).7z"
   ${gamecube}/bin/gotg-recipe single_archive $raw $TMPDIR/out/usa.game
   [ "$(cat $TMPDIR/out/usa.game.rvz)" = "rvz-of:iso-bytes" ]
+
+  # A PlayStation disc: the sheet becomes <id>.cue, the tracks it names keep
+  # their names beside it.
+  raw=$TMPDIR/raw-cue && mkdir -p $raw
+  touch "$raw/Game (USA).7z"
+  GOTG_TEST_7Z_CUE=1 ${psx}/bin/gotg-recipe single_archive $raw $TMPDIR/out/usa.disc
+  grep -qF 'Track 1).bin' $TMPDIR/out/usa.disc/usa.disc.cue
+  [ "$(cat "$TMPDIR/out/usa.disc/Game (USA) (Track 2).bin")" = t2 ]
+  [ ! -e "$TMPDIR/out/usa.disc/Game (USA).cue" ]
+  grep -q '"single_archive"' ${psx}/share/gotg/recipe.json
 
   # An unknown handler is a refusal, not a guess.
   if ${switch}/bin/gotg-recipe mystery $raw $TMPDIR/out/y 2>$TMPDIR/err-dispatch; then

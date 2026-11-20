@@ -169,6 +169,7 @@ envs
       "env-nes"
       "env-snes"
       "env-genesis"
+      "env-psx"
       "env-n64"
       "env-n64-usa_super_mario_64-pc"
       "env-switch"

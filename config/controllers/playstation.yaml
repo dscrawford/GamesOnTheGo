@@ -1,0 +1,55 @@
+# PlayStation: the digital pad ares connects by default, drawn as the
+# generic pad until it has artwork of its own.
+
+label: PlayStation
+
+# The danstick layout the capture walks; `controls` is its control set.
+layout: generic
+# assets/controllers/<artwork>.svg
+artwork: generic
+players: 2
+# What ares calls this console, for the bindings ares writes itself.
+ares: [PlayStation]
+# The GOTG platforms played with this controller.
+platforms: [psx]
+
+# danstick's control id -> what the button says.
+controls:
+  a: Cross (bottom)
+  b: Circle (right)
+  x: Square (left)
+  y: Triangle (top)
+  dpup: D-pad up
+  dpdown: D-pad down
+  dpleft: D-pad left
+  dpright: D-pad right
+  back: Select
+  start: Start
+  leftshoulder: L1
+  rightshoulder: R1
+  lefttrigger: L2
+  righttrigger: R2
+  leftstick_up: Left stick up (D-pad)
+  leftstick_down: Left stick down (D-pad)
+  leftstick_left: Left stick left (D-pad)
+  leftstick_right: Left stick right (D-pad)
+  rightstick_up: Right stick up
+  rightstick_down: Right stick down
+  rightstick_left: Right stick left
+  rightstick_right: Right stick right
+
+# Where the drawing marks it, when the circle is not named after the
+# control. The generic drawing uses a modern pad's letters.
+anchors:
+  a: A
+  b: B
+  x: X
+  y: Y
+  dpup: Up
+  dpdown: Down
+  dpleft: Left
+  dpright: Right
+  back: Select
+  start: Start
+  leftshoulder: L
+  rightshoulder: R
