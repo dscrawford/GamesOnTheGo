@@ -66,13 +66,9 @@ dat_dirs:
 
 # Single-file extension -> platform, for loose ROM torrents.
 extensions:
-  # `.iso` is genuinely ambiguous — GameCube, Wii, PS2 and PSP all use it — so it
-  # is mapped here rather than in the code defaults, where the assumption would
-  # be invisible. PS2 titles arrive only as the Redump set above, whose DAT
-  # directory names the platform; a loose PS2 .iso would be filed as GameCube,
-  # and when one arrives this mapping must go and the platform be decided from
-  # the disc header instead (dolphin-tool reports the Game ID; a PS2 disc has
-  # SYSTEM.CNF).
+  # `.iso` is genuinely ambiguous — GameCube, Wii, PS2 and PSP all use it. PS2
+  # arrives only as the Redump set above; a loose PS2 .iso would need this
+  # decided from the disc header instead (a PS2 disc has SYSTEM.CNF).
   iso: gamecube
   z64: n64
   n64: n64

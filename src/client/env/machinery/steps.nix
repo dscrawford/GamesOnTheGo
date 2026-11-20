@@ -271,10 +271,8 @@ in
     '';
   };
 
-  # Terminal: a PlayStation 2 disc as the CHD PCSX2 reads. A CD title is a cue
-  # and its tracks, and only the cue says how they fit, so it wins over the
-  # largest file; a DVD title is its one .iso. find -type f skips the symlinks
-  # an archive can carry.
+  # Terminal: a PS2 disc as CHD. A CD title's cue wins over its bigger tracks,
+  # since only the cue says how they fit; a DVD title is its one .iso.
   convertChd = {
     name = "convert-chd";
     tools.CHDMAN = "${pkgs.mame-tools}/bin/chdman";
