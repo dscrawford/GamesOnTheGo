@@ -270,4 +270,24 @@ in
       cur="$dest.rvz"
     '';
   };
+
+  # Terminal: a PlayStation 2 disc as the CHD PCSX2 reads. A CD title is a cue
+  # and its tracks, and only the cue says how they fit, so it wins over the
+  # largest file; a DVD title is its one .iso. find -type f skips the symlinks
+  # an archive can carry.
+  convertChd = {
+    name = "convert-chd";
+    tools.CHDMAN = "${pkgs.mame-tools}/bin/chdman";
+    script = ''
+      disc="$(find "$cur" -type f -iname '*.cue' -print -quit || true)"
+      mode=createcd
+      if [ -z "$disc" ]; then
+        disc="$(find "$cur" -type f -printf '%s\t%p\0' | sort -z -rn | head -z -n1 | cut -z -f2- | tr -d '\0' || true)"
+        mode=createdvd
+      fi
+      [ -n "$disc" ] || fail "no disc image in $cur"
+      "$CHDMAN" "$mode" -i "$disc" -o "$dest.chd" >/dev/null || fail "conversion failed"
+      cur="$dest.chd"
+    '';
+  };
 }
