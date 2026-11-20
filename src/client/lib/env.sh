@@ -30,8 +30,9 @@ override_field() {
   local game="$1" field="$2" id platform
   id="$(manifest_field "$game" id)"
   platform="$(manifest_field "$game" platform)"
-  jq -r --arg k1 "$platform/$id" --arg k2 "$id" --arg f "$field" \
-    '(.[$k1][$f] // .[$k2][$f]) // empty' "$(overrides_json)"
+  # "<platform>/*" is every game on a platform: each PS4 game is a tree.
+  jq -r --arg k1 "$platform/$id" --arg k2 "$id" --arg k3 "$platform/*" --arg f "$field" \
+    '(.[$k1][$f] // .[$k2][$f] // .[$k3][$f]) // empty' "$(overrides_json)"
 }
 
 # The flake attribute for a game: its own environment when src/client/env has a file
@@ -285,7 +286,7 @@ env_build_wait() {
 }
 
 # The file handed to the emulator. Directory games need a glob (Wii U wants the
-# .rpx inside code/), single-file games are just themselves.
+# .rpx inside code/, a PS4 game its eboot.bin), single-file games are just themselves.
 resolve_target() {
   local game="$1" path pattern match
   path="$(game_installed_path "$game")" ||

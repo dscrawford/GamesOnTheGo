@@ -50,9 +50,11 @@ firmware_populated() {
 # swept by the next run instead of accumulating under names nothing ever
 # revisits. Fixed names are safe because every caller holds the platform lock.
 #
-#   $1 the zip   $2 the registered directory to (re)create
+# A `flat` glob instead takes every matching file, flattened (PS4 *.sprx).
+#
+#   $1 the zip   $2 the registered directory to (re)create   $3 the flat glob, if any
 firmware_unpack() {
-  local zip="$1" reg="$2" tmp entry name
+  local zip="$1" reg="$2" flat="${3:-}" tmp entry name
   tmp="$reg.unpack"
   rm -rf "$tmp" "$reg.part"
   mkdir -p "$tmp" "$reg.part" || return 1
@@ -82,20 +84,29 @@ EOF
 
   # Any single failure fails the whole install: a partial set that passed the
   # populated check would be cached, linked everywhere, and never retried.
-  while IFS= read -r -d '' entry; do
-    case "$entry" in
-      */00) name="${entry%/00}" name="${name##*/}" ;;
-      *) name="${entry##*/}" ;;
-    esac
-    name="${name//.cnmt/}"
-    if ! mkdir -p "$reg.part/$name" || ! mv "$entry" "$reg.part/$name/00"; then
-      rm -rf "$tmp" "$reg.part"
-      return 1
-    fi
-  done < <(find "$tmp" -type f \( -name '*.nca' -o -path '*.nca/00' \) -print0)
+  if [[ -n "$flat" ]]; then
+    while IFS= read -r -d '' entry; do
+      if ! mv "$entry" "$reg.part/${entry##*/}"; then
+        rm -rf "$tmp" "$reg.part"
+        return 1
+      fi
+    done < <(find "$tmp" -type f -iname "$flat" -print0)
+  else
+    while IFS= read -r -d '' entry; do
+      case "$entry" in
+        */00) name="${entry%/00}" name="${name##*/}" ;;
+        *) name="${entry##*/}" ;;
+      esac
+      name="${name//.cnmt/}"
+      if ! mkdir -p "$reg.part/$name" || ! mv "$entry" "$reg.part/$name/00"; then
+        rm -rf "$tmp" "$reg.part"
+        return 1
+      fi
+    done < <(find "$tmp" -type f \( -name '*.nca' -o -path '*.nca/00' \) -print0)
+  fi
   rm -rf "$tmp"
 
-  # A zip with no NCAs in it is not firmware, whatever it is named.
+  # A zip with nothing the layout wants in it is not firmware, whatever it is named.
   firmware_populated "$reg.part" || {
     rm -rf "$reg.part"
     return 1
@@ -138,7 +149,7 @@ firmware_adopt() {
 
 # The server's copy, unpacked straight into the cache.
 firmware_fetch() {
-  local cache="$1" platform="$2" file="$3" zip rc=0
+  local cache="$1" platform="$2" file="$3" flat="${4:-}" zip rc=0
   service_have || return 1
 
   zip="$cache.zip"
@@ -150,7 +161,7 @@ firmware_fetch() {
     return 1
 
   log "fetched $file"
-  firmware_unpack "$zip" "$cache" || rc=1
+  firmware_unpack "$zip" "$cache" "$flat" || rc=1
   rm -f "$zip"
   return "$rc"
 }
@@ -162,13 +173,12 @@ firmware_fetch() {
 #
 #   $1 environment attribute   $2 the platform whose directory holds the zip
 firmware_ensure() {
-  local attr="$1" platform="$2" manifest spec into file dest cache
+  local attr="$1" platform="$2" manifest spec into file flat dest cache
 
   manifest="$(firmware_manifest "$attr")"
   [[ -f "$manifest" ]] || return 0
-  spec="$(jq -r '[.into // "", .file // ""] | @tsv' "$manifest" 2>/dev/null)" || spec=""
-  into="${spec%%$'\t'*}"
-  file="${spec#*$'\t'}"
+  spec="$(jq -r '[.into // "", .file // "", .flat // ""] | @tsv' "$manifest" 2>/dev/null)" || spec=""
+  IFS=$'\t' read -r into file flat <<<"$spec"
   [[ -n "$into" && -n "$file" ]] || return 0
 
   # Joined onto paths that later meet rm -rf. Today it only ever comes out of
@@ -192,7 +202,7 @@ firmware_ensure() {
     flock 9
     if ! firmware_populated "$cache"; then
       firmware_adopt "$cache" "$into" ||
-        firmware_fetch "$cache" "$platform" "$file" ||
+        firmware_fetch "$cache" "$platform" "$file" "$flat" ||
         exit 1
     fi
     firmware_link "$cache" "$dest"
@@ -201,7 +211,7 @@ firmware_ensure() {
       warn "could not place firmware for $attr — the emulator will ask instead"
     else
       warn "no $platform firmware here or on the server at /Games/$platform/$file"
-      warn "the emulator will offer to install some on the first launch"
+      [[ -n "$flat" ]] || warn "the emulator will offer to install some on the first launch"
     fi
   fi
   return 0

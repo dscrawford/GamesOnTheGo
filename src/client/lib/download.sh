@@ -441,7 +441,7 @@ _download_game_locked() {
         _install_file "$member" "$dest"
       fi
       ;;
-    wiiu_decrypted)
+    wiiu_decrypted | ps4_tree)
       # Placement too: the tree is already what the emulator reads, so no
       # environment (and no built recipe) is required to put it in place.
       mkdir -p "$(dirname "$dest")"

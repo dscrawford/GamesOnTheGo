@@ -261,7 +261,7 @@ after (`GOTG_UI_SAVES_SYNC=0` stops that; `GOTG_SAVES_WATCH=0` the watcher).
 saves, machine and time, and keeps the one you pick, the other set aside. A
 push against a newer server copy is refused (409) unless `--force`. Local
 history: `~/.local/state/gotg/saves/local/`, last 3 (`GOTG_SAVES_KEEP`).
-Wii U saves are not synced yet.
+Wii U saves are not synced yet. PS4: see [docs/ps4.md](docs/ps4.md).
 
 ## QA
 
