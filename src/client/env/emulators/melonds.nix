@@ -11,8 +11,7 @@ in
     {
       emulator = pkgs.melonds;
       bin = "melonDS";
-      # Its config is $XDG_CONFIG_HOME/melonDS/melonDS.toml, and the bindings
-      # written into it are ours to get right, not the player's own install's.
+      # The bindings written into melonDS.toml must not touch the player's own install.
       isolate = true;
       args = [
         "{fullscreen}"
@@ -47,8 +46,7 @@ in
         optional = true;
       };
 
-      # The client's pad writer leaves the bindings in melonds-pad.json; they
-      # go in here, after it, beside the settings pinned on every launch.
+      # pads-melonds.sh leaves melonds-pad.json; the preLaunch merges it.
       padEmulator = "melonds";
 
       preLaunch = ''

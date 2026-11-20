@@ -1,8 +1,5 @@
-# Nintendo DS.
-#
-# The DS's face buttons and shoulders are a SNES pad's, so it walks danstick's
-# snes layout. The drawing names its circles after danstick's controls, so it
-# needs no `anchors:`.
+# Nintendo DS. Its buttons are a SNES pad's, so it walks danstick's snes layout;
+# the drawing's circles are named after danstick's controls, so no `anchors:`.
 
 label: Nintendo DS
 

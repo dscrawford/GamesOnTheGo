@@ -1,13 +1,8 @@
 # shellcheck shell=bash
-# melonDS bindings: player one's pad, written as JSON for the environment's
-# preLaunch to merge into melonDS.toml (the client carries no TOML writer).
-#
-# melonDS binds raw SDL joystick inputs, not gamepad elements, so each DS button
-# is looked up in the pad's map from gotg-pads. One int per input, as
-# EmuInstance::joystickButtonDown reads it: a button is its index, a hat is
-# 0x100 | hat << 4 | direction, and an axis is 0x10000 | axis << 24 | dir << 20
-# (0 positive, 1 negative, 2 trigger) over a low half of 0xFFFF. A button and an
-# axis can share one int, which is how the D-pad and the left stick both move.
+# melonDS bindings for player one, as JSON the environment's preLaunch merges
+# into melonDS.toml. Ints as EmuInstance::joystickButtonDown decodes them:
+# button = index, hat = 0x100|hat<<4|dir, axis = 0x10000|axis<<24|dir<<20
+# (0 +, 1 -, 2 trigger); one int can hold a button and an axis at once.
 
 pads_melonds_file() { printf '%s/melonds-pad.json' "$(env_state_dir "$1")"; }
 
@@ -51,9 +46,8 @@ pads_melonds_bindings() {
   ' <<<'null'
 }
 
-# Player one's SDL index inside the game: melonDS opens a joystick by its
-# position among those it can see, and under `danstick-rs exec` that is only
-# danstick's clones, in the order SDL enumerates them.
+# melonDS opens a joystick by SDL index, and under `danstick-rs exec` the game
+# sees only danstick's clones.
 #
 #   $1 gotg-pads' enumeration   $2 the chosen pad   $3 danstick's published seats
 pads_melonds_index() {
@@ -74,8 +68,7 @@ pads_melonds_configure() {
   fi
   seating="$(pads_seating "$pads" "$published")"
   first="$(jq -c '.[0] // empty' <<<"$seating")"
-  # Nobody seated: the last binding stays, so a pad seated mid-game still works
-  # on the next launch rather than being unbound by this one.
+  # Nobody seated: keep the last binding rather than unbinding it.
   [[ -n "$first" ]] || return 0
   index="$(pads_melonds_index "$pads" "$first" "$published")"
   [[ -n "$index" ]] || return 0
