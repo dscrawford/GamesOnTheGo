@@ -403,6 +403,7 @@ pads_configure() {
       danstick_emit "$attr" || true
       ;;
     ryujinx) pads_ryujinx_configure "$attr" ;;
+    melonds) pads_melonds_configure "$attr" ;;
     azahar) pads_azahar_configure "$attr" ;;
     pcsx2) pads_pcsx2_configure "$attr" ;;
     cemu)

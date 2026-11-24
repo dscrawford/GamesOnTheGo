@@ -162,7 +162,8 @@ envs
     # deliberately absent: each brings its own large emulator. One
     # decompiled port, so a native PC build of a game -- its own
     # window, its own renderer, no emulator -- is gradable too; the
-    # overlay has to draw over all three kinds.
+    # overlay has to draw over all three kinds. melonDS too, the one
+    # cartridge platform ares cannot run.
     environments = pkgs.lib.getAttrs [
       "env-gb"
       "env-gbc"
@@ -170,6 +171,7 @@ envs
       "env-nes"
       "env-snes"
       "env-genesis"
+      "env-nds"
       "env-n64"
       "env-n64-usa_super_mario_64-pc"
       "env-ps2"

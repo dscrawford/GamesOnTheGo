@@ -12,7 +12,7 @@ skopeo copy docker-archive:result docker://localhost:30500/gotg-qa:0.5.9
 ```
 
 The image carries the cartridge platforms (gb, gbc, gba, nes, snes, genesis,
-n64), which share one ares between them, and the Switch. A platform that is not in it cannot
+n64), which share one ares between them, the DS on melonDS, and the Switch. A platform that is not in it cannot
 be graded in a pod — add it to `environments` in `flake.nix` and rebuild,
 rather than expecting the pod to build it.
 

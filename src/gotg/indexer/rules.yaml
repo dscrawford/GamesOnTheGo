@@ -59,6 +59,11 @@ dat_dirs:
   "Nintendo - GameCube":
     platform: gamecube
     handler: archive_set
+  # The decrypted set only: melonDS's own FreeBIOS cannot boot an encrypted
+  # dump's secure area, and most machines here will never have the real BIOS.
+  "Nintendo - Nintendo DS (Decrypted)":
+    platform: nds
+    handler: no_intro_set
   # Redump again, one .7z per disc; the client converts each to CHD on install.
   "Sony - PlayStation 2":
     platform: ps2
@@ -104,6 +109,7 @@ extensions:
   # right outcome until a disc platform exists to claim it.
   md: genesis
   gen: genesis
+  nds: nds
 
 # The format each platform's emulator wants. A platform
 # absent here is imported as it arrives, which is every platform so far.
