@@ -5,6 +5,8 @@
 let
   switch = packages.env-switch;
   gamecube = packages.env-gamecube;
+  threeds = packages.env-3ds;
+  ps2 = packages.env-ps2;
   # The real harkinian envs are too heavy to build in a check (they
   # carry the ports); a dummy port pins the helper's contract at
   # eval time instead. Both handlers, because the same zip is
@@ -192,6 +194,11 @@ pkgs.runCommand "check-recipes" {
   #!${pkgs.runtimeShell}
   for arg in "$@"; do case "$arg" in -o*) stage="''${arg#-o}";; esac; done
   if [ "''${GOTG_TEST_7Z_EMPTY:-0}" = 1 ]; then exit 0; fi
+  if [ "''${GOTG_TEST_7Z_CUE:-0}" = 1 ]; then
+    printf 'track-bytes-longer-than-the-cue' > "$stage/game (Track 1).bin"
+    printf 'cue' > "$stage/game.cue"
+    exit 0
+  fi
   if [ "''${GOTG_TEST_7Z_MANY:-0}" = 1 ]; then
     for i in $(seq 3000); do
       printf 'x' > "$stage/padding-file-with-a-long-name-to-fill-the-pipe-buffer-$i.bin"
@@ -209,10 +216,21 @@ pkgs.runCommand "check-recipes" {
   [ -f "$in" ] || exit 1
   printf 'rvz-of:%s' "$(cat "$in")" > "$out"
   EOF
+  cat > $TMPDIR/bin/chdman <<'EOF'
+  #!${pkgs.runtimeShell}
+  mode="$1"; prev=""; in=""; out=""
+  for arg in "$@"; do
+    case "$prev" in -i) in="$arg";; -o) out="$arg";; esac
+    prev="$arg"
+  done
+  [ -f "$in" ] || exit 1
+  printf '%s-of:%s' "$mode" "$(cat "$in")" > "$out"
+  EOF
   chmod +x $TMPDIR/bin/*
 
   export GOTG_UNRAR=$TMPDIR/bin/unrar GOTG_RHASH=$TMPDIR/bin/rhash
   export GOTG_P7Z=$TMPDIR/bin/7z GOTG_DOLPHIN_TOOL=$TMPDIR/bin/dolphin-tool
+  export GOTG_CHDMAN=$TMPDIR/bin/chdman
 
   # Scene: sfv verified, largest file wins, staging swept.
   raw=$TMPDIR/raw-scene && mkdir -p $raw
@@ -232,6 +250,12 @@ pkgs.runCommand "check-recipes" {
   touch "$raw/Game (USA).7z"
   ${gamecube}/bin/gotg-recipe single_archive $raw $TMPDIR/out/usa.game
   [ "$(cat $TMPDIR/out/usa.game.rvz)" = "rvz-of:iso-bytes" ]
+
+  # A PS2 DVD is its .iso; a PS2 CD is its cue, never the bigger track beside it.
+  ${ps2}/bin/gotg-recipe single_archive $raw $TMPDIR/out/usa.ps2dvd
+  [ "$(cat $TMPDIR/out/usa.ps2dvd.chd)" = "createdvd-of:iso-bytes" ]
+  GOTG_TEST_7Z_CUE=1 ${ps2}/bin/gotg-recipe single_archive $raw $TMPDIR/out/usa.ps2cd
+  [ "$(cat $TMPDIR/out/usa.ps2cd.chd)" = "createcd-of:cue" ]
 
   # An unknown handler is a refusal, not a guess.
   if ${switch}/bin/gotg-recipe mystery $raw $TMPDIR/out/y 2>$TMPDIR/err-dispatch; then
@@ -394,6 +418,17 @@ pkgs.runCommand "check-recipes" {
   ${switch}/bin/gotg-recipe single_file $raw $TMPDIR/out/world.loose
   [ "$(cat $TMPDIR/out/world.loose/world.loose.nsp)" = game ]
   [ "$(cat $TMPDIR/out/world.loose/extras/dlc_big-pack.nsp)" = a-much-larger-dlc-file ]
+
+  # A 3DS cart with its update and DLC CIAs: the launch installs what is in extras/.
+  raw=$TMPDIR/raw-3ds && mkdir -p $raw/extras/update_1.1 $raw/extras/dlc_
+  printf 'cart' > $raw/usa.cart.3ds
+  printf 'update' > $raw/extras/update_1.1/u.cia
+  printf 'dlc' > $raw/extras/dlc_/d.cia
+  ${threeds}/bin/gotg-recipe single_file $raw $TMPDIR/out/usa.cart
+  [ "$(cat $TMPDIR/out/usa.cart/usa.cart.3ds)" = cart ]
+  [ "$(cat $TMPDIR/out/usa.cart/extras/update_1.1-u.cia)" = update ]
+  [ "$(cat $TMPDIR/out/usa.cart/extras/dlc_-d.cia)" = dlc ]
+  grep -q '"extras"' ${threeds}/share/gotg/recipe.json
 
   # No extras at all is the common case: a bundle with an empty extras/.
   raw=$TMPDIR/raw-plain && mkdir -p $raw

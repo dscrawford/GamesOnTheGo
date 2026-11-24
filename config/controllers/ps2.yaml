@@ -1,0 +1,28 @@
+# PlayStation 2. danstick's ps2 layout walks the buttons; the sticks pass through.
+
+label: PlayStation 2
+
+# The danstick layout the capture walks; `controls` is its control set.
+layout: ps2
+# assets/controllers/<artwork>.svg
+artwork: dualshock2
+players: 2
+# The GOTG platforms played with this controller.
+platforms: [ps2]
+
+# danstick's control id -> what the button says.
+controls:
+  a: Cross (bottom)
+  b: Circle (right)
+  x: Square (left)
+  y: Triangle (top)
+  dpup: D-pad up
+  dpdown: D-pad down
+  dpleft: D-pad left
+  dpright: D-pad right
+  back: Select
+  start: Start
+  leftshoulder: L1
+  rightshoulder: R1
+  lefttrigger: L2
+  righttrigger: R2

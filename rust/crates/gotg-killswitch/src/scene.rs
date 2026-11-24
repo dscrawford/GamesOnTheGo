@@ -1937,7 +1937,7 @@ mod tests {
                 a_fill,
                 b_fill: 0.0,
                 off: 0b100,
-                console: 0,
+                console: crate::consoles::for_platform("gb") as u32,
                 pressed: [0; crate::frame::ROWS_MAX],
                 sticks: [[0.0; 4]; crate::frame::ROWS_MAX],
                 testing: false,
@@ -1982,7 +1982,7 @@ mod tests {
 
     #[test]
     fn a_hovered_button_is_ringed_and_its_label_lit_in_the_owners_colour() {
-        let console = &CONSOLES[0];
+        let console = &CONSOLES[crate::consoles::for_platform("gb")];
         let a = console.control("a").expect("a");
         let scene = hovering(a as i32, 0);
         let mut drawing = Drawing::default();
