@@ -1,0 +1,53 @@
+# Nintendo 3DS. The Switch layout, whose buttons sit where a 3DS's do; the
+# generic drawing stands in until there is a 3DS one.
+
+label: 3DS
+
+# The danstick layout the capture walks; `controls` is its control set.
+layout: switch
+# assets/controllers/<artwork>.svg
+artwork: generic
+players: 1
+# The GOTG platforms played with this controller.
+platforms: [3ds]
+
+# danstick's control id -> what the button says.
+controls:
+  a: B (bottom)
+  b: A (right)
+  x: Y (left)
+  y: X (top)
+  dpup: D-pad up
+  dpdown: D-pad down
+  dpleft: D-pad left
+  dpright: D-pad right
+  back: Select
+  start: Start
+  leftshoulder: L
+  rightshoulder: R
+  lefttrigger: ZL
+  righttrigger: ZR
+  leftstick_up: Circle Pad up
+  leftstick_down: Circle Pad down
+  leftstick_left: Circle Pad left
+  leftstick_right: Circle Pad right
+  rightstick_up: C-Stick up
+  rightstick_down: C-Stick down
+  rightstick_left: C-Stick left
+  rightstick_right: C-Stick right
+
+# Where the drawing marks it, when the circle is not named after the
+# control. These drawings predate danstick and use the console's letters.
+anchors:
+  a: B
+  b: A
+  x: Y
+  y: X
+  dpup: Up
+  dpdown: Down
+  dpleft: Left
+  dpright: Right
+  back: Select
+  start: Start
+  leftshoulder: L
+  rightshoulder: R

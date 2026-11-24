@@ -172,6 +172,7 @@ envs
       "env-n64"
       "env-n64-usa_super_mario_64-pc"
       "env-switch"
+      "env-3ds"
     ] envs;
   };
 

@@ -39,6 +39,10 @@ EXT_PLATFORM = {
     "nsp": "switch", "xci": "switch",
     "rvz": "gamecube", "gcm": "gamecube",
     "wua": "wiiu", "wux": "wiiu",
+    # Azahar boots carts and executables as they are; a .cia is installed by
+    # the environment first. The z-forms are Azahar's own compression.
+    "3ds": "3ds", "cci": "3ds", "cxi": "3ds", "cia": "3ds", "3dsx": "3ds",
+    "zcci": "3ds", "zcxi": "3ds", "z3dsx": "3ds",
 }
 
 ACTION_HARDLINK = "hardlink"      # renamed hardlink, zero space, seeding-safe
@@ -53,7 +57,7 @@ ACTION_ATTACH = "attach"          # an update or DLC: published onto its base ga
 # Where the client has a recipe that installs extras beside the game. Anywhere
 # else an update is quarantined rather than attached: attached, it would send
 # the base through a recipe the platform does not carry.
-EXTRAS_PLATFORMS = frozenset({"switch"})
+EXTRAS_PLATFORMS = frozenset({"switch", "3ds"})
 
 
 @dataclass
@@ -75,6 +79,16 @@ class Op:
 
 def _extra_reason(role: str, version: str, entry: str) -> str:
     return f"{role}{' v' + version if version else ''} for {entry}"
+
+
+def plan_extra(platform: str, src: str, filename: str) -> Op | None:
+    """An attach for a file whose No-Intro tags name it an update or DLC, else None."""
+    p = parse(filename)
+    role = extra_role(p.variants)
+    if not role or not p.valid:
+        return None
+    version = p.revision.lstrip("v").replace("_", ".")
+    return _attach(platform, src, f"{p.region}.{p.slug}", _display_title(p), role, version)
 
 
 def _attach(platform: str, src: str, entry: str, title: str, role: str, version: str) -> Op:

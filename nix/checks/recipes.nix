@@ -5,6 +5,7 @@
 let
   switch = packages.env-switch;
   gamecube = packages.env-gamecube;
+  threeds = packages.env-3ds;
   # The real harkinian envs are too heavy to build in a check (they
   # carry the ports); a dummy port pins the helper's contract at
   # eval time instead. Both handlers, because the same zip is
@@ -394,6 +395,17 @@ pkgs.runCommand "check-recipes" {
   ${switch}/bin/gotg-recipe single_file $raw $TMPDIR/out/world.loose
   [ "$(cat $TMPDIR/out/world.loose/world.loose.nsp)" = game ]
   [ "$(cat $TMPDIR/out/world.loose/extras/dlc_big-pack.nsp)" = a-much-larger-dlc-file ]
+
+  # A 3DS cart with its update and DLC CIAs: the launch installs what is in extras/.
+  raw=$TMPDIR/raw-3ds && mkdir -p $raw/extras/update_1.1 $raw/extras/dlc_
+  printf 'cart' > $raw/usa.cart.3ds
+  printf 'update' > $raw/extras/update_1.1/u.cia
+  printf 'dlc' > $raw/extras/dlc_/d.cia
+  ${threeds}/bin/gotg-recipe single_file $raw $TMPDIR/out/usa.cart
+  [ "$(cat $TMPDIR/out/usa.cart/usa.cart.3ds)" = cart ]
+  [ "$(cat $TMPDIR/out/usa.cart/extras/update_1.1-u.cia)" = update ]
+  [ "$(cat $TMPDIR/out/usa.cart/extras/dlc_-d.cia)" = dlc ]
+  grep -q '"extras"' ${threeds}/share/gotg/recipe.json
 
   # No extras at all is the common case: a bundle with an empty extras/.
   raw=$TMPDIR/raw-plain && mkdir -p $raw
