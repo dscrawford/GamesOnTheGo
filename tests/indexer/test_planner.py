@@ -437,6 +437,25 @@ def test_an_archive_set_without_a_target_format_keeps_the_archive_name(roots):
     assert [(o.action, o.dst) for o in ops] == [(ACTION_EXTRACT, "/g/snes/usa.chrono_trigger.7z")]
 
 
+def test_the_ps2_redump_set_plans_chd_conversions(roots):
+    src, games = roots
+    make_dir(
+        src,
+        "Sony - PlayStation 2",
+        files=(
+            "Shadow of the Colossus (USA).7z",
+            "Shadow of the Colossus (Europe, Australia).7z",
+            "Ico (USA).7z",
+        ),
+    )
+
+    from gotg.indexer.rules import load
+
+    ops = plan_source(src / "Sony - PlayStation 2", games, load())
+    kept = sorted((o.platform, o.dst.rsplit("/", 1)[-1]) for o in ops if o.action == ACTION_CONVERT)
+    assert kept == [("ps2", "usa.ico.chd"), ("ps2", "usa.shadow_of_the_colossus.chd")]
+
+
 # --- mods: hand-placed extras ---------------------------------------------------
 
 

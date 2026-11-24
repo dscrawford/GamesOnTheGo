@@ -157,7 +157,8 @@ envs
     inherit gotg qa-tools;
     # The cartridge platforms, which share one ares and so cost one
     # emulator between them, and the Switch — the one disc-era console
-    # whose updates and DLC the harness needs to grade. The rest are
+    # whose updates and DLC the harness needs to grade. The PS2, whose
+    # games want a BIOS and a GPU nothing else here exercises. The rest are
     # deliberately absent: each brings its own large emulator. One
     # decompiled port, so a native PC build of a game -- its own
     # window, its own renderer, no emulator -- is gradable too; the
@@ -171,6 +172,7 @@ envs
       "env-genesis"
       "env-n64"
       "env-n64-usa_super_mario_64-pc"
+      "env-ps2"
       "env-switch"
       "env-3ds"
     ] envs;

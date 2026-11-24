@@ -35,6 +35,11 @@ let
       "PermissionAsked"
     ];
     wiiu = [ ];
+    ps2 = [
+      # Without it PCSX2 resets the file to defaults and drops the rest.
+      "SettingsVersion"
+      "SetupWizardIncomplete"
+    ];
     switch = [
       # Ryujinx writes its own default config on a first run, and every frame
       # rate variant edits that config — so a variant that replaced this rather
