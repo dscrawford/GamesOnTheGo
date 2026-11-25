@@ -124,7 +124,7 @@ in
     name = "7z";
     tools.P7Z = "${pkgs._7zz}/bin/7zz";
     script = ''
-      archive="$(find "$cur" -maxdepth 1 \( -name '*.7z' -o -name '*.rar' \) | head -1 || true)"
+      archive="$(find "$cur" -maxdepth 1 \( -name '*.7z' -o -name '*.rar' -o -name '*.zip' \) | head -1 || true)"
       [ -n "$archive" ] || fail "no archive in $cur"
       next="$stage/extract"
       mkdir -p "$next"

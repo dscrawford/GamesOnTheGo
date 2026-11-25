@@ -73,6 +73,11 @@ dat_dirs:
   "Sony - PlayStation":
     platform: psx
     handler: archive_set
+  # No-Intro, one .3ds per .zip. Azahar reads no zip, so the client unpacks it
+  # on install; the server keeps the zip, hardlinked, rather than a second copy.
+  "Nintendo - Nintendo 3DS (Decrypted)":
+    platform: 3ds
+    handler: archive_set
 
 # Single-file extension -> platform, for loose ROM torrents.
 extensions:

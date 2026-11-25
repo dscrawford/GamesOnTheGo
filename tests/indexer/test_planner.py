@@ -456,6 +456,28 @@ def test_the_ps2_redump_set_plans_chd_conversions(roots):
     assert kept == [("ps2", "usa.ico.chd"), ("ps2", "usa.shadow_of_the_colossus.chd")]
 
 
+def test_the_zipped_3ds_set_is_one_archive_per_game_unpacked_on_the_client(roots):
+    src, games = roots
+    make_dir(
+        src,
+        "Nintendo - Nintendo 3DS (Decrypted)",
+        files=(
+            "Pokemon X (USA) (En,Fr,Es).zip",
+            "Pokemon X (Europe) (En,Fr,De,Es,It).zip",
+            "Kid Icarus - Uprising (USA).zip",
+        ),
+    )
+
+    from gotg.indexer.rules import load
+
+    ops = plan_source(src / "Nintendo - Nintendo 3DS (Decrypted)", games, load())
+    kept = sorted((o.action, o.platform, o.dst.rsplit("/", 1)[-1]) for o in ops if o.action != ACTION_SKIP)
+    assert kept == [
+        (ACTION_EXTRACT, "3ds", "usa.kid_icarus_uprising.zip"),
+        (ACTION_EXTRACT, "3ds", "usa.pokemon_x.zip"),
+    ]
+
+
 # --- mods: hand-placed extras ---------------------------------------------------
 
 

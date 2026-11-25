@@ -205,6 +205,13 @@ def test_a_mapped_archive_set_is_an_archive_set():
     assert verdict.platform == "gamecube"
 
 
+def test_the_decrypted_3ds_set_is_an_archive_set():
+    from gotg.indexer.classify import HANDLER_ARCHIVE_SET
+
+    verdict = classify(src("Nintendo - Nintendo 3DS (Decrypted)", files=("a (USA).zip", "b (USA).zip")), load())
+    assert (verdict.handler, verdict.platform) == (HANDLER_ARCHIVE_SET, "3ds")
+
+
 def test_an_unmapped_7z_set_is_reported_like_a_zipped_one():
     games = tuple(f"Game {i} (USA).7z" for i in range(20))
     verdict = classify(src("Some - Console", files=games), RULES)

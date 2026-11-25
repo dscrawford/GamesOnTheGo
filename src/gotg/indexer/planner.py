@@ -126,7 +126,8 @@ def _plan_classified(source, verdict, games_root: Path | str, rules: Rules) -> l
         return _plan_loose(verdict.platform, games_root, str(source.path), _rom_files(source, rules), True)
 
     if verdict.handler == cl.HANDLER_ARCHIVE_SET:
-        archives = [name for name in source.files if cl._ext(name) in SINGLE_ARCHIVE_EXTS]
+        # A zip is an archive here by declaration: the set is named in dat_dirs.
+        archives = [name for name in source.files if cl._ext(name) in (*SINGLE_ARCHIVE_EXTS, "zip")]
         return pl.plan_archive_set(
             verdict.platform, games_root, str(source.path), archives, rules.target_for(verdict.platform).ext
         )

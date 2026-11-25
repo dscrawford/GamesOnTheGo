@@ -439,6 +439,13 @@ pkgs.runCommand "check-recipes" {
   [ "$(cat $TMPDIR/out/usa.cart/extras/dlc_-d.cia)" = dlc ]
   grep -q '"extras"' ${threeds}/share/gotg/recipe.json
 
+  # The No-Intro 3DS set: one .3ds in a .zip, unpacked to the bundle Azahar reads.
+  raw=$TMPDIR/raw-3ds-zip && mkdir -p $raw
+  printf 'cart' > "$TMPDIR/Cart (USA).3ds"
+  (cd $TMPDIR && zip -q "$raw/usa.cart.zip" "Cart (USA).3ds")
+  GOTG_P7Z=${pkgs._7zz}/bin/7zz ${threeds}/bin/gotg-recipe single_archive $raw $TMPDIR/out/usa.zipped
+  [ "$(cat $TMPDIR/out/usa.zipped/usa.zipped.3ds)" = cart ]
+
   # No extras at all is the common case: a bundle with an empty extras/.
   raw=$TMPDIR/raw-plain && mkdir -p $raw
   touch $raw/group.rar $raw/group.r00
