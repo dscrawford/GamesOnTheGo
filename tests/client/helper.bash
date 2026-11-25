@@ -171,6 +171,20 @@ write_api_config() {
   chmod 600 "$GOTG_CONFIG_DIR/api.json"
 }
 
+# One file already in the service library, published as its own entry; with
+# UNHASHED=1 the row has no sha256, as `--allow-unhashed` publishes it.
+_publish_member() {
+  local platform="$1" name="$2" title="$3" handler="$4" file="$5" sha
+  sha="\"$(sha256sum "$file" | cut -d' ' -f1)\""
+  [[ -z "${UNHASHED:-}" ]] || sha=null
+  jq -n --arg h "$handler" --arg t "$title" --arg n "$name" --arg p "$file" \
+    --argjson s "$(stat -c '%s' "$file")" --argjson m "$(stat -c '%Y' "$file")" --argjson sha "$sha" \
+    '{handler: $h, title: $t,
+      files: [{name: $n, path: $p, size_bytes: $s, mtime: $m, sha256: $sha}]}' |
+    curl -gfsS -X PUT -H "Authorization: Bearer index-token" \
+      --data-binary @- "$GOTG_SERVICE_URL/catalog/$platform/${name%.*}" >/dev/null
+}
+
 # Publish a game into the real service's library and catalog, the way the
 # indexer would: bytes in the library root, a row through the index token.
 add_game() {
@@ -180,18 +194,7 @@ add_game() {
   printf '%s' "$content" >"$SERVICE_LIBRARY_DIR/$platform/$name"
 
   local file="$SERVICE_LIBRARY_DIR/$platform/$name"
-  local sha size mtime id
-  sha="$(sha256sum "$file" | cut -d' ' -f1)"
-  size="$(stat -c '%s' "$file")"
-  mtime="$(stat -c '%Y' "$file")"
-  id="${name%.*}"
-
-  jq -n --arg h "$handler" --arg t "$title" --arg n "$name" --arg p "$file" \
-    --argjson s "$size" --argjson m "$mtime" --arg sha "$sha" \
-    '{handler: $h, title: $t,
-      files: [{name: $n, path: $p, size_bytes: $s, mtime: $m, sha256: $sha}]}' |
-    curl -gfsS -X PUT -H "Authorization: Bearer index-token" \
-      --data-binary @- "$GOTG_SERVICE_URL/catalog/$platform/$id" >/dev/null
+  _publish_member "$platform" "$name" "$title" "$handler" "$file"
 }
 
 # Publish a binary file into the service library and catalog. add_game pipes
@@ -202,18 +205,7 @@ add_binary_game() {
   cp "$src" "$SERVICE_LIBRARY_DIR/$platform/$name"
 
   local file="$SERVICE_LIBRARY_DIR/$platform/$name"
-  local sha size mtime id
-  sha="$(sha256sum "$file" | cut -d' ' -f1)"
-  size="$(stat -c '%s' "$file")"
-  mtime="$(stat -c '%Y' "$file")"
-  id="${name%.*}"
-
-  jq -n --arg h "$handler" --arg t "$title" --arg n "$name" --arg p "$file" \
-    --argjson s "$size" --argjson m "$mtime" --arg sha "$sha" \
-    '{handler: $h, title: $t,
-      files: [{name: $n, path: $p, size_bytes: $s, mtime: $m, sha256: $sha}]}' |
-    curl -gfsS -X PUT -H "Authorization: Bearer index-token" \
-      --data-binary @- "$GOTG_SERVICE_URL/catalog/$platform/$id" >/dev/null
+  _publish_member "$platform" "$name" "$title" "$handler" "$file"
 }
 
 # The harkinian shape end to end: a zipped ROM published under the handler the

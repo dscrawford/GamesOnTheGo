@@ -113,6 +113,6 @@ class PortsRoutes:
         path, meta = found
         fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
         try:
-            self._stream_fd(fd, f"gotg-{output}.run", meta["sha256"])
+            self._stream_fd(fd, f"gotg-{output}.run", f'"{meta["sha256"]}"')
         finally:
             os.close(fd)

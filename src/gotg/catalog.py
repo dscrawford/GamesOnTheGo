@@ -426,15 +426,13 @@ class CatalogStore:
 
     @staticmethod
     def _file_view(row: sqlite3.Row, *, full: bool, paths: bool = False) -> dict:
-        view = {"name": row["name"], "size_bytes": row["size_bytes"], "sha256": row["sha256"]}
+        view = {"name": row["name"], "size_bytes": row["size_bytes"], "mtime": row["mtime"], "sha256": row["sha256"]}
         if full or paths:
             view["path"] = row["path"]
-        if full:
-            view["mtime"] = row["mtime"]
         return view
 
     def view(self, *, full: bool = False, paths: bool = False) -> dict:
-        """The catalog. `full` is the indexer's view (paths, mtimes, seen_at);
+        """The catalog. `full` is the indexer's view (paths, seen_at);
         `paths` alone is for the reader that has the library mounted."""
         # Two queries under one read transaction, not one per entry: a delete
         # landing mid-iteration must not put a null in the games array, and a

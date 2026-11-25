@@ -259,8 +259,11 @@ _library_member() {
 # The importer writes bare-hex sidecars, so the manifest digest and the sidecar
 # agree; either is enough to catch a truncated or corrupted transfer.
 _verify_checksum() {
-  local file="$1" expected="$2"
-  [[ -n "$expected" && "$expected" != "null" ]] || return 0
+  local file="$1" expected="$2" size="${3:-}" zips="${4:-}"
+  if [[ -z "$expected" || "$expected" == "null" ]]; then
+    _verify_unhashed "$file" "$size" "$zips"
+    return
+  fi
   local actual
   actual="$(sha256sum "$file" | cut -d' ' -f1)"
   if [[ "$actual" != "$expected" ]]; then
@@ -270,6 +273,22 @@ _verify_checksum() {
      got      $actual"
   fi
   log "checksum ok"
+}
+
+# The size catches a resume curl calls done on a 416, the one an oversized
+# partial earns. A recipe's unpacking checks a zip's CRCs itself, so only a
+# zip placed as it is (`zips`) is tested. Info-ZIP reads $UNZIP as options.
+_verify_unhashed() {
+  local file="$1" size="$2" zips="$3"
+  if [[ "$size" =~ ^[0-9]+$ && "$(stat -c '%s' "$file")" != "$size" ]]; then
+    rm -f "$file"
+    die "$(basename "$file") is not the catalog's $size bytes — deleted the download"
+  fi
+  [[ -n "$zips" && "${file,,}" == *.zip ]] || return 0
+  if ! (unset UNZIP UNZIPOPT && exec "${GOTG_UNZIP:-unzip}" -tqq "$file") >/dev/null 2>&1; then
+    rm -f "$file"
+    die "$(basename "$file") failed its CRC check — deleted the download"
+  fi
 }
 
 # Move a completed download into place. Staging lives under the games directory
@@ -282,18 +301,19 @@ _install_file() {
 
 # Every member the catalog lists for a game -- or, given a JSON array of
 # release names, only the members under those extras/<release>/ directories --
-# into the staging directory, each verified against the catalog's hash.
+# into the staging directory, each verified against the catalog's hash -- or,
+# with none, its size, and a zip's CRCs when `zips` says it is placed as is.
 _fetch_members() {
-  local game="$1" staged="$2" title="$3" want="$4"
+  local game="$1" staged="$2" title="$3" want="$4" zips="${5:-}"
   local id platform
   id="$(manifest_field "$game" id)"
   platform="$(manifest_field "$game" platform)"
   local files_base
   files_base="$(manifest_files_pick)"
 
-  local name size sha out url encoded server_path local_src rows row
+  local name size sha mtime validator out url encoded server_path local_src rows row
   mapfile -t rows < <(jq -r --argjson want "$want" '.files[] | select(.name as $n | $want | if type == "array" then any(.[]; . as $r | $n | startswith("extras/" + $r + "/")) else true end)
-    | [.name, .size_bytes, (.sha256 // "null"),
+    | [.name, .size_bytes, (.sha256 // "null"), (.mtime // "null"),
     (.name | split("/") | map(@uri) | join("/")), (.path // "")] | @tsv' <<<"$game")
   # The whole game's size, from the catalog, before a byte moves -- and what
   # of it is on disk already, from a run that stopped, so a resumed download
@@ -309,7 +329,7 @@ _fetch_members() {
   done
   _agg_begin "$total" "$ahead"
   for row in "${rows[@]+"${rows[@]}"}"; do
-    IFS=$'\t' read -r name size sha encoded server_path <<<"$row"
+    IFS=$'\t' read -r name size sha mtime encoded server_path <<<"$row"
     index=$((index + 1))
     # This file's bytes on disk are its own to count from here.
     _AGG_AHEAD=$((_AGG_AHEAD - on_disk[index - 1]))
@@ -318,6 +338,12 @@ _fetch_members() {
     validate_filename "$name"
     [[ "$sha" == "null" || "$sha" =~ ^[0-9a-f]{64}$ ]] ||
       die "invalid sha256 in catalog for $name"
+    # The If-Range a resume sends: the hash, else what the service makes of
+    # size and mtime. It is a header, so nothing else shaped is let through.
+    validator="$sha"
+    [[ "$sha" != "null" || "$mtime" == "null" ]] || validator="$size-$mtime"
+    [[ "$validator" == "$sha" || "$validator" =~ ^[0-9]+-[0-9]+$ ]] ||
+      die "invalid size or mtime in catalog for $name"
     out="$staged/$name"
     mkdir -p "$(dirname "$out")"
     # The library is mounted here: the member is copied from it, and verified
@@ -325,20 +351,20 @@ _fetch_members() {
     if local_src="$(_library_member "$server_path")"; then
       log "copying $name from the library at $GOTG_LIBRARY_MOUNT"
       cp --reflink=auto -- "$local_src" "$out" || die "could not copy $name from $local_src"
-      (_verify_checksum "$out" "$sha") || die "the library's copy of $name does not match the catalog"
+      (_verify_checksum "$out" "$sha" "$size" "$zips") || die "the library's copy of $name does not match the catalog"
       _agg_finished "$(stat -c '%s' "$out")" 0
       continue
     fi
     url="$files_base/games/$platform/$id/$encoded"
     local fetched="" dl_status attempt
     for attempt in 1 2 3; do
-      if _download_with_progress "$url" "$out" "$sha" "$label" "${size:-0}"; then
+      if _download_with_progress "$url" "$out" "$validator" "$label" "${size:-0}"; then
         # Verified inside the loop, in a subshell so its die ends the attempt
         # rather than the command: a poisoned partial resumes into a file
         # that hashes wrong — curl even calls a 416 on an oversized offset
         # success — and verify already deletes it, which is exactly the reset
         # the next attempt needs.
-        if (_verify_checksum "$out" "$sha"); then
+        if (_verify_checksum "$out" "$sha" "$size" "$zips"); then
           fetched=1
           break
         fi
@@ -425,15 +451,22 @@ _download_game_locked() {
   count="$(jq -r '.files | length' <<<"$game")"
   log "fetching $title ($(human_size "$total"), $count file(s))"
 
-  _fetch_members "$game" "$staged" "$title" true
+  # An `unzip` override means this game's own environment carries the recipe
+  # that unpacks it — the same pipeline every processed source goes through —
+  # and so do attached updates or DLC, which only a recipe can set beside the
+  # game. Everything else is placement, not processing.
+  local placed=""
+  case "$handler" in
+    single_file | no_intro_set)
+      [[ "$(override_field "$game" unzip)" == "true" ]] || game_has_extras "$game" || placed=1
+      ;;
+  esac
+
+  _fetch_members "$game" "$staged" "$title" true "$placed"
 
   case "$handler" in
     single_file | no_intro_set)
-      # An `unzip` override means this game's own environment carries the
-      # recipe that unpacks it — the same pipeline every processed source
-      # goes through — and so do attached updates or DLC, which only a recipe
-      # can set beside the game. Everything else is placement, not processing.
-      if [[ "$(override_field "$game" unzip)" == "true" ]] || game_has_extras "$game"; then
+      if [[ -z "$placed" ]]; then
         _run_recipe "$game" "$handler" "$staged" "$dest"
       else
         local member

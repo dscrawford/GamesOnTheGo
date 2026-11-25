@@ -81,6 +81,7 @@ def test_upsert_and_views(catalog, library):
     assert game["id"] == "usa.zelda"
     assert game["handler"] == "single_file"
     assert "path" not in game["files"][0], "the client view never carries server paths"
+    assert game["files"][0]["mtime"] == 1700000000, "a resume without a hash validates on size and mtime"
 
     full = catalog.view(full=True)
     assert full["games"][0]["files"][0]["path"].endswith("usa.zelda.z64")
@@ -1343,7 +1344,6 @@ def test_paths_are_for_the_library_token_and_the_indexer_only(library_service, c
     status, body = call(f"{library_service}/catalog?paths=1", token=LIBRARY)
     assert status == 200
     assert body["games"][0]["files"][0]["path"] == str(game)
-    assert "mtime" not in body["games"][0]["files"][0]
     assert "seen_at" not in body["games"][0], "paths is not the indexer's full view"
 
     status, body = call(f"{library_service}/catalog?paths=1", token=INDEX)

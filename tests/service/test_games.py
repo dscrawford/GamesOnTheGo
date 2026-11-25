@@ -23,6 +23,7 @@ from harness import send, serve
 
 from gotg.catalog import CatalogStore
 from gotg.service.app import Config
+from gotg.service.routes_files import member_etag
 
 CLIENT = "client-token"
 INDEX = "index-token"
@@ -307,20 +308,55 @@ def test_a_large_file_streams_intact_with_a_mid_file_resume(service, library, ca
     base, _ = service
     status, body, headers = fetch(base, "/games/n64/usa.big/usa.big.z64")
     assert status == 200 and body == blob
-    assert "ETag" not in headers, "no hash, no validator"
+    st = (library / "some-release" / "usa.big.z64").stat()
+    assert headers["ETag"] == f'"{st.st_size}-{int(st.st_mtime)}"'
     status, tail, _ = fetch(base, "/games/n64/usa.big/usa.big.z64", headers={"Range": f"bytes={len(blob) // 2}-"})
     assert status == 206 and tail == blob[len(blob) // 2 :]
 
 
 def test_if_range_without_a_stored_hash_sends_the_whole_file(service, library, catalog):
-    # No sha means no validator: an unverifiable resume must restart, and a
-    # plain Range with nothing to verify against must still work.
+    # A stale validator restarts the file; a plain Range still resumes.
     path = add_member(catalog, library, "usa.nosha", "usa.nosha.z64", ROM)
     base, _ = service
     status, body, _ = fetch(base, path, headers={"Range": "bytes=4-", "If-Range": f'"{ROM_SHA}"'})
     assert (status, body) == (200, ROM)
     status, body, _ = fetch(base, path, headers={"Range": "bytes=4-"})
     assert (status, body) == (206, ROM[4:])
+
+
+def test_without_a_hash_the_size_and_mtime_validate_a_resume(service, library, catalog):
+    path = add_member(catalog, library, "usa.nosha", "usa.nosha.z64", ROM)
+    file = library / "some-release" / "usa.nosha.z64"
+    os.utime(file, (1_700_000_000, 1_700_000_000))
+    base, _ = service
+    validator = f'"{len(ROM)}-1700000000"'
+    status, body, headers = fetch(base, path, headers={"Range": "bytes=4-", "If-Range": validator})
+    assert (status, body, headers["ETag"]) == (206, ROM[4:], validator)
+
+    file.write_bytes(ROM + b"more")
+    os.utime(file, (1_700_000_100, 1_700_000_100))
+    status, body, headers = fetch(base, path, headers={"Range": "bytes=4-", "If-Range": validator})
+    assert (status, body, headers["ETag"]) == (200, ROM + b"more", f'"{len(ROM) + 4}-1700000100"')
+
+
+@pytest.mark.parametrize(
+    ("sha", "size", "mtime", "etag"),
+    [
+        ("a" * 64, 5, 7.0, '"' + "a" * 64 + '"'),
+        (None, 5, 1_700_000_000.9, '"5-1700000000"'),
+        (None, 0, 0.0, '"0-0"'),
+    ],
+)
+def test_the_etag_is_the_hash_else_size_and_whole_seconds(sha, size, mtime, etag):
+    assert member_etag(sha, size, mtime) == etag
+
+
+def test_a_hash_is_the_validator_even_when_size_and_mtime_match(service, library, catalog):
+    path = add_member(catalog, library, "usa.sha", "usa.sha.z64", ROM, sha=ROM_SHA)
+    st = (library / "some-release" / "usa.sha.z64").stat()
+    base, _ = service
+    status, body, _ = fetch(base, path, headers={"Range": "bytes=4-", "If-Range": f'"{st.st_size}-{int(st.st_mtime)}"'})
+    assert (status, body) == (200, ROM)
 
 
 def test_a_zero_byte_file_streams_and_refuses_every_range(service, library, catalog):

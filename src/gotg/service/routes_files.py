@@ -50,6 +50,12 @@ def open_contained(path: Path, root: Path) -> int | None:
     return fd
 
 
+def member_etag(sha256: str | None, size: int, mtime: float) -> str:
+    """The sha256, else size and mtime of the open file -- which the client
+    builds the same from its catalog row, to send back as If-Range."""
+    return f'"{sha256}"' if sha256 else f'"{size}-{int(mtime)}"'
+
+
 def range_window(range_header: str, if_range: str, etag: str | None, size: int) -> tuple[int, int, int]:
     """`(start, end, status)` for a file of `size` bytes: 200 for the whole of
     it, 206 for the window asked for, 416 when the window starts past the end.
@@ -85,8 +91,8 @@ class FileRoutes:
         """`GET /games/<platform>/<id>/<name>` streams one member file.
 
         Everything about the response is resumable: Accept-Ranges, a single
-        byte range honored with 206, the sha256 as an ETag so If-Range makes a
-        resume against changed bytes restart cleanly instead of splicing two
+        byte range honored with 206, an ETag (`member_etag`) so If-Range makes
+        a resume against changed bytes restart cleanly instead of splicing two
         files together.
         """
         if self.catalog is None:
@@ -119,7 +125,8 @@ class FileRoutes:
             self._problem(404, f"no such file: {platform}/{game_id}/{name}")
             return
         try:
-            self._stream_fd(fd, name, meta.get("sha256"))
+            st = os.fstat(fd)
+            self._stream_fd(fd, name, member_etag(meta.get("sha256"), st.st_size, st.st_mtime))
         finally:
             os.close(fd)
 
@@ -159,9 +166,8 @@ class FileRoutes:
         finally:
             os.close(fd)
 
-    def _stream_fd(self, fd: int, name: str, sha256: str | None) -> None:
+    def _stream_fd(self, fd: int, name: str, etag: str | None) -> None:
         size = os.fstat(fd).st_size
-        etag = f'"{sha256}"' if sha256 else None
         start, end, status = range_window(self.headers.get("Range", ""), self.headers.get("If-Range", ""), etag, size)
         if status == 416:
             self.send_response(416)

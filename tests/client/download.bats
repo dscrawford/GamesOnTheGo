@@ -16,6 +16,15 @@ teardown() {
   stop_saves_service
 }
 
+# A stored (uncompressed) zip of one ROM, so a byte of the ROM can be flipped
+# in place and only the zip's CRC knows.
+make_rom_zip() {
+  local out="$1" dir="$TEST_TMP/mkzip-crc"
+  mkdir -p "$dir"
+  printf 'rom-bytes-that-the-crc-covers' >"$dir/Zelda (USA).z64"
+  (cd "$dir" && zip -q -0 "$out" "Zelda (USA).z64")
+}
+
 @test "the token travels in a header, never a query parameter" {
   add_game n64 "usa.zelda.z64" "rom-content"
   local url="$GOTG_SERVICE_URL/games/n64/usa.zelda/usa.zelda.z64"
@@ -432,6 +441,98 @@ publish_scene_game() {
   gotg download usa.zelda
   [ "$status" -eq 0 ]
   [ "$(cat "$GOTG_GAMES_DIR/n64/usa.zelda.z64")" = "short" ]
+}
+
+@test "without a hash, a partial resumes against the row's size and mtime" {
+  UNHASHED=1 add_game n64 "usa.zelda.z64" "the full rom content for resume"
+  gotg refresh
+  mkdir -p "$GOTG_PARTIAL_DIR/usa.zelda"
+  printf 'the full rom con' >"$GOTG_PARTIAL_DIR/usa.zelda/usa.zelda.z64"
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  run diff "$SERVICE_LIBRARY_DIR/n64/usa.zelda.z64" "$GOTG_GAMES_DIR/n64/usa.zelda.z64"
+  [ "$status" -eq 0 ]
+  grep -q 'GET /games/n64/usa.zelda/usa.zelda.z64 206' "$TEST_TMP/service.log"
+}
+
+@test "without a hash, a partial of bytes that changed since is refetched whole, never spliced" {
+  UNHASHED=1 add_game n64 "usa.zelda.z64" "old-old-old-old-old-old"
+  gotg refresh
+  mkdir -p "$GOTG_PARTIAL_DIR/usa.zelda"
+  printf 'old-old-old' >"$GOTG_PARTIAL_DIR/usa.zelda/usa.zelda.z64"
+  # Same size, new bytes, a later mtime: only the validator can tell.
+  printf 'new-new-new-new-new-new' >"$SERVICE_LIBRARY_DIR/n64/usa.zelda.z64"
+  touch -d '@2000000000' "$SERVICE_LIBRARY_DIR/n64/usa.zelda.z64"
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [ "$(cat "$GOTG_GAMES_DIR/n64/usa.zelda.z64")" = "new-new-new-new-new-new" ]
+}
+
+@test "without a hash, a partial longer than the file is dropped, not installed" {
+  UNHASHED=1 add_game n64 "usa.zelda.z64" "short"
+  gotg refresh
+  mkdir -p "$GOTG_PARTIAL_DIR/usa.zelda"
+  printf 'this partial is much longer than the real file' \
+    >"$GOTG_PARTIAL_DIR/usa.zelda/usa.zelda.z64"
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [ "$(cat "$GOTG_GAMES_DIR/n64/usa.zelda.z64")" = "short" ]
+}
+
+@test "without a hash, an mtime that is not a whole number never reaches a header" {
+  local bad
+  for bad in 1.5 -3; do
+    UNHASHED=1 add_game n64 "usa.zelda.z64" "rom"
+    gotg refresh
+    jq --argjson m "$bad" '(.games[].files[].mtime) = $m' "$GOTG_CACHE_FILE" >"$GOTG_CACHE_FILE.tmp"
+    mv "$GOTG_CACHE_FILE.tmp" "$GOTG_CACHE_FILE"
+    gotg download usa.zelda
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"invalid size or mtime"* ]]
+    [ ! -e "$GOTG_GAMES_DIR/n64/usa.zelda.z64" ]
+  done
+}
+
+@test "without a hash, a cache from before mtime was served still downloads" {
+  UNHASHED=1 add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  jq 'del(.games[].files[].mtime)' "$GOTG_CACHE_FILE" >"$GOTG_CACHE_FILE.tmp"
+  mv "$GOTG_CACHE_FILE.tmp" "$GOTG_CACHE_FILE"
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  [ "$(cat "$GOTG_GAMES_DIR/n64/usa.zelda.z64")" = "rom" ]
+}
+
+@test "with a hash, the mtime is never what validates" {
+  add_game n64 "usa.zelda.z64" "rom"
+  gotg refresh
+  jq '(.games[].files[].mtime) = 1.5' "$GOTG_CACHE_FILE" >"$GOTG_CACHE_FILE.tmp"
+  mv "$GOTG_CACHE_FILE.tmp" "$GOTG_CACHE_FILE"
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+}
+
+@test "without a hash, a zip that fails its CRC check is deleted, not installed" {
+  make_rom_zip "$TEST_TMP/zelda.zip"
+  local at
+  at="$(grep -obUa 'that-the-crc' "$TEST_TMP/zelda.zip" | head -1 | cut -d: -f1)"
+  printf 'X' | dd of="$TEST_TMP/zelda.zip" bs=1 seek="$at" conv=notrunc status=none
+  UNHASHED=1 add_binary_game n64 "$TEST_TMP/zelda.zip" usa.zelda.zip Zelda no_intro_set
+  gotg refresh
+  gotg download usa.zelda
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"failed its CRC check"* ]]
+  [ ! -e "$GOTG_GAMES_DIR/n64/usa.zelda.zip" ]
+  [ ! -e "$GOTG_PARTIAL_DIR/usa.zelda/usa.zelda.zip" ]
+}
+
+@test "without a hash, a zip whose CRCs check out installs as it is" {
+  make_rom_zip "$TEST_TMP/zelda.zip"
+  UNHASHED=1 add_binary_game n64 "$TEST_TMP/zelda.zip" usa.zelda.zip Zelda no_intro_set
+  gotg refresh
+  gotg download usa.zelda
+  [ "$status" -eq 0 ]
+  cmp "$TEST_TMP/zelda.zip" "$GOTG_GAMES_DIR/n64/usa.zelda.zip"
 }
 
 # --- updates and DLC ----------------------------------------------------------
