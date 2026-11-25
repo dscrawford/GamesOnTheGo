@@ -67,6 +67,8 @@ moves; two builds at once took all 24 cores and stopped the person typing.
   `systemd-run` scope on the shell does not reach the daemon; these flags do.
 - **`nice -n 19`** anything heavy outside Nix (pytest, ffmpeg).
 - Under those caps no permission is needed, danstick rebuilds included.
+- `gotg update` builds every game that moved in one `nix build`; run it
+  as `GOTG_UPDATE_JOBS=2 nix run gotg#update` here.
 - Work that does not need this machine's hardware belongs on the cluster
   (`node1-3`, `k8s/qa`) or a remote builder when one exists.
 

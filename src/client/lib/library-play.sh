@@ -283,30 +283,144 @@ _library_update_self_locked() {
   foreign_gl_sync
 }
 
+# attr -> {out, drv}, {gone: true} or {error: true}, in one evaluation: a
+# `nix build` per game evaluated the whole library and catalog once each.
+library_eval_roots() {
+  local library="$1" attr attrs
+  shift
+  for attr in "$@"; do
+    [[ "$attr" =~ $GOTG_ROOT_ATTR_RE ]] || die "refusing to evaluate an attribute named $attr"
+  done
+  attrs="$(printf '%s\n' "$@" | jq -R . | jq -cs .)"
+  timeout "${GOTG_UPDATE_EVAL_TIMEOUT:-600}" "$(nix_bin)" eval --json \
+    "$library#legacyPackages.$(updates_system)" --apply "
+      root:
+      let
+        walk = s: parts:
+          if parts == [ ] then s
+          else if builtins.isAttrs s && builtins.hasAttr (builtins.head parts) s
+          then walk s.\${builtins.head parts} (builtins.tail parts)
+          else null;
+        want = attr:
+          let
+            parts = builtins.filter builtins.isString (builtins.split \"[.]\" attr);
+            got = builtins.tryEval (
+              let
+                found = walk root parts;
+                v = if found == null then { gone = true; } else { out = found.outPath; drv = found.drvPath; };
+              in builtins.deepSeq v v);
+          in if got.success then got.value else { error = true; };
+      in builtins.listToAttrs (map (attr: { name = attr; value = want attr; }) (builtins.fromJSON ''${attrs}''))
+    " 2>"$GOTG_STATE_DIR/update-eval.log" || true
+}
+
+# Writes "attr<TAB>same|built|gone|failed" per root to $2. Moved roots share
+# one parallel `nix build --keep-going`; one the evaluation could not answer
+# for is built alone, so its error is its own.
+library_build_roots() {
+  local library="$1" results="$2" answer stamp attr kind out drv root rc
+  shift 2
+  : >"$results"
+  (($# > 0)) || return 0
+  mkdir -p "$(library_games_dir)" "$GOTG_STATE_DIR"
+  answer="$(library_eval_roots "$library" "$@")"
+  # A game newer than the pinned catalog, or a pin the server has moved past
+  # (the evaluation fails outright): move the catalog once and ask again.
+  if library_writable "$library" && {
+    jq -e 'type == "object" and any(.[]; .gone == true)' <<<"$answer" >/dev/null 2>&1 ||
+      grep -q "mismatch in field 'narHash'" "$GOTG_STATE_DIR/update-eval.log" 2>/dev/null
+  }; then
+    log "the library's catalog is behind a game here, or has moved on; updating it"
+    "$(nix_bin)" flake update catalog --flake "$library" >&2 || true
+    answer="$(library_eval_roots "$library" "$@")"
+  fi
+  jq -e 'type == "object"' <<<"$answer" >/dev/null 2>&1 || answer='{}'
+  stamp="$(library_stamp "$library")"
+  local -a build=() alone=() attrs_built=()
+  local -A outs=()
+  while IFS=$'\t' read -r attr kind out drv; do
+    root="$(library_games_dir)/$attr"
+    case "$kind" in
+      gone) printf '%s\tgone\n' "$attr" >>"$results" ;;
+      build)
+        if [[ -e "$root" && "$(readlink -f "$root")" == "$out" ]]; then
+          [[ "$(cat "$root.by" 2>/dev/null)" == "$stamp" ]] || printf '%s' "$stamp" >"$root.by"
+          printf '%s\tsame\n' "$attr" >>"$results"
+        else
+          build+=("$drv^out")
+          attrs_built+=("$attr")
+          outs["$attr"]="$out"
+        fi
+        ;;
+      *) alone+=("$attr") ;;
+    esac
+  done < <(
+    for attr in "$@"; do printf '%s\n' "$attr"; done |
+      jq -Rr --argjson a "$answer" '
+        . as $k | ($a[$k] // {}) as $v
+        | if $v.gone == true then [$k, "gone", "", ""]
+          elif ($v.out | type) == "string" and ($v.drv | type) == "string" then [$k, "build", $v.out, $v.drv]
+          else [$k, "alone", "", ""] end
+        | join("\t")'
+  )
+  if ((${#build[@]} > 0)); then
+    log "rebuilding ${#build[@]} game(s)"
+    local -a jobs=()
+    [[ -z "${GOTG_UPDATE_JOBS:-}" ]] || jobs=(--max-jobs "$GOTG_UPDATE_JOBS")
+    # --keep-going: one game that does not build is that game's problem.
+    _nix_drawn build --keep-going --no-link "${jobs[@]}" "${build[@]}" || true
+    for attr in "${attrs_built[@]}"; do
+      root="$(library_games_dir)/$attr"
+      out="${outs[$attr]}"
+      if [[ -e "$out" ]] && "$(nix_bin)" build "$out" -o "$root"; then
+        printf '%s' "$stamp" >"$root.by"
+        printf '%s\tbuilt\n' "$attr" >>"$results"
+      else
+        printf '%s\tfailed\n' "$attr" >>"$results"
+      fi
+    done
+  fi
+  for attr in "${alone[@]}"; do
+    rc=0
+    library_build "$library" "$attr" || rc=$?
+    case "$rc" in
+      0) kind=built ;;
+      3) kind=gone ;;
+      *) kind=failed ;;
+    esac
+    printf '%s\t%s\n' "$attr" "$kind" >>"$results"
+  done
+}
+
 # One game brought up to date: every root it has here -- the plain game and
 # its variants, each an output of its own -- rebuilt from the library as it
 # is, and then whatever its install lacks fetched (an update, DLC, a pack:
 # download.sh's top-up). What Play would do on its way to the game, done
 # now without playing; what the picker's Update row runs.
 library_update_game() {
-  local key="$1" library attr rc found=0 failed=0 game
+  local key="$1" library attr kind results found=0 failed=0 game
   [[ "$key" =~ ^[a-z0-9][a-z0-9_-]*/[a-z]{3,5}\.[a-z0-9][a-z0-9_]*$ ]] || die "usage: gotg update <platform>/<id>"
   library="$(gotg_library)"
   [[ -n "$library" ]] || die "no library configured: set GOTG_LIBRARY, or \`library\` in $GOTG_CONFIG_FILE"
+  local -a attrs=()
   while IFS= read -r attr; do
     [[ -n "$attr" && "$(updates_attr_key "$attr")" == "$key" ]] || continue
-    found=$((found + 1))
-    rc=0
-    library_build "$library" "$attr" || rc=$?
-    if ((rc == 0)); then
-      log "$attr: up to date"
-    elif ((rc == 3)); then
-      warn "$attr is no longer in the library; its last build still runs"
-    else
-      warn "$attr: could not rebuild; the build already here still runs"
-      failed=$((failed + 1))
-    fi
+    attrs+=("$attr")
   done < <(library_root_attrs)
+  found=${#attrs[@]}
+  results="$(mktemp)"
+  library_build_roots "$library" "$results" "${attrs[@]}"
+  while IFS=$'\t' read -r attr kind; do
+    case "$kind" in
+      same | built) log "$attr: up to date" ;;
+      gone) warn "$attr is no longer in the library; its last build still runs" ;;
+      *)
+        warn "$attr: could not rebuild; the build already here still runs"
+        failed=$((failed + 1))
+        ;;
+    esac
+  done <"$results"
+  rm -f "$results"
   ((found > 0)) || log "$key has no build here yet; a play will make one"
   if manifest_cached && game="$(manifest_find "$key" 2>/dev/null)"; then
     _top_up_extras "$game"
@@ -373,23 +487,27 @@ cmd_update() {
       warn "gotg-ui: could not build; see $GOTG_STATE_DIR/update-gotg-ui.log"
     fi
   fi
-  mkdir -p "$(library_games_dir)"
-  while IFS= read -r attr; do
-    [[ -n "$attr" ]] || continue
+  local -a attrs=()
+  local kind results same=0
+  mapfile -t attrs < <(library_root_attrs)
+  results="$(mktemp)"
+  library_build_roots "$library" "$results" "${attrs[@]}"
+  while IFS=$'\t' read -r attr kind; do
     root="$(library_games_dir)/$attr"
-    local rc=0
-    library_build "$library" "$attr" || rc=$?
-    if ((rc == 0)); then
-      log "$attr: up to date"
-    elif ((rc == 3)); then
+    case "$kind" in
+      same) same=$((same + 1)) ;;
+      built) log "$attr: up to date" ;;
       # Not removed for the person: the last build still runs, saves and
       # all, and may be the one they wanted.
-      warn "$attr is no longer in the library; its last build still runs. To let it go: rm $root $root.by"
-    else
-      warn "$attr: could not rebuild; the build already here still runs"
-      failed=$((failed + 1))
-    fi
-  done < <(library_root_attrs)
+      gone) warn "$attr is no longer in the library; its last build still runs. To let it go: rm $root $root.by" ;;
+      *)
+        warn "$attr: could not rebuild; the build already here still runs"
+        failed=$((failed + 1))
+        ;;
+    esac
+  done <"$results"
+  rm -f "$results"
+  ((same == 0)) || log "$same game(s) already up to date; nothing built for them"
   foreign_gl_sync
   ((failed == 0)) || die "$failed game(s) did not rebuild"
 }

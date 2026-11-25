@@ -74,6 +74,7 @@ case "$1 $2" in
     fi
     exit 0 ;;
   "eval --json")
+    if [[ "$*" == *drvPath* && -n "${EVAL_ROOTS_JSON:-}" ]]; then printf '%s\n' "$EVAL_ROOTS_JSON"; exit 0; fi
     for arg in "$@"; do
       case "$arg" in
         *"#legacyPackages."*) printf '%s\n' "$EVAL_GAMES_JSON"; exit 0 ;;
@@ -89,6 +90,15 @@ if [[ "$1" == build && "$*" == *"#catalog"* ]]; then
 fi
 if [[ "$1" == build && "$*" == *"--print-out-paths"* ]]; then
   for arg in "$@"; do case "$arg" in *"#"*) echo "$TEST_TMP/store/${arg#*#}-out" ;; esac; done
+  exit 0
+fi
+if [[ "$1" == build && "$*" == *"^out"* ]]; then
+  for arg in "$@"; do
+    [[ "$arg" == *"^out" ]] || continue
+    name="${arg%.drv^out}"
+    [[ -n "${BUILD_FAIL:-}" && "$name" =~ $BUILD_FAIL ]] && { echo "error: build of $arg failed" >&2; continue; }
+    mkdir -p "$name/bin"
+  done
   exit 0
 fi
 if [[ "$1" == build && "$*" == *"--no-link"* ]]; then exit 0; fi
@@ -404,6 +414,111 @@ wants() { export EVAL_GAMES_JSON="$1"; }
   gotg complete updates
   [ "$status" -eq 0 ]
   [ "$(jq -r '.games | length' <<<"$output")" = 0 ]
+}
+
+# --- every game, from one evaluation ---------------------------------------------
+
+# What the one evaluation answers for each root: an attribute and the store
+# name it builds to, as {out, drv}, or `gone`.
+roots_want() {
+  local json='{}' attr name
+  while (($# > 0)); do
+    attr="$1" name="$2"
+    shift 2
+    if [[ "$name" == gone ]]; then
+      json="$(jq -c --arg a "$attr" '.[$a] = {gone: true}' <<<"$json")"
+    else
+      json="$(jq -c --arg a "$attr" --arg o "$TEST_TMP/store/$name" '.[$a] = {out: $o, drv: ($o + ".drv")}' <<<"$json")"
+    fi
+  done
+  export EVAL_ROOTS_JSON="$json"
+}
+game_builds() { grep -c -- '\^out' "$NIX_LOG" || true; }
+
+@test "an update where nothing moved builds no game, and says how many were already current" {
+  prep_self_update
+  root_for n64.usa.zelda zelda
+  root_for n64.usa.mario mario
+  roots_want n64.usa.zelda zelda n64.usa.mario mario
+  gotg update
+  [ "$status" -eq 0 ]
+  [ "$(game_builds)" = 0 ]
+  ! grep -q '#n64\.' "$NIX_LOG"
+  [ "$(grep -c 'drv = found.drvPath' "$NIX_LOG")" = 1 ]
+  [[ "$stderr" == *"2 game(s) already up to date"* ]]
+  # Stamped current, so a launch does not rebuild them either.
+  [ "$(cat "$(GAMES)/n64.usa.zelda.by")" = "$(cat "$(GAMES)/n64.usa.mario.by")" ]
+  [[ "$(cat "$(GAMES)/n64.usa.zelda.by")" == "$GOTG_LIBRARY "* ]]
+}
+
+@test "the games that moved are built together, in one nix build, from one evaluation" {
+  prep_self_update
+  root_for n64.usa.zelda zelda
+  root_for n64.usa.mario mario
+  root_for n64.usa.kirby kirby
+  roots_want n64.usa.zelda zelda-2 n64.usa.mario mario n64.usa.kirby kirby-2
+  gotg update
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'drv = found.drvPath' "$NIX_LOG")" = 1 ]
+  [ "$(game_builds)" = 1 ]
+  local line
+  line="$(grep -- '\^out' "$NIX_LOG")"
+  [[ "$line" == *"--keep-going"* ]]
+  [[ "$line" == *"zelda-2.drv^out"* && "$line" == *"kirby-2.drv^out"* && "$line" != *"/mario.drv"* ]]
+  [ "$(readlink -f "$(GAMES)/n64.usa.zelda")" = "$TEST_TMP/store/zelda-2" ]
+  [ "$(readlink -f "$(GAMES)/n64.usa.kirby")" = "$TEST_TMP/store/kirby-2" ]
+  [ "$(readlink -f "$(GAMES)/n64.usa.mario")" = "$TEST_TMP/store/mario" ]
+  [[ "$stderr" == *"n64.usa.zelda: up to date"* && "$stderr" == *"1 game(s) already up to date"* ]]
+}
+
+@test "a game that does not build fails alone: the others are still placed, and its root is kept" {
+  prep_self_update
+  root_for n64.usa.zelda zelda
+  root_for n64.usa.kirby kirby
+  roots_want n64.usa.zelda zelda-2 n64.usa.kirby kirby-2
+  export BUILD_FAIL='kirby-2$'
+  gotg update
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"n64.usa.kirby: could not rebuild"* ]]
+  [[ "$stderr" == *"1 game(s) did not rebuild"* ]]
+  [ "$(readlink -f "$(GAMES)/n64.usa.zelda")" = "$TEST_TMP/store/zelda-2" ]
+  [ "$(readlink -f "$(GAMES)/n64.usa.kirby")" = "$TEST_TMP/store/kirby" ]
+}
+
+@test "GOTG_UPDATE_JOBS caps how many games build at once" {
+  prep_self_update
+  root_for n64.usa.zelda zelda
+  roots_want n64.usa.zelda zelda-2
+  export GOTG_UPDATE_JOBS=3
+  gotg update
+  [ "$status" -eq 0 ]
+  grep -- '\^out' "$NIX_LOG" | grep -q -- '--max-jobs 3'
+}
+
+@test "a game the evaluation says is gone moves the catalog once, and is then said to be gone" {
+  prep_self_update
+  root_for n64.usa.zelda zelda
+  root_for n64.usa.zelda.rando rando
+  roots_want n64.usa.zelda zelda n64.usa.zelda.rando gone
+  : >"$NIX_LOG"
+  gotg update
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^flake update catalog --flake' "$NIX_LOG")" = 1 ]
+  [ "$(grep -c 'drv = found.drvPath' "$NIX_LOG")" = 2 ]
+  [[ "$stderr" == *"n64.usa.zelda.rando is no longer in the library"* ]]
+  [ -e "$(GAMES)/n64.usa.zelda.rando" ]
+}
+
+@test "a root the evaluation could not answer for is built alone, the old way" {
+  prep_self_update
+  root_for n64.usa.zelda zelda
+  root_for n64.usa.mario mario
+  export EVAL_ROOTS_JSON="{\"n64.usa.zelda\": {\"error\": true}, \"n64.usa.mario\": {\"out\": \"$TEST_TMP/store/mario\", \"drv\": \"$TEST_TMP/store/mario.drv\"}}"
+  gotg update
+  [ "$status" -eq 0 ]
+  grep -qF "build $GOTG_LIBRARY#n64.usa.zelda -o $(GAMES)/n64.usa.zelda" "$NIX_LOG"
+  ! grep -qF "#n64.usa.mario" "$NIX_LOG"
+  [ "$(game_builds)" = 0 ]
 }
 
 # --- one game brought up to date -------------------------------------------------
