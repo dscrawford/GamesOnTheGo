@@ -51,7 +51,7 @@ let
       expected = true;
     };
     testAPlatformWithNoEnvironmentIsAnError = {
-      expr = env "psx" "usa.crash_bandicoot" null ? error;
+      expr = env "saturn" "usa.nights_into_dreams" null ? error;
       expected = true;
     };
     testAVariantNameThatCouldBeAPathIsRefused = {
