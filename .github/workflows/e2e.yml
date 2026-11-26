@@ -48,22 +48,3 @@ jobs:
           name: controllers-runs
           path: ~/.cache/gotg/controllers-runs/
           if-no-files-found: ignore
-
-  # `gotg qa` grades a real game on a pod; GPU tier on node3. Manual only:
-  # it needs the library's games on the state volume and costs a GPU slice.
-  qa:
-    name: game QA (cluster)
-    if: github.event_name == 'workflow_dispatch'
-    needs: controllers   # k8s/qa and k8s/controllers must not share a node
-    runs-on: [self-hosted, gotg-cluster]
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v7
-      - name: Run a QA Job
-        env:
-          GAME: usa.diddy_kong_racing_rev1
-          NAME: ci-${{ github.run_id }}
-        run: |
-          sed -e "s/@NAME@/$NAME/" -e "s/@GAME@/$GAME/" k8s/qa/job.yaml | kubectl apply -f -
-          trap 'kubectl -n default logs job/gotg-qa-$NAME || true' EXIT
-          kubectl -n default wait --for=condition=complete --timeout=50m "job/gotg-qa-$NAME"

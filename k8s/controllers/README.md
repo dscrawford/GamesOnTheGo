@@ -26,8 +26,7 @@ the verdict. `GOTG_E2E_REQUIRE=1` is baked in, so a pod that cannot reach
 (`podAntiAffinity` on `gotg.dcrawford/uinput`), and each pod runs the share
 `tests/e2e/shards.py` gives it: balanced on `durations.json`, longest first.
 The tests cannot share a node -- every fake pad is a real device there, and a
-test's daemon would seat another test's pads -- which is also why k8s/qa
-carries the same label: its virtual pad would join these tests. A share with
+test's daemon would seat another test's pads. A share with
 no free node waits, and the run says so. Refresh the timings with
 `--durations` after adding or slowing tests; a test with no timing counts as
 the median.

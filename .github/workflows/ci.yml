@@ -149,9 +149,7 @@ jobs:
       - name: Fill the templates' placeholders
         run: |
           mkdir -p /tmp/k8s
-          sed -e 's/@NAME@/ci/' -e 's/@GAME@/usa.ci/' k8s/qa/job.yaml > /tmp/k8s/qa-job.yaml
           sed -e 's/@TAG@/ci/' -e 's/@SHARDS@/3/' k8s/controllers/job.yaml > /tmp/k8s/controllers-job.yaml
-          cp k8s/qa/state.yaml /tmp/k8s/qa-state.yaml
       - name: kubeconform
         run: |
           curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \

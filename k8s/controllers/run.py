@@ -40,7 +40,7 @@ SHARDS = 3
 TIMINGS_PREFIX = "gotg-e2e-durations "
 CACHE = pathlib.Path(os.environ.get("XDG_CACHE_HOME", pathlib.Path.home() / ".cache")) / "gotg"
 # How long a share may sit unscheduled before the run says why it is waiting:
-# the anti-affinity keeps it off a node where k8s/qa is making its own pad.
+# the anti-affinity keeps it off a node where another share is making pads.
 PENDING_NOTICE = 30.0
 # The suite took 12.5 minutes in one pod; anything past this is stuck.
 DEADLINE = 40 * 60.0

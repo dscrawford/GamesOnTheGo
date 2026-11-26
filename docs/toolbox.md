@@ -62,9 +62,9 @@ should be buildable on its own. Prebuilt upstream binaries want
 
 Runs a game headless with a virtual pad and grades the recording on five axes:
 boots, audio, video, controller, graphics. `src/client/lib/cmd-qa.sh` assembles
-the session, `qa-analyze.sh` grades it, `src/client/qa/` holds the pad, the
-in-session script and the container image, and `k8s/qa/` runs it on the
-cluster. `docs/qa-platform-plan.md` records what it can and cannot judge.
+the session, `qa-analyze.sh` grades it, `src/client/qa/` holds the pad and the
+in-session script. It runs locally, in your own session; there is no
+cluster QA. `docs/qa-platform-plan.md` records what it can and cannot judge.
 
 Its parts are useful alone: the same `cage` + `wf-recorder` + `ffmpeg` in
 `qa-tools` will capture a frame of anything headless, which is how a launcher

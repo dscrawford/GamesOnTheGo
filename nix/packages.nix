@@ -149,38 +149,6 @@ envs
   # demand like the emulator environments.
   qa-tools = pkgs.callPackage ../src/client/qa/tools.nix { };
 
-  # The QA runner as a container, for Jobs on the cluster.
-  #
-  #   nix build .#qa-image
-  #   skopeo copy docker-archive:result docker://localhost:30500/gotg-qa:0.1.0
-  qa-image = pkgs.callPackage ../src/client/qa/image.nix {
-    inherit gotg qa-tools;
-    # The cartridge platforms, which share one ares and so cost one
-    # emulator between them, and the Switch — the one disc-era console
-    # whose updates and DLC the harness needs to grade. The PS2, whose
-    # games want a BIOS and a GPU nothing else here exercises. The rest are
-    # deliberately absent: each brings its own large emulator. One
-    # decompiled port, so a native PC build of a game -- its own
-    # window, its own renderer, no emulator -- is gradable too; the
-    # overlay has to draw over all three kinds. melonDS too, the one
-    # cartridge platform ares cannot run.
-    environments = pkgs.lib.getAttrs [
-      "env-gb"
-      "env-gbc"
-      "env-gba"
-      "env-nes"
-      "env-snes"
-      "env-genesis"
-      "env-nds"
-      "env-psx"
-      "env-n64"
-      "env-n64-usa_super_mario_64-pc"
-      "env-ps2"
-      "env-switch"
-      "env-3ds"
-    ] envs;
-  };
-
   # The controller suite as a container, for Jobs on the cluster.
   #
   #   nix build .#controllers-image
