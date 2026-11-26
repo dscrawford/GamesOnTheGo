@@ -71,7 +71,7 @@ moves; two builds at once took all 24 cores and stopped the person typing.
 - **`nice -n 19`** anything heavy outside Nix (pytest, ffmpeg).
 - Under those caps no permission is needed, danstick rebuilds included.
 - Work that does not need this machine's hardware belongs on the cluster
-  (`node1-3`, `k8s/qa`) or a remote builder when one exists.
+  (`node1-3`) or a remote builder when one exists.
 
 ## Test
 
@@ -161,7 +161,7 @@ src/gotg/service     the proxy: credentials, saves store          (stdlib, pytes
 src/gotg/indexer     catalog builder; rules.yaml                  (pyyaml extra)
 src/client/bin,lib   `gotg`: install/play/steam/controllers       (bash, bats)
 src/client/env       one Nix environment per platform/game; mods/ per-game overrides
-src/client/qa        the QA harness and its synthetic pad         (runs in k8s/qa)
+src/client/qa        the QA harness and its synthetic pad         (runs locally, in the session)
 rust/crates          gotg-pads (what SDL sees) and gotg-killswitch (the exit chord,
                      the overlay: joining, pairing, rebinding; pure models +
                      overlay/painter)                                  (cargo)
@@ -251,8 +251,7 @@ name-CRC, because SDL renames clones) and `keys.py`.
   against upstream; excluded from `ruff format`.
 - `node_modules/`, `.swarm/`, `ruvector.db`, `.claude-flow/` — tool litter,
   gitignored, never source.
-- Secrets live in `~/.config/gotg/config.json` (0600) and the k8s secret
-  `gotg-qa-config`; nothing in the tree.
+- Secrets live in `~/.config/gotg/config.json` (0600); nothing in the tree.
 - Never stop or reconfigure a danstick daemon you did not start; match it by
   pid from its `state` event, never by argv (that has killed a user's real
   daemon from a test before).

@@ -100,6 +100,9 @@ All the value is in the harness; the cluster is just a place to run it.
   one deliberately-broken game per tier (e.g. snes + n64).
 
 ### Phase 2 — containerize, run on node3 — IMAGE DONE 2026-09-02
+**Retired 2026-11-26:** the image and `k8s/qa/` are gone; QA runs locally,
+in the session that changed the code. The notes below are history.
+
 `nix build .#qa-image` (src/client/qa/image.nix, entrypoint.sh) plus the
 manifests and runbook in [k8s/qa/](../k8s/qa/README.md). Verified locally
 under docker with **no host /nix mount and an empty state volume**: gb

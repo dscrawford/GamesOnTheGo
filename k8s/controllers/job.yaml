@@ -33,8 +33,7 @@ spec:
     metadata:
       labels:
         app: gotg-controllers
-        # Anything that makes pads through the node's /dev/uinput. k8s/qa
-        # carries it too: its virtual pad is a device these tests would see.
+        # Anything that makes pads through the node's /dev/uinput.
         gotg.dcrawford/uinput: "true"
     spec:
       restartPolicy: Never
