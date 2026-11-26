@@ -13,6 +13,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .ps4 import Ps4Member, probe
+
 log = logging.getLogger("gotg-importer")
 
 # Decrypted-WiiU marker dirs; probed one level deeper to confirm an executable.
@@ -41,6 +43,7 @@ class Source:
     dirs: tuple[str, ...] = ()  # immediate child directory names
     code_files: tuple[str, ...] = ()  # names inside code/, when that dir exists
     archive_members: tuple[str, ...] = ()  # names inside a .rar set, without unpacking
+    ps4: tuple[Ps4Member, ...] = ()  # PS4 packages and extracted games, read from their param.sfo
 
     name: str = field(default="")
 
@@ -121,7 +124,7 @@ def scan(path: Path, *, probe_archives: bool = True) -> Source:
         members: tuple[str, ...] = ()
         if probe_archives and _ext(path.name) in SINGLE_ARCHIVE_EXTS:
             members = list_archive_file(path)
-        return Source(path=path, is_dir=False, archive_members=members)
+        return Source(path=path, is_dir=False, archive_members=members, ps4=probe(path, False))
 
     files: list[str] = []
     dirs: list[str] = []
@@ -144,4 +147,5 @@ def scan(path: Path, *, probe_archives: bool = True) -> Source:
         dirs=tuple(dirs),
         code_files=code_files,
         archive_members=members,
+        ps4=probe(path, True, tuple(files), tuple(dirs)),
     )

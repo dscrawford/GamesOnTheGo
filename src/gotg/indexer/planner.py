@@ -13,6 +13,7 @@ from pathlib import Path
 from ..contract import ENTRY_ID_RE
 from . import classify as cl
 from . import plan as pl
+from . import ps4
 from .rules import Rules
 from .scan import SINGLE_ARCHIVE_EXTS, Source, scan
 
@@ -62,7 +63,8 @@ def plan_source(
     # An archive set is a set here and a single archive per game on the wire.
     handler = cl.HANDLER_SINGLE_ARCHIVE if verdict.handler == cl.HANDLER_ARCHIVE_SET else verdict.handler
     for op in ops:
-        op.handler = handler
+        # A PS4 payload may hold packages and trees side by side; plan_ps4 says which.
+        op.handler = op.handler or handler
     return ops
 
 
@@ -89,6 +91,9 @@ def _plan_classified(source, verdict, games_root: Path | str, rules: Rules) -> l
                 reason=verdict.reason or f"no platform for handler {verdict.handler!r}",
             )
         ]
+
+    if verdict.platform == "ps4" and source.ps4:
+        return [ps4.plan_ps4(games_root, str(source.path), m) for m in source.ps4]
 
     if verdict.handler == cl.HANDLER_WIIU_DECRYPTED:
         return [pl.plan_wiiu_decrypted(games_root, src_dir, source.name)]

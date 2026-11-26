@@ -170,6 +170,26 @@ in
     '';
   };
 
+  # A fake PKG unpacked into the tree shadPS4 runs. pkg_makegp4, because
+  # pkg_extract leaves param.sfo behind; fake packages share the zero passcode.
+  unpackPs4Pkg = {
+    name = "unpack-pkg";
+    tools.PKGTOOL = "${pkgs.liborbispkg-pkgtool}/bin/pkgtool";
+    script = ''
+      [ -f "$cur" ] || fail "unpack-pkg needs a file, got $(basename "$cur")"
+      next="$stage/pkg"
+      # The catalog hash covers the package; nothing in it unpacks past 256 GiB.
+      # .NET's W^X double mapping sizes a memfd past any file cap, so it is off.
+      (
+        ulimit -f $((256 * 1024 * 1024))
+        DOTNET_EnableWriteXorExecute=0 exec "$PKGTOOL" pkg_makegp4 --passcode 00000000000000000000000000000000 "$cur" "$next"
+      ) >/dev/null || fail "pkgtool could not unpack $(basename "$cur")"
+      rm -f "$next"/*.gp4
+      [ -f "$next/eboot.bin" ] || fail "$(basename "$cur") holds no eboot.bin"
+      cur="$next"
+    '';
+  };
+
   # Terminal: the whole tree, placed as the extensionless destination — the
   # shape overrides.json calls unzip, where the launch target is resolved by
   # glob inside it. An archive's contents are its own to choose and extractors

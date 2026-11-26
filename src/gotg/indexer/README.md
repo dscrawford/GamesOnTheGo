@@ -52,6 +52,7 @@ under an id the client then hands to the wrong emulator.
 
 | Handler | Detected by | Action |
 |---|---|---|
+| `ps4_tree` / `single_file` (ps4) | a PS4 `.pkg` (`\x7fCNT`) or a folder with `eboot.bin` + `sce_sys/param.sfo`, itself or one level down; id from `param.sfo` | tree published as is / `.pkg` hardlinked; updates and DLC `manual` (`ps4.py`) |
 | `wiiu_decrypted` | `code/` `content/` `meta/` with a `code/*.rpx` | zip to `<id>.zip` |
 | `wiiu_nus` | TMD + `*.h3` + 8-hex content, no decrypted output | `manual` (decrypt deferred) |
 | `scene_archive` | `*.rar` plus `*.r00`/`*.sfv` | extract the inner ROM |

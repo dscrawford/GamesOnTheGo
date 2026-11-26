@@ -173,7 +173,8 @@ teardown() {
 
   local key
   while read -r key; do
-    [[ "$key" =~ ^([a-z0-9][a-z0-9_-]*/)?[a-z]{3,5}\.[a-z0-9][a-z0-9_]*$ ]] || {
+    # Or "<platform>/*", every game on one platform.
+    [[ "$key" =~ ^([a-z0-9][a-z0-9_-]*/)?[a-z]{3,5}\.[a-z0-9][a-z0-9_]*$ || "$key" =~ ^[a-z0-9][a-z0-9_-]*/\*$ ]] || {
       echo "malformed override key: $key" >&2
       return 1
     }

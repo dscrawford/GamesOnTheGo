@@ -36,6 +36,7 @@ def test_the_wire_legal_handlers_are_exactly_the_contract():
         classify.HANDLER_SINGLE_ARCHIVE,
         classify.HANDLER_WIIU_DECRYPTED,
         classify.HANDLER_WIIU_NUS,
+        classify.HANDLER_PS4_TREE,
     }
     assert publishable == contract.HANDLERS
     assert contract.LINK_HANDLERS < contract.HANDLERS

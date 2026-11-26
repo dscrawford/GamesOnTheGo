@@ -34,7 +34,7 @@ PLATFORM_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,15}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 # What a raw source *is*, which tells the client what recipe turns it into a
-# runnable game. Only these six cross the wire; the classifier's internal
+# runnable game. Only these cross the wire; the classifier's internal
 # verdicts (excluded, manual) never become catalog rows.
 HANDLER_SINGLE_FILE = "single_file"
 HANDLER_NO_INTRO_SET = "no_intro_set"
@@ -42,6 +42,8 @@ HANDLER_SCENE_ARCHIVE = "scene_archive"
 HANDLER_SINGLE_ARCHIVE = "single_archive"
 HANDLER_WIIU_DECRYPTED = "wiiu_decrypted"
 HANDLER_WIIU_NUS = "wiiu_nus"
+# An extracted PS4 game (eboot.bin, sce_sys/), fetched and placed as its tree.
+HANDLER_PS4_TREE = "ps4_tree"
 
 HANDLERS = frozenset(
     {
@@ -51,6 +53,7 @@ HANDLERS = frozenset(
         HANDLER_SINGLE_ARCHIVE,
         HANDLER_WIIU_DECRYPTED,
         HANDLER_WIIU_NUS,
+        HANDLER_PS4_TREE,
     }
 )
 
